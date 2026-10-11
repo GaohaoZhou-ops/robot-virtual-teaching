@@ -114,7 +114,7 @@ export default function EndEffectorControlPanel({
           <small>6D SPACE BALL · MAP FRAME</small>
           <strong>{sideLabel[control.side]}末端</strong>
         </div>
-        <button type="button" aria-label="退出机械臂末端控制" onClick={onClose}>
+        <button type="button" aria-label="退出机械臂末端控制" title="保留当前姿态并退出末端控制" onClick={onClose}>
           <X size={14} />
         </button>
       </header>
@@ -201,10 +201,10 @@ export default function EndEffectorControlPanel({
       <footer className="end-effector-panel__footer">
         <span>
           {bodyLocked
-            ? '本体锁定：关节角保持不变'
+            ? '本体锁定：关节角保持不变 · Esc 取消调整'
             : mapLocked
-              ? '全局锁定：地图 XYZ / RPY 保持不变'
-              : 'Ctrl+Z 撤销拖拽 · 完成后可选择锁定'}
+              ? '全局锁定：地图 XYZ / RPY 保持不变 · Esc 取消调整'
+              : 'Ctrl+Z 撤销拖拽 · Esc 取消本次调整'}
         </span>
         <div className="end-effector-panel__actions">
           <button type="button" disabled={locked || control.dragging} onClick={onReset}>

@@ -192,6 +192,21 @@ def run():
         ik_joints = joints(canvas)
         assert ik_joints != expected
         assert read_robot_pose(canvas) == parking_pose
+        # Cancel only the nested IK adjustment; the teaching pose edit stays open.
+        field.focus()
+        page.keyboard.down("Escape")
+        expect(canvas).to_have_attribute("data-end-effector-control-state", "idle")
+        expect(card).to_have_attribute("data-pose-edit-state", "editing")
+        wait_for_joints(page, expected)
+        page.keyboard.down("Escape")  # Holding Escape must not cancel the outer edit.
+        page.keyboard.up("Escape")
+        expect(card).to_have_attribute("data-pose-edit-state", "editing")
+        double_click_tool(page, canvas, "left")
+        expect(canvas).to_have_attribute("data-end-effector-control-state", "active")
+        field.fill(str(target))
+        field.press("Enter")
+        ik_joints = joints(canvas)
+        assert ik_joints != expected
         card.get_by_role("button", name="确认修改", exact=True).click()
         expect(card).to_have_attribute("data-pose-edit-state", "idle")
         expect(canvas).to_have_attribute("data-end-effector-control-state", "idle")
