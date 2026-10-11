@@ -322,8 +322,9 @@ Desktop.ini
 *.swo
 *~
 
-# Local robot assets can be large and machine-specific
-robots/
+# Local robot assets live at the repository root and can be large.
+# Keep same-named directories inside source packages and fixtures visible.
+/robots/
 
 # Point-cloud assets are ignored by default; keep the bundled example map.
 *.[pP][lL][yY]
@@ -333,7 +334,8 @@ robots/
 *.atls
 
 # Locally recovered/exported projects may contain hundreds of MB of map data
-recovered-projects/
+# Scope the recovery workspace to the root, preserving nested fixture inputs.
+/recovered-projects/
 *.atlas-project/
 *.atlas-project.zip
 

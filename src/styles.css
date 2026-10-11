@@ -2341,6 +2341,81 @@ code {
   background: linear-gradient(90deg, transparent, rgba(30, 24, 9, 0.36), transparent);
 }
 
+.robot-chassis-control-readout {
+  position: absolute;
+  top: 49px;
+  left: 10px;
+  z-index: 6;
+  width: min(280px, calc(100% - 20px));
+  padding: 8px 10px;
+  border: 1px solid rgba(94, 229, 154, 0.35);
+  border-left: 2px solid var(--green);
+  background: linear-gradient(110deg, rgba(94, 229, 154, 0.08), transparent), rgba(4, 17, 20, 0.94);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.robot-chassis-control-readout__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--green);
+}
+
+.robot-chassis-control-readout__header strong { font-size: 11px; }
+.robot-chassis-control-readout__header > span { color: #819b94; font-size: 9px; }
+
+.robot-chassis-control-readout__header button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px -3px auto;
+  border: 1px solid rgba(94, 229, 154, 0.2);
+  color: #91b3a6;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.robot-chassis-control-readout__header button:hover {
+  color: var(--green);
+  background: rgba(94, 229, 154, 0.12);
+}
+
+.robot-chassis-control-readout__header button:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 2px;
+}
+
+.robot-chassis-control-readout__keys {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px 12px;
+  margin-top: 8px;
+  color: #a6beb7;
+  font-size: 9px;
+}
+
+.robot-chassis-control-readout__keys > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.robot-chassis-control-readout__keys b { width: 11px; font: 700 10px Menlo, monospace; }
+.robot-chassis-control-readout__keys [data-axis="x"] b { color: #f36b68; }
+.robot-chassis-control-readout__keys [data-axis="y"] b { color: #5ee59a; }
+.robot-chassis-control-readout__keys [data-axis="z"] b { color: #79a8ff; }
+.robot-chassis-control-readout__keys [data-axis="yaw"] svg { color: var(--amber); }
+.robot-chassis-control-readout__keys [data-locked="true"] { opacity: 0.55; }
+.robot-chassis-control-readout__keys kbd {
+  min-width: 37px;
+  color: #d2e4de;
+  font: 9px Menlo, monospace;
+}
+
 .robot-collision-distance {
   --collision-tone: var(--cyan);
   --collision-rgb: 89, 219, 232;
@@ -2689,6 +2764,14 @@ code {
   backdrop-filter: blur(13px);
   clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
   animation: space-ball-panel-in 180ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+.point-cloud-view:has([data-pose-edit-state="editing"]) .end-effector-panel {
+  top: 48px;
+  right: 10px;
+  left: auto;
+  max-height: calc(100% - 156px);
+  overflow: auto;
 }
 
 .end-effector-panel.is-limited {
@@ -11556,6 +11639,10 @@ input[type="number"]::-webkit-inner-spin-button {
     0 0 0 1px rgba(244, 201, 93, 0.045),
     inset 0 0 52px rgba(244, 201, 93, 0.018);
   animation: joint-float-reveal 180ms ease-out both;
+}
+
+.joint-float-window.is-teaching-pose-edit {
+  width: min(440px, calc(100vw - 20px));
 }
 
 @keyframes joint-float-reveal {

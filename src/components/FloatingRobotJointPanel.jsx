@@ -9,6 +9,7 @@ import {
 import RobotJointPanel from './RobotJointPanel.jsx';
 
 const WINDOW_WIDTH = 520;
+const TEACHING_POSE_WINDOW_WIDTH = 440;
 const WINDOW_EDGE = 10;
 const WINDOW_TOP = 82;
 const WINDOW_TITLE_HEIGHT = 52;
@@ -36,6 +37,7 @@ export default function FloatingRobotJointPanel({
   robot,
   robotLoadState,
   jointValues,
+  teachingPoseEditing = false,
   ...jointPanelProps
 }) {
   const [minimized, setMinimized] = useState(false);
@@ -54,7 +56,8 @@ export default function FloatingRobotJointPanel({
 
   const clampPosition = useCallback((candidate) => {
     const bounds = windowRef.current?.getBoundingClientRect();
-    const width = Math.min(bounds?.width || WINDOW_WIDTH, window.innerWidth - WINDOW_EDGE * 2);
+    const fallbackWidth = teachingPoseEditing ? TEACHING_POSE_WINDOW_WIDTH : WINDOW_WIDTH;
+    const width = Math.min(bounds?.width || fallbackWidth, window.innerWidth - WINDOW_EDGE * 2);
     const height = Math.min(
       bounds?.height || WINDOW_TITLE_HEIGHT,
       window.innerHeight - WINDOW_EDGE * 2,
@@ -65,13 +68,25 @@ export default function FloatingRobotJointPanel({
       x: Math.min(maxX, Math.max(WINDOW_EDGE, Number(candidate?.x) || 0)),
       y: Math.min(maxY, Math.max(WINDOW_EDGE, Number(candidate?.y) || 0)),
     };
-  }, []);
+  }, [teachingPoseEditing]);
 
   const resetPosition = useCallback(() => {
     const nextPosition = clampPosition(defaultWindowPosition());
     positionRef.current = nextPosition;
     setPosition(nextPosition);
   }, [clampPosition]);
+
+  useEffect(() => {
+    if (!teachingPoseEditing) return;
+    setMinimized(false);
+    const width = windowRef.current?.getBoundingClientRect().width || TEACHING_POSE_WINDOW_WIDTH;
+    const nextPosition = clampPosition({
+      x: window.innerWidth - width - WINDOW_EDGE,
+      y: WINDOW_TOP,
+    });
+    positionRef.current = nextPosition;
+    setPosition(nextPosition);
+  }, [clampPosition, teachingPoseEditing]);
 
   useEffect(() => {
     if (!open) {
@@ -111,7 +126,7 @@ export default function FloatingRobotJointPanel({
   return createPortal(
     <aside
       ref={windowRef}
-      className={`joint-float-window ${robotReady ? 'is-ready' : 'is-waiting'} ${minimized ? 'is-minimized' : ''} ${dragging ? 'is-dragging' : ''}`}
+      className={`joint-float-window ${robotReady ? 'is-ready' : 'is-waiting'} ${teachingPoseEditing ? 'is-teaching-pose-edit' : ''} ${minimized ? 'is-minimized' : ''} ${dragging ? 'is-dragging' : ''}`}
       role="dialog"
       aria-modal="false"
       aria-label="全关节控制浮动窗口"

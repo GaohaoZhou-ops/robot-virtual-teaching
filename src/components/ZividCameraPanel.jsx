@@ -2082,9 +2082,9 @@ export default function ZividCameraPanel({
       onCaptureProviderChange(null);
       return undefined;
     }
-    const provider = () => captureZividTeachingVision({
+    const provider = (options = {}) => captureZividTeachingVision({
       mapData,
-      cameraPoses: cameraPosesRef.current,
+      cameraPoses: options.cameraPoses || cameraPosesRef.current,
       meshRenderQuality,
     });
     onCaptureProviderChange(provider);

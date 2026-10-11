@@ -5,7 +5,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 from archive_helpers import read_exported_project
-from chassis_drag_smoke import chassis_screen_point, read_camera
+from chassis_drag_smoke import chassis_screen_point, enter_chassis_drag, read_camera
 from end_effector_control_smoke import double_click_tool, load_robot
 from viewer_tools_helpers import viewer_tool
 
@@ -100,9 +100,7 @@ def run():
         viewer_tool(page, name='定位机器人模型').click()
         page.wait_for_timeout(400)
 
-        x, y = chassis_screen_point(canvas)
-        page.mouse.dblclick(x, y, delay=70)
-        page.wait_for_function("document.querySelector('.three-canvas').dataset.chassisDragMode === 'armed'")
+        enter_chassis_drag(page, canvas)
         initial = state(canvas)
         camera = read_camera(canvas)
         drag(page, canvas, dx=24, dy=8, kind='chassis')
@@ -192,8 +190,7 @@ def run():
         # Chassis motion can also move globally locked arm joints through IK.
         page.get_by_role('button', name='锁定全局姿态左机械臂末端', exact=True).click()
         page.get_by_role('button', name='退出机械臂末端控制').click()
-        x, y = chassis_screen_point(canvas)
-        page.mouse.dblclick(x, y, delay=70)
+        enter_chassis_drag(page, canvas)
         locked_start = state(canvas)
         drag(page, canvas, dx=10, dy=4, kind='chassis')
         undo(page, canvas, locked_start)
