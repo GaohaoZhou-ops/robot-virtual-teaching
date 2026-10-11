@@ -85,6 +85,7 @@ export default function Inspector({
   activeTeachingParkingPointId,
   robotParkingGhostId,
   robotParkingGhostPoseId,
+  editingTeachingPoseId,
   jointPoses = [],
   zividCameraPoses,
   cameraTeachingResult,
@@ -161,6 +162,10 @@ export default function Inspector({
         : null,
     [pointById, selectedEdge],
   );
+
+  useEffect(() => {
+    setJointWindowOpen(Boolean(editingTeachingPoseId));
+  }, [editingTeachingPoseId]);
 
   useEffect(() => {
     const resumed = isWorkbenchActive && !workbenchActivityRef.current;
@@ -740,6 +745,7 @@ export default function Inspector({
 
       <FloatingRobotJointPanel
         open={jointWindowOpen}
+        teachingPoseEditing={Boolean(editingTeachingPoseId)}
         onClose={() => setJointWindowOpen(false)}
         robot={robot}
         robotLoadState={robotLoadState}

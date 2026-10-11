@@ -492,6 +492,8 @@ export default function App() {
   const [activeTeachingTaskId, setActiveTeachingTaskId] = useState(null);
   const [activeTeachingParkingPointId, setActiveTeachingParkingPointId] = useState(null);
   const [robotParkingGhost, setRobotParkingGhost] = useState(null);
+  const robotParkingGhostRef = useRef(null);
+  robotParkingGhostRef.current = robotParkingGhost;
   const [jointPoses, setJointPoses] = useState([]);
   const [zividCameraPoses, setZividCameraPoses] = useState({});
   const [cameraTeachingCommand, setCameraTeachingCommand] = useState(null);
@@ -2792,26 +2794,39 @@ export default function App() {
   }, [activeTeachingParkingPointId, notify, teachingTasks]);
 
   const captureTeachingPoint = useCallback(async (options = {}) => {
+    const replacePoseId = options?.replacePoseId;
     const createParkingPoint = options?.createParkingPoint === true;
-    const task = teachingTasks.find((item) => item.id === activeTeachingTaskId);
+    const task = teachingTasks.find((item) => item.id === (options?.taskId || activeTeachingTaskId));
     if (!task) {
       notify('请先新建或选择一个示教任务', 'warning');
       return;
     }
     const selectedParkingPoint = task.parkingPoints?.find(
-      (item) => item.id === activeTeachingParkingPointId,
+      (item) => item.id === (options?.parkingPointId || activeTeachingParkingPointId),
     );
     if (!selectedParkingPoint && !createParkingPoint) {
       notify('请先新增或选择一个停车点', 'warning');
       return;
     }
+    const originalPoint = replacePoseId
+      ? selectedParkingPoint?.poses?.find((point) => point.id === replacePoseId)
+      : null;
+    const edit = robotParkingGhostRef.current;
+    if (replacePoseId && (
+      !originalPoint
+      || !edit?.editing
+      || edit.taskId !== task.id
+      || edit.parkingPointId !== selectedParkingPoint.id
+      || edit.poseId !== replacePoseId
+      || createParkingPoint
+    )) return;
     if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
       notify('当前地图或机器人与该示教任务不一致，无法记录', 'warning');
       return;
     }
     if (teachingCaptureBusyRef.current) return;
-    const pose = normalizeRobotPose(robotPose);
-    const joints = normalizeRobotJointValues(robotJointValues);
+    const pose = normalizeRobotPose(replacePoseId ? selectedParkingPoint.mapPose : robotPose);
+    const joints = normalizeRobotJointValues(replacePoseId ? options.jointValues : robotJointValues);
     const timestamp = new Date().toISOString();
     const parkingPoints = task.parkingPoints || [];
     const parkingPoint = createParkingPoint
@@ -2845,7 +2860,7 @@ export default function App() {
         message: '正在冻结左右 RGB 与点云快照',
       });
       try {
-        const capturePromise = provider();
+        const capturePromise = provider(replacePoseId ? { cameraPoses: options.cameraPoses } : undefined);
         await waitForPaint();
         cameraCapture = await capturePromise;
       } catch (error) {
@@ -2857,10 +2872,19 @@ export default function App() {
         teachingCaptureBusyRef.current = false;
       }
     }
+    // A closed preview, a new selection or Escape invalidates an in-flight edit.
+    if (replacePoseId && (
+      !robotParkingGhostRef.current?.editing
+      || robotParkingGhostRef.current.revision !== edit.revision
+    )) {
+      setTeachingCaptureState({ status: 'idle', message: '' });
+      return;
+    }
     const point = {
-      id: createId('teach-pose'),
-      name: `A${String(parkingPoint.poses.length + 1).padStart(2, '0')}`,
-      sequence: parkingPoint.poses.length + 1,
+      ...originalPoint,
+      id: originalPoint?.id || createId('teach-pose'),
+      name: originalPoint?.name || `A${String(parkingPoint.poses.length + 1).padStart(2, '0')}`,
+      sequence: originalPoint?.sequence || parkingPoint.poses.length + 1,
       capturedAt: timestamp,
       mapPose: {
         frameId: coordinateFrame,
@@ -2875,6 +2899,10 @@ export default function App() {
         values: { ...joints },
       },
       cameraCapture,
+      ...(replacePoseId && {
+        opticalTargets: Object.fromEntries(Object.entries(cameraCapture?.frames || {})
+          .map(([side, frame]) => [side, frame.opticalPose])),
+      }),
     };
     setTeachingTasks((current) => current.map((item) => (
       item.id === task.id
@@ -2889,7 +2917,11 @@ export default function App() {
                   candidate.id === parkingPoint.id
                     ? {
                         ...candidate,
-                        poses: [...candidate.poses, point],
+                        poses: replacePoseId
+                          ? candidate.poses.map((entry) => entry.id === replacePoseId
+                            ? { ...entry, ...point, name: entry.name }
+                            : entry)
+                          : [...candidate.poses, point],
                         updatedAt: timestamp,
                       }
                     : candidate
@@ -2899,8 +2931,17 @@ export default function App() {
         : item
     )));
     if (createParkingPoint) setActiveTeachingParkingPointId(parkingPoint.id);
+    if (replacePoseId) {
+      setRobotParkingGhost((current) => current?.revision === edit.revision ? {
+        ...current,
+        editing: false,
+        targetPose: pose,
+        jointValues: { ...joints },
+        revision: createId('robot-parking-ghost'),
+      } : current);
+    }
     notify(
-      `${parkingPoint.name} / ${point.name} ${createParkingPoint ? '已新建并示教' : '已示教'} · ${point.fullBodyJoints.count} 个全身关节${cameraCapture ? ' + 双目 RGB/XYZ' : ''}`,
+      `${parkingPoint.name} / ${point.name} ${replacePoseId ? '已修改' : createParkingPoint ? '已新建并示教' : '已示教'} · ${point.fullBodyJoints.count} 个全身关节${cameraCapture ? ' + 双目 RGB/XYZ' : ''}`,
       'success',
     );
     setTeachingCaptureState({
@@ -3918,12 +3959,61 @@ export default function App() {
     teachingTasks,
   ]);
 
-  const cancelTeachingParkingPointEdit = useCallback(() => {
+  const beginTeachingPoseEdit = useCallback((taskId, parkingPointId, poseId) => {
+    const task = teachingTasks.find((item) => item.id === taskId);
+    const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
+    const pose = parkingPoint?.poses?.find((item) => item.id === poseId);
+    if (
+      !pose
+      || robotParkingGhost?.taskId !== taskId
+      || robotParkingGhost?.parkingPointId !== parkingPointId
+      || robotParkingGhost?.poseId !== poseId
+    ) return;
+    if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
+      notify('请加载与该姿态匹配的地图和机器人后再调整', 'warning');
+      return;
+    }
+    if (teachingCaptureBusyRef.current) {
+      notify('请等待当前姿态采集完成后再调整姿态', 'warning');
+      return;
+    }
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    const targetPose = normalizeRobotPose(parkingPoint.mapPose);
+    const jointValues = normalizeRobotJointValues(pose.fullBodyJoints?.values);
+    setRobotPose(targetPose);
+    setRobotJointValues(jointValues);
+    setActiveTeachingTaskId(taskId);
+    setActiveTeachingParkingPointId(parkingPointId);
+    setTeachingCaptureState({ status: 'idle', message: '' });
+    setRobotParkingGhost((current) => current && {
+      ...current,
+      editing: true,
+      targetPose,
+      jointValues: { ...jointValues },
+      revision: createId('robot-parking-ghost'),
+    });
+    requestSynchronizedFocus('robot-ghost', parkingPointId);
+    notify(`正在调整 ${parkingPoint.name} / ${pose.name} · 点击“确认修改”保存，Esc 取消`, 'info');
+  }, [
+    notify,
+    requestSynchronizedFocus,
+    robotLoadState.status,
+    robotParkingGhost,
+    stopTeachingTaskPlayback,
+    teachingContextMatches,
+    teachingTasks,
+  ]);
+
+  const cancelTeachingPreviewEdit = useCallback(() => {
     if (!robotParkingGhost?.editing) return;
     setRobotControlEnabled(false);
     setRobotPose(normalizeRobotPose(robotParkingGhost.targetPose));
+    if (robotParkingGhost.poseId) {
+      setRobotJointValues(normalizeRobotJointValues(robotParkingGhost.jointValues));
+    }
     setRobotParkingGhost((current) => current && { ...current, editing: false });
-    notify('已取消停车点修改，恢复原停车位置', 'info');
+    notify(robotParkingGhost.poseId ? '已取消姿态修改，恢复原关节姿态' : '已取消停车点修改，恢复原停车位置', 'info');
   }, [notify, robotParkingGhost]);
 
   const recordTeachingParkingPointPosition = useCallback((taskId, parkingPointId, nextPose) => {
@@ -3934,6 +4024,7 @@ export default function App() {
       || !robotParkingGhost?.editing
       || robotParkingGhost.taskId !== taskId
       || robotParkingGhost.parkingPointId !== parkingPointId
+      || robotParkingGhost.poseId
     ) return;
     if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
       notify('当前地图或机器人与该停车点不一致，无法录入新位置', 'warning');
@@ -4619,6 +4710,7 @@ export default function App() {
                 robotTrajectoryActive={['playing', 'paused'].includes(teachingPlayback.status)}
                 teachingPlayback={teachingPlayback}
                 robotParkingGhost={robotParkingGhost}
+                teachingCaptureBusy={teachingCaptureState.status === 'capturing'}
                 teachingSpaceMode={teachingSpaceMode}
                 teachingTasks={teachingTasks}
                 spaceMouseInputRef={spaceMouseInputRef}
@@ -4638,8 +4730,10 @@ export default function App() {
                 onClearRobotParkingGhost={clearRobotParkingGhost}
                 onMoveToParkingPoint={applyTeachingParkingPoint}
                 onEditParkingPoint={beginTeachingParkingPointEdit}
-                onCancelParkingPointEdit={cancelTeachingParkingPointEdit}
+                onCancelTeachingPreviewEdit={cancelTeachingPreviewEdit}
                 onRecordParkingPointPosition={recordTeachingParkingPointPosition}
+                onEditTeachingPose={beginTeachingPoseEdit}
+                onConfirmTeachingPose={captureTeachingPoint}
                 isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
               />
               <TeachingPlaybackDock
@@ -4772,6 +4866,7 @@ export default function App() {
           activeTeachingParkingPointId={activeTeachingParkingPointId}
           robotParkingGhostId={robotParkingGhost?.parkingPointId || null}
           robotParkingGhostPoseId={robotParkingGhost?.poseId || null}
+          editingTeachingPoseId={robotParkingGhost?.editing ? robotParkingGhost.poseId : null}
           jointPoses={jointPoses}
           zividCameraPoses={zividCameraPoses}
           cameraTeachingResult={cameraTeachingResult}
