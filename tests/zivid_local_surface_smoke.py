@@ -40,7 +40,7 @@ def run():
             "document.querySelector('.zivid-camera-canvas')?.dataset.contextState === 'ready'"
         )
 
-        panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         canvas = panel.get_by_label("Zivid 2 M70 仿真相机画面", exact=True)
         assert canvas.get_attribute("data-camera-mesh-candidate-face-count") == "0"
         assert int(canvas.get_attribute("data-rgb-surface-candidate-point-count")) >= 20

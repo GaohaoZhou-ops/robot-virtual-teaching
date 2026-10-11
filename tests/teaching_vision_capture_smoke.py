@@ -110,14 +110,14 @@ def run():
         page.wait_for_function(
             "document.querySelector('.zivid-camera-canvas')?.dataset.contextState === 'ready'"
         )
-        camera_panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        camera_panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         assert camera_panel.get_attribute("data-camera-teaching-mode") == "active"
         camera_panel.get_by_role("button", name="点云", exact=True).click()
         camera_panel.get_by_role("button", name="放大相机画面", exact=True).click()
         page.wait_for_function(
             "Number(document.querySelector('.zivid-camera-canvas')?.dataset.digitalZoom) > 1"
         )
-        zoom = page.locator(".zivid-camera-canvas").get_attribute("data-digital-zoom")
+        zoom = camera_panel.locator(".zivid-camera-canvas").get_attribute("data-digital-zoom")
         teaching_tab.click()
         assert page.locator(".zivid-camera-canvas").count() == 0
         assert teaching_panel.get_attribute("data-active-teaching-task") == task_id
@@ -128,7 +128,7 @@ def run():
             "document.querySelector('.zivid-camera-canvas')?.dataset.contextState === 'ready'"
         )
         assert camera_panel.get_attribute("data-render-mode") == "pointcloud"
-        assert page.locator(".zivid-camera-canvas").get_attribute("data-digital-zoom") == zoom
+        assert camera_panel.locator(".zivid-camera-canvas").get_attribute("data-digital-zoom") == zoom
         teaching_tab.click()
 
         page.get_by_role("button", name="查看地图与工程配置").click()

@@ -94,7 +94,7 @@ def run():
             "document.querySelector('[aria-label=\"虚拟示教\"]')?.dataset.parkingPointCount === '1'"
         )
         first_parking_node = capture_tree_card.get_by_role(
-            "treeitem", name="选择当前停车点 停车点 P01"
+            "button", name="选择当前停车点 停车点 P01"
         )
         assert first_parking_node.is_visible()
         assert first_parking_node.get_attribute("aria-current") == "true"
@@ -229,7 +229,7 @@ def run():
         )
         drift_dialog.wait_for(state="detached")
         second_parking_node = page.get_by_label("示教任务与停车点树", exact=True).get_by_role(
-            "treeitem", name="选择当前停车点 停车点 P02"
+            "button", name="选择当前停车点 停车点 P02"
         )
         assert second_parking_node.get_attribute("aria-current") == "true"
         assert teaching_panel.get_attribute("data-parking-point-count") == "2"

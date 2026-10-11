@@ -205,11 +205,11 @@ def run():
         )
         page.get_by_role("tab", name="相机", exact=True).click()
         page.wait_for_function(
-            "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.cameraTeachingMode === 'active'"
+            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraTeachingMode === 'active'"
         )
 
         main_canvas = page.locator(".three-canvas")
-        panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         assert panel.get_by_text("相机反算已激活", exact=True).count() == 0
         assert panel.locator(".zivid-camera-inverse-badge").count() == 0
         assert page.get_by_label("相机视角反算示教", exact=True).count() == 0

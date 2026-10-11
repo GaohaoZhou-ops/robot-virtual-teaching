@@ -62,7 +62,7 @@ def run():
         dialog.get_by_role("button", name="创建任务", exact=True).click()
         tree = page.get_by_label("示教任务与停车点树", exact=True)
         first_stop = tree.get_by_role(
-            "treeitem", name="选择当前停车点 停车点 P01"
+            "button", name="选择当前停车点 停车点 P01"
         )
         first_stop.wait_for()
         first_stop_pose = read_robot_pose(canvas)
@@ -84,7 +84,7 @@ def run():
         )
         page.get_by_role("button", name="新增停车点", exact=True).click()
         second_stop = tree.get_by_role(
-            "treeitem", name="选择当前停车点 停车点 P02"
+            "button", name="选择当前停车点 停车点 P02"
         )
         second_stop.wait_for()
         before_preview = read_robot_pose(canvas)

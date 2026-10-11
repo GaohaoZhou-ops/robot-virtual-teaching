@@ -158,9 +158,9 @@ def run():
         assert collision_alert.is_visible()
         assert "检测到环境干涉" in collision_alert.inner_text()
         assert "红色部件" in collision_alert.inner_text()
-        camera_panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        camera_panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         page.wait_for_function(
-            "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.cameraCollisionState === 'collision'"
+            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionState === 'collision'"
         )
         assert camera_panel.get_attribute("data-collision-protection-enabled") == "true"
         assert camera_panel.get_attribute("data-camera-collision-warning") == "visible"
@@ -201,9 +201,9 @@ def run():
                 assert near_alert.is_visible()
                 assert "进入 100 mm 安全边界" in near_alert.inner_text()
                 page.wait_for_function(
-                    "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.cameraCollisionState === 'near'"
+                    "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionState === 'near'"
                 )
-                camera_warning = page.locator(".zivid-camera-collision-alert.is-near")
+                camera_warning = camera_panel.locator(".zivid-camera-collision-alert.is-near")
                 assert camera_warning.is_visible()
                 assert "距离低于 10 cm 安全阈值" in camera_warning.inner_text()
             if observed_near and state == "safe":
@@ -215,7 +215,7 @@ def run():
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         assert canvas.get_attribute("data-collision-highlight-color") == "none"
         page.wait_for_function(
-            "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.cameraCollisionWarning === 'hidden'"
+            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionWarning === 'hidden'"
         )
         assert page.locator(".zivid-camera-collision-alert").count() == 0
         page.screenshot(path="/tmp/atlas-collision-protection.png", full_page=True)

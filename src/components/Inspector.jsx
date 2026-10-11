@@ -84,6 +84,7 @@ export default function Inspector({
   activeTeachingTaskId,
   activeTeachingParkingPointId,
   robotParkingGhostId,
+  robotParkingGhostPoseId,
   jointPoses = [],
   zividCameraPoses,
   cameraTeachingResult,
@@ -118,6 +119,7 @@ export default function Inspector({
 }) {
   const [activePage, setActivePage] = useState('teaching');
   const [activeTeachingCameraSide, setActiveTeachingCameraSide] = useState('left');
+  const [expandedCameraSide, setExpandedCameraSide] = useState(null);
   const [jointWindowOpen, setJointWindowOpen] = useState(false);
   const scrollRef = useRef(null);
   const workbenchActivityRef = useRef(isWorkbenchActive);
@@ -239,8 +241,14 @@ export default function Inspector({
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
   }, [activePage]);
 
-  const handleZividExpandedChange = useCallback((isExpanded) => {
-    if (isExpanded) setJointWindowOpen(false);
+  const handleZividExpandedChange = useCallback((isExpanded, side) => {
+    if (isExpanded) {
+      setExpandedCameraSide(side);
+      setActiveTeachingCameraSide(side);
+      setJointWindowOpen(false);
+    } else {
+      setExpandedCameraSide((current) => current === side ? null : current);
+    }
   }, []);
 
   const activateInspectorPage = (pageId) => {
@@ -656,6 +664,7 @@ export default function Inspector({
               activeTaskId={activeTeachingTaskId}
               activeParkingPointId={activeTeachingParkingPointId}
               previewParkingPointId={robotParkingGhostId}
+              previewPoseId={robotParkingGhostPoseId}
               mapData={mapData}
               robot={robot}
               robotLoadState={robotLoadState}
@@ -684,27 +693,32 @@ export default function Inspector({
               className="camera-teaching-workspace is-active"
               data-camera-controls-location="adjacent-to-viewport"
               data-camera-inverse-activation="automatic"
+              data-camera-layout="vertical-stereo"
             >
-              <ZividCameraPanel
-                active={activePage === 'camera' && !collapsed}
-                mapData={mapData}
-                robot={robot}
-                robotLoadState={robotLoadState}
-                cameraPoses={zividCameraPoses}
-                activeSide={activeTeachingCameraSide}
-                onActiveSideChange={setActiveTeachingCameraSide}
-                cameraTeachingEnabled={cameraTeachingEnabled}
-                cameraTeachingResult={cameraTeachingResult}
-                meshRenderQuality={meshRenderQuality}
-                onMeshRenderQualityChange={onMeshRenderQualityChange}
-                spaceMouseInputRef={spaceMouseInputRef}
-                mainViewportCanvasRef={main3DCanvasRef}
-                jointControlOpen={jointWindowOpen}
-                onExpandedChange={handleZividExpandedChange}
-                onOpenJointControl={() => setJointWindowOpen(true)}
-                onCameraTeachingMove={onCameraTeachingMove}
-                onCaptureProviderChange={onZividCaptureProviderChange}
-              />
+              {['left', 'right'].map((side) => (
+                <ZividCameraPanel
+                  key={side}
+                  side={side}
+                  active={activePage === 'camera' && !collapsed && (!expandedCameraSide || expandedCameraSide === side)}
+                  mapData={mapData}
+                  robot={robot}
+                  robotLoadState={robotLoadState}
+                  cameraPoses={zividCameraPoses}
+                  activeSide={expandedCameraSide === side ? activeTeachingCameraSide : side}
+                  onActiveSideChange={setActiveTeachingCameraSide}
+                  cameraTeachingEnabled={cameraTeachingEnabled}
+                  cameraTeachingResult={cameraTeachingResult}
+                  meshRenderQuality={meshRenderQuality}
+                  onMeshRenderQualityChange={onMeshRenderQualityChange}
+                  spaceMouseInputRef={spaceMouseInputRef}
+                  mainViewportCanvasRef={main3DCanvasRef}
+                  jointControlOpen={jointWindowOpen}
+                  onExpandedChange={handleZividExpandedChange}
+                  onOpenJointControl={() => setJointWindowOpen(true)}
+                  onCameraTeachingMove={onCameraTeachingMove}
+                  onCaptureProviderChange={side === 'left' ? onZividCaptureProviderChange : undefined}
+                />
+              ))}
             </div>
           </div>
         )}

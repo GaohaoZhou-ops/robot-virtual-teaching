@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from archive_helpers import read_exported_project
 
@@ -35,7 +35,10 @@ def run():
         os.environ.get("MAP_FILE", str(ROOT / "tests/fixtures/rotation-map.ply"))
     ).expanduser().resolve()
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or None,
+        )
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.set_default_timeout(180_000)
         page.on("pageerror", lambda error: errors.append(str(error)))
@@ -130,7 +133,7 @@ def run():
             "document.querySelector('[aria-label=\"虚拟示教\"]')?.dataset.teachingTaskCount === '1'"
         )
         page.get_by_role("tab", name="相机", exact=True).click()
-        zivid_panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        zivid_panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         assert zivid_panel.is_visible()
         assert page.get_by_label("相机视角反算示教", exact=True).count() == 0
         assert page.get_by_role("tab", name="相机反算", exact=True).count() == 0
@@ -166,14 +169,14 @@ def run():
         )
         assert context_loss_canceled
         page.wait_for_function(
-            "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.rendererStatus === 'context-lost'"
+            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.rendererStatus === 'context-lost'"
         )
         assert page.locator(".app-shell").is_visible()
         camera_canvas.evaluate(
             "canvas => canvas.dispatchEvent(new Event('webglcontextrestored'))"
         )
         page.wait_for_function(
-            "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.rendererStatus === 'ready'"
+            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.rendererStatus === 'ready'"
         )
         if os.environ.get("CAMERA_BUFFER_ONLY") == "1":
             print("map_file=", map_file.name)
@@ -280,7 +283,7 @@ def run():
 
         zivid_panel.get_by_role("button", name="右臂 M70").click()
         page.wait_for_function(
-            "document.querySelector('[aria-label=\"Zivid 2 M70 相机视图\"]')?.dataset.cameraSide === 'right'"
+            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraSide === 'right'"
         )
         right_quaternion_before = csv_vector(canvas, "data-zivid-right-optical-quaternion")
         first_revision = int(canvas.get_attribute("data-camera-teaching-revision"))
@@ -448,9 +451,9 @@ def run():
         page.wait_for_function(
             "Math.abs(Number(document.querySelector('[data-joint-name=\"right_J1\"]')?.dataset.jointValue) - 35) < 1e-6"
         )
-        assert float(right_joint.input_value()) == 35
-        assert float(left_joint.input_value()) == -22
-        assert float(wheel_joint.input_value()) == -270
+        expect(right_joint).to_have_value("35.00")
+        expect(left_joint).to_have_value("-22.00")
+        expect(wheel_joint).to_have_value("-270.00")
 
         saved_name.fill("双臂抓取预备")
         saved_name.press("Enter")
