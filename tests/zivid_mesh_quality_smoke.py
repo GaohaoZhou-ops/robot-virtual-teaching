@@ -43,7 +43,7 @@ def run():
             timeout=180_000,
         )
         page.get_by_role("tab", name="相机").click()
-        panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         panel.scroll_into_view_if_needed()
         page.wait_for_function(
             "document.querySelector('[data-zivid-model=\"zivid-2-m70\"]')?.dataset.rendererStatus === 'ready'"
@@ -72,7 +72,7 @@ def run():
         page.wait_for_function(
             "document.querySelector('.zivid-camera-canvas')?.dataset.meshRenderQuality === 'balanced'"
         )
-        panel = page.get_by_label("Zivid 2 M70 相机视图", exact=True)
+        panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         canvas = camera_canvas(panel)
         page.get_by_role("button", name="显示设置", exact=True).click()
         assert page.get_by_label("网格渲染质量", exact=True).input_value() == "balanced"

@@ -17,14 +17,17 @@ def vector_attribute(locator, name):
 def run():
     errors = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or None,
+        )
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.set_default_timeout(180_000)
         page.on("pageerror", lambda error: errors.append(str(error)))
 
         page.goto(f"{BASE_URL.rstrip('/')}/workbench", wait_until="networkidle")
         page.locator('[data-session-state="ready"]').wait_for()
-        assert page.get_by_label("Zivid 2 M70 相机视图").count() == 0
+        assert page.locator(".zivid-camera-panel").count() == 0
 
         page.locator('input[type="file"][accept=".ply"]').set_input_files(
             str(ROOT / "tests/fixtures/rotation-map.ply")
@@ -42,9 +45,32 @@ def run():
         camera_tab.click()
         assert camera_tab.get_attribute("aria-selected") == "true"
         assert page.get_by_label("全关节控制浮动窗口", exact=True).count() == 0
-        panel = page.get_by_label("Zivid 2 M70 相机视图")
-        panel.scroll_into_view_if_needed()
+        panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
+        right_panel = page.locator('.zivid-camera-panel[data-camera-slot="right"]')
         panel.wait_for()
+        right_panel.wait_for()
+        page.wait_for_function("""() => {
+          const panels = [...document.querySelectorAll('.zivid-camera-panel')];
+          return panels.length === 2 && panels.every(panel => panel.dataset.rendererStatus === 'ready');
+        }""")
+        for width, height in ((980, 640), (1024, 768), (1440, 900), (1600, 1000)):
+            page.set_viewport_size({"width": width, "height": height})
+            page.wait_for_timeout(180)
+            left_box, right_box = panel.bounding_box(), right_panel.bounding_box()
+            area = page.locator('.inspector-scroll[data-page-scroll="camera"]').bounding_box()
+            assert left_box["y"] + left_box["height"] + 9 <= right_box["y"]
+            assert abs(left_box["height"] - right_box["height"]) < 1
+            assert left_box["y"] >= area["y"]
+            assert right_box["y"] + right_box["height"] <= area["y"] + area["height"]
+            for camera in (panel, right_panel):
+                box = camera.get_by_label("M70 相机画面交互区", exact=True).bounding_box()
+                assert box["height"] > 100
+                assert abs(box["width"] / box["height"] - 1944 / 1200) < 0.01
+            assert page.locator('.inspector-scroll[data-page-scroll="camera"]').evaluate(
+                "element => element.scrollHeight <= element.clientHeight"
+            )
+            page.screenshot(path=f"/tmp/atlas-zivid-stereo-{width}x{height}.png", full_page=True)
+        page.set_viewport_size({"width": 1440, "height": 900})
         assert page.get_by_label("主3D辅助视角").count() == 0
         assert panel.get_attribute("data-zivid-model") == "zivid-2-m70"
         assert panel.get_attribute("data-horizontal-fov") == "56.6"
@@ -60,28 +86,31 @@ def run():
         assert camera_canvas.get_attribute("data-camera-ready") == "true"
         assert camera_canvas.get_attribute("data-render-mode") == "rgb"
         assert int(camera_canvas.get_attribute("data-render-point-count")) > 0
+        assert camera_canvas.get_attribute("data-optical-frame") == "zivid_left_optical_frame"
+        assert right_panel.locator(".zivid-camera-canvas").get_attribute("data-optical-frame") == "zivid_right_optical_frame"
 
         panel.get_by_role("button", name="点云", exact=True).click()
         page.wait_for_function(
-            "document.querySelector('[data-zivid-model=\"zivid-2-m70\"]')?.dataset.renderMode === 'pointcloud'"
+            "document.querySelector('[data-camera-slot=\"left\"] .zivid-camera-canvas')?.dataset.renderMode === 'pointcloud'"
         )
         assert camera_canvas.get_attribute("data-render-mode") == "pointcloud"
         assert panel.get_by_label("点云深度色标").is_visible()
+        assert right_panel.get_attribute("data-render-mode") == "rgb"
 
         panel.get_by_role("button", name="放大相机画面").click()
         panel.get_by_role("button", name="放大相机画面").click()
         page.wait_for_function(
-            "Number(document.querySelector('[data-zivid-model=\"zivid-2-m70\"]')?.dataset.zoom) > 2"
+            "Number(document.querySelector('[data-camera-slot=\"left\"] .zivid-camera-canvas')?.dataset.digitalZoom) > 2"
         )
         assert float(camera_canvas.get_attribute("data-digital-zoom")) > 2
 
-        panel.get_by_role("button", name="右臂 M70").click()
-        page.wait_for_function(
-            "document.querySelector('[data-zivid-model=\"zivid-2-m70\"]')?.dataset.opticalFrame === 'zivid_right_optical_frame'"
-        )
-        panel = page.get_by_label("Zivid 2 M70 相机视图")
-        assert panel.get_attribute("data-camera-side") == "right"
-        assert panel.get_attribute("data-zoom") == "1.00"
+        left_zoom = panel.get_attribute("data-zoom")
+        assert right_panel.get_attribute("data-camera-side") == "right"
+        assert right_panel.get_attribute("data-zoom") == "1.00"
+        right_panel.get_by_role("button", name="放大相机画面").click()
+        assert float(right_panel.get_attribute("data-zoom")) > 1
+        assert panel.get_attribute("data-zoom") == left_zoom
+        right_panel.get_by_role("button", name="重置相机缩放").click()
 
         before_position = vector_attribute(main_canvas, "data-zivid-right-optical-position")
         before_revision = int(main_canvas.get_attribute("data-zivid-camera-pose-revision"))
@@ -94,11 +123,17 @@ def run():
         after_position = vector_attribute(main_canvas, "data-zivid-right-optical-position")
         assert any(abs(after - before) > 0.02 for after, before in zip(after_position, before_position))
 
-        page.get_by_role("button", name="放大 Zivid 相机视图").click()
+        right_panel.get_by_role("button", name="放大 Zivid 相机视图").click()
         dialog = page.get_by_role("dialog", name="Zivid 2 M70 相机大图")
         dialog.wait_for()
         expanded_panel = dialog.get_by_label("Zivid 2 M70 相机视图")
         assert expanded_panel.is_visible()
+        assert expanded_panel.get_attribute("data-camera-side") == "right"
+        assert page.locator(".zivid-camera-panel").count() == 1
+        expanded_panel.get_by_role("button", name="左臂 M70").click()
+        assert expanded_panel.get_attribute("data-optical-frame") == "zivid_left_optical_frame"
+        expanded_panel.get_by_role("button", name="右臂 M70").click()
+        assert expanded_panel.get_attribute("data-optical-frame") == "zivid_right_optical_frame"
         assert expanded_panel.locator(".zivid-camera-canvas").is_visible()
         camera_stage = dialog.get_by_label("Zivid相机主画面", exact=True)
         side_stack = dialog.get_by_label("相机控制与主3D辅助区", exact=True)
@@ -259,8 +294,27 @@ def run():
         page.screenshot(path="/tmp/atlas-zivid-m70-camera.png", full_page=True)
         expanded_panel.get_by_role("button", name="关闭 Zivid 相机大图").click()
         dialog.wait_for(state="detached")
+        panel.wait_for()
+        right_panel.wait_for()
+        assert panel.get_attribute("data-zoom") == left_zoom
+        assert panel.get_attribute("data-render-mode") == "pointcloud"
+        panel.get_by_role("button", name="放大 Zivid 相机视图").click()
+        dialog.wait_for()
+        assert dialog.locator(".zivid-camera-panel").get_attribute("data-camera-side") == "left"
+        page.keyboard.press("Escape")
+        dialog.wait_for(state="detached")
+        assert panel.is_visible() and right_panel.is_visible()
+        assert page.locator(".zivid-camera-panel").count() == 2
+
+        page.get_by_role("tab", name="示教", exact=True).click()
+        assert page.locator(".zivid-camera-canvas").count() == 0
+        camera_tab.click()
+        page.wait_for_function("document.querySelectorAll('.zivid-camera-canvas').length === 2")
+        assert panel.get_attribute("data-zoom") == left_zoom
+        assert panel.get_attribute("data-render-mode") == "pointcloud"
 
         assert not errors, errors
+        print("stereo cameras: layout, independent modes/zoom, enlargement, switching and restore passed")
         browser.close()
 
 

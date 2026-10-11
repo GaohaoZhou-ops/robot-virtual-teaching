@@ -139,17 +139,25 @@ playwright/.auth/
 *.profraw
 *.profdata
 
-# UI smoke-test captures; scope device exports so source artwork stays visible.
+# UI smoke-test captures in the repository root or beside the test scripts.
+# Keep source artwork and fixture media outside these filename patterns.
 /atlas-*.png
 /transfer-*.png
+/tests/atlas-*.png
+/tests/transfer-*.png
 # Browser recordings / traces saved beside smoke-test screenshots.
-# Keep design media and fixtures outside these root-level filename patterns.
 /atlas-*.mp4
 /atlas-*.webm
 /transfer-*.mp4
 /transfer-*.webm
 /atlas-*-trace.zip
 /transfer-*-trace.zip
+/tests/atlas-*.mp4
+/tests/atlas-*.webm
+/tests/transfer-*.mp4
+/tests/transfer-*.webm
+/tests/atlas-*-trace.zip
+/tests/transfer-*-trace.zip
 /atlas-ipad-*.mov
 /atlas-ipad-*.heic
 /ipad/atlas-ipad-*.png
@@ -317,19 +325,12 @@ Desktop.ini
 # Local robot assets can be large and machine-specific
 robots/
 
-# Point-cloud assets are ignored by default; keep compact repository fixtures
-# A /**/ exception matches files both directly in a fixture folder and below it.
+# Point-cloud assets are ignored by default; keep the bundled example map.
 *.[pP][lL][yY]
 !maps/xian_map.ply
-!tests/fixtures/**/*.[pP][lL][yY]
-!ipad/Tests/Fixtures/**/*.[pP][lL][yY]
-!vision/Tests/Fixtures/**/*.[pP][lL][yY]
 
-# Local iPad / Vision Pro model-transfer payloads; keep test fixtures trackable.
+# Local iPad / Vision Pro model-transfer payloads
 *.atls
-!tests/fixtures/**/*.atls
-!ipad/Tests/Fixtures/**/*.atls
-!vision/Tests/Fixtures/**/*.atls
 
 # Locally recovered/exported projects may contain hundreds of MB of map data
 recovered-projects/
@@ -343,12 +344,27 @@ robot-teaching-*.zip
 robot-free-navigation-*.json
 /robot-teaching-*/
 *.abxteach.ndjson
-!tests/fixtures/**/*.abxteach.ndjson
-!ipad/Tests/Fixtures/**/*.abxteach.ndjson
-!vision/Tests/Fixtures/**/*.abxteach.ndjson
 /virtual-teaching-*/
 parking-merge-server-*.zip
 parking-merge-server-*/
 parking-merge-*-result.zip
 parking-merge-*-result.json
 /merge-job/
+
+# Compact regression inputs remain trackable, including export-shaped filenames.
+# Keep exceptions after export rules; /**/ covers direct and nested fixture files.
+!tests/fixtures/**/*.[pP][lL][yY]
+!tests/fixtures/**/*.atls
+!tests/fixtures/**/*.abxteach.ndjson
+!tests/fixtures/**/*.json
+!tests/fixtures/**/*.zip
+!ipad/Tests/Fixtures/**/*.[pP][lL][yY]
+!ipad/Tests/Fixtures/**/*.atls
+!ipad/Tests/Fixtures/**/*.abxteach.ndjson
+!ipad/Tests/Fixtures/**/*.json
+!ipad/Tests/Fixtures/**/*.zip
+!vision/Tests/Fixtures/**/*.[pP][lL][yY]
+!vision/Tests/Fixtures/**/*.atls
+!vision/Tests/Fixtures/**/*.abxteach.ndjson
+!vision/Tests/Fixtures/**/*.json
+!vision/Tests/Fixtures/**/*.zip

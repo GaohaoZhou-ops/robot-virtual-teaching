@@ -581,10 +581,14 @@ export default function App() {
       const parkingPoint = task?.parkingPoints?.find(
         (item) => item.id === current.parkingPointId,
       );
+      const pose = current.poseId
+        ? parkingPoint?.poses?.find((item) => item.id === current.poseId)
+        : null;
       const currentMapKey = mapData?.sourceHash || mapData?.mapId || mapData?.name || '';
       const currentRobotKey = selectedRobot?.id || selectedRobot?.relativePath || '';
       if (
         !parkingPoint
+        || (current.poseId && !pose)
         || !currentMapKey
         || !currentRobotKey
         || current.mapKey !== currentMapKey
@@ -593,11 +597,13 @@ export default function App() {
       if (
         current.parkingPointName !== parkingPoint.name
         || current.taskName !== task.name
+        || current.poseName !== (pose?.name || '')
       ) {
         return {
           ...current,
           parkingPointName: parkingPoint.name,
           taskName: task.name,
+          poseName: pose?.name || '',
         };
       }
       return current;
@@ -2664,11 +2670,12 @@ export default function App() {
     setTeachingCaptureState({ status: 'idle', message: '' });
   }, []);
 
-  const previewTeachingParkingPoint = useCallback((id) => {
+  const previewTeachingParkingPoint = useCallback((id, poseId = null) => {
     const task = teachingTasks.find((item) => (
       (item.parkingPoints || []).some((parkingPoint) => parkingPoint.id === id)
     ));
     const parkingPoint = task?.parkingPoints?.find((item) => item.id === id);
+    const pose = poseId ? parkingPoint?.poses?.find((item) => item.id === poseId) : null;
     const currentTask = teachingTasks.find((item) => item.id === activeTeachingTaskId);
     const currentParkingPoint = currentTask?.parkingPoints?.find(
       (item) => item.id === activeTeachingParkingPointId,
@@ -2678,7 +2685,7 @@ export default function App() {
     setActiveTeachingParkingPointId(id);
     setTeachingCaptureState({ status: 'idle', message: '' });
 
-    if (!task || !parkingPoint) {
+    if (!task || !parkingPoint || (poseId && !pose)) {
       setRobotParkingGhost(null);
       return;
     }
@@ -2712,12 +2719,14 @@ export default function App() {
       taskName: task.name,
       parkingPointId: parkingPoint.id,
       parkingPointName: parkingPoint.name,
+      poseId: pose?.id || null,
+      poseName: pose?.name || '',
       sourceParkingPointId: sourceParkingDistance <= 0.15 ? currentParkingPoint?.id || '' : '',
       sourceName: sourceParkingDistance <= 0.15
         ? currentParkingPoint?.name || '当前机器人'
         : '当前机器人',
       targetPose,
-      jointValues: { ...normalizeRobotJointValues(robotJointValues) },
+      jointValues: { ...normalizeRobotJointValues(pose ? pose.fullBodyJoints?.values : robotJointValues) },
       mapKey: mapData?.sourceHash || mapData?.mapId || mapData?.name || '',
       robotKey: selectedRobot?.id || selectedRobot?.relativePath || '',
       createdAt: new Date().toISOString(),
@@ -2725,7 +2734,7 @@ export default function App() {
     setCollapsedPanel((current) => current === '3d' ? null : current);
     requestSynchronizedFocus('robot-ghost', parkingPoint.id);
     notify(
-      `${parkingPoint.name} 虚影已生成 · XY ${planarDistance.toFixed(2)} m / 直线 ${straightDistance.toFixed(2)} m`,
+      `${parkingPoint.name}${pose ? ` / ${pose.name}` : ''} 虚影已生成 · XY ${planarDistance.toFixed(2)} m / 直线 ${straightDistance.toFixed(2)} m`,
       'info',
     );
   }, [
@@ -3605,10 +3614,10 @@ export default function App() {
     [notify],
   );
   const handleRobotControlChange = useCallback(
-    (enabled) => {
+    (enabled, { announce = true } = {}) => {
       const nextEnabled = Boolean(enabled) && robotLoadState.status === 'loaded';
       setRobotControlEnabled(nextEnabled);
-      notify(
+      if (announce) notify(
         nextEnabled
           ? robotHeightLocked
             ? '机器人控制已启用 · WASD 全向移动 / ←→ 原地旋转 / Z 高度已锁'
@@ -3837,10 +3846,11 @@ export default function App() {
   }, [notify]);
 
   const applyTeachingParkingPoint = useCallback(
-    (taskId, parkingPointId) => {
+    (taskId, parkingPointId, poseId = null) => {
       const task = teachingTasks.find((item) => item.id === taskId);
       const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
-      if (!task || !parkingPoint) return;
+      const pose = poseId ? parkingPoint?.poses?.find((item) => item.id === poseId) : null;
+      if (!task || !parkingPoint || (poseId && !pose)) return;
       if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
         notify('当前地图或机器人与该停车点不一致，无法应用', 'warning');
         return;
@@ -3848,12 +3858,18 @@ export default function App() {
       stopTeachingTaskPlayback(false);
       setRobotControlEnabled(false);
       setRobotPose(normalizeRobotPose(parkingPoint.mapPose));
+      if (pose) setRobotJointValues(normalizeRobotJointValues(pose.fullBodyJoints?.values));
       setActiveTeachingTaskId(task.id);
       setActiveTeachingParkingPointId(parkingPoint.id);
       setTeachingCaptureState({ status: 'idle', message: '' });
       setRobotParkingGhost(null);
       requestSynchronizedFocus('robot', selectedRobot?.id || selectedRobot?.relativePath || 'active-robot');
-      notify(`已移动到 ${parkingPoint.name} · 可继续示教操作并记录姿态`, 'success');
+      notify(
+        pose
+          ? `已移动到 ${parkingPoint.name} 并应用 ${pose.name} · 可继续示教操作并记录姿态`
+          : `已移动到 ${parkingPoint.name} · 可继续示教操作并记录姿态`,
+        'success',
+      );
     },
     [
       notify,
@@ -3865,6 +3881,108 @@ export default function App() {
       teachingTasks,
     ],
   );
+
+  const beginTeachingParkingPointEdit = useCallback((taskId, parkingPointId) => {
+    const task = teachingTasks.find((item) => item.id === taskId);
+    const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
+    if (
+      !parkingPoint
+      || robotParkingGhost?.taskId !== taskId
+      || robotParkingGhost?.parkingPointId !== parkingPointId
+      || robotParkingGhost.poseId
+    ) return;
+    if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
+      notify('请加载与该停车点匹配的地图和机器人后再修改位置', 'warning');
+      return;
+    }
+    if (teachingCaptureBusyRef.current) {
+      notify('请等待当前姿态采集完成后再修改停车点', 'warning');
+      return;
+    }
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(true);
+    setRobotPose(normalizeRobotPose(parkingPoint.mapPose));
+    setActiveTeachingTaskId(taskId);
+    setActiveTeachingParkingPointId(parkingPointId);
+    setTeachingCaptureState({ status: 'idle', message: '' });
+    setRobotParkingGhost((current) => current && { ...current, editing: true });
+    requestSynchronizedFocus('robot-ghost', parkingPointId);
+    notify('WASD 调整停车位置 · ←/→ 调整朝向 · 点击“录入新位置”保存，Esc 取消', 'info');
+  }, [
+    notify,
+    requestSynchronizedFocus,
+    robotLoadState.status,
+    robotParkingGhost,
+    stopTeachingTaskPlayback,
+    teachingContextMatches,
+    teachingTasks,
+  ]);
+
+  const cancelTeachingParkingPointEdit = useCallback(() => {
+    if (!robotParkingGhost?.editing) return;
+    setRobotControlEnabled(false);
+    setRobotPose(normalizeRobotPose(robotParkingGhost.targetPose));
+    setRobotParkingGhost((current) => current && { ...current, editing: false });
+    notify('已取消停车点修改，恢复原停车位置', 'info');
+  }, [notify, robotParkingGhost]);
+
+  const recordTeachingParkingPointPosition = useCallback((taskId, parkingPointId, nextPose) => {
+    const task = teachingTasks.find((item) => item.id === taskId);
+    const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
+    if (
+      !parkingPoint
+      || !robotParkingGhost?.editing
+      || robotParkingGhost.taskId !== taskId
+      || robotParkingGhost.parkingPointId !== parkingPointId
+    ) return;
+    if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
+      notify('当前地图或机器人与该停车点不一致，无法录入新位置', 'warning');
+      return;
+    }
+    const targetPose = normalizeRobotPose(nextPose);
+    const updatedAt = new Date().toISOString();
+    const mapPose = {
+      ...parkingPoint.mapPose,
+      frameId: parkingPoint.mapPose?.frameId || coordinateFrame,
+      position: { ...targetPose.position },
+      rpy: { ...targetPose.rpy },
+    };
+    setTeachingTasks((current) => current.map((item) => item.id !== taskId ? item : {
+      ...item,
+      updatedAt,
+      parkingPoints: item.parkingPoints.map((point) => point.id !== parkingPointId ? point : {
+        ...point,
+        mapPose,
+        updatedAt,
+        poses: (point.poses || []).map((pose) => ({
+          ...pose,
+          updatedAt,
+          mapPose: {
+            ...pose.mapPose,
+            frameId: mapPose.frameId,
+            position: { ...targetPose.position },
+            rpy: { ...targetPose.rpy },
+          },
+        })),
+      }),
+    }));
+    setRobotControlEnabled(false);
+    setRobotPose(targetPose);
+    setRobotParkingGhost((current) => current && {
+      ...current,
+      editing: false,
+      targetPose,
+      revision: createId('robot-parking-ghost'),
+    });
+    notify(`${parkingPoint.name} 新位置已录入 · 所属姿态的基座位置已同步`, 'success');
+  }, [
+    coordinateFrame,
+    notify,
+    robotLoadState.status,
+    robotParkingGhost,
+    teachingContextMatches,
+    teachingTasks,
+  ]);
 
   const changeTeachingPlaybackSpeed = useCallback((requestedSpeed) => {
     const speed = [0.5, 1, 1.5, 2, 5].includes(Number(requestedSpeed))
@@ -4519,6 +4637,9 @@ export default function App() {
                 onCollisionProtectionChange={handleRobotCollisionProtectionChange}
                 onClearRobotParkingGhost={clearRobotParkingGhost}
                 onMoveToParkingPoint={applyTeachingParkingPoint}
+                onEditParkingPoint={beginTeachingParkingPointEdit}
+                onCancelParkingPointEdit={cancelTeachingParkingPointEdit}
+                onRecordParkingPointPosition={recordTeachingParkingPointPosition}
                 isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
               />
               <TeachingPlaybackDock
@@ -4650,6 +4771,7 @@ export default function App() {
           activeTeachingTaskId={activeTeachingTaskId}
           activeTeachingParkingPointId={activeTeachingParkingPointId}
           robotParkingGhostId={robotParkingGhost?.parkingPointId || null}
+          robotParkingGhostPoseId={robotParkingGhost?.poseId || null}
           jointPoses={jointPoses}
           zividCameraPoses={zividCameraPoses}
           cameraTeachingResult={cameraTeachingResult}

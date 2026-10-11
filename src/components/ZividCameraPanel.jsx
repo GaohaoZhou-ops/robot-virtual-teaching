@@ -1660,6 +1660,7 @@ function MainViewportPane({ sourceCanvasRef }) {
 
 export default function ZividCameraPanel({
   active = true,
+  side = 'left',
   mapData,
   robot,
   robotLoadState,
@@ -1680,7 +1681,7 @@ export default function ZividCameraPanel({
 }) {
   const enabled = isM70Robot(robot, robotLoadState);
   const viewEnabled = active && enabled;
-  const [internalActiveSide, setInternalActiveSide] = useState('left');
+  const [internalActiveSide, setInternalActiveSide] = useState(side);
   const activeSide = ['left', 'right'].includes(controlledActiveSide)
     ? controlledActiveSide
     : internalActiveSide;
@@ -1769,6 +1770,10 @@ export default function ZividCameraPanel({
   useEffect(() => {
     if (!viewEnabled && expanded) setExpanded(false);
   }, [expanded, viewEnabled]);
+
+  useEffect(() => {
+    onExpandedChange?.(expanded, side);
+  }, [expanded, onExpandedChange, side]);
 
   useEffect(() => {
     if (!mapData?.geometry) setCameraMeshStats(EMPTY_CAMERA_MESH_STATS);
@@ -2472,6 +2477,7 @@ export default function ZividCameraPanel({
 
   if (!active) return null;
   if (!enabled) {
+    if (side === 'right') return null;
     return (
       <section className="camera-empty-state" aria-label="相机未就绪">
         <Camera size={24} />
@@ -2573,8 +2579,9 @@ export default function ZividCameraPanel({
   const panel = (
     <section
       className={`zivid-camera-panel ${expanded ? 'is-expanded has-teaching-controls' : ''}`}
-      aria-label="Zivid 2 M70 相机视图"
+      aria-label={expanded ? 'Zivid 2 M70 相机视图' : `${side === 'left' ? '左' : '右'}相机 · Zivid 2 M70`}
       data-zivid-model="zivid-2-m70"
+      data-camera-slot={side}
       data-camera-side={activeSide}
       data-render-mode={renderMode}
       data-renderer-status={rendererStatus}
@@ -2618,8 +2625,8 @@ export default function ZividCameraPanel({
         <div className="zivid-camera-panel__identity">
           <span><Camera size={13} /></span>
           <div>
-            <small>END-EFFECTOR VISION · SIM</small>
-            <strong>Zivid 2 M70</strong>
+            <small>{activeSide === 'left' ? 'CAM-L' : 'CAM-R'} · ZIVID 2 M70</small>
+            <strong>{activeSide === 'left' ? '左相机' : '右相机'} · M70</strong>
           </div>
         </div>
         <div className="zivid-camera-panel__live"><i /> OPTICAL LINK</div>
@@ -2686,18 +2693,14 @@ export default function ZividCameraPanel({
           className="zivid-camera-expand"
           aria-label={expanded ? '关闭 Zivid 相机大图' : '放大 Zivid 相机视图'}
           title={expanded ? '关闭大图' : '放大查看'}
-          onClick={() => {
-            const nextExpanded = !expanded;
-            onExpandedChange?.(nextExpanded);
-            setExpanded(nextExpanded);
-          }}
+          onClick={() => setExpanded(!expanded)}
         >
           {expanded ? <X size={14} /> : <Maximize2 size={13} />}
         </button>
       </header>
 
       <div className="zivid-camera-toolbar">
-        <div className="zivid-camera-sides" role="group" aria-label="选择末端相机">
+        {expanded && <div className="zivid-camera-sides" role="group" aria-label="选择末端相机">
           {['left', 'right'].map((side) => (
             <button
               type="button"
@@ -2713,7 +2716,7 @@ export default function ZividCameraPanel({
               {side === 'left' ? '左臂 M70' : '右臂 M70'}
             </button>
           ))}
-        </div>
+        </div>}
         <div className="zivid-camera-modes" role="group" aria-label="相机渲染模式">
           <button
             type="button"
@@ -2948,6 +2951,7 @@ export default function ZividCameraPanel({
         </aside>
       )}
 
+      {expanded && <>
       <div className="zivid-camera-specs">
         <span><small>NATIVE</small>{ZIVID_M70_PROFILE.nativeWidth} × {ZIVID_M70_PROFILE.nativeHeight}</span>
         <span><small>FOV @ 0.70 m</small>{ZIVID_M70_PROFILE.focusWidthMm} × {ZIVID_M70_PROFILE.focusHeightMm} mm</span>
@@ -2966,6 +2970,7 @@ export default function ZividCameraPanel({
             : `≈ ${compactNumber(frustumStats.estimated)} PTS`}
         </strong>
       </footer>
+      </>}
     </section>
   );
 

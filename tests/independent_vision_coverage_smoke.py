@@ -134,9 +134,9 @@ def run():
         page.wait_for_function(
             "document.querySelector('.zivid-camera-canvas')?.dataset.contextState === 'ready'"
         )
-        zivid_canvas = page.locator(".zivid-camera-canvas")
+        zivid_canvas = page.locator('.zivid-camera-panel[data-camera-slot="left"] .zivid-camera-canvas')
         # The LOD renderer may replace its canvas after the pose settles.
-        camera_mount = page.locator(".zivid-camera-render-mount")
+        camera_mount = page.locator('.zivid-camera-panel[data-camera-slot="left"] .zivid-camera-render-mount')
         assert zivid_canvas.get_attribute("data-teaching-surface-tint") == "disabled"
         assert (
             zivid_canvas.get_attribute("data-surface-appearance-source")

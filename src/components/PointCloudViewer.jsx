@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createIPadCaptureLayer, disposeIPadCaptureLayer } from '../lib/ipadCaptureDisplay.js';
 import * as THREE from 'three';
@@ -22,6 +22,7 @@ import {
   Rotate3D,
   RotateCcw,
   Ruler,
+  Save,
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
@@ -1115,6 +1116,7 @@ const writeRobotParkingGhostHiddenDataset = (canvas) => {
   if (!canvas) return;
   canvas.dataset.parkingGhostState = 'hidden';
   canvas.dataset.parkingGhostTargetId = '';
+  canvas.dataset.parkingGhostPoseId = '';
   canvas.dataset.parkingGhostMeshCount = '0';
   canvas.dataset.parkingGhostJointCount = '0';
   canvas.dataset.parkingGhostJointValues = '';
@@ -1475,6 +1477,9 @@ export default function PointCloudViewer({
   onCollisionProtectionChange,
   onClearRobotParkingGhost,
   onMoveToParkingPoint,
+  onEditParkingPoint,
+  onCancelParkingPointEdit,
+  onRecordParkingPointPosition,
   onCollisionProtectionStatus,
   isActive = true,
 }) {
@@ -1532,6 +1537,8 @@ export default function PointCloudViewer({
   const onRobotPoseChangeRef = useRef(onRobotPoseChange);
   const onRobotJointValuesChangeRef = useRef(onRobotJointValuesChange);
   const onRobotControlChangeRef = useRef(onRobotControlChange);
+  const onCancelParkingPointEditRef = useRef(onCancelParkingPointEdit);
+  const robotParkingGhostRef = useRef(robotParkingGhost);
   const onZividCameraPoseChangeRef = useRef(onZividCameraPoseChange);
   const onCameraTeachingResultRef = useRef(onCameraTeachingResult);
   const parkingMergePlannerRef = useRef(null);
@@ -1591,6 +1598,8 @@ export default function PointCloudViewer({
   onRobotPoseChangeRef.current = onRobotPoseChange;
   onRobotJointValuesChangeRef.current = onRobotJointValuesChange;
   onRobotControlChangeRef.current = onRobotControlChange;
+  onCancelParkingPointEditRef.current = onCancelParkingPointEdit;
+  robotParkingGhostRef.current = robotParkingGhost;
   onZividCameraPoseChangeRef.current = onZividCameraPoseChange;
   onCameraTeachingResultRef.current = onCameraTeachingResult;
   onCollisionProtectionStatusRef.current = onCollisionProtectionStatus;
@@ -4035,7 +4044,7 @@ export default function PointCloudViewer({
     };
 
     const chassisDragActions = {
-      enter: () => updateChassisDragMode(true, 'double-click'),
+      enter: (reason = 'double-click') => updateChassisDragMode(true, reason),
       exit: (reason = 'user') => updateChassisDragMode(false, reason),
       cancel: (reason = 'cancelled') => finishChassisPointerDrag(null, reason),
     };
@@ -5333,6 +5342,7 @@ export default function PointCloudViewer({
       updateRobotParkingGhostGuide(visual, robotPoseRef.current, canvas);
       canvas.dataset.parkingGhostState = 'visible';
       canvas.dataset.parkingGhostTargetId = robotParkingGhost.parkingPointId;
+      canvas.dataset.parkingGhostPoseId = robotParkingGhost.poseId || '';
       canvas.dataset.parkingGhostMeshCount = String(visual.meshCount);
       canvas.dataset.parkingGhostJointCount = String(visual.jointCount);
       canvas.dataset.parkingGhostJointValues = JSON.stringify(
@@ -5992,28 +6002,32 @@ export default function PointCloudViewer({
     controls.domElement.dataset.keyboardMode = 'always-on';
   }, [interactionMode, mapData?.geometry, shiftPanArmed]);
 
-  useEffect(() => {
-    const canvas = controlsRef.current?.domElement;
-    const enabled = Boolean(
-      robotControlEnabled
-      && robotDescriptor
-      && robotLoadState?.status === 'loaded',
-    );
+  const updateRobotKeyboardControl = useCallback((enabled, focus = false) => {
     if (enabled && chassisDragModeRef.current) {
       chassisDragInteractionRef.current?.exit?.('robot-keyboard-control');
+    }
+    if (enabled && endEffectorControlRef.current) {
+      endEffectorInteractionRef.current?.exit?.();
     }
     robotControlEnabledRef.current = enabled;
     pressedKeysRef.current.clear();
     keyboardImpulseRef.current.clear();
     setShiftPanArmed(false);
+    const canvas = controlsRef.current?.domElement;
     if (!canvas) return;
     canvas.dataset.robotControlEnabled = enabled ? 'true' : 'false';
-    canvas.dataset.robotControlAvailable =
-      robotDescriptor && robotLoadState?.status === 'loaded' ? 'true' : 'false';
     canvas.dataset.keyboardControlOwner = enabled ? 'robot' : 'camera';
     canvas.dataset.shiftPanArmed = 'false';
     canvas.dataset.effectiveInteractionMode = interactionModeRef.current;
-  }, [mapData?.geometry, robotControlEnabled, robotDescriptor, robotLoadState?.status]);
+    if (focus) canvas.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    const available = Boolean(robotDescriptor && robotLoadState?.status === 'loaded');
+    updateRobotKeyboardControl(Boolean(robotControlEnabled && available));
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.robotControlAvailable = available ? 'true' : 'false';
+  }, [mapData?.geometry, robotControlEnabled, robotDescriptor, robotLoadState?.status, updateRobotKeyboardControl]);
 
   useEffect(() => {
     const locked = Boolean(robotHeightLocked && robotDescriptor);
@@ -6045,6 +6059,27 @@ export default function PointCloudViewer({
       if (active) canvas.dataset.keyboardControlOwner = 'camera';
     }
   }, [mapData?.geometry, robotTrajectoryActive]);
+
+  useEffect(() => {
+    if (!robotParkingGhost?.editing || !isActive || robotLoadState?.status !== 'loaded') {
+      return undefined;
+    }
+    updateRobotKeyboardControl(true, true);
+    onRobotControlChangeRef.current?.(true, { announce: false });
+    return () => {
+      chassisDragInteractionRef.current?.exit?.('parking-point-edit-ended');
+      updateRobotKeyboardControl(false);
+      onRobotControlChangeRef.current?.(false, { announce: false });
+    };
+  }, [
+    isActive,
+    mapData?.geometry,
+    robotDescriptor,
+    robotLoadState?.status,
+    robotParkingGhost?.editing,
+    robotParkingGhost?.revision,
+    updateRobotKeyboardControl,
+  ]);
 
   useEffect(() => {
     if (!mapData?.geometry) return undefined;
@@ -6090,6 +6125,19 @@ export default function PointCloudViewer({
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (
+        event.code === 'Escape'
+        && renderActiveRef.current
+        && robotParkingGhostRef.current?.editing
+        && !event.defaultPrevented
+        && !target?.closest?.('[aria-modal="true"], dialog[open]')
+      ) {
+        event.preventDefault();
+        updateRobotKeyboardControl(false);
+        chassisDragInteractionRef.current?.exit?.('parking-point-edit-cancelled');
+        onCancelParkingPointEditRef.current?.();
+        return;
+      }
       if (event.code === 'Escape' && chassisDragModeRef.current) {
         event.preventDefault();
         chassisDragInteractionRef.current?.exit?.('escape');
@@ -6182,7 +6230,7 @@ export default function PointCloudViewer({
       document.removeEventListener('visibilitychange', onVisibilityChange);
       resetKeys(false);
     };
-  }, [mapData?.geometry]);
+  }, [mapData?.geometry, updateRobotKeyboardControl]);
 
   useEffect(() => {
     const group = sliceGroupRef.current;
@@ -6808,24 +6856,7 @@ export default function PointCloudViewer({
     if (robotTrajectoryActiveRef.current) return;
     if (robotLoadState?.status !== 'loaded' || !robotDescriptor) return;
     const enabled = !robotControlEnabledRef.current;
-    if (enabled && chassisDragModeRef.current) {
-      chassisDragInteractionRef.current?.exit?.('robot-keyboard-control');
-    }
-    if (enabled && endEffectorControlRef.current) {
-      endEffectorInteractionRef.current?.exit?.();
-    }
-    robotControlEnabledRef.current = enabled;
-    pressedKeysRef.current.clear();
-    keyboardImpulseRef.current.clear();
-    setShiftPanArmed(false);
-    const canvas = controlsRef.current?.domElement;
-    if (canvas) {
-      canvas.dataset.robotControlEnabled = enabled ? 'true' : 'false';
-      canvas.dataset.keyboardControlOwner = enabled ? 'robot' : 'camera';
-      canvas.dataset.shiftPanArmed = 'false';
-      canvas.dataset.effectiveInteractionMode = interactionModeRef.current;
-      canvas.focus({ preventScroll: true });
-    }
+    updateRobotKeyboardControl(enabled, true);
     onRobotControlChangeRef.current?.(enabled);
   };
 
@@ -6980,6 +7011,8 @@ export default function PointCloudViewer({
               aria-live="polite"
               aria-label="停车点机器人虚影"
               data-parking-point-id={robotParkingGhost.parkingPointId}
+              data-pose-id={robotParkingGhost.poseId || ''}
+              data-parking-edit-state={robotParkingGhost.editing ? 'editing' : 'idle'}
               data-frozen-joint-count={Object.keys(robotParkingGhost.jointValues || {}).length}
             >
               <span className="robot-parking-ghost-readout__mark" aria-hidden="true">
@@ -6992,23 +7025,66 @@ export default function PointCloudViewer({
                   <span>{robotParkingGhost.sourceName || '当前机器人'}</span>
                   <i>→</i>
                   <span>{robotParkingGhost.parkingPointName || '目标停车点'}</span>
+                  {robotParkingGhost.poseId && (
+                    <span className="robot-parking-ghost-readout__pose" title={robotParkingGhost.poseName}>
+                      姿态 · {robotParkingGhost.poseName}
+                    </span>
+                  )}
                 </strong>
                 <div className="robot-parking-ghost-readout__metrics">
                   <span><Ruler size={10} /><small>XY 平面</small><b>{robotParkingGhostMetrics.planarDistance.toFixed(2)} m</b></span>
                   <span><small>3D 直线</small><b>{robotParkingGhostMetrics.straightDistance.toFixed(2)} m</b></span>
                   <span><small>ΔZ</small><b>{robotParkingGhostMetrics.deltaZ >= 0 ? '+' : ''}{robotParkingGhostMetrics.deltaZ.toFixed(2)} m</b></span>
                 </div>
-                <em>{Object.keys(robotParkingGhost.jointValues || {}).length} JOINTS FROZEN · 虚影不改变当前机器人</em>
+                <em>{robotParkingGhost.editing
+                  ? 'WASD 移动 · ←/→ 转向 · Esc 取消修改'
+                  : `${Object.keys(robotParkingGhost.jointValues || {}).length} JOINTS FROZEN · 虚影不改变当前机器人`}</em>
               </div>
-              <button
-                type="button"
-                className="robot-parking-ghost-readout__move"
-                title={`移动到 ${robotParkingGhost.parkingPointName || '当前停车点'} 的位置与朝向，保留当前关节姿态`}
-                onClick={() => onMoveToParkingPoint?.(robotParkingGhost.taskId, robotParkingGhost.parkingPointId)}
-                disabled={!onMoveToParkingPoint}
-              >
-                <MapPin size={12} /> 移动到当前停车点
-              </button>
+              <div className="robot-parking-ghost-readout__actions">
+                {!robotParkingGhost.poseId && (
+                  <button
+                    type="button"
+                    className="robot-parking-ghost-readout__edit"
+                    aria-pressed={Boolean(robotParkingGhost.editing)}
+                    title={robotParkingGhost.editing
+                      ? '将当前底盘位姿录入该停车点，并同步所属姿态的基座位置'
+                      : '启用机器人键盘控制调整停车位置，保留原位置虚影；Esc 取消修改'}
+                    disabled={robotParkingGhost.editing ? !onRecordParkingPointPosition : !onEditParkingPoint}
+                    onClick={() => {
+                      if (robotParkingGhost.editing) {
+                        updateRobotKeyboardControl(false);
+                        chassisDragInteractionRef.current?.cancel?.('parking-point-record');
+                        onRecordParkingPointPosition?.(
+                          robotParkingGhost.taskId,
+                          robotParkingGhost.parkingPointId,
+                          normalizeRobotPose(robotPoseRef.current),
+                        );
+                      } else {
+                        onEditParkingPoint?.(robotParkingGhost.taskId, robotParkingGhost.parkingPointId);
+                      }
+                    }}
+                  >
+                    {robotParkingGhost.editing ? <Save size={12} /> : <Move3D size={12} />}
+                    {robotParkingGhost.editing ? '录入新位置' : '修改停车点'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="robot-parking-ghost-readout__move"
+                  title={robotParkingGhost.poseId
+                    ? `移动到 ${robotParkingGhost.parkingPointName || '当前停车点'} 并应用 ${robotParkingGhost.poseName || '当前姿态'} 的全部关节角度`
+                    : `移动到 ${robotParkingGhost.parkingPointName || '当前停车点'} 的位置与朝向，保留当前关节姿态`}
+                  onClick={() => onMoveToParkingPoint?.(
+                    robotParkingGhost.taskId,
+                    robotParkingGhost.parkingPointId,
+                    robotParkingGhost.poseId,
+                  )}
+                  disabled={!onMoveToParkingPoint}
+                >
+                  {robotParkingGhost.poseId ? <Bot size={12} /> : <MapPin size={12} />}
+                  {robotParkingGhost.poseId ? '使用当前姿态' : '移动到当前停车点'}
+                </button>
+              </div>
               <button
                 type="button"
                 className="robot-parking-ghost-readout__close"
