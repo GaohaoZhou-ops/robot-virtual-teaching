@@ -1,6 +1,6 @@
 import os
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from viewer_tools_helpers import viewer_tool
 
@@ -44,10 +44,13 @@ def run():
     page_errors = []
     console_errors = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or None,
+        )
         context = browser.new_context(viewport={"width": 1600, "height": 960})
         page = context.new_page()
-        page.set_default_timeout(180_000)
+        page.set_default_timeout(30_000)
         page.on("pageerror", lambda error: page_errors.append(str(error)))
         page.on(
             "console",
@@ -75,27 +78,33 @@ def run():
             )
         )
         page.locator(".loading-curtain").wait_for(state="hidden")
-        toggle = viewer_tool(page, name="开启碰撞保护")
+        toggle = viewer_tool(page, name="关闭碰撞保护")
         assert toggle.is_visible()
         assert toggle.count() == 1
-        assert toggle.is_disabled()
+        expect(toggle).to_have_attribute("aria-pressed", "true")
+        canvas = page.locator(".three-canvas")
+        expect(canvas).to_have_attribute("data-collision-state", "waiting")
+        expect(canvas).to_have_attribute("data-collision-worker", "inactive")
+        expect(page.get_by_label("碰撞保护距离", exact=True)).to_have_text("等待检测")
+        # The default can still be disabled while waiting for a robot.
+        toggle.click()
+        expect(viewer_tool(page, name="开启碰撞保护")).to_be_disabled()
+        expect(page.get_by_label("碰撞保护距离", exact=True)).to_have_count(0)
         page.get_by_role("button", name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         wait_for_robot(page)
         page.get_by_role("tab", name="相机", exact=True).click()
 
         canvas = page.locator(".three-canvas")
-        toggle = viewer_tool(page, name="开启碰撞保护")
+        toggle = viewer_tool(page, name="关闭碰撞保护")
         assert not toggle.is_disabled()
-        assert toggle.get_attribute("aria-pressed") == "false"
+        assert toggle.get_attribute("aria-pressed") == "true"
         assert page.get_by_role("group", name="机器人控制", exact=True).get_by_role(
-            "button", name="开启碰撞保护"
+            "button", name="关闭碰撞保护"
         ).is_visible()
-        assert canvas.get_attribute("data-collision-protection-enabled") == "false"
-        assert canvas.get_attribute("data-collision-worker") == "inactive"
+        assert canvas.get_attribute("data-collision-protection-enabled") == "true"
         assert page.locator(".robot-collision-alert").count() == 0
 
-        toggle.click()
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.collisionState === 'safe'"
         )
@@ -108,10 +117,16 @@ def run():
         assert "base_link" in excluded
         assert any(name.startswith("wheel_") for name in excluded)
         assert "arm_right_baselink" not in excluded
-        safe_alert = page.locator(".robot-collision-alert.is-safe")
-        assert safe_alert.is_visible()
-        assert "非底盘结构安全" in safe_alert.inner_text()
-        assert "≥100 mm" in safe_alert.inner_text()
+        distance_readout = page.locator(".panel-3d .panel-heading").get_by_label("碰撞保护距离", exact=True)
+        expect(distance_readout).to_have_attribute("data-collision-state", "safe")
+        assert "非底盘结构安全" in distance_readout.get_attribute("title")
+        assert distance_readout.inner_text() == "≥100 mm"
+        assert page.locator(".robot-collision-alert").count() == 0
+        distance_box = distance_readout.bounding_box()
+        settings_box = page.get_by_role("button", name="显示设置", exact=True).bounding_box()
+        assert distance_box["x"] + distance_box["width"] < settings_box["x"]
+        assert abs(distance_box["y"] - settings_box["y"]) < 1
+        print("default protection waits for a robot, then automatically displays the safe distance", flush=True)
 
         probe = tuple(
             float(value)
@@ -129,6 +144,11 @@ def run():
         assert canvas.get_attribute("data-collision-worker") == "inactive"
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         assert page.locator(".robot-collision-alert").count() == 0
+        expect(distance_readout).to_have_count(0)
+        viewer_tool(page, name="开启碰撞保护").click()
+        expect(canvas).to_have_attribute("data-collision-state", "safe")
+        viewer_tool(page, name="关闭碰撞保护").click()
+        expect(canvas).to_have_attribute("data-collision-worker", "inactive")
 
         epsilon = 0.001
         collision_points = [
@@ -137,6 +157,7 @@ def run():
             (probe[0], probe[1] + epsilon, probe[2]),
             (probe[0], probe[1], probe[2] + epsilon),
         ]
+        page.once("dialog", lambda dialog: dialog.accept())
         map_input.set_input_files(
             ply_payload("collision-probe-map.ply", collision_points, [(0, 1, 2)])
         )
@@ -146,7 +167,7 @@ def run():
         )
         wait_for_robot(page)
         canvas = page.locator(".three-canvas")
-        viewer_tool(page, name="开启碰撞保护").click()
+        expect(viewer_tool(page, name="关闭碰撞保护")).to_have_attribute("aria-pressed", "true")
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.collisionState === 'collision'"
         )
@@ -154,10 +175,12 @@ def run():
         assert probe_link in collision_links
         assert int(canvas.get_attribute("data-collision-mesh-samples")) > 0
         assert canvas.get_attribute("data-collision-highlight-color") == "#ff4545"
-        collision_alert = page.locator(".robot-collision-alert.is-collision")
-        assert collision_alert.is_visible()
-        assert "检测到环境干涉" in collision_alert.inner_text()
-        assert "红色部件" in collision_alert.inner_text()
+        expect(distance_readout).to_have_attribute("data-collision-state", "collision")
+        assert "检测到环境干涉" in distance_readout.get_attribute("title")
+        assert "红色部件" in distance_readout.get_attribute("title")
+        assert distance_readout.inner_text() == "0 mm"
+        assert page.locator(".robot-collision-alert").count() == 0
+        print("collision distance and robot highlights updated", flush=True)
         camera_panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         page.wait_for_function(
             "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionState === 'collision'"
@@ -197,9 +220,10 @@ def run():
                 assert 0.008 < distance < 0.1
                 assert snapshot["collisionNearLinks"]
                 assert snapshot["collisionHighlightColor"] == "#ffc84a"
-                near_alert = page.locator(".robot-collision-alert.is-near")
-                assert near_alert.is_visible()
-                assert "进入 100 mm 安全边界" in near_alert.inner_text()
+                expect(distance_readout).to_have_attribute("data-collision-state", "near")
+                assert "进入 100 mm 安全边界" in distance_readout.get_attribute("title")
+                displayed_distance = float(distance_readout.inner_text().removesuffix(" mm"))
+                assert abs(displayed_distance - distance * 1000) <= 0.501
                 page.wait_for_function(
                     "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionState === 'near'"
                 )
@@ -214,14 +238,16 @@ def run():
         assert observed_safe_after_near
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         assert canvas.get_attribute("data-collision-highlight-color") == "none"
+        expect(distance_readout).to_have_attribute("data-collision-state", "safe")
         page.wait_for_function(
             "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionWarning === 'hidden'"
         )
         assert page.locator(".zivid-camera-collision-alert").count() == 0
         page.screenshot(path="/tmp/atlas-collision-protection.png", full_page=True)
 
-        # The protection state is deliberately not persisted: refresh should
-        # restore the workspace but must not silently reallocate the worker.
+        # Refresh restores the enabled default even after a manual disable.
+        viewer_tool(page, name="关闭碰撞保护").click()
+        expect(canvas).to_have_attribute("data-collision-worker", "inactive")
         page.reload(wait_until="domcontentloaded")
         page.locator('[data-session-state="ready"]').wait_for()
         page.locator(".loading-curtain").wait_for(state="hidden")
@@ -229,16 +255,18 @@ def run():
         page.get_by_role("tab", name="示教").click(force=True)
         canvas = page.locator(".three-canvas")
         assert page.get_by_label("自碰撞保护", exact=True).count() == 0
-        assert canvas.get_attribute("data-collision-worker") == "inactive"
-        assert viewer_tool(page, name="开启碰撞保护").get_attribute(
+        expect(canvas).to_have_attribute("data-collision-worker", "dedicated")
+        expect(canvas).to_have_attribute("data-collision-protection-enabled", "true")
+        expect(distance_readout).to_be_visible()
+        assert viewer_tool(page, name="关闭碰撞保护").get_attribute(
             "aria-pressed"
-        ) == "false"
+        ) == "true"
 
         print("probe_link=", probe_link)
         print("excluded_links=", excluded)
         print("collision_links=", collision_links)
         print("near_transition=", observed_near)
-        print("refresh_default_off=", True)
+        print("refresh_default_on=", True)
         print("page_errors=", page_errors)
         print("console_errors=", console_errors)
         assert not page_errors
