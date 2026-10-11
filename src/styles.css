@@ -2779,6 +2779,78 @@ code {
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.48), inset 3px 0 0 rgba(244, 201, 93, 0.72);
 }
 
+.torso-control-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100% - 20px));
+  max-height: calc(100% - 98px);
+  overflow: hidden;
+}
+
+.torso-control-panel > header,
+.torso-control-panel > footer { flex-shrink: 0; }
+.torso-control-panel__body { min-height: 0; overflow: auto; }
+
+.point-cloud-view:has([data-pose-edit-state="editing"]) .torso-control-panel {
+  left: 10px;
+  right: auto;
+}
+
+.torso-control-panel__description {
+  margin: 9px 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.torso-control-field {
+  display: grid;
+  grid-template-columns: 70px minmax(40px, 1fr) 83px;
+  align-items: center;
+  gap: 9px;
+  margin: 7px 10px;
+  padding: 7px 5px;
+  border: 1px solid rgba(89, 219, 232, 0.1);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.torso-control-field.is-active { border-color: rgba(89, 219, 232, 0.5); }
+.torso-control-field > button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font: 10px Menlo, monospace;
+  cursor: pointer;
+}
+.torso-control-field.is-active > button { color: var(--cyan); }
+.torso-control-field > input { width: 100%; min-width: 0; accent-color: var(--cyan); cursor: pointer; }
+.torso-control-field > label { display: flex; align-items: center; gap: 4px; }
+.torso-control-field label input {
+  width: 62px;
+  min-width: 0;
+  height: 26px;
+  border: 1px solid rgba(89, 219, 232, 0.2);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  text-align: right;
+  font: 11px Menlo, monospace;
+}
+.torso-control-field label span { color: var(--muted); font-size: 10px; }
+.torso-control-panel__status { margin: 9px 12px; color: var(--muted); font-size: 9px; }
+.torso-control-panel__status.is-limited { color: var(--amber); }
+.torso-control-panel .end-effector-panel__footer { min-height: 36px; }
+.torso-control-panel .end-effector-panel__footer > span { font-size: 9px; }
+.torso-control-panel .end-effector-panel__footer button { height: 25px; font-size: 9px; }
+
+@media (max-width: 1100px) {
+  .torso-control-panel { width: min(280px, calc(100% - 20px)); }
+  .torso-control-field { grid-template-columns: 58px minmax(30px, 1fr) 75px; gap: 5px; }
+  .torso-control-field label input { width: 58px; }
+}
+
 .end-effector-panel.is-locked {
   border-color: rgba(94, 229, 154, 0.58);
   box-shadow:

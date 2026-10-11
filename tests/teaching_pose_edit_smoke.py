@@ -9,6 +9,7 @@ from end_effector_control_smoke import double_click_tool, number_attr
 from parking_ghost_smoke import read_robot_pose, wait_for_pose
 from parking_position_edit_smoke import assert_map_pose
 from teaching_capture_pose_ghost_smoke import capture, set_joints
+from torso_control_ui_smoke import enter_torso, set_value
 from viewer_tools_helpers import viewer_tool
 
 
@@ -215,6 +216,34 @@ def run():
         assert final_task["parkingPoints"][0]["poses"][0]["fullBodyJoints"]["values"] == ik_joints
         assert final_task["parkingPoints"][0]["poses"][1] == sibling
         print("Escape, selection changes, playback stop and saving IK adjustments passed", flush=True)
+
+        # Torso linkage remains a nested adjustment and saves into the same pose.
+        begin_edit(page, canvas, card, parking_pose, ik_joints)
+        enter_torso(page, canvas)
+        yaw_joint = page.get_by_role("spinbutton", name="waist_yaw_J 关节值", exact=True)
+        yaw_joint.fill("7")
+        yaw_joint.press("Enter")
+        expect(page.get_by_role("spinbutton", name="躯干YAW (°)", exact=True)).to_have_value("7.0")
+        torso_height = number_attr(canvas, "torso-height") - 0.04
+        set_value(page, "躯干高度 (m)", torso_height)
+        assert joints(canvas) != ik_joints
+        assert json.loads(canvas.get_attribute("data-parking-ghost-joint-values")) == ik_joints
+        canvas.focus()
+        page.keyboard.press("Escape")
+        expect(card).to_have_attribute("data-pose-edit-state", "editing")
+        wait_for_joints(page, ik_joints)
+        enter_torso(page, canvas)
+        set_value(page, "躯干高度 (m)", torso_height)
+        ik_joints = joints(canvas)
+        page.screenshot(path="/tmp/atlas-torso-teaching-edit.png", full_page=True)
+        card.get_by_role("button", name="确认修改", exact=True).click()
+        expect(card).to_have_attribute("data-pose-edit-state", "idle")
+        expect(page.get_by_label("躯干联动控制", exact=True)).to_have_count(0)
+        assert read_robot_pose(canvas) == parking_pose
+        torso_task = export_task(page, task_id)
+        assert torso_task["parkingPoints"][0]["poses"][0]["fullBodyJoints"]["values"] == ik_joints
+        assert torso_task["parkingPoints"][0]["poses"][1] == sibling
+        print("torso linkage, frozen preview, nested cancellation and teaching pose save passed", flush=True)
 
         # Keep the existing parking action and an accessible short card on small screens.
         page.set_viewport_size({"width": 980, "height": 640})

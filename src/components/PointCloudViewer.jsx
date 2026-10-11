@@ -30,6 +30,8 @@ import {
   X,
 } from 'lucide-react';
 import EndEffectorControlPanel from './EndEffectorControlPanel.jsx';
+import TorsoControlPanel from './TorsoControlPanel.jsx';
+import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
 import {
   createUniformMeshIndex,
@@ -1555,6 +1557,7 @@ export default function PointCloudViewer({
   const chassisDragInteractionRef = useRef(null);
   const chassisDragModeRef = useRef(false);
   const endEffectorControllersRef = useRef({ left: null, right: null });
+  const torsoControllerRef = useRef(null);
   const transformControlsRef = useRef(null);
   const endEffectorTargetRef = useRef(null);
   const endEffectorSpaceBallRef = useRef(null);
@@ -2231,6 +2234,12 @@ export default function PointCloudViewer({
       status: active.status,
       positionError: active.positionError,
       rotationError: active.rotationError,
+      ...(active.side === 'torso' && {
+        torsoPose: active.torsoPose,
+        limits: active.controller.limits,
+        heightError: active.heightError || 0,
+        armLockLimited: active.armLockLimited,
+      }),
       dragging: Boolean(transformControlsRef.current?.dragging),
       ...overrides,
       locked: Boolean(lockModes[active.side]),
@@ -2272,6 +2281,9 @@ export default function PointCloudViewer({
       const controller = endEffectorControllersRef.current[side];
       if (lock?.type !== 'map' || !controller) return;
       const frozenJoints = restoreLockedEndEffectorJoints(side);
+      if (endEffectorControlRef.current?.side === 'torso') {
+        torsoControllerRef.current?.joints.forEach((joint) => frozenJoints.add(joint));
+      }
       const result = solveEndEffectorIk(
         controller,
         lock.targetPosition,
@@ -2314,8 +2326,108 @@ export default function PointCloudViewer({
 
   globalEndEffectorUpdateRef.current = solveGlobalEndEffectorLocks;
 
+  const syncTorsoTarget = (active) => {
+    const target = endEffectorTargetRef.current;
+    if (!target) return;
+    active.controller.frame.getWorldPosition(target.position);
+    active.controller.base.getWorldQuaternion(target.quaternion);
+    if (active.mode !== 'height') {
+      target.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0), THREE.MathUtils.degToRad(active.torsoPose.pitch),
+      ));
+    }
+    if (active.mode === 'yaw') {
+      target.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(active.torsoPose.yaw),
+      ));
+    }
+    target.updateMatrixWorld(true);
+    active.pose = poseFromWorldObject(target);
+  };
+
+  const configureTorsoTransform = (active) => {
+    const transform = transformControlsRef.current;
+    transform.setSpace('local');
+    transform.setMode(active.mode === 'height' ? 'translate' : 'rotate');
+    transform.showX = false;
+    transform.showY = active.mode === 'pitch';
+    transform.showZ = active.mode !== 'pitch';
+    endEffectorSpaceBallRef.current?.children.forEach((ring, index) => {
+      ring.visible = index === (active.mode === 'pitch' ? 1 : 2);
+    });
+    syncTorsoTarget(active);
+  };
+
+  const updateTorsoTarget = (forceReport = false, changes = null) => {
+    const active = endEffectorControlRef.current;
+    const target = endEffectorTargetRef.current;
+    if (active?.side !== 'torso' || !target) return null;
+    const requested = { ...active.torsoPose, ...changes };
+    if (!changes) {
+      if (active.mode === 'height') {
+        requested.height = active.controller.base.worldToLocal(target.getWorldPosition(new THREE.Vector3())).z;
+      } else {
+        const rotation = active.controller.base.getWorldQuaternion(new THREE.Quaternion()).invert()
+          .multiply(target.getWorldQuaternion(new THREE.Quaternion()));
+        if (active.mode === 'yaw') {
+          rotation.premultiply(new THREE.Quaternion().setFromAxisAngle(
+            new THREE.Vector3(0, 1, 0), -THREE.MathUtils.degToRad(active.torsoPose.pitch),
+          ));
+          const angle = THREE.MathUtils.radToDeg(2 * Math.atan2(rotation.z, rotation.w));
+          requested.yaw += THREE.MathUtils.euclideanModulo(angle - requested.yaw + 180, 360) - 180;
+        } else {
+          const up = new THREE.Vector3(0, 0, 1).applyQuaternion(rotation);
+          const angle = THREE.MathUtils.radToDeg(Math.atan2(up.x, up.z));
+          requested.pitch += THREE.MathUtils.euclideanModulo(angle - requested.pitch + 180, 360) - 180;
+        }
+      }
+    }
+    const result = solveRobotTorsoPose(active.controller, requested, active.referenceForward);
+    // Explicit torso control drives the body even when its joints are excluded
+    // from arm IK. Keep arm body locks and compensate map locks with arm joints.
+    Object.values(lockedEndEffectorsRef.current).forEach((lock) => {
+      if (lock?.type !== 'body') return;
+      active.controller.joints.forEach((joint) => {
+        if (lock.jointValues.has(joint)) lock.jointValues.set(joint, joint.userData.jointValue);
+      });
+    });
+    const locks = solveGlobalEndEffectorLocks(forceReport);
+    active.torsoPose = result.pose;
+    active.heightError = result.heightError;
+    active.positionError = result.heightError;
+    active.rotationError = result.rotationError;
+    active.armLockLimited = Object.values(locks).some((lock) => lock.status === 'limited');
+    active.status = active.armLockLimited ? 'limited' : result.status;
+    syncTorsoTarget(active);
+    setEndEffectorControl(endEffectorPanelState(active));
+    writeActiveEndEffectorDataset(controlsRef.current?.domElement, active, {
+      ...active, actualPose: active.pose,
+    }, active.pose);
+    reportRobotJointValues(forceReport);
+    reportZividCameraPoses(forceReport);
+    return result;
+  };
+
+  const setTorsoControlMode = (mode) => {
+    const active = endEffectorControlRef.current;
+    if (active?.side !== 'torso' || !['height', 'yaw', 'pitch'].includes(mode)) return;
+    active.mode = mode;
+    active.torsoPose = readRobotTorsoPose(active.controller);
+    configureTorsoTransform(active);
+    setEndEffectorControl(endEffectorPanelState(active));
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.endEffectorMode = mode;
+  };
+
+  const setTorsoPose = (changes) => {
+    if (endEffectorControlRef.current?.side !== 'torso') return;
+    clearRobotDragHistory();
+    updateTorsoTarget(true, changes);
+  };
+
   const updateEndEffectorTarget = (forceReport = false) => {
     const active = endEffectorControlRef.current;
+    if (active?.side === 'torso') return updateTorsoTarget(forceReport);
     const target = endEffectorTargetRef.current;
     const canvas = controlsRef.current?.domElement;
     if (!active || !target) return null;
@@ -2373,18 +2485,19 @@ export default function PointCloudViewer({
 
   const enterEndEffectorControl = (side) => {
     if (robotTrajectoryActiveRef.current) return false;
-    const controller = endEffectorControllersRef.current[side];
+    const isTorso = side === 'torso';
+    const controller = isTorso ? torsoControllerRef.current : endEffectorControllersRef.current[side];
     const transform = transformControlsRef.current;
     const target = endEffectorTargetRef.current;
     const canvas = controlsRef.current?.domElement;
     if (!controller || !transform || !target) return false;
     const previous = endEffectorControlRef.current;
-    // Repeatedly selecting the same arm must keep the original cancellation point.
+    // Repeatedly selecting the same part must keep the original cancellation point.
     const initialState = previous?.side === side ? previous.initialState : {
       ...captureRobotDragState(),
       undoEntries: [...robotDragHistoryRef.current.entries],
     };
-    restoreLockedEndEffectorJoints(side);
+    if (!isTorso) restoreLockedEndEffectorJoints(side);
     const activeLock = lockedEndEffectorsRef.current[side];
     if (activeLock?.type === 'body') {
       activeLock.jointValues.forEach((value, joint) => setRobotJointValue(joint, value));
@@ -2404,19 +2517,30 @@ export default function PointCloudViewer({
     transform.detach();
     target.visible = !locked;
     transform.enabled = !locked;
+    transform.showX = true;
+    transform.showY = true;
+    transform.showZ = true;
+    endEffectorSpaceBallRef.current?.children.forEach((ring) => { ring.visible = true; });
     transform.setSpace('world');
     transform.setMode('translate');
     if (!locked) transform.attach(target);
     endEffectorControlRef.current = {
       side,
       initialState,
-      mode: 'translate',
+      mode: isTorso ? 'height' : 'translate',
       controller,
       pose,
       status,
       positionError: activeLock?.type === 'map' ? lastResult?.positionError || 0 : 0,
       rotationError: activeLock?.type === 'map' ? lastResult?.rotationError || 0 : 0,
     };
+    if (isTorso) {
+      const active = endEffectorControlRef.current;
+      active.torsoPose = readRobotTorsoPose(controller);
+      active.referenceForward = previous?.side === 'torso'
+        ? previous.referenceForward : active.torsoPose.forward;
+      configureTorsoTransform(active);
+    }
     setEndEffectorControl(endEffectorPanelState(endEffectorControlRef.current));
     if (robotControlEnabledRef.current) {
       robotControlEnabledRef.current = false;
@@ -2430,7 +2554,7 @@ export default function PointCloudViewer({
     if (canvas) {
       canvas.dataset.endEffectorControlState = 'active';
       canvas.dataset.endEffectorSide = side;
-      canvas.dataset.endEffectorMode = 'translate';
+      canvas.dataset.endEffectorMode = isTorso ? 'height' : 'translate';
       canvas.dataset.endEffectorIkStatus = status;
       canvas.dataset.endEffectorSpaceBallVisible = locked ? 'false' : 'true';
       canvas.dataset.endEffectorTransformAttached = locked ? 'false' : 'true';
@@ -2449,6 +2573,11 @@ export default function PointCloudViewer({
     const target = endEffectorTargetRef.current;
     if (transform?.dragging) transform.pointerUp(null);
     transform?.detach();
+    if (transform) {
+      transform.showX = true;
+      transform.showY = true;
+      transform.showZ = true;
+    }
     if (target) target.visible = false;
     if (controlsRef.current) controlsRef.current.enabled = true;
     endEffectorControlRef.current = null;
@@ -2657,6 +2786,11 @@ export default function PointCloudViewer({
         status: active.status,
         positionError: active.positionError,
         rotationError: active.rotationError,
+        ...(active.side === 'torso' && {
+          heightError: active.heightError,
+          armLockLimited: active.armLockLimited,
+          referenceForward: active.referenceForward,
+        }),
       },
     };
   };
@@ -2738,6 +2872,13 @@ export default function PointCloudViewer({
         active.positionError = saved?.positionError || 0;
         active.rotationError = saved?.rotationError || 0;
         applyPoseToWorldTarget(target, active.pose);
+        if (active.side === 'torso') {
+          active.torsoPose = readRobotTorsoPose(active.controller);
+          active.heightError = saved?.heightError || 0;
+          active.armLockLimited = Boolean(saved?.armLockLimited);
+          active.referenceForward = saved?.referenceForward ?? active.torsoPose.forward;
+          configureTorsoTransform(active);
+        }
         transform.detach();
         transform.enabled = !lock;
         target.visible = !lock;
@@ -2781,6 +2922,9 @@ export default function PointCloudViewer({
     history.pending = null;
     try {
       exitEndEffectorControl();
+      pressedKeysRef.current.clear();
+      keyboardImpulseRef.current.clear();
+      setShiftPanArmed(false);
       lockedEndEffectorsRef.current = cloneEndEffectorLocks(snapshot.locks);
       robotPoseRef.current = applyRobotPose(robotLayerRef.current, snapshot.pose);
       applyRobotJointStateToScene(snapshot.joints, 'end-effector-cancel');
@@ -2826,13 +2970,27 @@ export default function PointCloudViewer({
   }, [mapData?.geometry, robotPose]);
 
   useLayoutEffect(() => {
-    if (!sameNumericValues(normalizeRobotJointValues(robotJointValues), robotJointValuesRef.current)) {
-      clearRobotDragHistory();
-    }
+    const changed = !sameNumericValues(normalizeRobotJointValues(robotJointValues), robotJointValuesRef.current);
+    if (changed) clearRobotDragHistory();
     const appliedValues = applyRobotJointStateToScene(robotJointValues, 'external-control');
     if (loadedRobotRef.current) {
       robotJointValuesRef.current = appliedValues;
       reportZividCameraPoses(true);
+      const active = endEffectorControlRef.current;
+      if (changed && active?.side === 'torso') {
+        active.torsoPose = readRobotTorsoPose(active.controller);
+        active.referenceForward = active.torsoPose.forward;
+        active.status = 'tracking';
+        active.heightError = 0;
+        active.positionError = 0;
+        active.rotationError = 0;
+        active.armLockLimited = false;
+        syncTorsoTarget(active);
+        setEndEffectorControl(endEffectorPanelState(active));
+        writeActiveEndEffectorDataset(controlsRef.current?.domElement, active, {
+          ...active, actualPose: active.pose,
+        }, active.pose);
+      }
     }
   }, [mapData?.geometry, robotJointValues]);
 
@@ -4350,9 +4508,23 @@ export default function PointCloudViewer({
       camera.updateMatrixWorld(true);
       raycaster.setFromCamera(normalizedPointer, camera);
       const hits = raycaster.intersectObjects(robotLayer.children, true);
+      const firstVisual = hits.find((hit) => {
+        let object = hit.object;
+        while (object) {
+          if (object.userData?.urdfType === 'collision') return false;
+          if (object.userData?.urdfType === 'visual') return true;
+          object = object.parent;
+        }
+        return false;
+      });
       for (const hit of hits) {
         const side = endEffectorSideForObject(hit.object);
         if (side) return side;
+        if (hit === firstVisual && torsoControllerRef.current) {
+          let link = hit.object;
+          while (link && link.userData?.urdfType !== 'link') link = link.parent;
+          if (link === torsoControllerRef.current.chest) return 'torso';
+        }
       }
       return null;
     };
@@ -5058,11 +5230,11 @@ export default function PointCloudViewer({
         renderer.domElement.dataset.chassisControlGuideVisible = 'false';
       }
 
-      Object.entries(endEffectorControllersRef.current).forEach(([side, controller]) => {
+      Object.entries({ ...endEffectorControllersRef.current, torso: torsoControllerRef.current }).forEach(([side, controller]) => {
         if (!controller?.frame) return;
         controller.frame.getWorldPosition(endEffectorWorldPosition);
         endEffectorProjectedPosition.copy(endEffectorWorldPosition).project(camera);
-        const prefix = side === 'left' ? 'robotLeftTool' : 'robotRightTool';
+        const prefix = side === 'torso' ? 'robotTorso' : side === 'left' ? 'robotLeftTool' : 'robotRightTool';
         renderer.domElement.dataset[`${prefix}WorldX`] = endEffectorWorldPosition.x.toFixed(6);
         renderer.domElement.dataset[`${prefix}WorldY`] = endEffectorWorldPosition.y.toFixed(6);
         renderer.domElement.dataset[`${prefix}WorldZ`] = endEffectorWorldPosition.z.toFixed(6);
@@ -5079,6 +5251,12 @@ export default function PointCloudViewer({
           && endEffectorProjectedPosition.z <= 1
             ? 'true'
             : 'false';
+        if (side === 'torso') {
+          const torso = readRobotTorsoPose(controller);
+          ['height', 'yaw', 'pitch'].forEach((axis) => {
+            renderer.domElement.dataset[`torso${axis[0].toUpperCase()}${axis.slice(1)}`] = torso[axis].toFixed(6);
+          });
+        }
       });
 
       if (endEffectorTarget.visible && endEffectorSpaceBall.visible) {
@@ -5237,6 +5415,7 @@ export default function PointCloudViewer({
       robotParkingGhostVisualRef.current = null;
       robotChassisHandleRef.current = null;
       endEffectorControllersRef.current = { left: null, right: null };
+      torsoControllerRef.current = null;
       endEffectorControlRef.current = null;
       lockedEndEffectorsRef.current = createEndEffectorLocks();
       robotDragActionsRef.current?.clear();
@@ -5297,6 +5476,7 @@ export default function PointCloudViewer({
     endEffectorInteractionRef.current?.exit?.();
     clearEndEffectorLocks();
     endEffectorControllersRef.current = { left: null, right: null };
+    torsoControllerRef.current = null;
     zividCameraFramesRef.current = { left: null, right: null };
     lastZividCameraPoseSignatureRef.current = '';
     onZividCameraPoseChangeRef.current?.({});
@@ -5384,6 +5564,17 @@ export default function PointCloudViewer({
           endEffector.frame.add(pickTarget);
         });
         endEffectorControllersRef.current = endEffectors;
+        const chest = robot.getObjectByName('waist_yaw_L');
+        const chestBounds = new THREE.Box3();
+        if (chest) {
+          const inverse = chest.matrixWorld.clone().invert();
+          chest.children.filter((child) => child.userData?.urdfType === 'visual').forEach((visual) => {
+            expandObjectBoundsInFrame(chestBounds, visual, inverse);
+          });
+        }
+        torsoControllerRef.current = createRobotTorsoController(robot,
+          chestBounds.isEmpty() ? new THREE.Vector3() : chestBounds.getCenter(new THREE.Vector3()));
+        canvas.dataset.robotTorsoControlAvailable = torsoControllerRef.current ? 'true' : 'false';
         zividCameraFramesRef.current = {
           left: robot.getObjectByName('zivid_left_optical_frame') || null,
           right: robot.getObjectByName('zivid_right_optical_frame') || null,
@@ -5451,6 +5642,9 @@ export default function PointCloudViewer({
       canvas.dataset.chassisControlGuideVisible = 'false';
       endEffectorInteractionRef.current?.exit?.();
       endEffectorControllersRef.current = { left: null, right: null };
+      torsoControllerRef.current = null;
+      canvas.dataset.robotTorsoControlAvailable = 'false';
+      canvas.dataset.robotTorsoScreenVisible = 'false';
       zividCameraFramesRef.current = { left: null, right: null };
       lastZividCameraPoseSignatureRef.current = '';
       onZividCameraPoseChangeRef.current?.({});
@@ -7729,7 +7923,13 @@ export default function PointCloudViewer({
               </div>
             </aside>
           )}
-          <EndEffectorControlPanel
+          {endEffectorControl?.side === 'torso' ? <TorsoControlPanel
+            control={endEffectorControl}
+            onModeChange={setTorsoControlMode}
+            onPoseChange={setTorsoPose}
+            onCancel={cancelEndEffectorControl}
+            onClose={exitEndEffectorControl}
+          /> : <EndEffectorControlPanel
             control={endEffectorControl}
             lockModes={endEffectorLockModesState}
             onModeChange={setEndEffectorMode}
@@ -7738,7 +7938,7 @@ export default function PointCloudViewer({
             onToggleBodyLock={toggleBodyEndEffectorLock}
             onToggleMapLock={toggleMapEndEffectorLock}
             onClose={exitEndEffectorControl}
-          />
+          />}
           <div className="viewer-help">
             <span>
               {effectiveViewportPan || chassisDragMode
@@ -7755,7 +7955,7 @@ export default function PointCloudViewer({
             <span>
               <Keyboard size={12} />
               {endEffectorControlActive
-                ? 'Ctrl+Z 撤销拖拽 · Esc 取消末端调整'
+                ? `Ctrl+Z 撤销拖拽 · Esc 取消${endEffectorControl.side === 'torso' ? '躯干' : '末端'}调整`
                 : chassisDragMode
                 ? 'Ctrl+Z 撤销最近一次拖拽'
                 : robotControlActive
@@ -7767,7 +7967,9 @@ export default function PointCloudViewer({
             <span>
               <MousePointer2 size={12} />
               {endEffectorControlActive
-                ? endEffectorControl.locked
+                ? endEffectorControl.side === 'torso'
+                  ? '胸甲高度 / YAW / PITCH · 躯干关节联动'
+                  : endEffectorControl.locked
                   ? endEffectorControl.lockMode === 'map'
                     ? '地图绝对姿态锁定 · 底盘移动时全链 IK 补偿'
                     : '本体关节姿态锁定 · 双击另一末端继续调整'
@@ -7781,7 +7983,7 @@ export default function PointCloudViewer({
                 : 'Shift + 左键临时平移 · 右键平移'}
             </span>
             {robotLoadState?.status === 'loaded' && !endEffectorControlActive && !chassisDragMode && (
-              <span><Bot size={12} /> 双击底盘启用 WASD · 双击左 / 右末端进入 6D 控制</span>
+              <span><Bot size={12} /> 双击底盘启用 WASD · 双击胸甲联动躯干 · 双击末端进入 6D 控制</span>
             )}
             <span>
               <Gauge size={12} />
