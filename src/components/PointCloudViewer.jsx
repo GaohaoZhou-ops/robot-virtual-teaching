@@ -2378,6 +2378,12 @@ export default function PointCloudViewer({
     const target = endEffectorTargetRef.current;
     const canvas = controlsRef.current?.domElement;
     if (!controller || !transform || !target) return false;
+    const previous = endEffectorControlRef.current;
+    // Repeatedly selecting the same arm must keep the original cancellation point.
+    const initialState = previous?.side === side ? previous.initialState : {
+      ...captureRobotDragState(),
+      undoEntries: [...robotDragHistoryRef.current.entries],
+    };
     restoreLockedEndEffectorJoints(side);
     const activeLock = lockedEndEffectorsRef.current[side];
     if (activeLock?.type === 'body') {
@@ -2403,6 +2409,7 @@ export default function PointCloudViewer({
     if (!locked) transform.attach(target);
     endEffectorControlRef.current = {
       side,
+      initialState,
       mode: 'translate',
       controller,
       pose,
@@ -2759,6 +2766,40 @@ export default function PointCloudViewer({
     return true;
   };
 
+  const cancelEndEffectorControl = () => {
+    const snapshot = endEffectorControlRef.current?.initialState;
+    const history = robotDragHistoryRef.current;
+    if (
+      !snapshot
+      || snapshot.robot !== loadedRobotRef.current
+      || robotTrajectoryActiveRef.current
+      || history.restoring
+    ) return false;
+
+    // Stop an unfinished drag without committing it or running another IK solve.
+    history.restoring = true;
+    history.pending = null;
+    try {
+      exitEndEffectorControl();
+      lockedEndEffectorsRef.current = cloneEndEffectorLocks(snapshot.locks);
+      robotPoseRef.current = applyRobotPose(robotLayerRef.current, snapshot.pose);
+      applyRobotJointStateToScene(snapshot.joints, 'end-effector-cancel');
+      const canvas = controlsRef.current?.domElement;
+      writeRobotPoseDataset(canvas, robotPoseRef.current);
+      updateRobotParkingGhostGuide(robotParkingGhostVisualRef.current, snapshot.pose, canvas);
+      syncEndEffectorLockState();
+      onRobotPoseChangeRef.current?.(normalizeRobotPose(snapshot.pose));
+      reportRobotJointValues(true);
+      reportZividCameraPoses(true);
+      history.entries = [...snapshot.undoEntries];
+      canvas?.focus({ preventScroll: true });
+    } finally {
+      history.restoring = false;
+      writeRobotDragHistoryDataset();
+    }
+    return true;
+  };
+
   robotDragActionsRef.current = {
     begin: beginRobotDrag,
     markMovement: markRobotDragMovement,
@@ -2770,6 +2811,7 @@ export default function PointCloudViewer({
   endEffectorInteractionRef.current = {
     enter: enterEndEffectorControl,
     exit: exitEndEffectorControl,
+    cancel: cancelEndEffectorControl,
   };
   endEffectorObjectChangeRef.current = () => updateEndEffectorTarget(false);
 
@@ -6229,7 +6271,9 @@ export default function PointCloudViewer({
           || tagName === 'input'
           || tagName === 'textarea'
           || tagName === 'select')
-        && !(event.code === 'Escape' && teachingPoseEditingRef.current)
+        && !(event.code === 'Escape' && (
+          teachingPoseEditingRef.current || endEffectorControlRef.current
+        ))
       ) {
         return;
       }
@@ -6248,6 +6292,19 @@ export default function PointCloudViewer({
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.code === 'Escape' && event.repeat) return;
+      if (
+        event.code === 'Escape'
+        && renderActiveRef.current
+        && endEffectorControlRef.current
+        && !event.defaultPrevented
+        && !target?.closest?.('[aria-modal="true"], dialog[open]')
+      ) {
+        event.preventDefault();
+        resetKeys();
+        endEffectorInteractionRef.current?.cancel?.();
+        return;
+      }
       if (
         event.code === 'Escape'
         && renderActiveRef.current
@@ -7697,7 +7754,9 @@ export default function PointCloudViewer({
             </span>
             <span>
               <Keyboard size={12} />
-              {endEffectorControlActive || chassisDragMode
+              {endEffectorControlActive
+                ? 'Ctrl+Z 撤销拖拽 · Esc 取消末端调整'
+                : chassisDragMode
                 ? 'Ctrl+Z 撤销最近一次拖拽'
                 : robotControlActive
                 ? robotHeightLockActive
