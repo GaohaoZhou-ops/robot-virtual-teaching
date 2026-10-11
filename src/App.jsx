@@ -487,7 +487,7 @@ export default function App() {
   const [lockedRobotJointNames, setLockedRobotJointNames] = useState([]);
   const [robotControlEnabled, setRobotControlEnabled] = useState(false);
   const [robotHeightLocked, setRobotHeightLocked] = useState(false);
-  const [robotCollisionProtectionEnabled, setRobotCollisionProtectionEnabled] = useState(false);
+  const [robotCollisionProtectionEnabled, setRobotCollisionProtectionEnabled] = useState(true);
   const [teachingTasks, setTeachingTasks] = useState([]);
   const [activeTeachingTaskId, setActiveTeachingTaskId] = useState(null);
   const [activeTeachingParkingPointId, setActiveTeachingParkingPointId] = useState(null);
@@ -935,7 +935,7 @@ export default function App() {
         setLockedRobotJointNames([]);
         setRobotControlEnabled(false);
         setRobotHeightLocked(false);
-        setRobotCollisionProtectionEnabled(false);
+        setRobotCollisionProtectionEnabled(true);
         setTeachingTasks([]);
         setActiveTeachingTaskId(null);
         setActiveTeachingParkingPointId(null);
@@ -1818,7 +1818,7 @@ export default function App() {
       teachingCaptureBusyRef.current = false;
       setTeachingCaptureState({ status: 'idle', message: '' });
       setRobotControlEnabled(false);
-      setRobotCollisionProtectionEnabled(false);
+      setRobotCollisionProtectionEnabled(true);
       setSynchronizedFocus(null);
       defaultRobotJointLocksPendingRef.current = false;
       setSelectedRobot(importedRobot);
@@ -3465,7 +3465,7 @@ export default function App() {
       setLockedRobotJointNames([]);
       setRobotControlEnabled(false);
       setRobotHeightLocked(false);
-      setRobotCollisionProtectionEnabled(false);
+      setRobotCollisionProtectionEnabled(true);
       setZividCameraPoses({});
       setCameraTeachingCommand(null);
       setCameraTeachingResult({ status: 'idle', revision: 0 });

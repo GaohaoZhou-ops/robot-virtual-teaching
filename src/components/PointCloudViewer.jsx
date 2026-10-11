@@ -1464,7 +1464,7 @@ export default function PointCloudViewer({
   spaceMouseInputRef,
   viewportCanvasRef,
   cameraTeachingCommand,
-  collisionProtectionEnabled = false,
+  collisionProtectionEnabled = true,
   onRobotLoadState,
   onRobotPoseChange,
   onRobotJointValuesChange,
@@ -5474,11 +5474,21 @@ export default function PointCloudViewer({
     }
 
     const positionAttribute = geometry?.getAttribute?.('position');
-    if (!canvas || !positionAttribute?.count) {
+    if (
+      !canvas
+      || !positionAttribute?.count
+      || !robotDescriptor
+      || robotLoadState?.status !== 'loaded'
+      || !loadedRobotRef.current
+    ) {
+      if (canvas) canvas.dataset.collisionWorker = 'inactive';
+      const robotFailed = robotDescriptor && robotLoadState?.status === 'error';
       publishStatus({
-        state: 'error',
-        message: '干涉检测不可用',
-        detail: '请先加载有效的地图点云',
+        state: robotFailed ? 'error' : 'waiting',
+        message: robotFailed ? '机器人检测体不可用' : '等待地图与机器人就绪',
+        detail: robotFailed
+          ? '机器人模型加载失败，请重新选择模型'
+          : '碰撞保护已开启，模型加载完成后自动开始检测',
       });
       return undefined;
     }
@@ -5754,7 +5764,7 @@ export default function PointCloudViewer({
       canvas.dataset.collisionHighlightedLinks = '';
       canvas.dataset.collisionHighlightColor = 'none';
     };
-  }, [collisionProtectionEnabled, mapData?.geometry, robotDescriptor]);
+  }, [collisionProtectionEnabled, mapData?.geometry, robotDescriptor, robotLoadState?.status]);
 
   useEffect(() => {
     collisionCheckRequestRef.current?.();
@@ -6929,6 +6939,13 @@ export default function PointCloudViewer({
         error: '检测异常',
       }[collisionStatusState] || '保护开启'
     : '碰撞保护';
+  const collisionDistanceLabel = ['building', 'waiting', 'error'].includes(collisionStatusState)
+    ? { building: '检测中', waiting: '等待检测', error: '检测异常' }[collisionStatusState]
+    : collisionDistanceMillimeters !== null
+      ? `${collisionDistanceMillimeters.toFixed(0)} mm`
+      : collisionStatusState === 'safe'
+        ? `≥${ROBOT_COLLISION_SAFETY_DISTANCE * 1000} mm`
+        : '— mm';
   const progressiveCoveragePlayback = visionCoveragePlaybackSelection.progressive;
   const progressiveReachedPoseCount = Math.min(
     visionCoveragePlaybackSelection.playbackPoseCount,
@@ -6975,35 +6992,6 @@ export default function PointCloudViewer({
             <strong data-axis-code>X</strong>
             <span data-axis-label>前进 / 后退</span>
           </div>
-          {collisionProtectionEnabled && (
-            <div
-              className={`robot-collision-alert is-${collisionStatusState}`}
-              role={['collision', 'near', 'error'].includes(collisionStatusState) ? 'alert' : 'status'}
-              aria-live="polite"
-              data-collision-state={collisionStatusState}
-              data-collision-distance={collisionDistanceMillimeters ?? ''}
-            >
-              <span className="robot-collision-alert__icon">
-                {collisionStatusState === 'safe'
-                  ? <ShieldCheck size={16} />
-                  : <ShieldAlert size={16} />}
-              </span>
-              <div>
-                <small>
-                  {robotCollisionStatus.backend === 'isaac'
-                    ? 'ISAAC SIM / PHYSX COLLISION'
-                    : 'LOCAL WORKER / ENV CLEARANCE'}
-                </small>
-                <strong>{robotCollisionStatus.message}</strong>
-                <em>{robotCollisionStatus.detail}</em>
-              </div>
-              <b>
-                {collisionDistanceMillimeters !== null
-                  ? `${collisionDistanceMillimeters.toFixed(0)} mm`
-                  : collisionStatusState === 'safe' ? '≥100 mm' : '100 mm'}
-              </b>
-            </div>
-          )}
           {robotParkingGhostVisible && robotParkingGhostMetrics && (
             <aside
               className="robot-parking-ghost-readout"
@@ -7230,7 +7218,25 @@ export default function PointCloudViewer({
                 </button>
               </div>
             </ViewerMenu>
-            {displaySettingsContainer && createPortal(<ViewerMenu
+            {displaySettingsContainer && createPortal(<>
+              {collisionProtectionEnabled && (
+                <div
+                  className={`robot-collision-distance is-${collisionStatusState}`}
+                  role="status"
+                  aria-label="碰撞保护距离"
+                  aria-live="polite"
+                  aria-atomic="true"
+                  title={[robotCollisionStatus.message, robotCollisionStatus.detail].filter(Boolean).join(' · ')}
+                  data-collision-state={collisionStatusState}
+                  data-collision-distance={collisionDistanceMillimeters ?? ''}
+                >
+                  {collisionStatusState === 'safe'
+                    ? <ShieldCheck size={13} aria-hidden="true" />
+                    : <ShieldAlert size={13} aria-hidden="true" />}
+                  <span>{collisionDistanceLabel}</span>
+                </div>
+              )}
+              <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
               title="点云颜色、显示密度与网格质量"
@@ -7323,7 +7329,7 @@ export default function PointCloudViewer({
                   <strong>{formatPointCount(meshInfo.faceCount)} 面</strong>
                 </div>
               )}
-            </ViewerMenu>, displaySettingsContainer)}
+            </ViewerMenu></>, displaySettingsContainer)}
           </div>
           {isHeightColor && (
             <aside className="height-color-legend" aria-label="点云高程比例尺">

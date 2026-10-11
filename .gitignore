@@ -353,16 +353,23 @@ parking-merge-*-result.json
 
 # Compact regression inputs remain trackable, including export-shaped filenames.
 # Keep exceptions after export rules; /**/ covers direct and nested fixture files.
+# Reopen exported-project fixture directories so their file exceptions can apply.
+!tests/fixtures/**/*.atlas-project/
+!tests/fixtures/**/parking-merge-server-*/
 !tests/fixtures/**/*.[pP][lL][yY]
 !tests/fixtures/**/*.atls
 !tests/fixtures/**/*.abxteach.ndjson
 !tests/fixtures/**/*.json
 !tests/fixtures/**/*.zip
+!ipad/Tests/Fixtures/**/*.atlas-project/
+!ipad/Tests/Fixtures/**/parking-merge-server-*/
 !ipad/Tests/Fixtures/**/*.[pP][lL][yY]
 !ipad/Tests/Fixtures/**/*.atls
 !ipad/Tests/Fixtures/**/*.abxteach.ndjson
 !ipad/Tests/Fixtures/**/*.json
 !ipad/Tests/Fixtures/**/*.zip
+!vision/Tests/Fixtures/**/*.atlas-project/
+!vision/Tests/Fixtures/**/parking-merge-server-*/
 !vision/Tests/Fixtures/**/*.[pP][lL][yY]
 !vision/Tests/Fixtures/**/*.atls
 !vision/Tests/Fixtures/**/*.abxteach.ndjson
