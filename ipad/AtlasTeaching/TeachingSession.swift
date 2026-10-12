@@ -1,6 +1,15 @@
 import Foundation
 import UIKit
 
+struct PendingModelTransfer: Identifiable {
+    let session: PairedSession
+    let serverURL: String
+    var thumbnail: Data?
+    var previewError = ""
+    var loadingPreview = false
+    var id: String { session.id }
+}
+
 @MainActor
 final class TeachingSession: ObservableObject {
     @Published var projects: [LocalProject] = []
@@ -16,6 +25,7 @@ final class TeachingSession: ObservableObject {
     }
     @Published var code = ""
     @Published var geometry: ModelGeometry?
+    @Published private(set) var pendingModel: PendingModelTransfer?
     var displaySettings: ModelDisplaySettings { current?.displaySettings ?? ModelDisplaySettings() }
     private var saveTask: Task<Void, Never>?
     private var lastSaved = Date.distantPast
@@ -26,27 +36,65 @@ final class TeachingSession: ObservableObject {
     func reload() async {
         do { projects = try await ProjectStore.shared.projects() } catch { self.error = "读取本地草稿失败：\(error.localizedDescription)" }
     }
-    func pair(qr: PairingQRCode? = nil) async {
+    func pair(qr: PairingQRCode? = nil, confirmNewModel: Bool = false) async {
         guard !busy else { return }; busy = true; error = ""; defer { busy = false }
         do {
+            pendingModel = nil
             if let qr { try qr.validate(); serverAddress = qr.address; code = PairingCode.normalize(qr.code) }
             let client = try LANClient(address: qr?.address ?? serverAddress)
             status = "连接电脑并配对…"
             let paired = try await client.pair(code: code, deviceID: deviceID, name: TeachingDevice.current.model, qr: qr)
+            if confirmNewModel {
+                status = "配对成功，正在校验本地模型…"
+                if let local = try await ProjectStore.shared.matchingModel(paired.manifest, preferredID: paired.id) {
+                    let data = try await ProjectStore.shared.model(local.id)
+                    try await acceptModel(data, paired: paired, serverURL: client.baseURL.absoluteString)
+                    status = "本地已存在一致模型，已直接使用"
+                } else {
+                    pendingModel = PendingModelTransfer(session: paired, serverURL: client.baseURL.absoluteString)
+                    status = "配对成功，发现新模型，等待确认同步"
+                }
+                return
+            }
             status = "通过局域网下载物体…"
             let data = try await client.download(paired)
-            let geometry = try await Task.detached { try ModelGeometry(data: data, manifest: paired.manifest) }.value
-            let existing = projects.first { $0.id == paired.id }
-            var project = existing ?? LocalProject(serverURL: client.baseURL.absoluteString, session: paired,
-                result: TeachingResult(sessionId: paired.id, modelHash: paired.manifest.modelHash))
-            project.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
-            project.session = paired; project.serverURL = client.baseURL.absoluteString
-            try await ProjectStore.shared.saveModel(data, id: paired.id)
-            try await ProjectStore.shared.save(project)
-            UserDefaults.standard.set(client.baseURL.absoluteString, forKey: "serverAddress")
-            self.geometry = geometry; current = project; status = "物体已保存到 \(TeachingDevice.storageName)，可以断开网络"
-            await reload()
+            try await acceptModel(data, paired: paired, serverURL: client.baseURL.absoluteString)
         } catch { self.error = "接收失败：\(error.localizedDescription)"; status = "请检查局域网地址、配对码与本地网络权限" }
+    }
+    private func acceptModel(_ data: Data, paired: PairedSession, serverURL: String) async throws {
+        let geometry = try await Task.detached { try ModelGeometry(data: data, manifest: paired.manifest) }.value
+        let existing = try await ProjectStore.shared.projects().first { $0.id == paired.id }
+        var project = existing ?? LocalProject(serverURL: serverURL, session: paired,
+            result: TeachingResult(sessionId: paired.id, modelHash: paired.manifest.modelHash))
+        project.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
+        project.session = paired; project.serverURL = serverURL
+        try await ProjectStore.shared.saveModel(data, id: paired.id)
+        try await ProjectStore.shared.save(project)
+        UserDefaults.standard.set(serverURL, forKey: "serverAddress")
+        self.geometry = geometry; current = project; pendingModel = nil
+        status = "物体已保存到 \(TeachingDevice.storageName)，可以断开网络"
+        await reload()
+    }
+    func loadPendingPreview() async {
+        guard let pending = pendingModel, pending.thumbnail == nil, !pending.loadingPreview else { return }
+        pendingModel?.loadingPreview = true; pendingModel?.previewError = ""
+        defer { if pendingModel?.id == pending.id { pendingModel?.loadingPreview = false } }
+        do {
+            let image = try await LANClient(address: pending.serverURL).modelThumbnail(pending.session)
+            try Task.checkCancellation()
+            guard pendingModel?.id == pending.id, UIImage(data: image) != nil else { throw TeachingError("模型预览无效") }
+            pendingModel?.thumbnail = image
+        } catch {
+            if !Task.isCancelled, pendingModel?.id == pending.id { pendingModel?.previewError = "预览加载失败，可重试或直接同步模型" }
+        }
+    }
+    func syncPendingModel() async {
+        guard !busy, let pending = pendingModel else { return }
+        busy = true; error = ""; status = "正在同步模型…"; defer { busy = false }
+        do {
+            let data = try await LANClient(address: pending.serverURL).download(pending.session)
+            try await acceptModel(data, paired: pending.session, serverURL: pending.serverURL)
+        } catch { self.error = "模型同步失败，可重试：\(error.localizedDescription)"; status = "等待重试同步模型" }
     }
     func open(_ project: LocalProject) async {
         guard !busy else { return }; busy = true; error = ""; openingProjectID = project.id
@@ -56,7 +104,7 @@ final class TeachingSession: ObservableObject {
             geometry = try await Task.detached(priority: .userInitiated) { try ModelGeometry(data: data, manifest: project.session.manifest) }.value
             var opened = project
             opened.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
-            current = opened; serverAddress = project.serverURL
+            current = opened; pendingModel = nil; serverAddress = project.serverURL
             status = project.result.completedAt == nil ? "已恢复本地草稿，请重新校准物体" : "示教已完成，等待同步或已同步"
         } catch { self.error = error.localizedDescription }
     }
@@ -117,7 +165,8 @@ final class TeachingSession: ObservableObject {
         }
     }
     func close() async {
-        do { try await saveNow(); current = nil; geometry = nil; await reload() }
+        guard !busy else { return }
+        do { try await saveNow(); current = nil; geometry = nil; pendingModel = nil; status = ""; await reload() }
         catch { self.error = "保存失败，草稿仍在当前界面：\(error.localizedDescription)" }
     }
     func finish(sync: Bool) async {

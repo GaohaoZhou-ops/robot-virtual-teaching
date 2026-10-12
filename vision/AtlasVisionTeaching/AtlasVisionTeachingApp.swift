@@ -10,7 +10,7 @@ struct AtlasVisionTeachingApp: App {
         WindowGroup(id: "workspace") {
             VisionWorkspaceView().environmentObject(session).environmentObject(spatial)
         }
-        .defaultSize(width: 1080, height: 760)
+        .defaultSize(width: 1180, height: 900)
 
         ImmersiveSpace(id: "teaching-space") {
             VisionImmersiveView().environmentObject(session).environmentObject(spatial)

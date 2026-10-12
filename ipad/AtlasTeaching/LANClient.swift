@@ -185,6 +185,22 @@ struct LANClient {
         guard size <= maximumModelBytes else { throw TeachingError("物体超过 移动端传输上限（192 MiB）") }
         let data = try Data(contentsOf: url); try check(response, data: data); return data
     }
+    func modelThumbnail(_ paired: PairedSession) async throws -> Data {
+        guard UUID(uuidString: paired.id) != nil else { throw TeachingError("配对任务标识无效") }
+        let (bytes, response) = try await Self.session.bytes(for: request("sessions/\(paired.id)/thumbnail", token: paired.deviceToken))
+        guard response.expectedContentLength <= 512 * 1024 else { throw TeachingError("模型预览过大") }
+        var data = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            guard data.count < 512 * 1024 else { throw TeachingError("模型预览过大") }
+            data.append(byte)
+        }
+        try check(response, data: data)
+        guard let http = response as? HTTPURLResponse,
+              http.value(forHTTPHeaderField: "X-Model-SHA256") == paired.manifest.modelHash,
+              data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) else { throw TeachingError("模型预览与当前任务不匹配") }
+        return data
+    }
     func upload(_ project: LocalProject, modelURL: URL, onModelVerified: @MainActor () -> Void = {}) async throws {
         guard project.result.completedAt != nil, !project.result.samples.isEmpty else { throw TeachingError("示教尚未完成") }
         guard UUID(uuidString: project.id) != nil, project.result.sessionId == project.id else { throw TeachingError("本地模型与配对任务不匹配，已停止同步") }

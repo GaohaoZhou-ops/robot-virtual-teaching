@@ -13,7 +13,7 @@ struct VisionImmersiveView: View {
         } attachments: {
             Attachment(id: "controls") {
                 if session.current != nil {
-                    VisionTeachingControls(compact: true).padding(22).frame(width: 560).glassBackgroundEffect()
+                    VisionTeachingControls(compact: true).padding(28).frame(width: 680).glassBackgroundEffect()
                         .environmentObject(session).environmentObject(spatial)
                 }
             }
