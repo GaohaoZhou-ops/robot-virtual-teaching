@@ -19,6 +19,7 @@ final class VisionTrackingController: ObservableObject {
     @Published private(set) var renderSummary = ""
     @Published private(set) var renderError = ""
     @Published private(set) var isDemo = false
+    @Published private(set) var modelEntity: ModelEntity?
     @Published var showFrustum = false { didSet { frustum.isEnabled = showFrustum && trackingNormal } }
     @Published var quality = VisionQuality.light
     @Published var displayMode = ModelDisplayMode.mesh
@@ -27,7 +28,6 @@ final class VisionTrackingController: ObservableObject {
     let panelRoot = Entity()
     private let planesRoot = Entity()
     private let frustum = Entity()
-    private var modelEntity: Entity?
     private var markers: Entity?
     private var arSession: ARKitSession?
     private var world: WorldTrackingProvider?
@@ -68,6 +68,7 @@ final class VisionTrackingController: ObservableObject {
 
     func configure(_ model: ModelGeometry, samples: [TeachingSample], demo: Bool) {
         stop(); isDemo = demo; editSnapshot = nil
+        modelEntity?.removeFromParent(); modelEntity = nil
         placement = VisionPlacement(reference: SIMD3((model.minimum.x + model.maximum.x) / 2,
             (model.minimum.y + model.maximum.y) / 2, model.minimum.z))
         refreshMarkers(samples)

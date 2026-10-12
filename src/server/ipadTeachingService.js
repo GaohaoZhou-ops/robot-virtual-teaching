@@ -6,6 +6,7 @@ import path from 'node:path';
 import QRCode from 'qrcode';
 import { IPAD_PROTOCOL, MAX_MODEL_BYTES, validateModelBytes, validateIPadResult } from '../lib/ipadProtocol.js';
 import { advertiseIPadService } from './ipadDiscovery.js';
+import { modelThumbnail } from './modelThumbnail.js';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -153,12 +154,12 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         }
         fail(404, '找不到配对码，请确认电脑地址与配对码');
       }
-      const match = /^\/sessions\/([a-f0-9-]{36})(?:\/(model|verify-model|result|imported|renew|pairing-qr))?$/.exec(route);
+      const match = /^\/sessions\/([a-f0-9-]{36})(?:\/(model|thumbnail|verify-model|result|imported|renew|pairing-qr))?$/.exec(route);
       if (!match) fail(404, '接口不存在');
       const [, id, action] = match;
       await serialized(id, async () => {
         const session = await load(id);
-        const role = (action === 'model' && req.method === 'GET')
+        const role = (['model', 'thumbnail'].includes(action) && req.method === 'GET')
           || (['verify-model', 'result'].includes(action) && req.method === 'POST') ? 'device' : 'owner';
         authorize(req, session, role);
         if (!action && req.method === 'GET') return json(res, 200, publicSession(session));
@@ -199,6 +200,22 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
           res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Content-Length': stats.size,
             'Cache-Control': 'no-store', 'X-Content-SHA256': session.manifest.modelHash });
           const stream = createReadStream(file); stream.on('error', (error) => res.destroy(error)); stream.pipe(res); return;
+        }
+        if (action === 'thumbnail' && req.method === 'GET') {
+          if (!['paired', 'completed', 'imported'].includes(session.status)) fail(409, '该任务当前不可预览');
+          const file = path.join(directory, id, 'thumbnail-v1.png');
+          let image;
+          try { image = await readFile(file); }
+          catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            const model = await readFile(path.join(directory, id, 'model.atls'));
+            if (model.length !== session.manifest.byteLength || hash(model) !== session.manifest.modelHash) fail(409, '电脑模型文件与配对时不一致');
+            image = await modelThumbnail(model);
+            await atomicWrite(file, image);
+          }
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': image.length,
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Model-SHA256': session.manifest.modelHash });
+          res.end(image); return;
         }
         if (action === 'verify-model' && req.method === 'POST') {
           const identity = await readBody(req, 4096);

@@ -54,7 +54,7 @@ xcuserdata/
 *.dSYM.zip
 *.bcsymbolmap
 
-# Exported iPad app containers and Xcode diagnostics
+# Exported iPad / Vision Pro app containers and Xcode diagnostics
 # Containers can include local models, poses, and pairing credentials.
 *.xcappdata/
 *.xcappdata.zip
@@ -164,6 +164,14 @@ playwright/.auth/
 /ipad/atlas-ipad-*.mp4
 /ipad/atlas-ipad-*.mov
 /ipad/atlas-ipad-*.heic
+/atlas-vision-*.mov
+/atlas-vision-*.heic
+/vision/atlas-vision-*.png
+/vision/atlas-vision-*.mp4
+/vision/atlas-vision-*.webm
+/vision/atlas-vision-*.mov
+/vision/atlas-vision-*.heic
+/vision/atlas-vision-*-trace.zip
 
 # xcresulttool exports UUID-named images, recordings, snapshots and a manifest.
 # Include numbered retry folders such as atlas-ipad-level-shots-2.
@@ -175,6 +183,14 @@ playwright/.auth/
 /atlas-ipad-*-attachments-[0-9]*/
 /ipad/atlas-ipad-*-attachments/
 /ipad/atlas-ipad-*-attachments-[0-9]*/
+/atlas-vision-*-shots/
+/atlas-vision-*-shots-[0-9]*/
+/vision/atlas-vision-*-shots/
+/vision/atlas-vision-*-shots-[0-9]*/
+/atlas-vision-*-attachments/
+/atlas-vision-*-attachments-[0-9]*/
+/vision/atlas-vision-*-attachments/
+/vision/atlas-vision-*-attachments-[0-9]*/
 
 # Ad-hoc device snapshots may contain local poses and pairing credentials.
 # Limit these rules to diagnostic filenames, keeping app source/fixtures visible.
@@ -184,16 +200,28 @@ playwright/.auth/
 /ipad/atlas-ipad-*.json
 /ipad/atlas-ipad-*.plist
 /ipad/atlas-ipad-projects-*/
+/atlas-vision-*.json
+/atlas-vision-*.plist
+/atlas-vision-projects-*/
+/vision/atlas-vision-*.json
+/vision/atlas-vision-*.plist
+/vision/atlas-vision-projects-*/
 
 # USB pairing records created by local device-debugging tools contain credentials.
 /atlas-ipad-*-pairing/
 /ipad/atlas-ipad-*-pairing/
+/atlas-vision-*-pairing/
+/vision/atlas-vision-*-pairing/
 
-# Standalone Swift test executables produced during native iPad debugging.
+# Standalone Swift test executables produced during native device debugging.
 /atlas-ipad-*-test
 /atlas-ipad-*-tests
 /ipad/atlas-ipad-*-test
 /ipad/atlas-ipad-*-tests
+/atlas-vision-*-test
+/atlas-vision-*-tests
+/vision/atlas-vision-*-test
+/vision/atlas-vision-*-tests
 
 # Isolated smoke-test workspaces if TMPDIR points into the repository.
 /atlas-native-ipad-*/
@@ -222,6 +250,15 @@ playwright/.auth/
 /ipad/atlas-pairing-code-*/
 /ipad/atlas-pairing-qr-*/
 /ipad/atlas-discovery-*/
+
+# Model-preview and Vision Pro pairing UI tests also create isolated LAN stores.
+# Scope these prefixes to output locations; preserve similarly named fixtures.
+/atlas-model-preview-*/
+/tests/atlas-model-preview-*/
+/vision/atlas-model-preview-*/
+/atlas-vision-pairing-ui-*/
+/tests/atlas-vision-pairing-ui-*/
+/vision/atlas-vision-pairing-ui-*/
 
 # ABX contract-test source copies, temporary imports and UI captures
 /atlas-abx-export-*/

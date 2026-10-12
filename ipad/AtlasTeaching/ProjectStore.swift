@@ -25,6 +25,20 @@ actor ProjectStore {
     func saveModel(_ data: Data, id: String) throws { try data.write(to: file(id, ext: "atls"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
     func model(_ id: String) throws -> Data { try Data(contentsOf: file(id, ext: "atls"), options: .mappedIfSafe) }
     func modelURL(_ id: String) throws -> URL { try file(id, ext: "atls") }
+    func matchingModel(_ manifest: ModelManifest, preferredID: String? = nil) throws -> LocalProject? {
+        let candidates = try projects().filter {
+            $0.session.manifest.modelHash == manifest.modelHash && $0.session.manifest.byteLength == manifest.byteLength
+        }.sorted { $0.id == preferredID && $1.id != preferredID }
+        for candidate in candidates {
+            try Task.checkCancellation()
+            // Metadata only narrows the search. Re-read the actual file before reuse.
+            guard let identity = try? ModelFileIdentity.read(from: file(candidate.id, ext: "atls")),
+                  identity.modelHash == manifest.modelHash, identity.byteLength == manifest.byteLength else { continue }
+            return candidate
+        }
+        try Task.checkCancellation()
+        return nil
+    }
     func projects() throws -> [LocalProject] {
         let files = try FileManager.default.contentsOfDirectory(at: root(), includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
         return try files.map { try JSONDecoder().decode(LocalProject.self, from: Data(contentsOf: $0)) }

@@ -1,8 +1,8 @@
 import hashlib
 import json
 import os
+import re
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright, expect
@@ -29,7 +29,10 @@ with sync_playwright() as playwright:
     page = browser.new_page(viewport={"width": 1600, "height": 1000})
     page.set_default_timeout(30000)
     errors = []
+    creations = []
     page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('request', lambda request: creations.append(request.url)
+            if request.method == 'POST' and request.url == BASE + '/__atlas/ipad/sessions' else None)
     page.goto(BASE + '/workbench')
     page.wait_for_load_state('networkidle')
     ready(page)
@@ -38,11 +41,44 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
     dialog = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
     expect(dialog).to_be_visible()
-    page.get_by_role('button', name='准备物体与配对码').click()
-    page.locator('[data-ipad-status="ready"]').wait_for()
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    expect(dialog.locator('.ipad-code')).to_have_text(re.compile(r'^[A-Z0-9]{4}$'))
+    assert len(creations) == 1, 'opening under StrictMode must create only one transfer'
     page.screenshot(path='/tmp/atlas-ipad-pairing.png', full_page=True)
     ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    page.get_by_role('button', name='关闭设备示教窗口').click()
+    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    expect(dialog.locator('.ipad-code')).to_have_text(ticket['pairingCode'])
+    assert len(creations) == 1, 'reopening must reuse the ready transfer'
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.screenshot(path='/tmp/atlas-ipad-qr-1280.png', full_page=True)
+    qr_bounds = dialog.get_by_role('img', name='设备配对二维码').bounding_box()
+    assert 0 <= qr_bounds['x'] and qr_bounds['x'] + qr_bounds['width'] <= 1280
+    assert 0 <= qr_bounds['y'] and qr_bounds['y'] + qr_bounds['height'] <= 800
+    page.set_viewport_size({"width": 1600, "height": 1000})
+
+    # A saved expired code is renewed automatically before displaying the QR.
+    page.get_by_role('button', name='关闭设备示教窗口').click()
+    page.evaluate("""() => {
+        const items = JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'));
+        items[0].pairingExpiresAt = Date.now() - 1000;
+        localStorage.setItem('atlas-ipad-handoffs-v1', JSON.stringify(items));
+    }""")
+    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    renewed = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    assert renewed['id'] == ticket['id'] and renewed['pairingCode'] != ticket['pairingCode']
+    assert len(creations) == 1
+    ticket = renewed
+
+    # Pair while closed: opening must fetch the true status and keep the paired task.
+    page.get_by_role('button', name='关闭设备示教窗口').click()
     paired = api('/pair', {"code": ticket['pairingCode'], "deviceId": str(uuid.uuid4()), "deviceName": "iPad Pro UI test"})
+    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    expect(dialog.locator('[data-ipad-status="paired"]')).to_be_visible()
+    expect(dialog.get_by_role('img', name='设备配对二维码')).not_to_be_visible()
+    assert len(creations) == 1, 'opening must not replace a paired task'
     request = Request(BASE + '/__atlas/ipad/sessions/' + ticket['id'] + '/model', headers={"Authorization": "Bearer " + paired['deviceToken']})
     with urlopen(request) as response:
         model = response.read()
@@ -81,6 +117,7 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='继续工作 · 返回主工作台继续示教').click()
     page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
     expect(page.locator('[data-ipad-status="imported"]')).to_be_visible()
+    expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
     page.keyboard.press('Escape')
     expect(dialog).not_to_be_visible()
     # Narrow desktop viewport: the entry and dialog remain reachable.
@@ -88,6 +125,36 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
     expect(dialog).to_be_visible()
     page.screenshot(path='/tmp/atlas-ipad-pairing-1280.png', full_page=True)
+    assert len(creations) == 1, 'opening must preserve completed/imported tasks'
+
+    # A failed upload can resume the same transfer without creating an orphan task.
+    retry_page = browser.new_page(viewport={"width": 1280, "height": 800})
+    retry_page.set_default_timeout(30000)
+    retry_page.on('pageerror', lambda error: errors.append(str(error)))
+    retry_creations = []
+    retry_page.on('request', lambda request: retry_creations.append(request.url)
+                  if request.method == 'POST' and request.url == BASE + '/__atlas/ipad/sessions' else None)
+    retry_page.goto(BASE + '/workbench', wait_until='networkidle')
+    ready(retry_page)
+    retry_page.locator('[data-independent-teaching-input="true"]').set_input_files(str(Path(__file__).parent / 'fixtures/rotation-map.ply'))
+    ready(retry_page)
+    retry_page.route('**/__atlas/ipad/sessions/*/model', lambda route: route.fulfill(
+        status=503, content_type='application/json', body=json.dumps({'error': '测试模型上传中断'})))
+    retry_page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    expect(retry_page.get_by_role('alert')).to_have_text('测试模型上传中断')
+    failed = retry_page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    retry_page.unroute('**/__atlas/ipad/sessions/*/model')
+    retry_page.get_by_role('button', name='重试生成二维码').click()
+    expect(retry_page.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    resumed = retry_page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    assert failed['id'] == resumed['id'] and resumed['status'] == 'ready'
+    assert len(retry_creations) == 1, 'retry must resume the preparing transfer'
+
+    # Explicitly starting another transfer still prepares and displays its QR automatically.
+    retry_page.get_by_role('button', name='新建传输').click()
+    expect(retry_page.locator('.ipad-code')).not_to_have_text(resumed['pairingCode'])
+    expect(retry_page.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    assert len(retry_creations) == 2
     assert not errors, errors
     browser.close()
-print('iPad entry, model handoff, Swift Pose round trip, import deduplication, export and reload passed.')
+print('Automatic QR, StrictMode deduplication, reopen, expiry renewal, upload retry, new transfer, Swift Pose round trip, import deduplication, export and reload passed.')

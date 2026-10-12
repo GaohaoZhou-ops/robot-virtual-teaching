@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 final class AtlasVisionTeachingUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
@@ -6,6 +7,276 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         expectation(for: NSPredicate(format: "enabled == true AND label == %@", "进入空间示教"), evaluatedWith: button)
         waitForExpectations(timeout: 15)
     }
+    private func expectValue(_ value: String, in element: XCUIElement, timeout: TimeInterval = 5) {
+        expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: element)
+        waitForExpectations(timeout: timeout)
+        XCTAssertEqual(element.value as? String, value)
+    }
+
+    @MainActor func testPairedModelVerificationAndSyncConsent() async throws {
+        guard let base = ProcessInfo.processInfo.environment["ATLAS_PAIRING_ADDRESS"] else {
+            throw XCTSkip("Run tests/vision_pairing_ui_smoke.mjs with its isolated pairing service")
+        }
+        func testAPI(_ path: String) async throws -> [String: Any] {
+            let (data, response) = try await URLSession.shared.data(from: URL(string: base + "/__test/" + path)!)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        }
+        let fixture = try await testAPI("fixture")
+        let app = XCUIApplication()
+        app.launchArguments = ["-serverAddress", base]
+        app.launch()
+        XCTAssertTrue(app.buttons["pair-model"].waitForExistence(timeout: 20))
+        func pair(_ code: String) {
+            app.buttons["pairing-code-cell-0"].tap(); app.typeText(code + "\n")
+            app.buttons["pair-model"].tap()
+        }
+        pair(fixture["firstCode"] as! String)
+        XCTAssertTrue(app.buttons["confirm-model-sync"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.buttons["retry-model-preview"].waitForExistence(timeout: 15))
+        app.buttons["retry-model-preview"].tap()
+        XCTAssertTrue(app.images["pending-model-thumbnail"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["发现新模型"].exists)
+        var stats = try await testAPI("stats")
+        XCTAssertEqual(stats["downloads"] as? Int, 0, "pairing and thumbnail must not download the model")
+        _ = try await testAPI("screenshot")
+        app.buttons["defer-model-sync"].tap()
+        XCTAssertTrue(app.buttons["review-model-sync"].waitForExistence(timeout: 5))
+        stats = try await testAPI("stats")
+        XCTAssertEqual(stats["downloads"] as? Int, 0, "deferring must not download the model")
+        app.buttons["review-model-sync"].tap()
+        app.buttons["confirm-model-sync"].tap()
+        XCTAssertTrue(app.staticTexts["model-sync-error"].waitForExistence(timeout: 15), "the fixture fails the first download to exercise retry")
+        app.buttons["confirm-model-sync"].tap()
+        XCTAssertTrue(app.buttons["toggle-space"].waitForExistence(timeout: 20))
+        waitForEntry(app.buttons["toggle-space"])
+        XCTAssertTrue(app.staticTexts["model-file-info"].exists)
+        let preview = app.descendants(matching: .any).matching(identifier: "model-preview").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["place-front"].exists, "previewing does not start spatial placement")
+        XCTAssertFalse(app.buttons["finish-local"].exists, "completion belongs to the teaching workspace")
+        let initialView = try XCTUnwrap(preview.value as? String)
+        app.buttons["preview-rotate-right"].tap()
+        app.buttons["preview-tilt-up"].tap()
+        app.buttons["preview-zoom-in"].tap()
+        expectValue("水平 0°，俯仰 35°，缩放 125%", in: preview)
+        XCTAssertTrue(app.staticTexts["pose-count"].label.contains("0"), "preview transforms must not record poses")
+        _ = try await testAPI("screenshot-preview")
+        app.buttons["preview-reset"].tap()
+        expectValue(initialView, in: preview)
+        for _ in 0..<4 { app.buttons["preview-zoom-in"].tap() }
+        XCTAssertFalse(app.buttons["preview-zoom-in"].isEnabled, "zoom has a usable upper bound")
+        _ = try await testAPI("screenshot-preview-zoomed")
+        app.buttons["preview-reset"].tap()
+        app.buttons["preview-zoom-out"].tap(); app.buttons["preview-zoom-out"].tap()
+        XCTAssertFalse(app.buttons["preview-zoom-out"].isEnabled, "zoom has a usable lower bound")
+        app.buttons["preview-reset"].tap()
+        app.buttons["defer-teaching"].tap()
+        XCTAssertTrue(app.buttons["pair-model"].waitForExistence(timeout: 10))
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "模型同步测试.ply")).firstMatch.tap()
+        XCTAssertTrue(preview.waitForExistence(timeout: 15), "the saved model can be previewed again without the network")
+        expectValue(initialView, in: preview)
+        stats = try await testAPI("stats")
+        XCTAssertEqual(stats["downloads"] as? Int, 2)
+
+        app.buttons["new-project"].tap()
+        pair(fixture["reuseCode"] as! String)
+        XCTAssertTrue(app.buttons["toggle-space"].waitForExistence(timeout: 20))
+        waitForEntry(app.buttons["toggle-space"])
+        XCTAssertFalse(app.buttons["confirm-model-sync"].exists, "matching local bytes open directly")
+        XCTAssertTrue(app.staticTexts["model-file-info"].label.contains("本地复用测试"))
+        XCTAssertTrue(preview.waitForExistence(timeout: 15), "a reused local model also opens in preview")
+        XCTAssertFalse(app.buttons["place-front"].exists)
+        stats = try await testAPI("stats")
+        XCTAssertEqual(stats["downloads"] as? Int, 2, "a new task with identical bytes reuses local geometry")
+
+        app.buttons["new-project"].tap()
+        pair(fixture["changedCode"] as! String)
+        XCTAssertTrue(app.buttons["confirm-model-sync"].waitForExistence(timeout: 20), "same name but different content needs consent")
+        XCTAssertTrue(app.images["pending-model-thumbnail"].waitForExistence(timeout: 20))
+        stats = try await testAPI("stats")
+        XCTAssertEqual(stats["downloads"] as? Int, 2)
+        app.buttons["defer-model-sync"].tap()
+        app.buttons["new-project"].tap()
+    }
+
+    func testIPv4TypingValidationAndCorrection() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-serverAddress", "http://old-computer.local:22012"]
+        app.launch()
+        let host = app.textFields["server-address"], port = app.textFields["server-port"]
+        XCTAssertTrue(host.waitForExistence(timeout: 15))
+        let receive = app.buttons["pair-model"]
+        app.buttons["pairing-code-cell-0"].tap(); app.typeText("Q7Z2\n")
+        XCTAssertFalse(receive.isEnabled, "legacy hostnames cannot bypass IPv4-only input")
+
+        app.buttons["server-address-octet-0"].tap()
+        app.typeText("192.168.0.233")
+        expectValue("192.168.0.233", in: host)
+        XCTAssertEqual(port.value as? String, "22012", "host edits preserve the independent port")
+        XCTAssertTrue(receive.isEnabled)
+        for (index, value) in ["192", "168", "0", "233"].enumerated() {
+            XCTAssertEqual(app.buttons["server-address-octet-\(index)"].value as? String, value)
+        }
+
+        app.buttons["server-address-octet-3"].tap(); app.typeText("256")
+        expectValue("192.168.0.25", in: host)
+        XCTAssertTrue(app.staticTexts["server-address-error"].waitForExistence(timeout: 5))
+        XCTAssertFalse(receive.isEnabled, "a rejected digit requires correction before pairing")
+        app.typeText("5")
+        expectValue("192.168.0.255", in: host)
+        XCTAssertTrue(receive.isEnabled)
+
+        app.buttons["server-address-octet-3"].tap(); app.typeText("99")
+        expectValue("192.168.0.99", in: host)
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3))
+        expectValue("192.168..", in: host)
+        XCTAssertFalse(receive.isEnabled)
+        app.typeText("12.8")
+        expectValue("192.168.12.8", in: host)
+        XCTAssertTrue(receive.isEnabled)
+        XCTAssertEqual(app.textFields["pairing-code"].value as? String, "Q7Z2")
+        app.typeText("\n")
+    }
+
+    @MainActor func testIPv4WholePasteIsAtomic() {
+        let view = VisionIPv4AddressInput(frame: CGRect(x: 0, y: 0, width: 440, height: 64))
+        let revision = UUID()
+        view.setHost("10.0.0.1", replacementID: revision)
+        var changes: [String] = [], rejections: [String] = []
+        view.onChange = { changes.append($0) }; view.onReject = { rejections.append($0) }
+        func edit(_ index: Int, _ replacement: String) {
+            view.selectCell(index)
+            XCTAssertEqual(view.delegate?.textField?(view, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: replacement), false)
+        }
+        edit(2, " 192.168.001.020 ")
+        XCTAssertEqual(changes, ["192.168.1.20"])
+        XCTAssertEqual(view.octets, ["192", "168", "1", "20"])
+        let invalid = ["256.1.1.1", "192.168.0", "192.168..1", "192.168.0.1:21990", "http://192.168.0.1", "computer.local", "::1", "２５５", "1234"]
+        for value in invalid { edit(0, value) }
+        XCTAssertEqual(rejections.count, invalid.count)
+        XCTAssertEqual(changes, ["192.168.1.20"], "invalid pastes must never partially replace a known address")
+        edit(1, "")
+        view.setHost(changes.last!, replacementID: revision)
+        XCTAssertEqual(view.octets, ["192", "", "1", "20"], "an empty octet keeps its position")
+        edit(1, "168")
+        XCTAssertEqual(changes.last, "192.168.1.20")
+        view.setHost("10.1.2.3", replacementID: UUID())
+        XCTAssertEqual(view.octets, ["10", "1", "2", "3"], "external search selection replaces all four octets")
+    }
+
+    func testDiscoveryAutofillsIPv4AndPort() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let serverID = environment["ATLAS_DISCOVERY_SERVER_ID"],
+              let address = environment["ATLAS_DISCOVERY_ADDRESS"],
+              let endpoint = URLComponents(string: address), let host = endpoint.host, let port = endpoint.port else {
+            throw XCTSkip("Provide ATLAS_DISCOVERY_SERVER_ID and ATLAS_DISCOVERY_ADDRESS for a running LAN service")
+        }
+        let app = XCUIApplication()
+        app.launchArguments = ["-serverAddress", "http://192.168.100.7:23456"]
+        app.launch()
+        let field = app.textFields["server-address"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        app.buttons["pairing-code-cell-0"].tap(); app.typeText("Q7Z2\n")
+        // Search must replace an existing address, even when its keyboard is active.
+        app.buttons["server-address-octet-3"].tap()
+        app.buttons["discover-teaching-server"].tap()
+        let selected = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "discovered-service-", "已填入")).firstMatch
+        XCTAssertTrue(selected.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertNotEqual(field.value as? String, "192.168.100.7")
+        XCTAssertTrue(app.staticTexts["discovery-status"].label.contains("已填入"))
+        XCTAssertEqual(app.textFields["pairing-code"].value as? String, "Q7Z2")
+
+        let server = app.buttons["discovered-service-\(serverID)"]
+        XCTAssertTrue(server.waitForExistence(timeout: 20))
+        server.tap()
+        expectValue(host, in: field)
+        expectValue(String(port), in: app.textFields["server-port"])
+        XCTAssertEqual(server.value as? String, "已填入")
+
+        if let otherID = environment["ATLAS_DISCOVERY_OTHER_ID"],
+           let otherAddress = environment["ATLAS_DISCOVERY_OTHER_ADDRESS"],
+           let otherEndpoint = URLComponents(string: otherAddress), let otherPort = otherEndpoint.port {
+            let other = app.buttons["discovered-service-\(otherID)"]
+            XCTAssertTrue(other.waitForExistence(timeout: 20)); other.tap()
+            expectValue(String(otherPort), in: app.textFields["server-port"])
+            XCTAssertEqual(other.value as? String, "已填入")
+            XCTAssertEqual(server.value as? String, "未选择")
+            server.tap()
+            expectValue(String(port), in: app.textFields["server-port"])
+        }
+
+        // A result explicitly selected while typing must replace the active native input.
+        app.buttons["server-address-octet-0"].tap(); app.typeText("10")
+        XCTAssertNotEqual(server.value as? String, "已填入")
+        server.tap()
+        expectValue(host, in: field)
+        XCTAssertTrue(app.buttons["pair-model"].isEnabled)
+        XCTAssertFalse(app.buttons["toggle-space"].exists, "discovery cannot pair or open a model")
+    }
+
+    func testPairingCodeTypingAndCorrections() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-serverAddress", "http://127.0.0.1:21990"]
+        app.launch()
+        let code = app.textFields["pairing-code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        func selectCell(_ index: Int) { app.buttons["pairing-code-cell-\(index)"].tap() }
+        func expectCode(_ value: String) {
+            // Text arrives through visionOS's remote keyboard service.
+            expectation(for: NSPredicate(format: "value == %@", value), evaluatedWith: code)
+            waitForExpectations(timeout: 5)
+            XCTAssertEqual(code.value as? String, value)
+        }
+        let receive = app.buttons["pair-model"]
+        XCTAssertFalse(receive.isEnabled)
+        selectCell(0); app.typeText("a!1@b#2")
+        expectCode("A1B2")
+        XCTAssertTrue(receive.isEnabled)
+
+        selectCell(1); app.typeText("z")
+        expectCode("AZB2")
+        app.typeText(XCUIKeyboardKey.delete.rawValue)
+        expectCode("AZ2")
+        XCTAssertFalse(receive.isEnabled, "clearing any cell must disable pairing")
+        app.typeText(XCUIKeyboardKey.delete.rawValue)
+        expectCode("A2")
+        app.typeText("7q")
+        expectCode("A7Q2")
+        app.typeText("! @#$-_")
+        XCTAssertEqual(code.value as? String, "A7Q2", "unsupported characters cannot replace a valid cell")
+        XCTAssertTrue(receive.isEnabled)
+        app.typeText("\n")
+    }
+
+    @MainActor func testPairingCodeWholePasteIsAtomic() {
+        let view = VisionPairingCodeInput(frame: CGRect(x: 0, y: 0, width: 316, height: 64))
+        var changes: [String] = []
+        view.onChange = { changes.append($0) }
+        view.setCode("A1B2")
+        func edit(_ index: Int, _ replacement: String) {
+            view.selectCell(index)
+            XCTAssertEqual(view.delegate?.textField?(view, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: replacement), false)
+        }
+        edit(2, " q!7-z_2 🙂 ")
+        XCTAssertEqual(changes, ["Q7Z2"], "pasting a complete code into any cell must publish a single complete edit")
+        XCTAssertEqual(view.characters, ["Q", "7", "Z", "2"])
+        for invalid in ["12345", "你好", "ß", "é", "e\u{301}", "１２３４", "! @#$-_", "🙂"] { edit(0, invalid) }
+        XCTAssertEqual(changes, ["Q7Z2"])
+        view.selectCell(1)
+        for input in ["!? 🙂", "x"] {
+            _ = view.delegate?.textField?(view, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: input)
+        }
+        XCTAssertEqual(changes, ["Q7Z2", "QXZ2"], "ignored characters neither publish changes nor advance the selected cell")
+        edit(1, "")
+        view.setCode(changes.last!)
+        XCTAssertEqual(view.characters, ["Q", "", "Z", "2"], "a SwiftUI update must preserve the empty cell's position")
+        edit(1, "a-?b")
+        XCTAssertEqual(changes.last, "QAB2")
+        view.setCode("")
+        XCTAssertTrue(view.characters.allSatisfy(\.isEmpty))
+    }
+
     func testLocalTeachingLifecycle() throws {
         let app = XCUIApplication()
         app.launch()
@@ -17,27 +288,30 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         expectation(for: enabled, evaluatedWith: enter)
         waitForExpectations(timeout: 20)
         enter.tap()
-        let front = app.buttons["place-front"].firstMatch
-        XCTAssertTrue(front.waitForExistence(timeout: 20))
-        front.tap()
-        app.buttons["confirm-placement"].firstMatch.tap()
-        let record = app.buttons["record-pose"].firstMatch
+        let front = app.buttons["place-front"]
+        let panelFront = app.buttons["spatial-place-front"]
+        XCTAssertTrue(panelFront.waitForExistence(timeout: 20))
+        panelFront.tap()
+        app.buttons["spatial-confirm-placement"].tap()
+        let record = app.buttons["spatial-record-pose"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
         record.tap()
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("1"))
-        app.buttons["move-demo"].firstMatch.tap()
+        app.buttons["spatial-move-demo"].tap()
         record.tap()
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"))
-        app.buttons["adjust-model"].firstMatch.tap()
-        XCTAssertFalse(app.buttons["record-pose"].firstMatch.exists)
-        app.buttons["取消调整"].firstMatch.tap()
+        app.buttons["spatial-adjust-model"].tap()
+        XCTAssertFalse(record.exists)
+        app.buttons["spatial-cancel-adjustment"].tap()
         XCTAssertTrue(record.exists)
         enter.tap()
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"))
         waitForEntry(enter)
         enter.tap()
+        // visionOS Simulator may omit RealityView attachments from its AX tree
+        // after reopening. Continue through the equivalent workspace controls.
         XCTAssertTrue(front.waitForExistence(timeout: 15))
-        XCTAssertFalse(record.exists, "reopening must require calibration")
+        XCTAssertFalse(app.buttons["record-pose"].exists, "reopening must require calibration")
         enter.tap()
         waitForEntry(enter)
         app.buttons["new-project"].tap()
@@ -45,17 +319,32 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "空间演练工件")).firstMatch.tap()
         XCTAssertTrue(app.staticTexts["pose-count"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"), "offline draft survives reopening")
+        app.buttons["review-poses"].tap()
+        XCTAssertTrue(app.buttons["finish-local"].waitForExistence(timeout: 10))
         app.buttons["finish-local"].tap()
         app.buttons.matching(NSPredicate(format: "label == %@", "完成并保存在本机")).allElementsBoundByIndex.last!.tap()
         let sync = app.buttons["sync-result"]
         XCTAssertTrue(sync.waitForExistence(timeout: 10))
         XCTAssertFalse(sync.isEnabled, "simulator results must never sync")
         XCTAssertFalse(app.buttons["删除 Pose 001"].exists, "completed samples are immutable")
+        // A repeated immersive presentation can omit its visible panel from the
+        // simulator AX tree; tapping the occluded workspace is not equivalent.
+        // Relaunch and restore the completed task to verify read-only spatial review.
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["open-demo"].waitForExistence(timeout: 15))
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "空间演练工件")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["review-poses"].waitForExistence(timeout: 15))
+        app.buttons["review-poses"].tap()
+        XCTAssertTrue(app.buttons["sync-result"].waitForExistence(timeout: 10))
         waitForEntry(enter); enter.tap()
-        XCTAssertTrue(front.waitForExistence(timeout: 15)); front.tap()
-        app.buttons["confirm-placement"].firstMatch.tap()
+        XCTAssertTrue(panelFront.waitForExistence(timeout: 15)); panelFront.tap()
+        let confirmReview = app.buttons["spatial-confirm-placement"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: confirmReview)
+        waitForExpectations(timeout: 10)
+        confirmReview.tap()
         XCTAssertTrue(app.staticTexts["已完成 · 空间回看"].firstMatch.waitForExistence(timeout: 10))
         XCTAssertFalse(record.exists, "spatial review cannot append samples")
+        XCTAssertFalse(app.buttons["record-pose"].exists, "completed samples remain immutable in the workspace")
         enter.tap(); waitForEntry(enter)
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import ImageIO
 
 @main struct VisionCoreTests {
     static func near(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ label: String) {
@@ -67,6 +68,10 @@ import simd
         _ = try await api("/sessions/\(ticket.id)/model", method: "PUT", token: ticket.ownerToken, body: bytes)
         let client = try LANClient(address: base)
         let paired = try await client.pair(code: ticket.pairingCode, deviceID: UUID().uuidString, name: TeachingDevice.visionPro.model)
+        let preview = try await client.modelThumbnail(paired)
+        let previewSource = CGImageSourceCreateWithData(preview as CFData, nil)!
+        let previewImage = CGImageSourceCreateImageAtIndex(previewSource, 0, nil)!
+        precondition(previewImage.width == 384 && previewImage.height == 256 && preview.count < 512 * 1024)
         let downloaded = try await client.download(paired)
         precondition(downloaded == bytes)
         var result = TeachingResult(sessionId: paired.id, modelHash: manifest.modelHash)
@@ -80,10 +85,22 @@ import simd
         let recovered = try await ProjectStore(directory: storeURL).projects()
         precondition(recovered.count == 1 && recovered[0].result.samples.count == 2 && recovered[0].result.device.platform == "visionOS")
         let modelURL = try await store.modelURL(paired.id)
+        var renamed = manifest; renamed.name = "another-name.ply"
+        let matching = try await store.matchingModel(renamed)
+        precondition(matching?.id == paired.id, "model content matches regardless of filename or transfer ID")
+        var different = manifest; different.modelHash = String(repeating: "0", count: 64)
+        let sameNameMismatch = try await store.matchingModel(different)
+        precondition(sameNameMismatch == nil, "the same filename cannot substitute for content verification")
         do { try await client.upload(project, modelURL: modelURL); preconditionFailure("unfinished result uploaded") } catch is TeachingError {}
         project.result.completedAt = timestamp(); try await store.save(project)
         try await store.saveModel(corrupt, id: paired.id)
+        let corruptedMatch = try await store.matchingModel(manifest)
+        precondition(corruptedMatch == nil, "metadata cannot hide actual local file corruption")
         do { try await client.upload(project, modelURL: modelURL); preconditionFailure("mismatched model uploaded") } catch is TeachingError {}
+        try await store.saveModel(bytes, id: paired.id)
+        try FileManager.default.removeItem(at: modelURL)
+        let missingMatch = try await store.matchingModel(manifest)
+        precondition(missingMatch == nil, "a stale project record without its file is a cache miss")
         try await store.saveModel(bytes, id: paired.id)
         try await client.upload(project, modelURL: modelURL)
         try await client.upload(project, modelURL: modelURL)
