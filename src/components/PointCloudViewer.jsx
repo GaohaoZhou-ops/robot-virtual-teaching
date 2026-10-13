@@ -1594,6 +1594,7 @@ export default function PointCloudViewer({
   const onRobotPoseChangeRef = useRef(onRobotPoseChange);
   const onRobotJointValuesChangeRef = useRef(onRobotJointValuesChange);
   const onRobotControlChangeRef = useRef(onRobotControlChange);
+  const onClearRobotParkingGhostRef = useRef(onClearRobotParkingGhost);
   const onCancelTeachingPreviewEditRef = useRef(onCancelTeachingPreviewEdit);
   const robotParkingGhostRef = useRef(robotParkingGhost);
   const teachingPoseEditing = Boolean(robotParkingGhost?.editing && robotParkingGhost.poseId);
@@ -1658,6 +1659,7 @@ export default function PointCloudViewer({
   onRobotPoseChangeRef.current = onRobotPoseChange;
   onRobotJointValuesChangeRef.current = onRobotJointValuesChange;
   onRobotControlChangeRef.current = onRobotControlChange;
+  onClearRobotParkingGhostRef.current = onClearRobotParkingGhost;
   onCancelTeachingPreviewEditRef.current = onCancelTeachingPreviewEdit;
   robotParkingGhostRef.current = robotParkingGhost;
   onZividCameraPoseChangeRef.current = onZividCameraPoseChange;
@@ -6523,6 +6525,17 @@ export default function PointCloudViewer({
       if (
         event.code === 'Escape'
         && renderActiveRef.current
+        && robotParkingGhostRef.current
+        && !event.defaultPrevented
+        && !document.querySelector('[aria-modal="true"], dialog[open]')
+      ) {
+        event.preventDefault();
+        onClearRobotParkingGhostRef.current?.();
+        return;
+      }
+      if (
+        event.code === 'Escape'
+        && renderActiveRef.current
         && robotControlEnabledRef.current
         && !event.defaultPrevented
         && !target?.closest?.('[aria-modal="true"], dialog[open]')
@@ -7533,7 +7546,8 @@ export default function PointCloudViewer({
                 type="button"
                 className="robot-parking-ghost-readout__close"
                 aria-label="清除停车点机器人虚影"
-                title="移除停车点机器人虚影与距离连线"
+                aria-keyshortcuts="Escape"
+                title="移除停车点机器人虚影与距离连线 · Esc"
                 onClick={() => onClearRobotParkingGhost?.()}
               >
                 <X size={12} />
