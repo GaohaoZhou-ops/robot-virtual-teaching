@@ -36,22 +36,25 @@ struct VisionWorkspaceView: View {
             Divider()
             VStack(alignment: .leading, spacing: 24) {
                 header
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        if session.current != nil { project }
-                        else if let pending = session.pendingModel {
-                            VStack(alignment: .leading, spacing: 24) {
-                                Label("新模型待同步", systemImage: "arrow.down.circle").font(.title2)
-                                VisionModelFileInfo(manifest: pending.session.manifest)
-                                Button("查看文件并同步") { modelSyncPresented = true }
-                                    .buttonStyle(.borderedProminent).tint(.cyan)
-                                    .accessibilityIdentifier("review-model-sync")
-                            }
-                        } else { connection }
+                GeometryReader { viewport in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 24) {
+                            if session.current != nil { project }
+                            else if let pending = session.pendingModel {
+                                VStack(alignment: .leading, spacing: 24) {
+                                    Label("新模型待同步", systemImage: "arrow.down.circle").font(.title2)
+                                    VisionModelFileInfo(manifest: pending.session.manifest)
+                                    Button("查看文件并同步") { modelSyncPresented = true }
+                                        .buttonStyle(.borderedProminent).tint(.cyan)
+                                        .accessibilityIdentifier("review-model-sync")
+                                }
+                            } else { connection }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
+                        .padding(.trailing, 8)
+                        .frame(minHeight: session.current != nil && previewing ? viewport.size.height : nil, alignment: .top)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 8)
-                    .padding(.trailing, 8)
                 }
                 status
                 if session.current != nil {
@@ -135,6 +138,7 @@ struct VisionWorkspaceView: View {
                             }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
                         }
                         .tint(item.id == session.current?.id ? Color.cyan : nil)
+                        .accessibilityIdentifier("project-\(item.id)")
                         .disabled(session.busy || !spaceClosed || item.id == session.current?.id)
                     }
                 }.padding(.horizontal, 20).padding(.vertical, 8)
@@ -246,7 +250,7 @@ struct VisionWorkspaceView: View {
             }
             if spatial.isDemo { Label("模拟演练 · 不可同步", systemImage: "testtube.2").foregroundStyle(.orange) }
             if previewing {
-                VisionModelPreview().id(session.current?.id)
+                if let model = session.geometry { VisionModelPreview(model: model).id(session.current?.id) }
             } else {
                 teachingProject
             }

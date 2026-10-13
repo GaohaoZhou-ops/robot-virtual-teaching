@@ -51,6 +51,24 @@ import ImageIO
             let points = try VisionMeshData(model: model, mode: .points, quality: quality)
             precondition(points.positions.count == model.vertices * 4 && points.triangles.count == model.vertices * 12)
         }
+        let smallPreview = try VisionMeshData.preview(model: model)
+        precondition(smallPreview.isMesh && smallPreview.primitiveCount == model.indices / 3,
+                     "small preview models keep their complete surfaces")
+        let denseFixture = URL(fileURLWithPath: args[2] + "-dense")
+        let denseManifest = try JSONDecoder().decode(ModelManifest.self, from: Data(contentsOf: denseFixture.appendingPathExtension("json")))
+        let denseBytes = try Data(contentsOf: denseFixture.appendingPathExtension("atls"))
+        let denseModel = try ModelGeometry(data: denseBytes, manifest: denseManifest)
+        let densePreview = try VisionMeshData.preview(model: denseModel)
+        precondition(!densePreview.isMesh && densePreview.primitiveCount == 50_000,
+                     "dense scans need visible point coverage, not disconnected subpixel faces")
+        let radius = (densePreview.positions[0].y - densePreview.positions[1].y) / 2
+        let diagonal = simd_length(denseManifest.bounds!.max.simd - denseManifest.bounds!.min.simd)
+        let fittedPointDiameter = 2 * radius * 0.82 * 280 / diagonal
+        precondition(fittedPointDiameter > 1.5 && fittedPointDiameter < 2,
+                     "preview points remain visible when a multi-meter scan fits in the window")
+        let spatialMesh = try VisionMeshData(model: denseModel, mode: .mesh, quality: .light)
+        precondition(spatialMesh.isMesh && spatialMesh.primitiveCount == 40_000 && denseModel.data == denseBytes,
+                     "preview budgets must not alter spatial rendering or the original model bytes")
         var corrupt = bytes; corrupt[32] ^= 1
         do { _ = try ModelGeometry(data: corrupt, manifest: manifest); preconditionFailure("corrupt model accepted") } catch is TeachingError {}
 

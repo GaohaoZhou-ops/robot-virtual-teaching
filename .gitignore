@@ -20,6 +20,9 @@ node_modules/
 .stylelintcache
 
 # Build output and frontend tool caches
+# build_local.sh writes dist/ and build/local/; the native entry points use
+# ipad/build/{device,simulator}/ and vision/build/{device,simulator}/.
+# The build/ rule covers all three logs, products and intermediate directories.
 dist/
 build/
 out/
@@ -162,8 +165,10 @@ playwright/.auth/
 /atlas-ipad-*.heic
 /ipad/atlas-ipad-*.png
 /ipad/atlas-ipad-*.mp4
+/ipad/atlas-ipad-*.webm
 /ipad/atlas-ipad-*.mov
 /ipad/atlas-ipad-*.heic
+/ipad/atlas-ipad-*-trace.zip
 /atlas-vision-*.mov
 /atlas-vision-*.heic
 /vision/atlas-vision-*.png
@@ -172,6 +177,11 @@ playwright/.auth/
 /vision/atlas-vision-*.mov
 /vision/atlas-vision-*.heic
 /vision/atlas-vision-*-trace.zip
+# Native captures emitted beside test runners (not inside fixture directories).
+/tests/atlas-ipad-*.mov
+/tests/atlas-ipad-*.heic
+/tests/atlas-vision-*.mov
+/tests/atlas-vision-*.heic
 
 # xcresulttool exports UUID-named images, recordings, snapshots and a manifest.
 # Include numbered retry folders such as atlas-ipad-level-shots-2.
@@ -191,6 +201,14 @@ playwright/.auth/
 /atlas-vision-*-attachments-[0-9]*/
 /vision/atlas-vision-*-attachments/
 /vision/atlas-vision-*-attachments-[0-9]*/
+/tests/atlas-ipad-*-shots/
+/tests/atlas-ipad-*-shots-[0-9]*/
+/tests/atlas-ipad-*-attachments/
+/tests/atlas-ipad-*-attachments-[0-9]*/
+/tests/atlas-vision-*-shots/
+/tests/atlas-vision-*-shots-[0-9]*/
+/tests/atlas-vision-*-attachments/
+/tests/atlas-vision-*-attachments-[0-9]*/
 
 # Ad-hoc device snapshots may contain local poses and pairing credentials.
 # Limit these rules to diagnostic filenames, keeping app source/fixtures visible.
@@ -206,12 +224,20 @@ playwright/.auth/
 /vision/atlas-vision-*.json
 /vision/atlas-vision-*.plist
 /vision/atlas-vision-projects-*/
+/tests/atlas-ipad-*.json
+/tests/atlas-ipad-*.plist
+/tests/atlas-ipad-projects-*/
+/tests/atlas-vision-*.json
+/tests/atlas-vision-*.plist
+/tests/atlas-vision-projects-*/
 
 # USB pairing records created by local device-debugging tools contain credentials.
 /atlas-ipad-*-pairing/
 /ipad/atlas-ipad-*-pairing/
 /atlas-vision-*-pairing/
 /vision/atlas-vision-*-pairing/
+/tests/atlas-ipad-*-pairing/
+/tests/atlas-vision-*-pairing/
 
 # Standalone Swift test executables produced during native device debugging.
 /atlas-ipad-*-test
@@ -222,17 +248,26 @@ playwright/.auth/
 /atlas-vision-*-tests
 /vision/atlas-vision-*-test
 /vision/atlas-vision-*-tests
+/tests/atlas-ipad-*-test
+/tests/atlas-ipad-*-tests
+/tests/atlas-vision-*-test
+/tests/atlas-vision-*-tests
 
 # Isolated smoke-test workspaces if TMPDIR points into the repository.
 /atlas-native-ipad-*/
 /atlas-clean-build-*/
 /ipad/atlas-native-ipad-*/
 /ipad/atlas-clean-build-*/
+# Includes atlas-clean-build-scripts-* from the build-entry regression test.
+/tests/atlas-clean-build-*/
+/vision/atlas-clean-build-*/
 # Node mkdtemp appends six random characters to the iPad / Vision Pro prefix.
 /atlas-ipad-??????/
 /ipad/atlas-ipad-??????/
+/tests/atlas-ipad-??????/
 /atlas-vision-??????/
 /vision/atlas-vision-??????/
+/tests/atlas-vision-??????/
 
 # Project import/export and server-result smoke-test workspaces.
 /atlas-load-modes-*/

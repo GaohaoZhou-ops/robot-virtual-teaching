@@ -20,7 +20,21 @@ struct VisionMeshData {
     let primitiveCount: Int
     let isMesh: Bool
 
-    init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality) throws {
+    /// Keep small surfaces complete. For dense scans, window-sized point splats
+    /// retain visible coverage instead of dropping nearly all of the tiny faces.
+    static func preview(model: ModelGeometry) throws -> VisionMeshData {
+        if model.indices > 0 && model.indices / 3 <= VisionQuality.balanced.faces {
+            return try VisionMeshData(model: model, mode: .mesh, quality: .balanced)
+        }
+        let extent = SIMD3<Float>(Float(model.maximum.x - model.minimum.x),
+                                  Float(model.maximum.y - model.minimum.y),
+                                  Float(model.maximum.z - model.minimum.z))
+        let radius = max(simd_length(extent) / 280, 0.00001)
+        guard radius.isFinite else { throw TeachingError("模型范围过大，无法生成预览") }
+        return try VisionMeshData(model: model, mode: .points, quality: .detail, pointRadius: radius)
+    }
+
+    init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality, pointRadius: Float? = nil) throws {
         isMesh = mode == .mesh && model.indices > 0
         let total = isMesh ? model.indices / 3 : model.vertices
         primitiveCount = min(total, isMesh ? quality.faces : quality.points)
@@ -34,7 +48,7 @@ struct VisionMeshData {
         while gcd(step, total) != 1 { step += 1 }
         // Point clouds use small tetrahedra, which remain visible from every side.
         let extent = Float(max(model.maximum.x - model.minimum.x, model.maximum.y - model.minimum.y, model.maximum.z - model.minimum.z))
-        let radius = max(Float(0.0015), min(Float(0.006), extent / 1000))
+        let radius = pointRadius ?? max(Float(0.0015), min(Float(0.006), extent / 1000))
         let offsets: [SIMD3<Float>] = [SIMD3(1, 1, 1), SIMD3(1, -1, -1), SIMD3(-1, 1, -1), SIMD3(-1, -1, 1)]
         try model.data.withUnsafeBytes { raw in
             func uint(_ offset: Int) -> UInt32 { UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self)) }

@@ -13,6 +13,31 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertEqual(element.value as? String, value)
     }
 
+    @MainActor func testExistingLocalModelPreview() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let projectID = environment["ATLAS_PREVIEW_PROJECT_ID"],
+              let captureURL = environment["ATLAS_PREVIEW_CAPTURE_URL"] else {
+            throw XCTSkip("Requires a local project and simulator screenshot receiver")
+        }
+        let app = XCUIApplication()
+        app.launch()
+        let project = app.buttons["project-\(projectID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 20)); project.tap()
+        let preview = app.descendants(matching: .any).matching(identifier: "model-preview").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 30))
+        let poseCount = app.staticTexts["pose-count"].label
+        app.buttons["preview-rotate-right"].tap()
+        app.buttons["preview-zoom-in"].tap()
+        expectValue("水平 0°，俯仰 20°，缩放 125%", in: preview)
+        _ = try await URLSession.shared.data(from: URL(string: captureURL + "/rotated")!)
+        app.buttons["preview-reset"].tap()
+        expectValue("水平 -30°，俯仰 20°，缩放 100%", in: preview)
+        _ = try await URLSession.shared.data(from: URL(string: captureURL + "/default")!)
+        XCTAssertEqual(app.staticTexts["pose-count"].label, poseCount)
+        XCTAssertFalse(app.buttons["place-front"].exists)
+        XCTAssertFalse(app.buttons["record-pose"].exists)
+    }
+
     @MainActor func testPairedModelVerificationAndSyncConsent() async throws {
         guard let base = ProcessInfo.processInfo.environment["ATLAS_PAIRING_ADDRESS"] else {
             throw XCTSkip("Run tests/vision_pairing_ui_smoke.mjs with its isolated pairing service")

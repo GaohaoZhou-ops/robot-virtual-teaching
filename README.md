@@ -79,6 +79,27 @@ npm install
 
 启动和状态脚本会列出检测到的可访问地址。默认监听所有网卡；请使用可信网络，并允许 Node.js 接收入站连接。
 
+### 本地编译
+
+三个入口均按脚本自身位置定位工程，可从其他工作目录调用；构建结束会打印产物与日志的绝对路径。
+
+| 目标 | 命令 | 默认产物 |
+| --- | --- | --- |
+| 电脑端 Web | `./scripts/build_local.sh` | `dist/` |
+| Vision Pro | `./scripts/build_vision.sh` | `vision/build/device/Build/Products/Release-xros/AtlasVisionTeaching.app` |
+| iPad Pro | `./scripts/build_ipad.sh` | `ipad/build/device/Build/Products/Release-iphoneos/AtlasTeaching.app` |
+
+电脑端需要 Node.js 和 npm；缺少 Vite 依赖时自动执行 `npm ci`，也可用 `--install` 强制按锁文件重装。日志位于 `build/local/build.log`，运行 `npm run preview` 可访问构建后的电脑端（默认端口 21990，需与开发服务错开使用）。
+
+原生端需要 macOS、完整 Xcode 和对应 SDK，默认构建 **Release、真机架构、未签名** 的 `.app`，不连接或安装到设备。安装真机时在 Xcode 中选择开发团队并签名。两个脚本均支持：
+
+```bash
+./scripts/build_vision.sh --simulator --configuration Debug
+./scripts/build_ipad.sh --simulator --configuration Debug
+```
+
+模拟器产物位于各自的 `build/simulator/Build/Products/Debug-xrsimulator/` 或 `Debug-iphonesimulator/`，日志位于 `<vision|ipad>/build/<device|simulator>/build.log`。可用 `--help` 查看参数；这些构建目录均在清理脚本范围内。
+
 ### 服务管理
 
 | 操作 | 命令 |
@@ -927,14 +948,15 @@ Zivid 视图根据机器人光学坐标投影当前地图，用于虚拟示教�
 
 ```bash
 # 无需连接设备或签名，先检查真机目标编译
-bash scripts/build-ipad.sh device
+./scripts/build_ipad.sh
 # 检查模拟器目标
-bash scripts/build-ipad.sh simulator
+./scripts/build_ipad.sh --simulator --configuration Debug
 # 打开原生工程
 open ipad/AtlasTeaching.xcodeproj
 ```
 
-- 构建产物位于 `ipad/build/Build/Products/`。
+- 构建产物位于 `ipad/build/device/Build/Products/Release-iphoneos/`，模拟器产物位于 `ipad/build/simulator/Build/Products/Debug-iphonesimulator/`。
+- 旧入口 `scripts/build-ipad.sh [device|simulator]` 仍保留，沿用其 Debug 配置和 `ipad/build/Build/Products/` 路径。
 - 连接真机后，在 Xcode 的 Signing & Capabilities 选择开发团队与设备，开启 iPad 开发者模式，然后 Run 安装；首次使用允许相机和本地网络访问。
 - 无签名编译产物不能直接安装真机。
 
@@ -1210,10 +1232,12 @@ ATLAS_PHYSICS_BACKEND=isaac ./scripts/start.sh
 
 | 处理方式 | 范围 |
 | --- | --- |
-| 清理 | Web / Xcode 构建产物、仓库内工具缓存、可再生成渲染缓存、测试结果与临时测试程序 |
+| 清理 | Web / iPad / Vision Pro 构建产物、仓库内工具缓存、可再生成渲染缓存、测试结果与临时测试程序 |
 | 保留 | 工程 JSON、完整 `.atlas-project` 目录 / ZIP、恢复工程、源点云、机器人资源 |
 | 保留 | `node_modules`、Xcode / 签名配置、`.atlas-cache/ipad-teaching/`、浏览器存储 |
 | 条件保护 | 跟踪文件、Pose、无法确认可再生成的模型所在目标，及不满足源文件摘要校验的地图副本 |
+
+`ipad/test-artifacts/`、`vision/test-artifacts/` 等测试输出目录会逐项检查：原生任务 JSON / ATLS 快照单独保留，同级测试报告、录像、截图和编译缓存继续清理。完整工程目录、设备导出容器，以及可能引用图片等相对资源的工程 / Pose 配置目录仍整体保留。`--dry-run` 使用同样规则，仅列出处理结果。
 
 脚本不停止服务；运行中的日志和 PID 会保留。清理后可用 `./scripts/restart.sh` 重建前端缓存。
 
@@ -1224,15 +1248,15 @@ ATLAS_PHYSICS_BACKEND=isaac ./scripts/start.sh
 <details>
 <summary>删除条件与数据保护规则</summary>
 
-- 清理范围包括 Web 的 `dist/`、Xcode 的 `ipad/build/`、仓库内 DerivedData、Vite/npm/Python 等工具缓存、`.atlas-cache/surfaces/` 等可再生成渲染缓存，以及测试结果、截图和临时原生测试程序。
+- 清理范围包括 Web 的 `dist/`、日志目录 `build/`、Xcode 的 `ipad/build/` 和 `vision/build/`、仓库内 DerivedData、Vite/npm/Python 等工具缓存、`.atlas-cache/surfaces/` 等可再生成渲染缓存，以及 Web / iPad / Vision Pro 测试结果、截图、录像和临时原生测试程序。
 - `dist/` 内由 `maps/` 复制的点云只有在源文件仍存在且 SHA-256 相同时才允许清理。
-- 脚本使用明确的目录和文件规则，不依赖 `.gitignore` 删除；若目标中发现 Git 跟踪文件、工程配置、Pose 或未确认可再生成的源模型，会保留整个目标并说明原因。
+- 脚本使用明确的目录和文件规则，不依赖 `.gitignore` 删除。普通构建 / 缓存目录内发现 Git 跟踪文件、工程配置、Pose 或源模型时，整个目标保留；混合测试输出目录则递归检查，保留资料并继续清理独立产物。`.atlas-project`、`.xcappdata` 和含工程 / Pose 资源引用的目录保持完整，符号链接不会被跟随到仓库外。
 
 - 保留工程 JSON、完整 `.atlas-project` 目录和 ZIP、恢复工程、源点云、机器人资源、`node_modules` 已安装依赖、Xcode/签名配置。
 - `.atlas-cache/ipad-teaching/` 虽然位于缓存目录中，但包含配对凭据、同步校验所需的冻结模型及待接收结果，整体保留。
 - 浏览器 IndexedDB 中混有未保存的配置/Pose，脚本不会直接清理浏览器存储，也不会访问 iPad 数据或仓库外的全局缓存。
 - 脚本不停止服务；正在运行的服务日志和 PID 状态会保留，清理后可执行 `./scripts/restart.sh` 重建前端缓存。
-- 清理回归使用 `node tests/clean_build_smoke.mjs`，在临时工程中验证实际删除和数据保护。
+- 清理回归使用 `node tests/clean_build_smoke.mjs`，在临时工程中验证实际删除、混合测试目录、原生 JSON 转义、资料与关联资源保护；构建脚本回归使用 `node tests/build_scripts_smoke.mjs`，验证跨工作目录、空格路径、真机 / 模拟器参数、缺失依赖安装及失败退出。
 
 - 当前完整工程目录/ZIP 会携带地图、机器人及已采集的视觉资源，与仅记录模型指纹和 Pose 的轻量配置并非同一种保存形态。
 - 清理脚本会完整保留这些已有工程，不通过删除其资源来缩小工程，也不改变现有保存格式。
@@ -1260,6 +1284,7 @@ ATLAS_PHYSICS_BACKEND=isaac ./scripts/start.sh
 | 示教姿态编辑与躯干调整回写 | `uv run --with playwright python tests/teaching_pose_edit_smoke.py`（先启动服务） |
 | 机器人导出适配 | `npm run test:abx` |
 | 清理与数据保护 | `node tests/clean_build_smoke.mjs` |
+| 构建脚本参数与失败处理 | `node tests/build_scripts_smoke.mjs` |
 
 <details>
 <summary>iPad 命令、模拟器与真机 UI 验证</summary>
