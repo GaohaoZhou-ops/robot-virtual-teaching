@@ -30,6 +30,12 @@ try {
   const root = await fixture('project with spaces');
   const disposable = [
     'dist/assets/app.js', 'dist/xian_map.ply', 'build/compiler.o', 'ipad/build/Build/Products/App.app/Info.plist',
+    'vision/build/device/Build/Products/App.app/Info.plist', 'vision/DerivedData/ModuleCache.noindex/cache.pcm',
+    'vision/.build/cache.bin', 'vision/screenshots/preview.png', 'tests/test-videos/capture.mp4',
+    'tests/test-artifacts/result.log', 'vision/test-artifacts/preview/screenshot.png',
+    'vision/atlas-vision-ui-attachments-2/clip.mov', 'atlas-vision-ui-shots/manifest.json',
+    'vision/atlas-vision-core-tests', 'tests/atlas-vision-check.log', 'vision/atlas-vision-test.xcresult/Info.plist',
+    'vision/Tests/__pycache__/check.pyc',
     '.npm-cache/_cacache/cache-data', '.cache/derived.bin', 'node_modules/.vite/deps/react.js',
     '.atlas-cache/surfaces/hash.atsurface.gz', '.atlas-cache/surfaces/hash.json',
     'tests/__pycache__/smoke.cpython-313.pyc', 'src/cluster/__pycache__/merge.pyc', 'scripts/old.pyc',
@@ -41,6 +47,8 @@ try {
   const keep = [
     'maps/xian_map.ply', 'custom-model.ply', 'robots/robot.urdf', '.env.local', 'package-lock.json',
     'node_modules/react/package.json', 'ipad/AtlasTeaching/Info.plist',
+    'vision/AtlasVisionTeaching/Info.plist', 'vision/AtlasVisionTeaching.xcodeproj/project.pbxproj',
+    'vision/Tests/Fixtures/model.atls', 'vision/AtlasVisionTeaching/Assets.xcassets/icon.png',
     'ipad/AtlasTeaching.xcodeproj/project.pbxproj', 'ipad/AtlasTeaching.xcodeproj/xcuserdata/settings.xcuserstate',
     'ipad/AtlasTeaching/Assets.xcassets/AppIcon.appiconset/icon.png',
     'project.atlas-project/atlas.project.json', 'project.atlas-project/config/project.json',
@@ -78,6 +86,42 @@ try {
     '.cache/renamed-config.JSON', 'ipad/build/saved-pose/pose.json', 'build/tracked-settings.txt']) {
     assert.equal(await exists(path.join(guarded, name)), true, `lost protected data ${name}`);
   }
+
+  // One native snapshot must not retain all sibling reports/builds/recordings.
+  // Complete projects still need their relative image and model resources.
+  const mixed = await fixture('mixed-test-artifacts');
+  const preserved = {
+    'ipad/test-artifacts/run/fixture-after-adjustment.json': JSON.stringify({ result: {
+      protocol: 'atlas-ipad-teaching/1', samples: [{ cameraPose: { position: [1, 2, 3] } }],
+    } }).replaceAll('/', '\\/'),
+    'ipad/test-artifacts/run/empty-native-project.json': '{"protocol":"atlas-ipad-teaching\\/1","samples":[]}',
+    'ipad/test-artifacts/run/model.atls': 'original model',
+    'vision/test-artifacts/session/real-project.atlas-project/atlas.project.json': '{}',
+    'vision/test-artifacts/session/real-project.atlas-project/rgb/frame.png': 'project image',
+    'vision/test-artifacts/session/renamed-project/settings.JSON': '{"schemaVersion":"1.3","map":{}}',
+    'vision/test-artifacts/session/renamed-project/capture.mp4': 'referenced project resource',
+    'vision/test-artifacts/session/pose-session/pose.json': '{"cameraPose":{}}',
+    'vision/test-artifacts/session/pose-session/rgb/frame.png': 'pose image',
+    'vision/test-artifacts/export.xcappdata/Documents/model.atls': 'device data',
+    'vision/test-artifacts/export.xcappdata/Info.plist': 'device metadata',
+    'vision/test-artifacts/tracked-note.txt': 'tracked test instructions',
+  };
+  const outputs = [
+    'ipad/test-artifacts/run/device.xcresult/Data/blob', 'ipad/test-artifacts/run/attachments/movie.mp4',
+    'ipad/test-artifacts/run/screenshots/frame.png', 'ipad/test-artifacts/run/trace.log',
+    'vision/test-artifacts/session/DerivedData/Build/Products/App.app/App',
+    'vision/test-artifacts/session/screenshots/preview.png', 'vision/test-artifacts/other-run/recording.mp4',
+  ];
+  for (const [name, value] of Object.entries(preserved)) await put(mixed, name, value);
+  for (const name of outputs) await put(mixed, name);
+  execFileSync('git', ['-c', 'init.templateDir=', 'init', '-q', mixed]);
+  execFileSync('git', ['-C', mixed, 'add', '--', 'vision/test-artifacts/tracked-note.txt']);
+  assert.match(run(mixed, '--dry-run'), /逐项检查/);
+  for (const name of outputs) assert.equal(await exists(path.join(mixed, name)), true, `dry run changed ${name}`);
+  run(mixed);
+  for (const name of outputs) assert.equal(await exists(path.join(mixed, name)), false, `mixed output survived: ${name}`);
+  for (const [name, value] of Object.entries(preserved)) assert.equal(await readFile(path.join(mixed, name), 'utf8'), value);
+  assert.match(run(mixed), /已清理 0 项/);
 
   const changedCopy = await fixture('modified-build-map');
   await put(changedCopy, 'maps/cloud.ply', 'source-A');

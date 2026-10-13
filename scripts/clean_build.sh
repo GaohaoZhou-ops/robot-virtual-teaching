@@ -14,9 +14,10 @@ for argument in "$@"; do
 
 清理当前仓库内的 Web/Xcode 构建产物、工具缓存、表面渲染缓存和测试产物。
 --dry-run / -n  只列出待清理项目，不删除文件。
+覆盖 Web、iPad 和 Vision Pro；测试目录逐项清理，保留模型和 Pose 快照。
 
 保留工程配置、Pose、源点云、机器人资源、工程包、已安装依赖、签名和 IDE 配置。
-iPad 配对目录包含同步必需的模型和结果，整体保留。
+iPad / Vision Pro 配对目录包含同步必需的模型和结果，整体保留。
 不清理浏览器自动保存、iPad 本机数据或仓库外的全局缓存；不终止服务。
 请在编译和测试结束后运行。脚本需要 Node.js，不依赖 node_modules。
 HELP
@@ -55,13 +56,19 @@ try {
 
   // An ignore rule is not permission to delete: ignored files include real
   // point clouds, recovered projects and iPad transfers. Use an explicit list.
+  const testRoots = new Set([
+    'test-results', 'test-artifacts', 'screenshots', 'test-downloads', 'test-videos', 'test-traces',
+    'tests/test-artifacts', 'tests/screenshots', 'tests/test-downloads', 'tests/test-videos', 'tests/test-traces',
+    'ipad/test-artifacts', 'ipad/screenshots', 'vision/test-artifacts', 'vision/screenshots',
+  ]);
   const candidates = new Set([
-    'dist', 'build', 'ipad/build', 'DerivedData', 'ipad/DerivedData', '.build', 'ipad/.build',
+    'dist', 'build', 'ipad/build', 'vision/build',
+    'DerivedData', 'ipad/DerivedData', 'vision/DerivedData', '.build', 'ipad/.build', 'vision/.build',
     '.vite', '.vite-temp', 'node_modules/.vite', 'node_modules/.vite-temp', 'node_modules/.cache',
     '.npm-cache', '.npm/_cacache', '.npm/_logs', '.cache', '.parcel-cache', '.turbo',
     '.eslintcache', '.stylelintcache', '.pytest_cache', '.mypy_cache', '.ruff_cache', '.pyre', '.hypothesis',
     'coverage', '.nyc_output', '.coverage', 'htmlcov', 'playwright-report', 'blob-report',
-    'test-results', 'test-artifacts', 'screenshots', 'ipad/test-artifacts', 'ipad/screenshots',
+    ...testRoots,
     '.atlas-cache/surfaces', '.atlas-cache/thumbnails', '.atlas-cache/previews', 'AtlasModelThumbnails',
   ]);
 
@@ -90,14 +97,14 @@ try {
       if (!entry.isSymbolicLink()) visit(path.join(relative, entry.name), entry);
     }
   }
-  for (const directory of ['', 'ipad']) {
+  for (const directory of ['', 'tests', 'ipad', 'vision']) {
     if (directory && (!contained(directory) || !stat(absolute(directory))?.isDirectory())) continue;
     for (const entry of fs.readdirSync(absolute(directory), { withFileTypes: true })) {
       const name = entry.name;
       if (/\.xcresult(?:\.zip)?$/.test(name)
-          || /^atlas-ipad-.*-(?:shots|attachments)(?:-\d+)?$/.test(name)
-          || /^atlas-ipad-.*-tests?$/.test(name)
-          || /^(?:atlas-|transfer-).*\.(?:png|mp4|log)$/.test(name)
+          || /^atlas-(?:ipad|vision)-.*-(?:shots|attachments)(?:-\d+)?$/.test(name)
+          || /^atlas-(?:ipad|vision)-.*-tests?$/.test(name)
+          || /^(?:atlas-|transfer-).*\.(?:png|mp4|webm|mov|heic|log)$/.test(name)
           || /^(?:npm-debug|yarn-debug|yarn-error|pnpm-debug)\.log/.test(name)
           || /^vite\.config\..*\.timestamp-.*$/.test(name)
           || /\.tsbuildinfo$/.test(name) || /^\.coverage\./.test(name)) {
@@ -114,7 +121,7 @@ try {
       } else if (/\.py[co]$/.test(entry.name)) candidates.add(relative);
     });
   }
-  for (const directory of ['src', 'scripts', 'tests', 'ipad/Tests', 'ipad/UITests']) pythonCaches(directory);
+  for (const directory of ['src', 'scripts', 'tests', 'ipad/Tests', 'ipad/UITests', 'vision/Tests', 'vision/UITests']) pythonCaches(directory);
 
   // Leave the active service's file descriptor and PID record intact.
   let serviceRunning = false;
@@ -147,14 +154,36 @@ try {
       && fs.statSync(absolute(source)).size === info.size && digest(file) === digest(absolute(source));
   }
 
-  // A user may accidentally save an actual project into a build/cache folder.
-  // Keep the whole target if it contains project markers or model/teaching data,
-  // including the images and relative resources referenced by that project.
+  function jsonPrefix(file, info) {
+    const fd = fs.openSync(file, 'r');
+    const prefix = Buffer.alloc(Math.min(info.size, 16384));
+    try { fs.readSync(fd, prefix, 0, prefix.length, 0); } finally { fs.closeSync(fd); }
+    // Foundation's JSONEncoder escapes slashes in the native protocol string.
+    return prefix.toString('utf8').replaceAll('\\/', '/');
+  }
+
+  // Native snapshots reference separately protected ATLS files. Full projects
+  // and unrecognized Pose/config JSON may reference images or relative assets:
+  // retain their containing directory, even inside a mixed test-output tree.
+  function projectBoundary(file) {
+    if (/\.(?:atlas-project|xcappdata)$/i.test(path.basename(file))) return true;
+    for (const entry of fs.readdirSync(file, { withFileTypes: true })) {
+      if (['atlas.project.json', 'project.json', 'pose.json', 'session.json', 'result.json'].includes(entry.name)) return true;
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.json')) continue;
+      const child = path.join(file, entry.name), prefix = jsonPrefix(child, fs.lstatSync(child));
+      if (/atlas-route-studio-project|"(?:schemaVersion|virtualTeachingTasks)"/.test(prefix)
+          || (/"cameraPose"/.test(prefix) && !prefix.includes('atlas-ipad-teaching/1'))) return true;
+    }
+    return false;
+  }
+
+  // Build/cache targets stay atomic. Mixed test directories can be traversed
+  // below, but complete projects and their relative resources remain atomic.
   function inspect(file) {
     const info = fs.lstatSync(file);
     if (info.isSymbolicLink()) return { bytes: 0 };
     const name = path.basename(file);
-    if (/\.atlas-project(?:\.zip)?$/i.test(name)
+    if (/\.(?:atlas-project|xcappdata)(?:\.zip)?$/i.test(name)
         || ['atlas.project.json', 'project.json', 'pose.json', 'session.json', 'result.json'].includes(name)
         || (/\.(?:ply|atls)$/i.test(name) && !publicBuildCopy(file, info))
         || /\.abxteach\.ndjson$/i.test(name)
@@ -173,10 +202,7 @@ try {
     if (info.isFile() && name.toLowerCase().endsWith('.json')) {
       // Look for project identity even if a guide/config JSON was renamed.
       // Reading a small prefix also handles old configs containing large media.
-      const fd = fs.openSync(file, 'r');
-      const prefix = Buffer.alloc(Math.min(info.size, 16384));
-      try { fs.readSync(fd, prefix, 0, prefix.length, 0); } finally { fs.closeSync(fd); }
-      if (/atlas-route-studio-project|atlas-ipad-teaching\/1|"(?:schemaVersion|virtualTeachingTasks|cameraPose)"/.test(prefix.toString('utf8'))) {
+      if (/atlas-route-studio-project|atlas-ipad-teaching\/1|"(?:schemaVersion|virtualTeachingTasks|cameraPose)"/.test(jsonPrefix(file, info))) {
         return { protected: path.relative(root, file), bytes: 0 };
       }
     }
@@ -186,24 +212,36 @@ try {
   console.log(`${dryRun ? '预览清理' : '清理工程'}：${root}`);
   let count = 0, total = 0, skipped = 0;
   const covered = [];
-  for (const relative of [...candidates].sort((a, b) => a.length - b.length || a.localeCompare(b))) {
-    if (!stat(absolute(relative)) || covered.some((parent) => relative.startsWith(`${parent}/`))) continue;
-    const trackedFile = tracked.find((name) => name === relative || name.startsWith(`${relative}/`));
-    if (!contained(relative) || trackedFile) {
-      console.log(`[保留] ${display(relative)}：${trackedFile ? '含 Git 跟踪文件' : '路径含符号链接'}`);
-      skipped += 1; covered.push(relative); continue;
+  function clean(relative, selective = false) {
+    const info = stat(absolute(relative));
+    if (!info) return;
+    if (!contained(relative)) {
+      console.log(`[保留] ${display(relative)}：路径含符号链接`);
+      skipped += 1; return;
     }
-    const result = inspect(absolute(relative));
+    const trackedFile = tracked.find((name) => name === relative || name.startsWith(`${relative}/`));
+    const result = trackedFile ? { protected: trackedFile } : inspect(absolute(relative));
     if (result.protected) {
-      console.log(`[保留] ${display(relative)}：含工程资料 ${display(result.protected)}`);
-      skipped += 1; covered.push(relative); continue;
+      if (selective && info.isDirectory() && !projectBoundary(absolute(relative))) {
+        console.log(`[逐项检查] ${display(relative)}：保留资料，清理其余测试产物`);
+        for (const name of fs.readdirSync(absolute(relative)).sort()) clean(path.join(relative, name), true);
+        if (!dryRun && fs.readdirSync(absolute(relative)).length === 0) fs.rmdirSync(absolute(relative));
+        return;
+      }
+      console.log(`[保留] ${display(relative)}：${trackedFile ? '含 Git 跟踪文件' : '含工程资料'} ${display(result.protected)}`);
+      skipped += 1; return;
     }
     console.log(`[${dryRun ? '将清理' : '清理'}] ${display(relative)} (${megabytes(result.bytes)})`);
     if (!dryRun) fs.rmSync(absolute(relative), { recursive: true, force: true });
-    total += result.bytes; count += 1; covered.push(relative);
+    total += result.bytes; count += 1;
+  }
+  for (const relative of [...candidates].sort((a, b) => a.length - b.length || a.localeCompare(b))) {
+    if (!stat(absolute(relative)) || covered.some((parent) => relative.startsWith(`${parent}/`))) continue;
+    clean(relative, testRoots.has(relative));
+    covered.push(relative);
   }
   console.log(`${dryRun ? '预计清理' : '已清理'} ${count} 项，文件大小合计 ${megabytes(total)}；保护性保留 ${skipped} 项。`);
-  console.log('工程配置、Pose、源模型、iPad 配对/同步资料、浏览器自动保存和已安装依赖均保留。');
+  console.log('工程配置、Pose、源模型、iPad / Vision Pro 配对/同步资料、浏览器自动保存和已安装依赖均保留。');
   if (serviceRunning) console.log('服务正在运行，保留日志和 PID 状态；清理后请重启服务以重建前端缓存。');
 } catch (error) {
   console.error(`清理未完成：${error.message}`);

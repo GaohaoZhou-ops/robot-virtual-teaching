@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { BoxGeometry } from 'three';
+import { BoxGeometry, PlaneGeometry } from 'three';
 import { packIPadModel, ipadResultTask } from '../src/lib/ipadTeaching.js';
 import { validateIPadResult } from '../src/lib/ipadProtocol.js';
 import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
@@ -23,11 +23,15 @@ const run = (cmd, args) => new Promise((resolve, reject) => {
   child.on('error', reject); child.on('exit', code => code === 0 ? resolve() : reject(new Error(`Exit ${code}`)));
 });
 const geometry = new BoxGeometry(1, 1, 1); geometry.computeBoundingBox();
+const denseGeometry = new PlaneGeometry(4.3, 4.35, 512, 512); denseGeometry.computeBoundingBox();
 const map = { geometry, name: 'vision-test.ply', mapId: 'vision-test', sourceHash: 'vision-test', bounds: geometry.boundingBox };
 try {
   const packed = await packIPadModel(map), fixture = path.join(directory, 'fixture');
   await writeFile(`${fixture}.atls`, new Uint8Array(packed.buffer));
   await writeFile(`${fixture}.json`, JSON.stringify(packed.manifest));
+  const dense = await packIPadModel({ geometry: denseGeometry, name: 'dense-preview.ply', bounds: denseGeometry.boundingBox });
+  await writeFile(`${fixture}-dense.atls`, new Uint8Array(dense.buffer));
+  await writeFile(`${fixture}-dense.json`, JSON.stringify(dense.manifest));
   const binary = path.join(directory, 'vision-native');
   await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift', 'ipad/AtlasTeaching/LANClient.swift',
     'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/AtlasTeaching/ModelGeometry.swift', 'vision/AtlasVisionTeaching/VisionPoseMath.swift',
@@ -64,5 +68,5 @@ try {
   assert.deepEqual(normalizeProject((await readProjectArchive(archive.bytes)).payload).teachingTasks[0].mobileCapture, result);
   console.log('Vision Pro protocol, simulator rejection, desktop import and archive round trip passed.');
 } finally {
-  geometry.dispose(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true });
+  geometry.dispose(); denseGeometry.dispose(); await new Promise(resolve => server.close(resolve)); await rm(directory, { recursive: true, force: true });
 }

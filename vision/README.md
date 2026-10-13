@@ -56,6 +56,10 @@
 
 ## 构建与验证
 
+仅生成编译产物时运行 `./scripts/build_vision.sh`，默认输出未签名 Release 应用到 `vision/build/device/Build/Products/Release-xros/AtlasVisionTeaching.app`，日志在 `vision/build/device/build.log`。使用 `--simulator --configuration Debug` 可构建模拟器应用，产物与日志改在 `vision/build/simulator/` 下。构建脚本不自动安装或启动设备；需要直接调试模拟器时仍使用 `./scripts/run-vision-simulator.sh`。
+
+构建 / 测试结束后，`./scripts/clean_build.sh --dry-run` 可预览清理范围，去掉 `--dry-run` 执行清理。覆盖 `vision/build/`、`vision/DerivedData/` 和 `vision/test-artifacts/`；测试目录中的模型、Pose 和任务快照会保留，完整工程及其引用资源也会保留。
+
 ```bash
 # 从仓库根目录执行；不访问真实示教任务，网络测试使用临时目录与独立端口。
 npm run test:vision
@@ -82,6 +86,8 @@ VISION_SIMULATOR_ID=<UDID> VISION_ARTIFACTS=/tmp/atlas-vision-check ./scripts/ch
 与 iPad 工程共享 `TeachingModels`、`TeachingSession`、`ProjectStore`、`LANClient`、Bonjour 发现和 ATLS 模型验证源码。独立的 visionOS Target 使用 RealityKit 渲染，不加载 iPad 的 ARSCNView。旧协议名称和 `/__atlas/ipad/` 路由保留，以兼容已有 iPad App；服务端依据明确的平台及位姿来源校验坐标轴。
 
 模型原文件完整保留；空间显示预算为轻量 / 均衡 / 精细：最多 4 / 12 / 30 万三角面，或 0.8 / 2 / 5 万点。Mesh 使用抽样面及其平均顶点颜色，点云使用小四面体；显示精度不改变示教坐标或模型指纹。最多保存 50,000 个 Pose、1,000 段校准，空间中显示最近 500 个 Pose 标记。当前版本不包含 iPad 专用的原始相机预览、二维码相机扫描或已示教表面覆盖着色。
+
+窗口预览使用独立显示数据：12 万面以内的模型保留完整网格，更密的扫描模型和点云采用最多 5 万个彩色点，按窗口尺寸设置点的可见大小，避免大量细小三角面被抽样后在缩小预览中消失。预览生成可取消、失败可重试，不改变空间示教的 1:1 模型与校准数据。原生回归测试覆盖稠密网格的预览策略、显示预算与点大小；`testExistingLocalModelPreview` 可通过测试运行器的 `ATLAS_PREVIEW_PROJECT_ID` 和 `ATLAS_PREVIEW_CAPTURE_URL` 检查指定本地模型，并让 Mac 端截图接收服务保存实际画面。
 
 Apple 接口参考：[ARKit 权限与空间会话](https://developer.apple.com/documentation/visionos/setting-up-access-to-arkit-data)、[头显参考位姿查询](https://developer.apple.com/documentation/arkit/worldtrackingprovider/querydeviceanchor(attimestamp:))。
 
