@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from viewer_tools_helpers import viewer_tool
 
@@ -224,6 +224,7 @@ def run():
         page.locator('[data-app-page="teaching-data"]').wait_for(state="detached")
         assert page.url.rstrip("/") == f"{BASE_URL.rstrip('/')}/workbench"
         dock = page.get_by_label("示教任务轨迹播放控制", exact=True)
+        canvas = page.locator(".three-canvas")
         dock.wait_for()
         assert dock.get_attribute("data-playback-status") == "playing"
         assert dock.get_attribute("data-playback-task")
@@ -253,6 +254,14 @@ def run():
         assert int(dock.get_attribute("data-playback-elapsed-ms")) > elapsed_before_collapse
         assert page.get_by_role("button", name="暂停示教轨迹播放").count() == 0
         page.screenshot(path="/tmp/atlas-teaching-playback-collapsed.png", full_page=True)
+        canvas.press("Space")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        collapsed_elapsed = dock.get_attribute("data-playback-elapsed-ms")
+        page.wait_for_timeout(200)
+        assert dock.get_attribute("data-playback-elapsed-ms") == collapsed_elapsed
+        canvas.press("Space")
+        expect(dock).to_have_attribute("data-playback-status", "playing")
+        expect(dock).to_have_attribute("data-collapsed", "true")
         expand_dock = page.get_by_role("button", name="展开播放控制条")
         assert expand_dock.get_attribute("aria-expanded") == "false"
         expand_dock.press("Enter")
@@ -273,17 +282,50 @@ def run():
             """,
             timeout=30_000,
         )
-        page.evaluate(
-            "document.querySelector('[aria-label=\"暂停示教轨迹播放\"]')?.click()"
-        )
-        page.wait_for_function(
-            "document.querySelector('[aria-label=\"示教任务轨迹播放控制\"]')?.dataset.playbackStatus === 'paused'"
-        )
+        # A held Space pauses once and freezes the actual motion, not just the UI.
+        canvas.focus()
+        page.keyboard.down("Space")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        page.keyboard.down("Space")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        page.keyboard.up("Space")
         paused_joint = scene_joint(page, "right_J1")
         paused_pose = scene_pose(page)
+        paused_elapsed = dock.get_attribute("data-playback-elapsed-ms")
         page.wait_for_timeout(450)
         assert abs(scene_joint(page, "right_J1") - paused_joint) < 0.0001
         assert abs(scene_pose(page)["x"] - paused_pose["x"]) < 0.0001
+        assert dock.get_attribute("data-playback-elapsed-ms") == paused_elapsed
+
+        # Typing and dismissing a modal must not resume or stop the paused task.
+        page.get_by_role("button", name="新建示教任务", exact=True).click()
+        dialog = page.get_by_role("dialog", name="新建示教任务", exact=True)
+        name = dialog.get_by_role("textbox", name="新示教任务名称", exact=True)
+        name.fill("快捷键")
+        name.press("End")
+        name.press("Space")
+        name.press("T")
+        expect(name).to_have_value("快捷键 T")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        dialog.get_by_role("button", name="创建任务", exact=True).focus()
+        page.keyboard.press("Escape")
+        expect(dialog).to_have_count(0)
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+
+        # The hidden workbench cannot resume or stop from another page.
+        page.get_by_role("button", name="打开示教数据管理页").click()
+        page.evaluate("document.activeElement?.blur()")
+        page.keyboard.press("Space")
+        page.keyboard.press("Escape")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        page.get_by_role("button", name="返回主工作台继续示教").click()
+
+        # Space on the focused playback button toggles exactly once per press.
+        page.get_by_role("button", name="继续示教轨迹播放", exact=True).press("Space")
+        expect(dock).to_have_attribute("data-playback-status", "playing")
+        page.get_by_role("button", name="暂停示教轨迹播放", exact=True).press("Space")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        print("Space pause/resume, held key, collapsed dock, modal/input and page scope passed", flush=True)
 
         # Following is an accessible boolean switch. Enabling it recenters the
         # robot without changing the viewing angle or zoom.
@@ -331,7 +373,8 @@ def run():
             page.screenshot(path=f"/tmp/atlas-teaching-playback-width-{width}.png", full_page=True)
         page.set_viewport_size({"width": 1440, "height": 900})
         page.get_by_role("combobox", name="示教轨迹播放速度").select_option("2")
-        page.get_by_role("button", name="继续示教轨迹播放").click()
+        canvas.press("Space")
+        expect(dock).to_have_attribute("data-playback-status", "playing")
         assert page.get_by_role("button", name="展开 Z 截面").get_attribute("aria-expanded") == "false"
         assert [height_range.get_attribute(f"data-slice-{edge}") for edge in ("min", "max")] == initial_slice
         print(
@@ -422,8 +465,16 @@ def run():
         assert_following(resumed_follow_view, scene_view(page))
         page.get_by_role("button", name="展开播放控制条").click()
         assert follow_switch.get_attribute("aria-checked") == "true"
-        page.get_by_role("button", name="停止示教轨迹播放").click()
+        # Escape stops playback before the preview handler can clear a ghost.
+        page.get_by_role("button", name="选择当前停车点 停车点 P01", exact=True).click()
+        ghost = page.get_by_label("停车点机器人虚影", exact=True)
+        expect(ghost).to_be_visible()
+        page.keyboard.down("Escape")
         dock.wait_for(state="detached")
+        expect(ghost).to_be_visible()
+        page.keyboard.down("Escape")
+        expect(ghost).to_be_visible()
+        page.keyboard.up("Escape")
         assert page.locator(".point-cloud-view").get_attribute(
             "data-robot-trajectory-active"
         ) == "false"
@@ -436,6 +487,32 @@ def run():
         assert scene_joint(page, "right_J1") == stopped_joint
         assert scene_view(page) == stopped_view
         assert viewer_tool(page, name="定位机器人模型").is_enabled()
+
+        canvas.press("Escape")
+        expect(ghost).to_have_count(0)
+        canvas.press("Space")
+        expect(dock).to_have_count(0)
+        assert scene_pose(page) == stopped_pose
+
+        # A new playback can also be terminated while paused, without restarting
+        # it on later Space presses or allowing stale animation frames to move it.
+        page.get_by_role("button", name="打开示教数据管理页").click()
+        page.get_by_role("button", name="选择示教任务 轨迹回放验证", exact=True).click(timeout=10_000)
+        play_task.click(timeout=10_000)
+        expect(dock).to_have_attribute("data-playback-status", "playing")
+        canvas.press("Space")
+        expect(dock).to_have_attribute("data-playback-status", "paused")
+        paused_pose = scene_pose(page)
+        paused_joint = scene_joint(page, "right_J1")
+        canvas.press("Escape")
+        expect(dock).to_have_count(0)
+        expect(page.locator(".point-cloud-view")).to_have_attribute("data-robot-trajectory-active", "false")
+        canvas.press("Space")
+        page.wait_for_timeout(450)
+        expect(dock).to_have_count(0)
+        assert scene_pose(page) == paused_pose
+        assert scene_joint(page, "right_J1") == paused_joint
+        print("Escape stops playing/paused tasks, preserves position and takes priority over ghosts", flush=True)
 
         page.screenshot(path="/tmp/atlas-teaching-playback.png", full_page=True)
         assert not errors, errors

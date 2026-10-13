@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 from viewer_tools_helpers import viewer_tool
 
@@ -136,6 +136,33 @@ def run():
         assert canvas.get_attribute("data-parking-ghost-target-pose") == target_pose
         assert first_stop.get_attribute("data-ghost-preview") == "true"
 
+        # Modal dialogs and other pages own Escape while the preview stays open.
+        page.get_by_role("button", name="新建示教任务", exact=True).click()
+        dialog.get_by_role("button", name="创建任务", exact=True).focus()
+        page.keyboard.press("Escape")
+        expect(dialog).to_have_count(0)
+        expect(ghost_card).to_be_visible()
+        page.get_by_role("button", name="打开示教数据管理页").click()
+        page.keyboard.press("Escape")
+        expect(canvas).to_have_attribute("data-parking-ghost-state", "visible")
+        page.get_by_role("button", name="返回主工作台继续示教").click()
+
+        # Escape dismisses the preview even with base keyboard control enabled,
+        # without changing the live robot or the current parking selection.
+        live_pose = read_robot_pose(canvas)
+        active_parking_id = tree.get_attribute("data-active-parking-point")
+        first_stop.focus()
+        page.keyboard.press("Escape")
+        expect(ghost_card).to_have_count(0)
+        expect(canvas).to_have_attribute("data-parking-ghost-state", "hidden")
+        expect(first_stop).to_have_attribute("data-ghost-preview", "false")
+        expect(canvas).to_have_attribute("data-robot-control-enabled", "true")
+        assert read_robot_pose(canvas) == live_pose
+        assert json.loads(canvas.get_attribute("data-robot-joint-values")) == before_joint_values
+        assert tree.get_attribute("data-active-parking-point") == active_parking_id
+
+        first_stop.click()
+        ghost_card.wait_for()
         page.get_by_role("button", name="清除停车点机器人虚影").click()
         ghost_card.wait_for(state="detached")
         page.wait_for_function(
@@ -211,7 +238,7 @@ def run():
         assert not errors, errors
         browser.close()
 
-    print("parking_ghost=created,current-pose-preserved,live-distance,cleared,moved,joints-preserved,captured,playback-stopped")
+    print("parking_ghost=created,current-pose-preserved,live-distance,escape-cleared,modal-page-priority,button-cleared,moved,joints-preserved,captured,playback-stopped")
 
 
 if __name__ == "__main__":

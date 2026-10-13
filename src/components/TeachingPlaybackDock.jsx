@@ -69,6 +69,8 @@ export default function TeachingPlaybackDock({
             className="is-primary"
             onClick={playing ? onPause : onResume}
             aria-label={playing ? '暂停示教轨迹播放' : '继续示教轨迹播放'}
+            aria-keyshortcuts="Space"
+            title={playing ? '暂停示教轨迹播放 · 空格' : '继续示教轨迹播放 · 空格'}
           >
             {playing ? <Pause size={13} fill="currentColor" /> : <Play size={13} fill="currentColor" />}
             {playing ? '暂停' : '继续'}
@@ -100,7 +102,14 @@ export default function TeachingPlaybackDock({
             <Crosshair size={13} /> 跟随
             <span className="teaching-playback-dock__switch" aria-hidden="true" />
           </button>
-          <button type="button" className="is-stop" onClick={onStop} aria-label="停止示教轨迹播放">
+          <button
+            type="button"
+            className="is-stop"
+            onClick={onStop}
+            aria-label="停止示教轨迹播放"
+            aria-keyshortcuts="Escape"
+            title="停止示教轨迹播放 · Esc"
+          >
             <Square size={11} fill="currentColor" /> 停止
           </button>
         </div>

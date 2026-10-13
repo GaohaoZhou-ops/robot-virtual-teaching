@@ -4096,6 +4096,42 @@ export default function App() {
   }, [appPage, pauseTeachingTaskPlayback]);
 
   useEffect(() => {
+    if (appPage !== APP_PAGE_WORKBENCH) return undefined;
+    const onKeyDown = (event) => {
+      const isSpace = event.code === 'Space' || event.key === ' ';
+      const isEscape = event.code === 'Escape' || event.key === 'Escape';
+      const runtime = teachingPlaybackRuntimeRef.current;
+      if (
+        (!isSpace && !isEscape)
+        || !runtime
+        || !['playing', 'paused'].includes(runtime.status)
+        || event.defaultPrevented
+        || event.isComposing
+        || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey
+      ) return;
+
+      const target = event.target;
+      if (
+        target?.isContentEditable
+        || target?.closest?.('input, textarea, select, [role="textbox"]')
+        || document.querySelector('[aria-modal="true"], dialog[open]')
+      ) return;
+      // Focused controls keep native Space activation, including pause/resume.
+      if (isSpace && target?.closest?.('button, a[href], [role="button"], [role="switch"]')) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      if (isEscape) stopTeachingTaskPlayback();
+      else if (runtime.status === 'playing') pauseTeachingTaskPlayback();
+      else resumeTeachingTaskPlayback();
+    };
+    // Handle playback before the viewer's window listener can dismiss a ghost.
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [appPage, pauseTeachingTaskPlayback, resumeTeachingTaskPlayback, stopTeachingTaskPlayback]);
+
+  useEffect(() => {
     const pauseWhenHidden = () => {
       if (document.visibilityState !== 'visible') pauseTeachingTaskPlayback();
     };

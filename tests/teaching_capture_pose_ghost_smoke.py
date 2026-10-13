@@ -164,10 +164,16 @@ def run():
         page.wait_for_function("document.querySelector('.three-canvas').dataset.synchronizedFocusState === 'settled'")
         page.screenshot(path="/tmp/atlas-teaching-capture-pose-ghost.png", full_page=True)
 
-        page.get_by_role("button", name="清除停车点机器人虚影").click()
+        # Escape from a pose in the teaching tree clears both the 3D ghost and
+        # its tree highlight, without applying the archived pose to the robot.
+        second_node.focus()
+        page.keyboard.press("Escape")
         card.wait_for(state="detached")
         expect(second_node).to_have_attribute("aria-selected", "false")
+        expect(canvas).to_have_attribute("data-parking-ghost-state", "hidden")
         page.wait_for_function("document.querySelector('.three-canvas').dataset.parkingGhostPoseId === ''")
+        assert read_robot_pose(canvas) == live_pose
+        assert json.loads(canvas.get_attribute("data-robot-joint-values")) == live_joints
 
         # Selecting the parent switches back to the parking-only action. Selecting
         # a pose again applies its joints and the owning stop in a single click.
@@ -229,7 +235,7 @@ def run():
         assert not errors, errors
         browser.close()
 
-    print("pose ghosts: expansion, parking-bound preview, action switching, one-click pose application, playback stop, clearing, task selection and deletion passed")
+    print("pose ghosts: expansion, parking-bound preview, action switching, one-click pose application, playback stop, Escape clearing, task selection and deletion passed")
 
 
 if __name__ == "__main__":

@@ -145,7 +145,11 @@ def run():
         expect(tree).to_have_attribute("data-active-task", task_id)
         expect(tree).to_have_attribute("data-active-parking-point", parking_id)
         page.keyboard.press("Escape")
+        expect(card).to_have_count(0)
+        expect(canvas).to_have_attribute("data-parking-ghost-state", "hidden")
         wait_for_pose(page, moved)
+        first_stop.click()
+        expect(card).to_be_visible()
         print("WASD and turn keys moved the robot with a fixed ghost; new position recorded", flush=True)
 
         # Escape cancels even while a movement key is held, restoring the saved
