@@ -317,12 +317,13 @@ export default function MapDetailsDialog({
           <div className="map-details-dialog__actions">
             <button
               type="button"
+              className="is-primary"
               disabled={!canDownloadOriginal}
-              title={canDownloadOriginal ? `下载 ${fileName}` : '此工程未保留原始文件，无法下载'}
+              title={canDownloadOriginal ? `下载原始地图文件：${fileName}` : '此工程未保留原始文件，无法下载'}
               onClick={downloadOriginal}
             >
               <Download size={13} />
-              下载原始文件
+              下载当前地图
             </button>
             <button type="button" onClick={onClose}>关闭</button>
           </div>

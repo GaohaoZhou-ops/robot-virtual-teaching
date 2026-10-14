@@ -18,7 +18,7 @@ def assert_axis(dialog, axis, expected_min, expected_max, expected_span):
 
 
 def assert_original_download(page, dialog):
-    button = dialog.get_by_role("button", name="下载原始文件", exact=True)
+    button = dialog.get_by_role("button", name="下载当前地图", exact=True)
     assert button.is_enabled()
     close = dialog.get_by_role("button", name="关闭", exact=True)
     download_box, close_box = button.bounding_box(), close.bounding_box()
@@ -100,7 +100,7 @@ def run():
                 "node => node.scrollWidth <= node.clientWidth"
             )
             dialog.get_by_role("table", name="XYZ坐标范围").scroll_into_view_if_needed()
-            dialog.get_by_role("button", name="下载原始文件", exact=True).scroll_into_view_if_needed()
+            dialog.get_by_role("button", name="下载当前地图", exact=True).scroll_into_view_if_needed()
             assert project.locator("dl").evaluate(
                 "node => getComputedStyle(node).gridTemplateColumns.split(' ').length"
             ) == (1 if width <= 720 else 2)
@@ -151,7 +151,7 @@ def run():
         page.locator(".loading-curtain").wait_for(state="hidden")
         details_button.click()
         dialog.wait_for()
-        assert dialog.get_by_role("button", name="下载原始文件", exact=True).is_disabled()
+        assert dialog.get_by_role("button", name="下载当前地图", exact=True).is_disabled()
         assert dialog.get_by_text("此工程未保留原始文件", exact=True).is_visible()
         dialog.get_by_role("button", name="关闭", exact=True).click()
 
