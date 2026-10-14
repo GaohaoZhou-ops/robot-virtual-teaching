@@ -82,6 +82,7 @@ def run():
         expect(page.locator(".waypoint-chips button")).to_have_count(2)
         page.locator(f'.waypoint-chips [data-waypoint-id="{first_id}"]').click()
         page.get_by_label("导航点名称", exact=True).fill("联动停车点")
+        page.get_by_role("button", name="修改", exact=True).click()
         x_field = page.locator(".property-editor .field-grid.three .numeric-field input").first
         new_x = first_pose["x"] + 0.35
         x_field.fill(str(new_x))
