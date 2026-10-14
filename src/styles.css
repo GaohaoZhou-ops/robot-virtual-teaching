@@ -12561,6 +12561,15 @@ input[type="number"]::-webkit-inner-spin-button {
 .text-field input:focus,
 .numeric-field > div:focus-within { border-color: rgba(89,219,232,.48); }
 
+.waypoint-name-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.waypoint-name-field .text-field { min-width: 0; }
+
 .field-section-heading {
   display: flex;
   align-items: center;

@@ -57,6 +57,44 @@ function NumericField({ label, value, unit, step = '0.01', onCommit }) {
   );
 }
 
+function WaypointNameField({ name, onCommit }) {
+  const [draft, setDraft] = useState(name);
+  const nextName = draft.trim();
+  const canCommit = Boolean(nextName && nextName !== name);
+
+  useEffect(() => {
+    setDraft(name);
+  }, [name]);
+
+  return (
+    <form
+      className="waypoint-name-field"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!canCommit) return;
+        onCommit(nextName);
+        setDraft(nextName);
+      }}
+    >
+      <label className="text-field">
+        <span>导航点名称</span>
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && event.nativeEvent.isComposing) {
+              event.preventDefault();
+            }
+          }}
+        />
+      </label>
+      <button type="submit" className="action-button primary" disabled={!canCommit}>
+        修改
+      </button>
+    </form>
+  );
+}
+
 const statusMeta = {
   connected: { label: '可互达', className: 'connected' },
   unreachable: { label: '未互达', className: 'unreachable' },
@@ -406,13 +444,11 @@ export default function Inspector({
               </div>
             </div>
 
-            <label className="text-field">
-              <span>导航点名称</span>
-              <input
-                value={selectedWaypoint.name}
-                onChange={(event) => onUpdateWaypoint(selectedWaypoint.id, { name: event.target.value })}
-              />
-            </label>
+            <WaypointNameField
+              key={selectedWaypoint.id}
+              name={selectedWaypoint.name}
+              onCommit={(name) => onUpdateWaypoint(selectedWaypoint.id, { name })}
+            />
 
             <div className="field-section-heading">
               <span>原始三维坐标</span>
