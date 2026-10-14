@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import {
@@ -44,6 +44,13 @@ import { ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceLabel } from './lib/ipadProtocol.js';
 import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
 import { inspectConnectivity } from './lib/graph.js';
+import {
+  buildTeachingWaypoints,
+  navigationEdgesForWaypoints,
+  parkingWaypointPose,
+  removeTeachingWaypoints,
+  updateTeachingWaypoint,
+} from './lib/teachingNavigation.js';
 import {
   buildExport,
   clampSlice,
@@ -462,8 +469,8 @@ export default function App() {
   const [teachingSpaceMode, setTeachingSpaceMode] = useState('map');
   const [heightRange, setHeightRange] = useState([0, 1]);
   const [heightRangeCollapsed, setHeightRangeCollapsed] = useState(true);
-  const [waypoints, setWaypoints] = useState([]);
-  const [edges, setEdges] = useState([]);
+  const [storedWaypoints, setWaypoints] = useState([]);
+  const [storedEdges, setEdges] = useState([]);
   const [mode, setMode] = useState('select');
   const [connectionSourceId, setConnectionSourceId] = useState(null);
   const [selectedWaypointId, setSelectedWaypointId] = useState(null);
@@ -541,6 +548,15 @@ export default function App() {
   const alternateTeachingMode = isIndependentTeachingSpace ? 'map' : 'independent';
   const activeCollapsedPanel = isIndependentTeachingSpace ? null : collapsedPanel;
   const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
+  const waypoints = useMemo(() => buildTeachingWaypoints(storedWaypoints, teachingTasks, {
+    mapData,
+    coordinateFrame,
+  }), [storedWaypoints, teachingTasks, mapData, coordinateFrame]);
+  const edges = useMemo(() => navigationEdgesForWaypoints(storedEdges, waypoints), [storedEdges, waypoints]);
+  const navigationTopology = useMemo(() => JSON.stringify([
+    waypoints.map((point) => point.id),
+    edges.map((edge) => [edge.id, edge.from, edge.to]),
+  ]), [waypoints, edges]);
 
   latestWorkspaceRef.current = {
     workspaceTransfer,
@@ -572,6 +588,23 @@ export default function App() {
   };
 
   useEffect(() => {
+    // Follow task/parking selection, without overriding later manual navigation
+    // selections when an existing point is merely renamed or moved.
+    const point = latestWorkspaceRef.current.waypoints.find((candidate) => (
+      candidate.id === activeTeachingParkingPointId && candidate.teachingTaskId === activeTeachingTaskId
+    ));
+    setSelectedWaypointId(point?.id || null);
+    setSelectedEdgeId(null);
+  }, [activeTeachingTaskId, activeTeachingParkingPointId]);
+
+  useEffect(() => {
+    const ids = new Set(waypoints.map((point) => point.id));
+    if (selectedWaypointId && !ids.has(selectedWaypointId)) setSelectedWaypointId(null);
+    if (connectionSourceId && !ids.has(connectionSourceId)) setConnectionSourceId(null);
+    if (selectedEdgeId && !edges.some((edge) => edge.id === selectedEdgeId)) setSelectedEdgeId(null);
+  }, [waypoints, edges, selectedWaypointId, selectedEdgeId, connectionSourceId]);
+
+  useEffect(() => {
     const geometry = mapData?.geometry;
     return () => geometry?.dispose?.();
   }, [mapData?.geometry]);
@@ -596,16 +629,21 @@ export default function App() {
         || current.mapKey !== currentMapKey
         || current.robotKey !== currentRobotKey
       ) return null;
+      const targetPose = normalizeRobotPose(parkingPoint.mapPose);
+      const targetChanged = !current.editing && Object.entries(parkingWaypointPose(targetPose))
+        .some(([axis, value]) => parkingWaypointPose(current.targetPose)[axis] !== value);
       if (
         current.parkingPointName !== parkingPoint.name
         || current.taskName !== task.name
         || current.poseName !== (pose?.name || '')
+        || targetChanged
       ) {
         return {
           ...current,
           parkingPointName: parkingPoint.name,
           taskName: task.name,
           poseName: pose?.name || '',
+          ...(targetChanged ? { targetPose, revision: createId('robot-parking-ghost') } : {}),
         };
       }
       return current;
@@ -845,8 +883,14 @@ export default function App() {
 
   const invalidateConnectivity = useCallback(() => {
     setValidation(initialValidation);
-    setEdges((current) => current.map((edge) => ({ ...edge, status: 'unchecked' })));
+    setEdges((current) => current.some((edge) => edge.status !== 'unchecked')
+      ? current.map((edge) => ({ ...edge, status: 'unchecked' }))
+      : current);
   }, []);
+
+  useEffect(() => {
+    invalidateConnectivity();
+  }, [invalidateConnectivity, navigationTopology]);
 
   const installMapGeometry = useCallback(
     async (geometry, name, options = {}) => {
@@ -2316,15 +2360,6 @@ export default function App() {
     setSynchronizedFocus({ type, id, revision: focusRevisionRef.current });
   }, []);
 
-  const focusWaypointFromInspector = useCallback(
-    (id) => {
-      setShowWaypoints3D(true);
-      selectWaypoint(id);
-      requestSynchronizedFocus('waypoint', id);
-    },
-    [requestSynchronizedFocus, selectWaypoint],
-  );
-
   const selectEdge = useCallback((id) => {
     setSelectedEdgeId(id);
     setSelectedWaypointId(null);
@@ -2388,10 +2423,15 @@ export default function App() {
   );
 
   const updateWaypoint = useCallback((id, patch) => {
+    if (waypoints.some((point) => point.id === id && point.teachingTaskId)) {
+      setTeachingTasks((current) => updateTeachingWaypoint(current, id, patch));
+      if (patch.pose) invalidateConnectivity();
+      return;
+    }
     setWaypoints((current) =>
       current.map((point) => (point.id === id ? { ...point, ...patch } : point)),
     );
-  }, []);
+  }, [invalidateConnectivity, waypoints]);
 
   const updateEdge = useCallback((id, patch) => {
     setEdges((current) =>
@@ -2403,6 +2443,11 @@ export default function App() {
     ({ waypointIds = [], edgeIds = [] }) => {
       const waypointIdSet = new Set(waypointIds);
       const edgeIdSet = new Set(edgeIds);
+      const linkedParking = waypoints.filter((point) => waypointIdSet.has(point.id) && point.teachingTaskId);
+      if (linkedParking.length) {
+        const poseCount = linkedParking.reduce((count, point) => count + point.teachingPoseCount, 0);
+        if (!window.confirm(`这些导航点关联 ${linkedParking.length} 个示教停车点。删除后将同时移除停车点、${poseCount} 个示教姿态及关联路径，是否继续？`)) return false;
+      }
       const removedWaypointCount = waypoints.reduce(
         (count, point) => count + (waypointIdSet.has(point.id) ? 1 : 0),
         0,
@@ -2421,6 +2466,10 @@ export default function App() {
       );
       if (!removedWaypointCount && !removedEdgeCount) return;
 
+      if (linkedParking.length) {
+        setTeachingTasks((current) => removeTeachingWaypoints(current, waypointIdSet));
+        if (waypointIdSet.has(activeTeachingParkingPointId)) setActiveTeachingParkingPointId(null);
+      }
       setWaypoints((current) =>
         current.filter((point) => !waypointIdSet.has(point.id)),
       );
@@ -2447,23 +2496,12 @@ export default function App() {
       if (removedEdgeCount) removed.push(`${removedEdgeCount} 条路径`);
       notify(`已删除 ${removed.join('和')}`, 'info');
     },
-    [edges, notify, waypoints],
+    [activeTeachingParkingPointId, edges, notify, waypoints],
   );
 
   const deleteWaypoint = useCallback(
-    (id) => {
-      setWaypoints((current) => current.filter((point) => point.id !== id));
-      setEdges((current) =>
-        current
-          .filter((edge) => edge.from !== id && edge.to !== id)
-          .map((edge) => ({ ...edge, status: 'unchecked' })),
-      );
-      setSelectedWaypointId(null);
-      setConnectionSourceId(null);
-      setValidation(initialValidation);
-      notify('导航点及关联路径已删除', 'info');
-    },
-    [notify],
+    (id) => deleteMapSelection({ waypointIds: [id] }),
+    [deleteMapSelection],
   );
 
   const deleteEdge = useCallback(
@@ -2567,6 +2605,8 @@ export default function App() {
     setTeachingTasks((current) => [...current, task]);
     setActiveTeachingTaskId(task.id);
     setActiveTeachingParkingPointId(initialParkingPoint?.id || null);
+    setSelectedWaypointId(initialParkingPoint?.id || null);
+    setSelectedEdgeId(null);
     setTeachingCaptureState({ status: 'idle', message: '' });
     notify(
       initialParkingPoint
@@ -2589,6 +2629,8 @@ export default function App() {
     const task = teachingTasks.find((item) => item.id === id);
     setActiveTeachingTaskId(id);
     setActiveTeachingParkingPointId(task?.parkingPoints?.[0]?.id || null);
+    setSelectedWaypointId(task?.parkingPoints?.[0]?.id || null);
+    setSelectedEdgeId(null);
     setRobotParkingGhost(null);
     setTeachingCaptureState({ status: 'idle', message: '' });
   }, [teachingTasks]);
@@ -2653,6 +2695,8 @@ export default function App() {
         : item
     )));
     setActiveTeachingParkingPointId(parkingPoint.id);
+    setSelectedWaypointId(parkingPoint.id);
+    setSelectedEdgeId(null);
     setTeachingCaptureState({ status: 'idle', message: '' });
     notify(`${parkingPoint.name} 已记录 · ${coordinateFrameLabel} XYZ/RPY`, 'success');
   }, [
@@ -2668,6 +2712,8 @@ export default function App() {
 
   const selectTeachingParkingPoint = useCallback((id) => {
     setActiveTeachingParkingPointId(id);
+    setSelectedWaypointId(id);
+    setSelectedEdgeId(null);
     setRobotParkingGhost(null);
     setTeachingCaptureState({ status: 'idle', message: '' });
   }, []);
@@ -2685,6 +2731,8 @@ export default function App() {
 
     setActiveTeachingTaskId(task?.id || activeTeachingTaskId);
     setActiveTeachingParkingPointId(id);
+    setSelectedWaypointId(id);
+    setSelectedEdgeId(null);
     setTeachingCaptureState({ status: 'idle', message: '' });
 
     if (!task || !parkingPoint || (poseId && !pose)) {
@@ -2693,6 +2741,7 @@ export default function App() {
     }
     if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
       setRobotParkingGhost(null);
+      requestSynchronizedFocus('waypoint', id);
       notify('停车点已选择；请加载与任务匹配的地图和机器人后再生成虚影', 'warning');
       return;
     }
@@ -2756,6 +2805,23 @@ export default function App() {
   const clearRobotParkingGhost = useCallback(() => {
     setRobotParkingGhost(null);
   }, []);
+
+  const selectNavigationWaypoint = useCallback((id) => {
+    selectWaypoint(id);
+    if (waypoints.some((point) => point.id === id && point.teachingTaskId)) {
+      previewTeachingParkingPoint(id);
+    } else {
+      setRobotParkingGhost(null);
+    }
+  }, [previewTeachingParkingPoint, selectWaypoint, waypoints]);
+
+  const focusWaypointFromInspector = useCallback((id) => {
+    setShowWaypoints3D(true);
+    selectNavigationWaypoint(id);
+    if (!waypoints.some((point) => point.id === id && point.teachingTaskId)) {
+      requestSynchronizedFocus('waypoint', id);
+    }
+  }, [requestSynchronizedFocus, selectNavigationWaypoint, waypoints]);
 
   const renameTeachingParkingPoint = useCallback((taskId, parkingPointId, name) => {
     const nextName = String(name || '').trim();
@@ -2930,7 +2996,11 @@ export default function App() {
           }
         : item
     )));
-    if (createParkingPoint) setActiveTeachingParkingPointId(parkingPoint.id);
+    if (createParkingPoint) {
+      setActiveTeachingParkingPointId(parkingPoint.id);
+      setSelectedWaypointId(parkingPoint.id);
+      setSelectedEdgeId(null);
+    }
     if (replacePoseId) {
       setRobotParkingGhost((current) => current?.revision === edit.revision ? {
         ...current,
@@ -4730,7 +4800,7 @@ export default function App() {
                 onMeshRenderQualityChange={setMeshRenderQuality}
                 showWaypoints={showWaypoints3D}
                 onShowWaypointsChange={setShowWaypoints3D}
-                onSelectWaypoint={selectWaypoint}
+                onSelectWaypoint={selectNavigationWaypoint}
                 onSelectEdge={selectEdge}
                 onClearSelection={clearSelection}
                 focusRequest={synchronizedFocus}
@@ -4866,7 +4936,7 @@ export default function App() {
                   selectedEdgeId={selectedEdgeId}
                   colorMode={pointColorMode}
                   onAddWaypoint={addWaypoint}
-                  onSelectWaypoint={selectWaypoint}
+                  onSelectWaypoint={selectNavigationWaypoint}
                   onSelectEdge={selectEdge}
                   onConnectTarget={connectTarget}
                   onClearSelection={clearSelection}

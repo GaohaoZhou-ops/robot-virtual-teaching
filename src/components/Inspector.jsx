@@ -239,8 +239,10 @@ export default function Inspector({
     || inspectorPages[0];
 
   useEffect(() => {
-    if (selectedWaypointId || selectedEdgeId) setActivePage('navigation');
-  }, [selectedEdgeId, selectedWaypointId]);
+    if (selectedEdgeId || (selectedWaypointId && !selectedWaypoint?.teachingTaskId)) {
+      setActivePage('navigation');
+    }
+  }, [selectedEdgeId, selectedWaypointId, selectedWaypoint?.teachingTaskId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -399,7 +401,7 @@ export default function Inspector({
             <div className="property-editor__title">
               <div className="point-glyph"><span /></div>
               <div>
-                <span className="eyebrow">WAYPOINT / 3D POSE</span>
+                <span className="eyebrow">{selectedWaypoint.teachingTaskId ? 'TEACHING / PARKING POINT' : 'WAYPOINT / 3D POSE'}</span>
                 <h3>{selectedWaypoint.name}</h3>
               </div>
             </div>
@@ -434,7 +436,9 @@ export default function Inspector({
 
             <div className="capture-note">
               <CrosshairMark />
-              {selectedWaypoint.source === 'robot-current-pose' ? (
+              {selectedWaypoint.teachingTaskId ? (
+                <span>关联示教任务「{selectedWaypoint.teachingTaskName}」。名称和位置与停车点同步，位置修改也会同步到所属姿态。</span>
+              ) : selectedWaypoint.source === 'robot-current-pose' ? (
                 <span>XYZ 与 RPY 取自机器人当前 {coordinateFrameLabel} 位姿；导出时同时写入 <code>pose</code>、<code>xzy</code> 与 <code>rpy</code>。</span>
               ) : (
                 <span>Z 值取自点击位置附近的原始点云；导出时同时写入 <code>pose</code>、<code>xzy</code> 与 <code>rpy</code>。</span>
@@ -445,7 +449,7 @@ export default function Inspector({
               type="button"
               className="danger-button"
               onClick={() => {
-                if (window.confirm(`删除 ${selectedWaypoint.name} 及其关联路径？`)) {
+                if (selectedWaypoint.teachingTaskId || window.confirm(`删除 ${selectedWaypoint.name} 及其关联路径？`)) {
                   onDeleteWaypoint(selectedWaypoint.id);
                 }
               }}
@@ -644,7 +648,13 @@ export default function Inspector({
               <div className="section-title"><span>导航点</span><small>{waypoints.length}</small></div>
               <div className="waypoint-chips">
                 {waypoints.map((point, index) => (
-                  <button type="button" key={point.id} onClick={() => onSelectWaypoint(point.id)}>
+                  <button
+                    type="button"
+                    key={point.id}
+                    data-waypoint-id={point.id}
+                    title={point.teachingTaskId ? `示教停车点 · ${point.teachingTaskName}` : point.name}
+                    onClick={() => onSelectWaypoint(point.id)}
+                  >
                     <i>{String(index + 1).padStart(2, '0')}</i>{point.name}
                   </button>
                 ))}
