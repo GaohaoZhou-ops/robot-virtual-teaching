@@ -263,7 +263,8 @@ export default function Map2DView({
     let centerY = null;
     let spanX = 0;
     let spanY = 0;
-    if (focusRequest.type === 'waypoint') {
+    const focusesWaypoint = ['waypoint', 'robot-ghost'].includes(focusRequest.type);
+    if (focusesWaypoint) {
       const point = pointById.get(focusRequest.id);
       if (point) {
         centerX = point.pose.x;
@@ -293,7 +294,7 @@ export default function Map2DView({
       spanX > 1e-9 ? Math.max(size.width - 150, 1) / spanX : Number.POSITIVE_INFINITY,
       spanY > 1e-9 ? Math.max(size.height - 130, 1) / spanY : Number.POSITIVE_INFINITY,
     );
-    const targetScale = focusRequest.type === 'waypoint'
+    const targetScale = focusesWaypoint
       ? fullScale * WAYPOINT_FOCUS_SCALE_MULTIPLIER
       : Number.isFinite(pathScale) ? pathScale : fullScale * 5;
     const targetView = {
@@ -309,7 +310,7 @@ export default function Map2DView({
     host.dataset.synchronizedFocusRevision = String(focusRequest.revision);
     host.dataset.synchronizedFocusState = 'animating';
     host.dataset.synchronizedFocusTargetScale = targetView.scale.toPrecision(12);
-    if (focusRequest.type === 'waypoint') {
+    if (focusesWaypoint) {
       host.dataset.waypointFocusScaleMultiplier = String(WAYPOINT_FOCUS_SCALE_MULTIPLIER);
     }
 
@@ -836,7 +837,9 @@ export default function Map2DView({
       const target = event.target;
       const tagName = target?.tagName?.toLowerCase();
       if (
-        target?.isContentEditable
+        hostRef.current?.closest('[aria-hidden="true"]')
+        || document.querySelector('[aria-modal="true"], dialog[open]')
+        || target?.isContentEditable
         || tagName === 'input'
         || tagName === 'textarea'
         || tagName === 'select'
@@ -852,7 +855,7 @@ export default function Map2DView({
       if (selectedEdgeId) edgeIds.add(selectedEdgeId);
       if (!waypointIds.size && !edgeIds.size) return;
       event.preventDefault();
-      onDeleteSelection?.({ waypointIds: [...waypointIds], edgeIds: [...edgeIds] });
+      if (onDeleteSelection?.({ waypointIds: [...waypointIds], edgeIds: [...edgeIds] }) === false) return;
       clearBoxSelection();
       onClearSelection();
     };
@@ -910,6 +913,9 @@ export default function Map2DView({
       data-box-selected-waypoint-count={boxSelection.waypointIds.length}
       data-box-selected-edge-count={boxSelection.edgeIds.length}
       data-delete-shortcut="Delete,Backspace"
+      data-waypoint-count={waypoints.length}
+      data-path-count={edges.length}
+      data-selected-waypoint={selectedWaypointId || ''}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -1033,6 +1039,8 @@ export default function Map2DView({
               key={point.id}
               data-waypoint-id={point.id}
               data-waypoint-source={point.source || 'point-cloud-slice'}
+              aria-label={`选择导航点 ${point.name}`}
+              aria-pressed={selected}
               className={`waypoint-marker ${selected ? 'is-selected' : ''} ${boxSelected ? 'is-box-selected' : ''} ${source ? 'is-source' : ''}`}
               style={{ left: screen.x, top: screen.y }}
               onPointerDown={(event) => event.stopPropagation()}

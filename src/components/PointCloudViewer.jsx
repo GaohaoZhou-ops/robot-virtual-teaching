@@ -108,6 +108,7 @@ const WAYPOINT_DEFAULT_COLOR = '#ffd166';
 const WAYPOINT_SELECTED_BODY_COLOR = '#59dbe8';
 const WAYPOINT_SELECTED_HALO_COLOR = '#9b8cff';
 const MIN_WAYPOINT_SCREEN_DIAMETER = 8;
+const MAX_WAYPOINT_SCREEN_DIAMETER = 10;
 const MAX_WAYPOINT_LOD_SCALE = 24;
 const ROS_AXIS_SCREEN_LENGTH = 68;
 const MIN_ROS_AXIS_LOD_SCALE = 1e-30;
@@ -5310,6 +5311,7 @@ export default function PointCloudViewer({
 
       if (waypointGroup.visible && waypointGroup.children.length) {
         let smallestDiameter = Number.POSITIVE_INFINITY;
+        let largestDiameter = 0;
         let largestLodScale = 1;
         waypointGroup.children.forEach((markerGroup) => {
           waypointCameraPosition
@@ -5323,19 +5325,28 @@ export default function PointCloudViewer({
           const naturalDiameter =
             (2 * (markerGroup.userData.baseRadius || 0) * camera.zoom * focalPixels)
             / depth;
+          // Keep distant points readable and close-up points small enough to
+          // see the robot chassis beneath them. The hit sphere stays wider.
+          const targetDiameter = THREE.MathUtils.clamp(
+            naturalDiameter,
+            MIN_WAYPOINT_SCREEN_DIAMETER,
+            MAX_WAYPOINT_SCREEN_DIAMETER,
+          );
           const lodScale = THREE.MathUtils.clamp(
-            MIN_WAYPOINT_SCREEN_DIAMETER / Math.max(naturalDiameter, 1e-9),
-            1,
+            targetDiameter / Math.max(naturalDiameter, 1e-30),
+            1e-30,
             MAX_WAYPOINT_LOD_SCALE,
           );
           markerGroup.scale.setScalar(lodScale);
           const renderedDiameter = naturalDiameter * lodScale;
           markerGroup.userData.screenDiameter = renderedDiameter;
           smallestDiameter = Math.min(smallestDiameter, renderedDiameter);
+          largestDiameter = Math.max(largestDiameter, renderedDiameter);
           largestLodScale = Math.max(largestLodScale, lodScale);
         });
         renderer.domElement.dataset.smallestWaypointScreenDiameter =
           Number.isFinite(smallestDiameter) ? smallestDiameter.toFixed(2) : '0';
+        renderer.domElement.dataset.largestWaypointScreenDiameter = largestDiameter.toFixed(2);
         renderer.domElement.dataset.waypointMaxLodScale = largestLodScale.toFixed(3);
       }
 
@@ -7093,6 +7104,7 @@ export default function PointCloudViewer({
       canvas.dataset.waypointRadius = waypointRadius.toPrecision(8);
       canvas.dataset.waypointVisibilityMode = 'screen-clamped-lod';
       canvas.dataset.minimumWaypointScreenDiameter = String(MIN_WAYPOINT_SCREEN_DIAMETER);
+      canvas.dataset.maximumWaypointScreenDiameter = String(MAX_WAYPOINT_SCREEN_DIAMETER);
     }
 
     edges.forEach((edge) => {
@@ -7173,7 +7185,7 @@ export default function PointCloudViewer({
       const marker = new THREE.Mesh(markerGeometry, markerMaterial);
       marker.renderOrder = 10;
       if (selected) {
-        const haloGeometry = new THREE.SphereGeometry(waypointRadius * 1.48, 18, 12);
+        const haloGeometry = new THREE.SphereGeometry(waypointRadius * 1.25, 18, 12);
         const haloMaterial = new THREE.MeshBasicMaterial({
           color: WAYPOINT_SELECTED_HALO_COLOR,
           transparent: true,
