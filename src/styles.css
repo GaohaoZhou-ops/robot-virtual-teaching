@@ -2198,6 +2198,26 @@ code {
   cursor: not-allowed;
 }
 
+.map-details-dialog__actions > button.is-primary {
+  height: 32px;
+  border-color: var(--cyan);
+  color: #051012;
+  background: var(--cyan);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.map-details-dialog__actions > button.is-primary:hover:not(:disabled) {
+  border-color: var(--cyan);
+  color: #031012;
+  background: #7de4ed;
+}
+
+.map-details-dialog__actions > button.is-primary:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
 @keyframes map-details-modal-in {
   from { opacity: 0; }
   to { opacity: 1; }
