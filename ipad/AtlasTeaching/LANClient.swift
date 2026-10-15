@@ -75,7 +75,7 @@ struct PairingQRCode: Decodable {
     static func parse(_ text: String) throws -> PairingQRCode {
         guard text.utf8.count <= 2048, let data = text.data(using: .utf8),
               let value = try? JSONDecoder().decode(Self.self, from: data) else {
-            throw TeachingError("这不是 Atlas 配对二维码，请扫描电脑「iPad 运行」窗口中的二维码")
+            throw TeachingError("这不是 Atlas 二维码，请扫描电脑「iPad / Vision Pro」窗口中的二维码")
         }
         try value.validate()
         return value
@@ -201,8 +201,28 @@ struct LANClient {
               data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10]) else { throw TeachingError("模型预览与当前任务不匹配") }
         return data
     }
-    func upload(_ project: LocalProject, modelURL: URL, onModelVerified: @MainActor () -> Void = {}) async throws {
+    func pairResult(_ project: LocalProject, modelURL: URL, qr: PairingQRCode, deviceID: String, name: String) async throws -> PairedSession {
+        try qr.validate()
+        guard try LANClient(address: qr.address).baseURL == baseURL else { throw TeachingError("二维码地址已变更，请重新扫描") }
+        let identity = try await verifiedLocalModel(project, modelURL: modelURL)
+        let info = try await identify()
+        guard info.serverId == qr.serverId else { throw TeachingError("电脑服务已重启或地址已变更，请重新打开电脑窗口并扫码") }
+        struct PairResult: Encodable {
+            var code: String; var sessionId: String; var serverId: String
+            var deviceId: String; var deviceName: String; var resultId: String; var modelIdentity: ModelFileIdentity
+        }
+        let body = PairResult(code: PairingCode.normalize(qr.code), sessionId: qr.sessionId, serverId: qr.serverId,
+            deviceId: deviceID, deviceName: name, resultId: project.result.id, modelIdentity: identity)
+        let (data, response) = try await Self.session.data(for: request("pair-result", method: "POST", body: try JSONEncoder().encode(body)))
+        try check(response, data: data)
+        let destination = try JSONDecoder().decode(PairedSession.self, from: data)
+        guard destination.id == qr.sessionId else { throw TeachingError("同步任务与二维码不匹配，请重新扫描") }
+        try validateDestination(destination, identity: identity)
+        return destination
+    }
+    private func verifiedLocalModel(_ project: LocalProject, modelURL: URL) async throws -> ModelFileIdentity {
         guard project.result.completedAt != nil, !project.result.samples.isEmpty else { throw TeachingError("示教尚未完成") }
+        guard project.result.device.platform != "visionOS-simulator" else { throw TeachingError("模拟演练数据只能保存在本机，不能同步") }
         guard UUID(uuidString: project.id) != nil, project.result.sessionId == project.id else { throw TeachingError("本地模型与配对任务不匹配，已停止同步") }
         let identity = try await Task.detached { try ModelFileIdentity.read(from: modelURL) }.value
         try Task.checkCancellation()
@@ -211,21 +231,39 @@ struct LANClient {
               identity.modelHash == project.result.modelHash else {
             throw TeachingError("\(TeachingDevice.storageName) 本地模型内容与配对时不一致，已停止同步；请恢复原模型，本地 Pose 仍保留")
         }
+        return identity
+    }
+    private func validateDestination(_ destination: PairedSession, identity: ModelFileIdentity) throws {
+        let manifest = destination.manifest
+        guard UUID(uuidString: destination.id) != nil, !destination.deviceToken.isEmpty,
+              manifest.protocol == teachingProtocol, manifest.coordinateFrame == "virtual_origin",
+              manifest.distanceUnit == "meter", manifest.verticalAxis == "Z",
+              manifest.modelHash == identity.modelHash, manifest.byteLength == identity.byteLength else {
+            throw TeachingError("电脑同步任务与本地模型不匹配，已停止同步；本地 Pose 仍保留")
+        }
+    }
+    func upload(_ project: LocalProject, modelURL: URL, onModelVerified: @MainActor () -> Void = {}) async throws {
+        let identity = try await verifiedLocalModel(project, modelURL: modelURL)
+        let destination = project.resultSyncDestination?.session ?? project.session
+        try validateDestination(destination, identity: identity)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         // Send only the model fingerprint first. No poses are sent until both files match.
-        let (verificationData, verificationResponse) = try await Self.session.data(for: request("sessions/\(project.id)/verify-model",
-            token: project.session.deviceToken, method: "POST", body: try encoder.encode(identity)))
+        let (verificationData, verificationResponse) = try await Self.session.data(for: request("sessions/\(destination.id)/verify-model",
+            token: destination.deviceToken, method: "POST", body: try encoder.encode(identity)))
         try check(verificationResponse, data: verificationData)
         struct Verification: Decodable { var sessionId: String; var modelHash: String; var byteLength: Int; var verified: Bool }
         let verification = try JSONDecoder().decode(Verification.self, from: verificationData)
-        guard verification.verified, verification.sessionId == project.id,
+        guard verification.verified, verification.sessionId == destination.id,
               verification.modelHash == identity.modelHash, verification.byteLength == identity.byteLength else {
             throw TeachingError("电脑返回的模型校验结果不匹配，已停止同步；本地 Pose 仍保留")
         }
         try Task.checkCancellation()
         await onModelVerified()
-        let (data, response) = try await Self.session.data(for: request("sessions/\(project.id)/result", token: project.session.deviceToken,
-            method: "POST", body: try encoder.encode(project.result)))
+        // Only the transport session changes. Preserve the result ID for browser
+        // deduplication and keep the original local result/Pose bytes untouched.
+        var result = project.result; result.sessionId = destination.id
+        let (data, response) = try await Self.session.data(for: request("sessions/\(destination.id)/result", token: destination.deviceToken,
+            method: "POST", body: try encoder.encode(result)))
         try check(response, data: data)
         struct Receipt: Decodable { var id: String; var received: Bool; var sampleCount: Int }
         let receipt = try JSONDecoder().decode(Receipt.self, from: data)

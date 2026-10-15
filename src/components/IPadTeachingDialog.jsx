@@ -17,7 +17,8 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
   const [fileReceipt, setFileReceipt] = useState('');
   const [copied, setCopied] = useState(false);
   const [preparationPending, setPreparationPending] = useState(false);
-  const legacyCode = ticket?.status === 'ready' && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
+  const canShowQR = ['ready', 'paired'].includes(ticket?.status);
+  const legacyCode = canShowQR && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
   const dialog = useRef(null), operation = useRef(false), initialized = useRef(false);
   const resultInput = useRef(null);
   const update = (next) => { rememberIPadTicket(next); setTicket(next); setTickets(readIPadTickets()); setCopied(false); };
@@ -70,7 +71,7 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
       next = { ...next, ...await ipadRequest(`/sessions/${next.id}/model`, { token: next.ownerToken, method: 'PUT', body: buffer }) };
       update(next);
     }
-    if (next.status === 'ready' && (Date.now() >= next.pairingExpiresAt || !/^[A-Z0-9]{4}$/.test(next.pairingCode || ''))) {
+    if (['ready', 'paired'].includes(next.status) && (Date.now() >= next.pairingExpiresAt || !/^[A-Z0-9]{4}$/.test(next.pairingCode || ''))) {
       next = { ...next, ...await ipadRequest(`/sessions/${next.id}/renew`, { token: next.ownerToken, method: 'POST' }) };
       update(next);
     }
@@ -144,7 +145,7 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
             <p>电脑正在准备当前物体，完成后会在这里显示二维码和配对码。</p>
           </div>
         </div>}
-        {ticket?.status === 'ready' && !legacyCode && <IPadPairingQRCode
+        {canShowQR && !legacyCode && <IPadPairingQRCode
           key={`${ticket.id}:${ticket.pairingCode}:${ticket.pairingExpiresAt}:${address}`}
           ticket={ticket} address={address} disabled={!!busy} copied={copied}
           onCopy={() => perform('复制配对码…', async () => { await navigator.clipboard.writeText(ticket.pairingCode); setCopied(true); })} />}
@@ -152,7 +153,7 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
         {tickets.length > 0 && <label className="ipad-history">传输任务<select disabled={!!busy} value={ticket?.id || ''} onChange={(e) => { setTicket(tickets.find((item) => item.id === e.target.value)); setError(''); }}><option value="" disabled>选择任务</option>{tickets.map((item) => <option key={item.id} value={item.id}>{item.manifest.name} · {new Date(item.createdAt).toLocaleString()} · {statusText[item.status]}</option>)}</select></label>}
         {ticket && (!['ready', 'preparing'].includes(ticket.status) || legacyCode) && <div className={`ipad-pairing is-${ticket.status}`} data-ipad-status={ticket.status}>
           <div><span>{statusText[ticket.status]}</span>{ticket.status === 'ready' && <p>此任务使用旧版配对码，请点击「更新配对码」生成 4 位码。</p>}
-            {ticket.status === 'paired' && <p>{ticket.deviceName} 已配对，物体下载完成后可在本机离线示教。</p>}
+            {ticket.status === 'paired' && <p>{ticket.deviceName} 已配对；示教完成后可扫描上方二维码同步结果。</p>}
             {['completed', 'imported'].includes(ticket.status) && <p>{ticket.sampleCount} 个 Pose · {ticket.status === 'imported' ? '已经加入示教数据，可在三维场景查看 Pose。' : '接收后保存为独立的设备示教任务。'}</p>}
             <small>{ticket.manifest.vertices.toLocaleString()} 个顶点{ticket.manifest.indices > 0 ? ` · ${(ticket.manifest.indices / 3).toLocaleString()} 个三角面` : ''} · {(ticket.manifest.byteLength / 1048576).toFixed(1)} MiB{ticket.manifest.sampled ? ' · 旧版抽样点云；新建传输可携带完整网格' : ' · 设备可在本机调节点云密度与 Mesh 质量'}</small>
           </div>
@@ -161,7 +162,7 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
       </div>
       <footer><span role="status">{busy}</span><div>
         {ticket && <button disabled={!!busy} onClick={refresh}><RefreshCw size={14}/>检查完成状态</button>}
-        {ticket?.status === 'ready' && <button disabled={!!busy} onClick={renew}>更新配对码</button>}
+        {canShowQR && <button disabled={!!busy} onClick={renew}>更新配对码</button>}
         {['completed', 'imported'].includes(ticket?.status) ? <button className="ipad-primary" disabled={!!busy} onClick={receive}><ArrowDownToLine size={15}/>{ticket.status === 'imported' ? '再次接收（去重）' : '接收示教结果'}</button> : null}
         {preparationPending && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare()}><RefreshCw size={15}/>{busy ? '正在准备二维码…' : '重试生成二维码'}</button>}
         {ticket && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare(true)}><Tablet size={15}/>新建传输</button>}

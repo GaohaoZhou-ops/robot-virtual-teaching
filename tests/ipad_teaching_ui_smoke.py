@@ -74,10 +74,16 @@ with sync_playwright() as playwright:
 
     # Pair while closed: opening must fetch the true status and keep the paired task.
     page.get_by_role('button', name='关闭设备示教窗口').click()
-    paired = api('/pair', {"code": ticket['pairingCode'], "deviceId": str(uuid.uuid4()), "deviceName": "iPad Pro UI test"})
+    device_id = str(uuid.uuid4())
+    paired = api('/pair', {"code": ticket['pairingCode'], "deviceId": device_id, "deviceName": "iPad Pro UI test"})
     page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
     expect(dialog.locator('[data-ipad-status="paired"]')).to_be_visible()
-    expect(dialog.get_by_role('img', name='设备配对二维码')).not_to_be_visible()
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    expect(dialog).to_contain_text('扫描二维码，同步示教结果')
+    page.get_by_role('button', name='更新配对码').click()
+    expect(dialog.locator('.ipad-code')).not_to_have_text(ticket['pairingCode'])
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
     assert len(creations) == 1, 'opening must not replace a paired task'
     request = Request(BASE + '/__atlas/ipad/sessions/' + ticket['id'] + '/model', headers={"Authorization": "Bearer " + paired['deviceToken']})
     with urlopen(request) as response:
@@ -93,13 +99,28 @@ with sync_playwright() as playwright:
     second['name'] = 'Pose 002'
     second['cameraPose']['position']['x'] += 0.5
     result['samples'].append(second)
-    assert api('/sessions/' + ticket['id'] + '/result', result, paired['deviceToken'])['received']
-    page.get_by_role('button', name='检查完成状态').click()
+    def sync_result(target, data):
+        connection = api('/pair-result', {"code": target['pairingCode'], "sessionId": target['id'],
+            "serverId": api('/info')['serverId'], "deviceId": device_id, "deviceName": "iPad Pro UI test",
+            "resultId": data['id'], "modelIdentity": {"modelHash": data['modelHash'], "byteLength": target['manifest']['byteLength']}})
+        outgoing = {**data, "sessionId": target['id']}
+        assert api('/sessions/' + target['id'] + '/result', outgoing, connection['deviceToken'])['received']
+
+    sync_result(ticket, result)
     page.locator('[data-ipad-status="completed"]').wait_for()
     page.get_by_role('button', name='接收示教结果', exact=True).click()
     page.locator('[data-ipad-status="imported"]').wait_for()
     page.get_by_role('button', name='再次接收（去重）').click()
     expect(page.get_by_role('button', name='再次接收（去重）')).to_be_enabled()
+    # Reuse the ready QR from a new transfer for the same completed result.
+    page.get_by_role('button', name='新建传输').click()
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    next_ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    assert next_ticket['id'] != ticket['id']
+    sync_result(next_ticket, result)
+    page.locator('[data-ipad-status="completed"]').wait_for()
+    page.get_by_role('button', name='接收示教结果', exact=True).click()
+    page.locator('[data-ipad-status="imported"]').wait_for()
     page.get_by_role('button', name='关闭设备示教窗口').click()
     page.get_by_role('button', name='打开示教数据管理页').click()
     detail = page.get_by_role('region', name='iPad 示教结果')
@@ -117,15 +138,19 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='继续工作 · 返回主工作台继续示教').click()
     page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
     expect(page.locator('[data-ipad-status="imported"]')).to_be_visible()
+    # The imported label comes from localStorage on the initial render. Wait
+    # for opening preparation to reach the network response before checking
+    # that controls are enabled; otherwise Escape can race that operation.
+    expect(dialog.get_by_label('电脑局域网地址')).to_be_visible()
     expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
-    page.keyboard.press('Escape')
+    dialog.press('Escape')
     expect(dialog).not_to_be_visible()
     # Narrow desktop viewport: the entry and dialog remain reachable.
     page.set_viewport_size({"width": 1280, "height": 800})
     page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
     expect(dialog).to_be_visible()
     page.screenshot(path='/tmp/atlas-ipad-pairing-1280.png', full_page=True)
-    assert len(creations) == 1, 'opening must preserve completed/imported tasks'
+    assert len(creations) == 2, 'opening must preserve completed/imported tasks after the explicit new transfer'
 
     # A failed upload can resume the same transfer without creating an orphan task.
     retry_page = browser.new_page(viewport={"width": 1280, "height": 800})
@@ -157,4 +182,4 @@ with sync_playwright() as playwright:
     assert len(retry_creations) == 2
     assert not errors, errors
     browser.close()
-print('Automatic QR, StrictMode deduplication, reopen, expiry renewal, upload retry, new transfer, Swift Pose round trip, import deduplication, export and reload passed.')
+print('Automatic QR, paired QR renewal, QR result sync to original/new transfer, automatic completion detection, import deduplication, export and reload passed.')

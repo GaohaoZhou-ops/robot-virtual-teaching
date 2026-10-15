@@ -7,6 +7,127 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    func testCompletedProjectContinuationStartsCamera() throws {
+        continueAfterFailure = false
+        guard let sourceID = ProcessInfo.processInfo.environment["ATLAS_CONTINUE_SOURCE_ID"],
+              UUID(uuidString: sourceID) != nil else {
+            throw XCTSkip("Provide a completed project; this test preserves it and creates a continuation without recording Poses")
+        }
+        let expectedCount = try XCTUnwrap(ProcessInfo.processInfo.environment["ATLAS_CONTINUE_POSE_COUNT"].flatMap(Int.init))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let source = app.buttons["local-project-\(sourceID)"]
+        XCTAssertTrue(source.waitForExistence(timeout: 15))
+        let localProjects = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "local-project-"))
+        let originalIDs = Set(localProjects.allElementsBoundByIndex.map(\.identifier))
+        source.tap()
+        let resume = app.buttons["continue-teaching"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 60))
+        XCTAssertEqual(app.staticTexts["teaching-tracking-status"].label, "已完成 · 结果预览")
+        XCTAssertEqual(app.staticTexts["teaching-depth-status"].label, "相机 / LiDAR 未启用")
+        XCTAssertFalse(app.staticTexts["等待相机"].exists)
+        XCTAssertFalse(app.staticTexts["等待 LiDAR"].exists)
+        XCTAssertFalse(app.buttons["capture-pose"].exists)
+        func snapshot(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(resume.isHittable)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(app.staticTexts["teaching-depth-status"].frame))
+            snapshot("Completed project preview - \(orientation.rawValue)")
+        }
+        resume.tap()
+        let capture = app.buttons["capture-pose"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(app.staticTexts["LiDAR 已就绪"].waitForExistence(timeout: 30), app.debugDescription)
+        XCTAssertFalse(capture.isEnabled, "continuation requires a fresh placement before recording")
+        XCTAssertFalse(resume.exists)
+        app.buttons["review-poses"].tap()
+        let closeReview = app.buttons["close-pose-review"]
+        XCTAssertTrue(closeReview.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["pose-review-count"].label.hasPrefix("\(expectedCount) "))
+        closeReview.tap()
+        snapshot("Continuation with live camera and LiDAR")
+        app.buttons["本地项目"].tap()
+        XCTAssertTrue(source.waitForExistence(timeout: 15))
+        let created = localProjects.allElementsBoundByIndex.filter { !originalIDs.contains($0.identifier) }
+        XCTAssertEqual(created.count, 1, "the completed project remains beside one new draft")
+        let draftID = try XCTUnwrap(created.first?.identifier)
+        source.tap()
+        XCTAssertTrue(resume.waitForExistence(timeout: 60), "the original result stays completed")
+        XCTAssertEqual(app.staticTexts["teaching-depth-status"].label, "相机 / LiDAR 未启用")
+        app.buttons["本地项目"].tap()
+        app.terminate(); app.launch()
+        let draft = app.buttons[draftID]
+        XCTAssertTrue(draft.waitForExistence(timeout: 15)); draft.tap()
+        XCTAssertTrue(capture.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["LiDAR 已就绪"].waitForExistence(timeout: 30))
+        XCUIDevice.shared.press(.home); app.activate()
+        XCTAssertTrue(app.staticTexts["LiDAR 已就绪"].waitForExistence(timeout: 30))
+        XCTAssertFalse(capture.isEnabled, "background recovery cannot reuse the old calibration")
+        snapshot("Reopened continuation after background recovery")
+    }
+
+    func testResultSyncScannerAndCancel() throws {
+        continueAfterFailure = false
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_RESULT_SYNC_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide a completed project; this test opens and cancels scanning without presenting a QR")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let scan = app.buttons["scan-sync-result"]
+        XCTAssertTrue(scan.waitForExistence(timeout: 30))
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            for _ in 0..<5 where !scan.isHittable {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.82))
+                    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
+            }
+            XCTAssertTrue(scan.isEnabled); scan.tap()
+            XCTAssertTrue(app.navigationBars["扫码同步到电脑"].waitForExistence(timeout: 10), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["scanner-status"].exists)
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "Result QR scanner - \(orientation.rawValue)"; attachment.lifetime = .keepAlways; add(attachment)
+            app.buttons["cancel-pairing-scan"].tap()
+            XCTAssertTrue(scan.waitForExistence(timeout: 5)); XCTAssertTrue(scan.isEnabled)
+            XCTAssertFalse(app.buttons["finish-teaching"].exists)
+            XCTAssertTrue(app.buttons["share-teaching-result"].exists)
+        }
+    }
+
+    func testFinishDisposableDraftAndOpenSyncScanner() throws {
+        continueAfterFailure = false
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_DISPOSABLE_FINISH_SCAN_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide a disposable draft; this test finishes it before opening the scanner")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let finish = app.buttons["finish-teaching"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 30))
+        for _ in 0..<5 where !finish.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.82))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
+        }
+        finish.tap()
+        let action = app.buttons["完成并扫码同步"]
+        XCTAssertTrue(action.waitForExistence(timeout: 8)); action.tap()
+        XCTAssertTrue(app.navigationBars["扫码同步到电脑"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["cancel-pairing-scan"].tap()
+        XCTAssertTrue(app.buttons["scan-sync-result"].waitForExistence(timeout: 5))
+        app.terminate(); app.launch()
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        XCTAssertTrue(app.buttons["scan-sync-result"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["capture-pose"].exists)
+    }
+
     func testFinishTeachingOpensOptionsWithoutChangingDraft() throws {
         continueAfterFailure = false
         guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_FINISH_DRAFT_FIXTURE_ID"],
@@ -37,6 +158,7 @@ final class AtlasTeachingUITests: XCTestCase {
             attachment.name = "Draft completion options - \(orientation.rawValue)"
             attachment.lifetime = .keepAlways; add(attachment)
             XCTAssertTrue(opened, app.debugDescription)
+            XCTAssertTrue(app.buttons["完成并扫码同步"].exists)
             XCTAssertTrue(app.buttons["完成并通过 AirDrop 分享"].exists)
             XCTAssertTrue(app.buttons["完成并同步到电脑"].exists)
             let cancel = app.buttons["继续示教"]
