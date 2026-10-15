@@ -215,6 +215,13 @@ struct LocalProject: Codable, Identifiable {
     var syncedAt: String?
     var displaySettings: ModelDisplaySettings?
 }
+// Portable results deliberately omit the local project's server address and credentials.
+struct TeachingResultFile: Codable {
+    var format = "atlas-teaching-result"
+    var version = 1
+    var manifest: ModelManifest
+    var result: TeachingResult
+}
 struct TeachingError: LocalizedError {
     var message: String
     init(_ message: String) { self.message = message }

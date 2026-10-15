@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, QrCode, RefreshCw, Tablet, Wifi, X } from 'lucide-react';
+import { ArrowDownToLine, FileUp, QrCode, RefreshCw, Tablet, Wifi, X } from 'lucide-react';
 import { ipadRequest, packIPadModel, readIPadTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
+import { readIPadResultFile } from '../lib/ipadResultFile.js';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
 import './IPadTeaching.css';
 
@@ -13,17 +14,19 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [fileReceipt, setFileReceipt] = useState('');
   const [copied, setCopied] = useState(false);
   const [preparationPending, setPreparationPending] = useState(false);
   const legacyCode = ticket?.status === 'ready' && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
   const dialog = useRef(null), operation = useRef(false), initialized = useRef(false);
+  const resultInput = useRef(null);
   const update = (next) => { rememberIPadTicket(next); setTicket(next); setTickets(readIPadTickets()); setCopied(false); };
   useEffect(() => {
     const focus = document.activeElement; dialog.current?.focus();
     return () => focus?.focus?.();
   }, []);
   useEffect(() => {
-    if (ticket?.status !== 'ready') return;
+    if (!['ready', 'paired'].includes(ticket?.status)) return;
     const controller = new AbortController();
     let checking = false;
     const timer = setInterval(async () => {
@@ -93,10 +96,19 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
     const next = await ipadRequest(`/sessions/${ticket.id}/renew`, { token: ticket.ownerToken, method: 'POST' });
     update({ ...ticket, ...next });
   });
+  const importFile = (file) => {
+    if (!file) return;
+    return perform('正在校验模型并导入结果文件…', async () => {
+      setFileReceipt('');
+      const imported = await readIPadResultFile(file);
+      await onImport(imported.result, imported.ticket);
+      setFileReceipt(`已接收 ${imported.result.samples.length} 个 Pose，已保存到当前工程。重复导入会自动去重。`);
+    });
+  };
   const keyDown = (event) => {
     if (event.key === 'Escape' && !operation.current) { event.stopPropagation(); onClose(); }
     if (event.key !== 'Tab') return;
-    const elements = [...dialog.current.querySelectorAll('button:not(:disabled), select:not(:disabled), input')];
+    const elements = [...dialog.current.querySelectorAll('button:not(:disabled), select:not(:disabled), input:not([hidden]):not(:disabled)')];
     if (!elements.length) return;
     const first = elements[0], last = elements.at(-1);
     if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last.focus(); }
@@ -107,6 +119,24 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
       <header><span className="ipad-mark"><Tablet size={25} /></span><div><small>ATLAS / ON DEVICE</small><h2 id="ipad-title">移动到 iPad 或 Vision Pro 上运行</h2></div><button aria-label="关闭设备示教窗口" disabled={!!busy} onClick={onClose}><X size={18} /></button></header>
       <div className="ipad-dialog__body">
         <div className="ipad-model"><span>独立示教物体</span><strong>{mapData.name}</strong></div>
+        <section className="ipad-result-file" aria-label="AirDrop 或文件接收"
+          onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
+          onDrop={(event) => {
+            event.preventDefault(); event.stopPropagation();
+            if (operation.current) return;
+            if (event.dataTransfer.files.length !== 1) { setFileReceipt(''); setError('请一次导入一个示教结果文件'); return; }
+            importFile(event.dataTransfer.files[0]);
+          }}>
+          <div className="ipad-result-file__heading"><FileUp size={20} aria-hidden="true"/><div>
+            <h3>接收已完成的示教</h3><span>AirDrop / Type-C 文件传输</span>
+          </div></div>
+          <p>在 iPad 点击「AirDrop / 导出结果」，发送到这台 Mac。将收到的结果文件拖到这里，或点击导入；也可选择从 Finder 拷贝的文件。</p>
+          <input ref={resultInput} type="file" hidden disabled={!!busy} accept=".json,application/json" data-ipad-result-input="true"
+            onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; importFile(file); }}/>
+          <button className="ipad-primary" disabled={!!busy} onClick={() => resultInput.current?.click()}><FileUp size={15}/>导入结果文件</button>
+          <small>无需重新配对；导入时核对当前模型，保留已有示教任务。</small>
+          {fileReceipt && <p className="ipad-result-file__receipt" role="status">{fileReceipt}</p>}
+        </section>
         {(!ticket || ticket.status === 'preparing') && <div className="ipad-qr" aria-busy={!!busy}>
           <div className="ipad-qr__image"><QrCode size={64} strokeWidth={1} aria-hidden="true" /></div>
           <div className="ipad-qr__instructions"><span className="ipad-qr__eyebrow">SCAN TO CONNECT</span>

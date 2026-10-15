@@ -169,6 +169,35 @@ final class TeachingSession: ObservableObject {
         do { try await saveNow(); current = nil; geometry = nil; pendingModel = nil; status = ""; await reload() }
         catch { self.error = "保存失败，草稿仍在当前界面：\(error.localizedDescription)" }
     }
+    func exportResult() async -> URL? {
+        guard !busy, let project = current else { return nil }
+        busy = true; error = ""; status = "正在校验模型并导出示教结果…"
+        defer { busy = false }
+        do {
+            try await saveNow()
+            let url = try await ProjectStore.shared.exportResult(project)
+            status = "结果文件已导出；可通过 AirDrop 分享，或在 Finder 的「文件」中拷贝 Teaching Exports"
+            return url
+        } catch {
+            self.error = "导出失败，本地结果仍保留：\(error.localizedDescription)"
+            status = "尚未导出，可重试"
+            return nil
+        }
+    }
+    func resultShareFinished(activity: UIActivity.ActivityType?, completed: Bool, error: Error?) {
+        // The share sheet cannot acknowledge an import into the browser workspace.
+        // Only a verified LAN receipt may set LocalProject.syncedAt.
+        if let error {
+            self.error = "分享失败，结果文件仍保留，可重试：\(error.localizedDescription)"
+            status = "尚未确认分享成功"
+        } else if completed {
+            status = activity == .airDrop
+                ? "AirDrop 已发送；请在电脑「iPad / Vision Pro」窗口导入结果文件"
+                : "结果文件已分享；请在电脑「iPad / Vision Pro」窗口导入结果文件"
+        } else {
+            status = "已取消分享；结果文件仍保留，可再次分享或通过 Finder 拷贝"
+        }
+    }
     func finish(sync: Bool) async {
         guard !busy, var project = current, !project.result.samples.isEmpty else { return }
         busy = true; error = ""; defer { busy = false }
@@ -191,7 +220,7 @@ final class TeachingSession: ObservableObject {
                 }
                 project.syncedAt = timestamp(); current = project; try await ProjectStore.shared.save(project)
                 status = "同步成功，请在电脑端点击「检查完成状态」并接收结果"
-            } else { status = "示教已完成并保存在 \(TeachingDevice.storageName)，返回局域网后点击同步" }
+            } else { status = "示教已完成并保存在 \(TeachingDevice.storageName)，可稍后同步到电脑" }
             await reload()
         } catch { self.error = "结果保留在 \(TeachingDevice.storageName)，可重试：\(error.localizedDescription)"; status = "尚未确认同步成功" }
     }
