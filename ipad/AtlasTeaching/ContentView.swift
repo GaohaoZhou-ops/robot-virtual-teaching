@@ -267,6 +267,7 @@ struct TeachingView: View {
     @StateObject private var coverage = TeachingCoverageRenderer()
     @State private var review = false
     @State private var finishing = false
+    @State private var resultShare: TeachingResultShareItem?
     @State private var displaySettingsOpen = false
     @State private var levelVisible = true
     @State private var zividFieldOfViewEnabled = false
@@ -281,7 +282,7 @@ struct TeachingView: View {
     private var liveCamera: Bool { ARController.supported && !completed }
     private var fieldOfView: ZividFieldOfView? { liveCamera ? ar.cameraFieldOfView : .modelPreview }
     private var canRecordPose: Bool {
-        scenePhase == .active && !review && session.current?.id == projectID
+        scenePhase == .active && !review && !finishing && session.current?.id == projectID
             && !completed && ar.calibrated && ar.trackingNormal && renderer.geometry != nil
             && !session.busy && count < maximumSamples && session.error.isEmpty
     }
@@ -415,12 +416,26 @@ struct TeachingView: View {
                         .buttonStyle(.bordered).disabled(count == 0)
                         .accessibilityIdentifier("review-poses")
                     if !completed {
-                        Button { finishing = true } label: { Label("完成示教", systemImage: "checkmark.circle").frame(maxWidth: .infinity).padding(7) }
-                            .buttonStyle(.bordered).disabled(count == 0 || session.busy || ar.adjustingPlacement)
+                        finishTeachingButton
                     } else {
+                        Button { Task { await shareResult() } } label: {
+                            Label("AirDrop / 导出结果", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity).padding(10)
+                        }
+                            .buttonStyle(.borderedProminent).disabled(session.busy)
+                            .accessibilityIdentifier("share-teaching-result")
+                            .popover(item: $resultShare) { item in
+                                TeachingResultShareSheet(url: item.url) { activity, completed, error in
+                                    session.resultShareFinished(activity: activity, completed: completed, error: error)
+                                    resultShare = nil
+                                }.presentationCompactAdaptation(.sheet)
+                            }
+                        Text("选择 AirDrop 发送到 Mac，再在电脑导入结果文件。也可用 Type-C 连接，在 Finder → iPad → 文件 → Atlas 示教中拷贝 Teaching Exports。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Divider()
                         LANAddressFields(address: $session.serverConnection).disabled(session.busy)
-                        Button { Task { await session.finish(sync: true) } } label: { Label("同步到电脑", systemImage: "arrow.up.circle").frame(maxWidth: .infinity).padding(10) }
-                            .buttonStyle(.borderedProminent).disabled(session.busy || !session.serverConnection.canConnect)
+                        Button { Task { await session.finish(sync: true) } } label: { Label("局域网同步到电脑", systemImage: "wifi").frame(maxWidth: .infinity).padding(10) }
+                            .buttonStyle(.bordered).disabled(session.busy || !session.serverConnection.canConnect)
                     }
                     if session.busy { ProgressView() }
                     Text(session.status).font(.caption).foregroundStyle(.secondary)
@@ -484,11 +499,35 @@ struct TeachingView: View {
         } message: { confirmation in
             Text(confirmation.message)
         }
-        .confirmationDialog("完成后将锁定本次 Pose；你可以现在同步，或离线保存后再同步。", isPresented: $finishing, titleVisibility: .visible) {
+    }
+    private var finishTeachingButton: some View {
+        Button {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            finishing = true
+        } label: {
+            Label("完成示教", systemImage: "checkmark.circle").frame(maxWidth: .infinity).padding(7)
+        }
+        .buttonStyle(.bordered).disabled(count == 0 || session.busy || ar.adjustingPlacement)
+        .accessibilityIdentifier("finish-teaching")
+        // On iPad the confirmation is a popover. Anchor it to the tapped button,
+        // rather than the whole AR viewport and its other presentation modifiers.
+        .confirmationDialog("完成示教？", isPresented: $finishing, titleVisibility: .visible) {
+            Button("完成并通过 AirDrop 分享") {
+                ar.stop()
+                Task {
+                    await session.finish(sync: false)
+                    if session.error.isEmpty && completed { await shareResult() }
+                }
+            }
             Button("完成并同步到电脑") { ar.stop(); Task { await session.finish(sync: true) } }
             Button("仅完成并保存在 iPad") { ar.stop(); Task { await session.finish(sync: false) } }
             Button("继续示教", role: .cancel) {}
+        } message: {
+            Text("已记录 \(count) 个 Pose。完成后将锁定本次示教；可以现在同步，或仅保存在 iPad 后再同步。")
         }
+    }
+    private func shareResult() async {
+        if let url = await session.exportResult() { resultShare = TeachingResultShareItem(url: url) }
     }
     private func setSidebarCollapsed(_ collapsed: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

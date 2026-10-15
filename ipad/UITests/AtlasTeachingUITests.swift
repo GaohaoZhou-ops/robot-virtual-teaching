@@ -7,6 +7,126 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    func testFinishTeachingOpensOptionsWithoutChangingDraft() throws {
+        continueAfterFailure = false
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_FINISH_DRAFT_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide an existing draft; this test only opens and cancels completion")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let finish = app.buttons["完成示教"]
+        XCTAssertTrue(finish.waitForExistence(timeout: 30))
+        for _ in 0..<5 where !finish.isHittable {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.82))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
+        }
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            if !finish.isHittable {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.82))
+                    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
+            }
+            XCTAssertTrue(finish.isEnabled, app.debugDescription)
+            finish.tap()
+            let save = app.buttons["仅完成并保存在 iPad"]
+            let opened = save.waitForExistence(timeout: 8)
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "Draft completion options - \(orientation.rawValue)"
+            attachment.lifetime = .keepAlways; add(attachment)
+            XCTAssertTrue(opened, app.debugDescription)
+            XCTAssertTrue(app.buttons["完成并通过 AirDrop 分享"].exists)
+            XCTAssertTrue(app.buttons["完成并同步到电脑"].exists)
+            let cancel = app.buttons["继续示教"]
+            if cancel.exists && cancel.isHittable { cancel.tap() }
+            else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.25)).tap() }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: save)], timeout: 5), .completed)
+            XCTAssertTrue(finish.exists, "cancel preserves the editable draft")
+            XCTAssertFalse(app.buttons["share-teaching-result"].exists, "opening completion must not lock the project")
+        }
+    }
+
+    func testFinishDisposableDraftsAndShare() throws {
+        continueAfterFailure = false
+        let fixtureIDs = (ProcessInfo.processInfo.environment["ATLAS_DISPOSABLE_FINISH_FIXTURE_IDS"] ?? "")
+            .split(separator: ",").map(String.init)
+        guard fixtureIDs.count == 2, fixtureIDs.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+            throw XCTSkip("Provide two disposable drafts; this test completes and locks both projects")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        for (index, fixtureID) in fixtureIDs.enumerated() {
+            app.launch()
+            let project = app.buttons["local-project-\(fixtureID)"]
+            XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+            let finish = app.buttons["finish-teaching"]
+            XCTAssertTrue(finish.waitForExistence(timeout: 30))
+            for _ in 0..<5 where !finish.isHittable {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.82))
+                    .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
+            }
+            finish.tap()
+            let action = app.buttons[index == 0 ? "仅完成并保存在 iPad" : "完成并通过 AirDrop 分享"]
+            XCTAssertTrue(action.waitForExistence(timeout: 8)); action.tap()
+            let share = app.buttons["share-teaching-result"]
+            XCTAssertTrue(share.waitForExistence(timeout: 15), app.debugDescription)
+            XCTAssertFalse(app.buttons["capture-pose"].exists)
+            if index == 1 {
+                let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "拷贝", "复制"])).firstMatch
+                XCTAssertTrue(copy.waitForExistence(timeout: 15), "completion must open the share sheet: \(app.debugDescription)")
+                let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                attachment.name = "Share immediately after completion"; attachment.lifetime = .keepAlways; add(attachment)
+                let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["Close", "关闭"])).firstMatch
+                if close.exists { close.tap() }
+                else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.25)).tap() }
+                XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                    predicate: NSPredicate(format: "exists == false"), object: copy)], timeout: 5), .completed)
+                XCTAssertTrue(share.isEnabled, "cancelled sharing can be retried")
+            }
+            app.terminate(); app.launch()
+            XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+            XCTAssertTrue(share.waitForExistence(timeout: 15), "completed state survives relaunch")
+            XCTAssertFalse(app.buttons["finish-teaching"].exists)
+            XCTAssertFalse(app.buttons["capture-pose"].exists)
+            app.terminate()
+        }
+    }
+
+    func testResultFileShareAndCancel() throws {
+        continueAfterFailure = false
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_RESULT_SHARE_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide a disposable completed project for result sharing")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let share = app.buttons["share-teaching-result"]
+        XCTAssertTrue(share.waitForExistence(timeout: 30))
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            if !share.isHittable { app.swipeUp() }
+            XCTAssertTrue(share.isEnabled); share.tap()
+            let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "拷贝", "复制"])).firstMatch
+            XCTAssertTrue(copy.waitForExistence(timeout: 15), app.debugDescription)
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "Result share sheet - \(orientation.rawValue)"
+            attachment.lifetime = .keepAlways; add(attachment)
+            let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["Close", "关闭"])).firstMatch
+            if close.exists { close.tap() }
+            else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.25)).tap() }
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: copy)], timeout: 5), .completed)
+            XCTAssertTrue(share.waitForExistence(timeout: 5))
+            XCTAssertTrue(share.isEnabled, "cancelled sharing can be retried")
+            XCTAssertFalse(app.buttons["capture-pose"].exists, "completed results stay locked")
+        }
+    }
+
     private func expectAutomaticPlacement(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         let capture = app.buttons["capture-pose"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
