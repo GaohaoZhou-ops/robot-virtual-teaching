@@ -123,12 +123,16 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
           return json(res, 201, { ...publicSession(session), ownerToken, pairingCode, pairingExpiresAt: session.pairingExpiresAt });
         });
       }
-      if (route === '/pair' && req.method === 'POST') {
+      if (['/pair', '/pair-result'].includes(route) && req.method === 'POST') {
+        const forResult = route === '/pair-result';
         const peer = req.socket.remoteAddress, now = Date.now();
         for (const [key, value] of attempts) if (now - value.start > 60000) attempts.delete(key);
         const attempt = attempts.get(peer) || { start: now, count: 0 }; attempt.count += 1; attempts.set(peer, attempt);
         if (attempt.count > 20) fail(429, '配对尝试过于频繁，请一分钟后重试');
         const body = await readBody(req, 4096);
+        if (forResult && (!/^[a-zA-Z0-9-]{1,80}$/.test(body.resultId || '') || !body.sessionId || !body.serverId)) {
+          fail(400, '扫码同步信息无效，请重新扫描电脑二维码');
+        }
         if ((body.sessionId != null || body.serverId != null)
           && (body.serverId !== serverId || !/^[a-f0-9-]{36}$/.test(body.sessionId || ''))) fail(409, '二维码对应的服务已变更，请重新扫描电脑上的二维码');
         const code = String(body.code || '').trim().toUpperCase();
@@ -143,10 +147,19 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
             if (body.sessionId != null && body.sessionId !== session.id) fail(409, '二维码与当前传输任务不匹配，请重新扫描');
             if (!equal(session.pairingCodeHash, hash(code))) fail(404, '配对码已更新，请使用电脑显示的新配对码');
             if (now > session.pairingExpiresAt) fail(410, '配对码已过期，请在电脑上重新生成');
-            if (!['ready', 'paired'].includes(session.status)) fail(409, '该任务当前不可配对');
+            if (!(forResult ? ['ready', 'paired', 'completed', 'imported'] : ['ready', 'paired']).includes(session.status)) fail(409, '该任务当前不可配对');
             if (session.deviceId && session.deviceId !== body.deviceId) fail(409, '配对码已被另一台设备使用');
+            if (forResult) {
+              // Check both files before claiming the task or rotating credentials.
+              // A scan of a different workpiece must not consume its QR code.
+              await verifyModel(session, body.modelIdentity);
+              if (session.resultHash) {
+                const existing = JSON.parse(await readFile(path.join(directory, session.id, 'result.json'), 'utf8'));
+                if (existing.id !== body.resultId) fail(409, '电脑任务已有另一份示教结果，请点击「新建传输」后重新扫码');
+              }
+            }
             const deviceToken = secret();
-            Object.assign(session, { status: 'paired', deviceId: body.deviceId, deviceName: String(body.deviceName || 'iPad Pro').slice(0, 80),
+            Object.assign(session, { status: session.resultHash ? session.status : 'paired', deviceId: body.deviceId, deviceName: String(body.deviceName || 'iPad Pro').slice(0, 80),
               deviceTokenHash: hash(deviceToken), pairedAt: new Date().toISOString() });
             await save(session);
             return json(res, 200, { ...publicSession(session), deviceToken });
@@ -167,7 +180,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
           session.status = 'cancelled'; await save(session); return json(res, 200, { status: 'cancelled' });
         }
         if (action === 'pairing-qr' && req.method === 'POST') {
-          if (session.status !== 'ready') fail(409, '只有尚未配对的任务可以生成二维码');
+          if (!['ready', 'paired'].includes(session.status)) fail(409, '只有等待配对或结果同步的任务可以生成二维码');
           if (Date.now() >= session.pairingExpiresAt) fail(410, '配对码已过期，请点击「更新配对码」');
           const { address, code } = await readBody(req, 4096);
           if (!getAddresses(req.socket.localPort).includes(address)) fail(400, '请选择当前电脑的局域网地址');
@@ -179,7 +192,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
           return json(res, 200, { image, expiresAt: session.pairingExpiresAt });
         }
         if (action === 'renew' && req.method === 'POST') {
-          if (session.status !== 'ready') fail(409, '只有尚未配对的任务可以更新配对码');
+          if (!['ready', 'paired'].includes(session.status)) fail(409, '只有等待配对或结果同步的任务可以更新配对码');
           return await withNewPairingCode(async (pairingCode) => {
             session.pairingCodeHash = hash(pairingCode); session.pairingExpiresAt = Date.now() + 15 * 60 * 1000;
             await save(session); return json(res, 200, { pairingCode, pairingExpiresAt: session.pairingExpiresAt });

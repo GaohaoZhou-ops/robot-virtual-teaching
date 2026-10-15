@@ -207,6 +207,10 @@ struct ModelManifest: Codable {
     var bounds: ModelBounds?
 }
 struct PairedSession: Codable { var id: String; var deviceToken: String; var manifest: ModelManifest }
+struct ResultSyncDestination: Codable {
+    var serverURL: String
+    var session: PairedSession
+}
 struct LocalProject: Codable, Identifiable {
     var id: String { session.id }
     var serverURL: String
@@ -214,6 +218,11 @@ struct LocalProject: Codable, Identifiable {
     var result: TeachingResult
     var syncedAt: String?
     var displaySettings: ModelDisplaySettings?
+    // Keep the original project and frozen result intact when a new desktop
+    // transfer receives an already completed teaching session.
+    var resultSyncDestination: ResultSyncDestination?
+    // A continuation starts locally and has no desktop transfer credentials yet.
+    var requiresResultPairing: Bool { session.deviceToken.isEmpty && resultSyncDestination == nil }
 }
 // Portable results deliberately omit the local project's server address and credentials.
 struct TeachingResultFile: Codable {

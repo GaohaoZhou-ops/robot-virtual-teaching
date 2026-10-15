@@ -6,13 +6,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { IPAD_PROTOCOL } from '../src/lib/ipadProtocol.js';
+import { IPAD_PROTOCOL, validateIPadResult } from '../src/lib/ipadProtocol.js';
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-pairing-qr-'));
 const serverId = randomUUID();
 const middleware = createIPadTeachingService({ directory, serverId,
   getAddresses: (port) => [`http://127.0.0.1:${port}`, `http://localhost:${port}`] });
-const server = createServer((req, res) => middleware(req, res, () => { res.writeHead(404); res.end(); }));
+let resultPosts = 0, modelDownloads = 0;
+const server = createServer((req, res) => {
+  if (req.method === 'GET' && req.url.endsWith('/model')) modelDownloads++;
+  if (req.method === 'POST' && req.url.endsWith('/result') && ++resultPosts === 2) {
+    const end = res.end;
+    res.end = function () { return end.call(this, JSON.stringify({ received: false, id: 'lost-receipt', sampleCount: 0 })); };
+  }
+  middleware(req, res, () => { res.writeHead(404); res.end(); });
+});
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const address = `http://127.0.0.1:${server.address().port}`;
 const model = Buffer.alloc(48); model.writeUInt32LE(0x534c5441); model.writeUInt32LE(1, 4); model.writeUInt32LE(1, 8);
@@ -63,12 +71,24 @@ try {
   await writeFile(modelFile, model);
   const binary = path.join(directory, 'qr-test');
   await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift',
-    'ipad/AtlasTeaching/LANClient.swift', 'ipad/Tests/QRCodeTests.swift', '-o', binary]);
+    'ipad/AtlasTeaching/LANClient.swift', 'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/Tests/QRCodeTests.swift', '-o', binary]);
   await run(binary, [file, address, task.id, serverId, modelFile]);
+  assert.equal(modelDownloads, 1, 'result sync must not download the model again');
+  assert.equal(resultPosts, 4, 'both transfers upload, ambiguous receipt retries, and rescan retries');
+  const original = JSON.parse(await readFile(path.join(directory, 'original-result.json'), 'utf8'));
+  const received = JSON.parse(await readFile(path.join(directory, 'received-result.json'), 'utf8'));
+  validateIPadResult(received, manifest, received.sessionId);
+  assert.notEqual(received.sessionId, original.sessionId, 'a new desktop transfer can receive an existing project');
+  assert.deepEqual({ ...received, sessionId: original.sessionId }, original, 'result ID and all recorded data survive rebinding');
   await qr(updated, { status: 409 });
   // Original manual code flow remains compatible, without QR-only identity fields.
   const paired = await api('/pair', { body: { code: other.pairingCode.toLowerCase(), deviceId: randomUUID() } });
   assert.equal(paired.id, other.id);
+  await qr(other);
+  const pairedRenewal = { ...other, ...await api(`/sessions/${other.id}/renew`, { token: other.ownerToken }) };
+  await qr(other, { status: 409 });
+  await qr(pairedRenewal);
+  assert.equal((await api(`/sessions/${other.id}`, { method: 'GET', token: other.ownerToken })).status, 'paired');
   const expired = await ready();
   const sessionFile = path.join(directory, expired.id, 'session.json');
   const data = JSON.parse(await readFile(sessionFile, 'utf8')); data.pairingExpiresAt = Date.now() - 1;

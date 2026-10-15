@@ -3,17 +3,24 @@ import AVFoundation
 import VisionKit
 
 struct PairingScannerView: View {
+    enum Purpose { case receiveModel, syncResult }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var permission = AVCaptureDevice.authorizationStatus(for: .video)
     @State private var cameraError: String?
     @State private var scanMessage = "对准电脑上的 Atlas 配对二维码"
+    let purpose: Purpose
     let onScan: (PairingQRCode) -> Void
+    init(purpose: Purpose = .receiveModel, onScan: @escaping (PairingQRCode) -> Void) {
+        self.purpose = purpose; self.onScan = onScan
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
-                Text("扫描电脑「iPad 运行」窗口中的二维码，识别后自动连接并接收物体。")
+                Text(purpose == .syncResult
+                    ? "在电脑打开相同物体的「iPad / Vision Pro」窗口，扫描其中的二维码。模型核对通过后，自动上传当前已完成的示教结果。"
+                    : "扫描电脑「iPad / Vision Pro」窗口中的二维码，识别后自动连接并接收物体。")
                     .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 Group {
                     if DataScannerViewController.isSupported && permission == .authorized && cameraError == nil {
@@ -39,7 +46,7 @@ struct PairingScannerView: View {
                 Label("电脑与 iPad 需连接同一局域网", systemImage: "wifi").font(.caption).foregroundStyle(.secondary)
             }.padding(24)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065))
-                .navigationTitle("扫码配对").navigationBarTitleDisplayMode(.inline)
+                .navigationTitle(purpose == .syncResult ? "扫码同步到电脑" : "扫码配对").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }.accessibilityIdentifier("cancel-pairing-scan")
                 } }
@@ -48,9 +55,10 @@ struct PairingScannerView: View {
         }
     }
     private var cameraHelp: String {
-        if !DataScannerViewController.isSupported { return "当前设备不支持相机扫码，可返回使用四位配对码。" }
+        let fallback = purpose == .syncResult ? "可返回使用局域网同步或 AirDrop。" : "可返回使用四位配对码。"
+        if !DataScannerViewController.isSupported { return "当前设备不支持相机扫码，" + fallback }
         if permission == .denied { return "请允许相机访问，以扫描电脑上的配对二维码。" }
-        if permission == .restricted { return "相机访问受到系统限制，可返回使用四位配对码。" }
+        if permission == .restricted { return "相机访问受到系统限制，" + fallback }
         return cameraError ?? "正在准备相机…"
     }
     private func prepareCamera() async {

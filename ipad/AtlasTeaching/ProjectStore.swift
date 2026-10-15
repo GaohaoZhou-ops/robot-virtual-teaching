@@ -28,6 +28,31 @@ actor ProjectStore {
     func saveModel(_ data: Data, id: String) throws { try data.write(to: file(id, ext: "atls"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
     func model(_ id: String) throws -> Data { try Data(contentsOf: file(id, ext: "atls"), options: .mappedIfSafe) }
     func modelURL(_ id: String) throws -> URL { try file(id, ext: "atls") }
+    func continueTeaching(_ project: LocalProject) throws -> LocalProject {
+        guard project.result.completedAt != nil else { throw TeachingError("当前项目仍是草稿，可直接继续示教") }
+        let source = try file(project.id, ext: "atls")
+        let identity = try ModelFileIdentity.read(from: source)
+        guard project.result.sessionId == project.id,
+              identity.modelHash == project.session.manifest.modelHash,
+              identity.modelHash == project.result.modelHash,
+              identity.byteLength == project.session.manifest.byteLength else {
+            throw TeachingError("本地模型与完成结果不匹配，无法创建补录草稿")
+        }
+        // Completed results are immutable on the desktop and deduplicated by ID.
+        // Keep the original project and create a separate draft with all its Poses.
+        let id = UUID().uuidString
+        var result = project.result
+        result.id = UUID().uuidString; result.sessionId = id
+        result.createdAt = timestamp(); result.completedAt = nil
+        let draft = LocalProject(serverURL: project.serverURL,
+            session: PairedSession(id: id, deviceToken: "", manifest: project.session.manifest), result: result,
+            displaySettings: (project.displaySettings ?? ModelDisplaySettings()).forOpening())
+        let destination = try file(id, ext: "atls")
+        try FileManager.default.copyItem(at: source, to: destination)
+        do { try save(draft) }
+        catch { try? FileManager.default.removeItem(at: destination); throw error }
+        return draft
+    }
     func exportResult(_ project: LocalProject) throws -> URL {
         guard project.result.completedAt != nil else { throw TeachingError("请先完成示教，再导出结果") }
         guard !project.result.samples.isEmpty, project.result.samples.count <= maximumSamples,

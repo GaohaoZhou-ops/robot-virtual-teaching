@@ -68,6 +68,7 @@ final class TeachingSession: ObservableObject {
             result: TeachingResult(sessionId: paired.id, modelHash: paired.manifest.modelHash))
         project.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
         project.session = paired; project.serverURL = serverURL
+        project.resultSyncDestination = nil
         try await ProjectStore.shared.saveModel(data, id: paired.id)
         try await ProjectStore.shared.save(project)
         UserDefaults.standard.set(serverURL, forKey: "serverAddress")
@@ -104,9 +105,25 @@ final class TeachingSession: ObservableObject {
             geometry = try await Task.detached(priority: .userInitiated) { try ModelGeometry(data: data, manifest: project.session.manifest) }.value
             var opened = project
             opened.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
-            current = opened; pendingModel = nil; serverAddress = project.serverURL
+            current = opened; pendingModel = nil
+            serverAddress = project.resultSyncDestination?.serverURL ?? project.serverURL
             status = project.result.completedAt == nil ? "已恢复本地草稿，请重新校准物体" : "示教已完成，等待同步或已同步"
         } catch { self.error = error.localizedDescription }
+    }
+    func continueTeaching() async {
+        guard !busy, let project = current, project.result.completedAt != nil else { return }
+        busy = true; error = ""; status = "正在保留已有 Pose 并创建补录草稿…"
+        defer { busy = false }
+        do {
+            try await saveNow()
+            let draft = try await ProjectStore.shared.continueTeaching(project)
+            current = draft
+            status = "已保留 \(draft.result.samples.count) 个 Pose，请重新放置物体后继续记录；原完成结果保留在本地项目"
+            await reload()
+        } catch {
+            self.error = "创建补录草稿失败：\(error.localizedDescription)"
+            status = "原完成结果仍保留，可重试"
+        }
     }
     func addCalibration(_ calibration: Calibration) {
         guard current?.result.completedAt == nil else { return }
@@ -198,6 +215,33 @@ final class TeachingSession: ObservableObject {
             status = "已取消分享；结果文件仍保留，可再次分享或通过 Finder 拷贝"
         }
     }
+    func syncResult(qr: PairingQRCode) async {
+        guard !busy, var project = current, project.result.completedAt != nil else { return }
+        busy = true; error = ""; status = "正在连接二维码中的电脑并核对模型…"
+        defer { busy = false }
+        do {
+            try await saveNow()
+            let client = try LANClient(address: qr.address)
+            let modelURL = try await ProjectStore.shared.modelURL(project.id)
+            let destination = try await client.pairResult(project, modelURL: modelURL, qr: qr,
+                deviceID: deviceID, name: TeachingDevice.current.model)
+            project.resultSyncDestination = ResultSyncDestination(serverURL: client.baseURL.absoluteString, session: destination)
+            project.syncedAt = nil
+            // Persist credentials before sending so a lost response or app restart
+            // can retry the same result, even after the QR expires.
+            try await ProjectStore.shared.save(project); current = project
+            serverAddress = client.baseURL.absoluteString
+            UserDefaults.standard.set(serverAddress, forKey: "serverAddress")
+            try await client.upload(project, modelURL: modelURL) { self.status = "模型一致，正在上传 Pose…" }
+            project.syncedAt = timestamp()
+            try await ProjectStore.shared.save(project); current = project
+            status = "扫码同步成功，请在电脑点击「接收示教结果」"
+            await reload()
+        } catch {
+            self.error = "扫码同步失败，本地 Pose 仍保留：\(error.localizedDescription)"
+            status = "可重新扫码；已连接的任务也可使用局域网按钮重试"
+        }
+    }
     func finish(sync: Bool) async {
         guard !busy, var project = current, !project.result.samples.isEmpty else { return }
         busy = true; error = ""; defer { busy = false }
@@ -205,13 +249,18 @@ final class TeachingSession: ObservableObject {
             guard !sync || project.result.device.platform != "visionOS-simulator" else {
                 throw TeachingError("模拟演练数据只能保存在本机，不能同步")
             }
+            guard !sync || !project.requiresResultPairing else {
+                throw TeachingError("补录结果需要新的传输任务，请在电脑点击「新建传输」，再使用「扫码同步到电脑」")
+            }
             await saveTask?.value
             if project.result.completedAt == nil { project.result.completedAt = timestamp() }
             // Freeze before any network call. A failed/ambiguous upload can retry the same bytes.
             current = project; try await ProjectStore.shared.save(project)
             if sync {
                 let client = try LANClient(address: serverAddress)
-                project.serverURL = client.baseURL.absoluteString; current = project
+                if project.resultSyncDestination != nil { project.resultSyncDestination?.serverURL = client.baseURL.absoluteString }
+                else { project.serverURL = client.baseURL.absoluteString }
+                current = project
                 try await ProjectStore.shared.save(project)
                 status = "正在核对 \(TeachingDevice.storageName) 与电脑的模型文件…"
                 let modelURL = try await ProjectStore.shared.modelURL(project.id)

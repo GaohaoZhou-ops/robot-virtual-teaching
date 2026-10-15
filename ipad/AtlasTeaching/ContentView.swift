@@ -268,6 +268,8 @@ struct TeachingView: View {
     @State private var review = false
     @State private var finishing = false
     @State private var resultShare: TeachingResultShareItem?
+    @State private var scanningResult = false
+    @State private var scannedResultCode: PairingQRCode?
     @State private var displaySettingsOpen = false
     @State private var levelVisible = true
     @State private var zividFieldOfViewEnabled = false
@@ -292,6 +294,7 @@ struct TeachingView: View {
     }
     private var viewportMessage: String {
         if sidebarCollapsed && !session.error.isEmpty { return session.error }
+        if completed && ARController.supported { return "示教已完成 · 继续采集请点击「继续示教」" }
         if !liveCamera { return "三维物体预览 · 拖动旋转 / 双指缩放视图" }
         if ar.repositioning || ar.adjustingPlacement { return ar.message }
         if sidebarCollapsed && !ar.calibrated { return "点击或拖动有效表面放置物体，放置后即可记录 Pose" }
@@ -321,10 +324,13 @@ struct TeachingView: View {
             HStack(spacing: 0) {
                 VStack {
                     HStack {
-                        Label(ar.tracking, systemImage: ar.trackingNormal ? "location.fill" : "location.slash")
-                            .foregroundStyle(ar.trackingNormal ? accent : .orange)
+                        Label(completed ? "已完成 · 结果预览" : ar.tracking,
+                              systemImage: completed ? "checkmark.circle" : ar.trackingNormal ? "location.fill" : "location.slash")
+                            .foregroundStyle(completed || ar.trackingNormal ? accent : .orange)
+                            .accessibilityIdentifier("teaching-tracking-status")
                         Spacer()
-                        Text(ar.depthAvailable ? "LiDAR 已就绪" : "等待 LiDAR").foregroundStyle(.secondary)
+                        Text(liveCamera ? (ar.depthAvailable ? "LiDAR 已就绪" : "等待 LiDAR") : "相机 / LiDAR 未启用")
+                            .foregroundStyle(.secondary).accessibilityIdentifier("teaching-depth-status")
                         if ARController.supported && !completed {
                             Button { levelVisible.toggle() } label: {
                                 Image(systemName: "move.3d").frame(minWidth: 20, minHeight: 32)
@@ -404,6 +410,15 @@ struct TeachingView: View {
                         .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("teaching-render-summary")
                     if session.current?.session.manifest.sampled == true { Text("大物体以抽样点云显示，尺寸与坐标不变").font(.caption).foregroundStyle(.secondary) }
                     Divider()
+                    if completed {
+                        Button { Task { await session.continueTeaching() } } label: {
+                            Label("继续示教", systemImage: "camera.fill").frame(maxWidth: .infinity).padding(10)
+                        }.buttonStyle(.bordered).disabled(session.busy || !ARController.supported)
+                            .accessibilityIdentifier("continue-teaching")
+                        Text("保留已有 \(count) 个 Pose，创建补录草稿；原完成结果仍可查看和同步。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Divider()
+                    }
                     fieldOfViewControl
                     coverageControl
                     Divider()
@@ -418,11 +433,30 @@ struct TeachingView: View {
                     if !completed {
                         finishTeachingButton
                     } else {
+                        Button {
+                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                            scanningResult = true
+                        } label: {
+                            Label("扫码同步到电脑", systemImage: "qrcode.viewfinder")
+                                .frame(maxWidth: .infinity).padding(10)
+                        }.buttonStyle(.borderedProminent).disabled(session.busy)
+                            .accessibilityIdentifier("scan-sync-result")
+                            .sheet(isPresented: $scanningResult, onDismiss: syncScannedResult) {
+                                PairingScannerView(purpose: .syncResult) { qr in
+                                    scannedResultCode = qr; scanningResult = false
+                                }
+                            }
+                        Text("扫描电脑「iPad / Vision Pro」窗口中的二维码，无需输入地址。两端需连接同一局域网并打开相同物体。")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if session.current?.requiresResultPairing == true {
+                            Text("这是补录结果，请先在电脑点击「新建传输」再扫码同步。也可通过 AirDrop 导入。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button { Task { await shareResult() } } label: {
                             Label("AirDrop / 导出结果", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity).padding(10)
                         }
-                            .buttonStyle(.borderedProminent).disabled(session.busy)
+                            .buttonStyle(.bordered).disabled(session.busy)
                             .accessibilityIdentifier("share-teaching-result")
                             .popover(item: $resultShare) { item in
                                 TeachingResultShareSheet(url: item.url) { activity, completed, error in
@@ -435,7 +469,7 @@ struct TeachingView: View {
                         Divider()
                         LANAddressFields(address: $session.serverConnection).disabled(session.busy)
                         Button { Task { await session.finish(sync: true) } } label: { Label("局域网同步到电脑", systemImage: "wifi").frame(maxWidth: .infinity).padding(10) }
-                            .buttonStyle(.bordered).disabled(session.busy || !session.serverConnection.canConnect)
+                            .buttonStyle(.bordered).disabled(session.busy || !session.serverConnection.canConnect || session.current?.requiresResultPairing == true)
                     }
                     if session.busy { ProgressView() }
                     Text(session.status).font(.caption).foregroundStyle(.secondary)
@@ -512,6 +546,13 @@ struct TeachingView: View {
         // On iPad the confirmation is a popover. Anchor it to the tapped button,
         // rather than the whole AR viewport and its other presentation modifiers.
         .confirmationDialog("完成示教？", isPresented: $finishing, titleVisibility: .visible) {
+            Button("完成并扫码同步") {
+                ar.stop()
+                Task {
+                    await session.finish(sync: false)
+                    if session.error.isEmpty && completed { scanningResult = true }
+                }
+            }
             Button("完成并通过 AirDrop 分享") {
                 ar.stop()
                 Task {
@@ -520,6 +561,7 @@ struct TeachingView: View {
                 }
             }
             Button("完成并同步到电脑") { ar.stop(); Task { await session.finish(sync: true) } }
+                .disabled(session.current?.requiresResultPairing == true)
             Button("仅完成并保存在 iPad") { ar.stop(); Task { await session.finish(sync: false) } }
             Button("继续示教", role: .cancel) {}
         } message: {
@@ -528,6 +570,11 @@ struct TeachingView: View {
     }
     private func shareResult() async {
         if let url = await session.exportResult() { resultShare = TeachingResultShareItem(url: url) }
+    }
+    private func syncScannedResult() {
+        guard let qr = scannedResultCode else { return }
+        scannedResultCode = nil
+        Task { await session.syncResult(qr: qr) }
     }
     private func setSidebarCollapsed(_ collapsed: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
