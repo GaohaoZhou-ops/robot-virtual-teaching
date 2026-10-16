@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var scanning = false
     @State private var scannedCode: PairingQRCode?
     @State private var codeFocused = false
+    @State private var projectToDelete: LocalProject?
+    @State private var revealedProjectID: String?
     var body: some View {
         GeometryReader { viewport in
         Group {
@@ -49,10 +51,24 @@ struct ContentView: View {
             }
             .frame(width: viewport.size.width, height: viewport.size.height)
             .scrollDismissesKeyboard(.interactively)
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded {
+                revealedProjectID = nil
+            })
         }
         .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
         .sheet(isPresented: $scanning, onDismiss: finishScanning) {
             PairingScannerView { qr in scannedCode = qr; scanning = false }
+        }
+        .alert("从此 iPad 删除模型？", isPresented: Binding(
+            get: { projectToDelete != nil }, set: { if !$0 { projectToDelete = nil } }
+        ), presenting: projectToDelete) { project in
+            Button("删除模型与全部 Pose", role: .destructive) {
+                Task { await session.deleteLocalProject(project) }
+            }.accessibilityIdentifier("confirm-delete-local-project")
+            Button("取消", role: .cancel) {}.accessibilityIdentifier("cancel-delete-local-project")
+        } message: { project in
+            Text("将删除「\(project.session.manifest.name)」在此 iPad 上的模型、全部 \(project.result.samples.count) 个 Pose 和应用生成的导出副本。电脑上的工程和已同步结果不受影响。")
         }
         .onAppear { if !scanning { discovery.start() } }
         .onDisappear { discovery.stop() }
@@ -170,6 +186,8 @@ struct ContentView: View {
                 Spacer()
                 Text("\(session.projects.count) 个物体").font(.caption).foregroundStyle(.secondary)
             }
+            Text("左滑条目可删除此 iPad 上的模型和全部 Pose，电脑工程不受影响。")
+                .font(.caption).foregroundStyle(.secondary)
             Divider()
             if session.projects.isEmpty {
                 VStack(spacing: 16) {
@@ -179,31 +197,39 @@ struct ContentView: View {
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.frame(maxWidth: .infinity, minHeight: 230)
             } else {
-                ForEach(session.projects) { project in
-                    Button { Task { await session.open(project) } } label: {
-                        HStack(spacing: 18) {
-                            VStack(alignment: .leading, spacing: 10) {
-                                Text(project.session.manifest.name).font(.headline).multilineTextAlignment(.leading).lineLimit(3)
-                                Text("\(project.result.samples.count) 个 Pose · \(project.syncedAt != nil ? "已同步" : project.result.completedAt != nil ? "已完成，待同步" : "本地草稿")")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                if session.openingProjectID == project.id {
-                                    ProgressView("轻量加载…").font(.caption).controlSize(.small)
-                                        .accessibilityIdentifier("opening-model-progress")
+                VStack(spacing: 12) {
+                    ForEach(session.projects) { project in
+                        LocalProjectSwipeRow(projectID: project.id, revealedProjectID: $revealedProjectID,
+                                             disabled: session.busy, onDelete: { projectToDelete = project }) {
+                            Button { Task { await session.open(project) } } label: {
+                                HStack(spacing: 18) {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text(project.session.manifest.name).font(.headline).multilineTextAlignment(.leading).lineLimit(3)
+                                        Text("\(project.result.samples.count) 个 Pose · \(project.syncedAt != nil ? "已同步" : project.result.completedAt != nil ? "已完成，待同步" : "本地草稿")")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        if session.openingProjectID == project.id {
+                                            ProgressView("轻量加载…").font(.caption).controlSize(.small)
+                                                .accessibilityIdentifier("opening-model-progress")
+                                        } else if session.deletingProjectID == project.id {
+                                            ProgressView("正在删除…").font(.caption).controlSize(.small)
+                                        }
+                                    }
+                                    Spacer(minLength: 4)
+                                    ProjectThumbnailView(project: project)
+                                        .frame(width: 150, height: 100)
+                                        .overlay(alignment: .topTrailing) {
+                                            Image(systemName: "arrow.up.right").font(.caption.weight(.medium)).foregroundStyle(accent)
+                                                .padding(7).background(.black.opacity(0.5), in: Circle()).padding(6)
+                                        }
+                                        .allowsHitTesting(false)
                                 }
-                            }
-                            Spacer(minLength: 4)
-                            ProjectThumbnailView(project: project)
-                                .frame(width: 150, height: 100)
-                                .overlay(alignment: .topTrailing) {
-                                    Image(systemName: "arrow.up.right").font(.caption.weight(.medium)).foregroundStyle(accent)
-                                        .padding(7).background(.black.opacity(0.5), in: Circle()).padding(6)
-                                }
-                                .allowsHitTesting(false)
+                                .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+                            }.buttonStyle(.plain).disabled(session.busy).accessibilityIdentifier("local-project-\(project.id)")
                         }
-                        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                    }.buttonStyle(.plain).disabled(session.busy).accessibilityIdentifier("local-project-\(project.id)")
+                    }
                 }
+                .accessibilityIdentifier("local-project-list")
             }
             Spacer(minLength: 12)
         }
@@ -214,6 +240,83 @@ struct ContentView: View {
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-projects-panel")
     }
 
+}
+
+/// A horizontal scroll keeps vertical page scrolling native, while allowing the
+/// action and card to share their actual height (including larger text sizes).
+private struct LocalProjectSwipeRow<Content: View>: View {
+    let projectID: String
+    @Binding var revealedProjectID: String?
+    let disabled: Bool
+    let onDelete: () -> Void
+    @ViewBuilder let content: Content
+    @State private var showingAction = false
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 12) {
+                    content
+                        .containerRelativeFrame(.horizontal)
+                        .id("card")
+                        .accessibilityAction(named: Text("从此 iPad 删除")) {
+                            guard !disabled else { return }
+                            close(using: proxy)
+                            onDelete()
+                        }
+                    Button {
+                        close(using: proxy)
+                        onDelete()
+                    } label: {
+                        VStack(spacing: 8) {
+                            Image(systemName: "trash").font(.title3.weight(.medium))
+                            Text("删除").font(.callout.weight(.semibold))
+                        }
+                        .foregroundStyle(.white)
+                        .frame(width: 88).frame(maxHeight: .infinity)
+                        .background(Color.red, in: RoundedRectangle(cornerRadius: 14))
+                        .contentShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .buttonStyle(.plain).disabled(disabled)
+                    .accessibilityIdentifier("swipe-delete-local-project-\(projectID)")
+                    .accessibilityLabel("从此 iPad 删除模型和全部 Pose")
+                    .accessibilityHidden(!showingAction)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: Bool.self) { geometry in
+                    geometry.frame(in: .scrollView(axis: .horizontal)).minX < -1
+                } action: { revealed in
+                    if revealed && !showingAction { revealedProjectID = projectID }
+                    if !revealed && revealedProjectID == projectID { revealedProjectID = nil }
+                    showingAction = revealed
+                }
+            }
+            .scrollIndicators(.hidden)
+            .scrollTargetBehavior(LocalProjectSwipeSnap())
+            .scrollDisabled(disabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .onChange(of: revealedProjectID) { _, id in
+                if id != projectID && showingAction { close(using: proxy) }
+            }
+            .onChange(of: disabled) { _, busy in
+                if busy { close(using: proxy) }
+            }
+        }
+    }
+
+    private func close(using proxy: ScrollViewProxy) {
+        withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("card", anchor: .leading) }
+        if revealedProjectID == projectID { revealedProjectID = nil }
+    }
+}
+
+private struct LocalProjectSwipeSnap: ScrollTargetBehavior {
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        let revealWidth = max(0, context.contentSize.width - context.containerSize.width)
+        let reveal = abs(context.velocity.dx) > 100 ? context.velocity.dx > 0 : target.rect.minX > revealWidth / 2
+        target.rect.origin.x = reveal ? revealWidth : 0
+    }
 }
 
 private struct LANAddressFields: View {

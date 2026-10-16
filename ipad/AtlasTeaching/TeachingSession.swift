@@ -16,6 +16,7 @@ final class TeachingSession: ObservableObject {
     @Published var current: LocalProject?
     @Published var busy = false
     @Published private(set) var openingProjectID: String?
+    @Published private(set) var deletingProjectID: String?
     @Published var error = ""
     @Published var status = ""
     @Published var serverConnection = LANAddressInput(address: UserDefaults.standard.string(forKey: "serverAddress") ?? "")
@@ -36,6 +37,28 @@ final class TeachingSession: ObservableObject {
     func reload() async {
         do { projects = try await ProjectStore.shared.projects() } catch { self.error = "读取本地草稿失败：\(error.localizedDescription)" }
     }
+    #if os(iOS)
+    func deleteLocalProject(_ project: LocalProject) async {
+        guard !busy, current == nil, projects.contains(where: { $0.id == project.id }) else { return }
+        busy = true; deletingProjectID = project.id; error = ""
+        defer { busy = false; deletingProjectID = nil }
+        // Drain earlier saves before removing files so an autosave cannot
+        // recreate the deleted project. Deletion is only available in the library.
+        await saveTask?.value; saveTask = nil
+        status = "正在从此 iPad 删除模型与 Pose…"
+        do {
+            try await ProjectStore.shared.deleteLocalProject(project.id)
+            projects.removeAll { $0.id == project.id }
+            if !projects.contains(where: { $0.session.manifest.modelHash == project.session.manifest.modelHash }) {
+                await ProjectThumbnailStore.shared.removeThumbnail(modelHash: project.session.manifest.modelHash)
+            }
+            status = "已从此 iPad 删除「\(project.session.manifest.name)」及全部 Pose；电脑工程和已同步结果保留"
+        } catch {
+            self.error = "本地删除未完成，请重试：\(error.localizedDescription)"
+            status = "电脑工程和已同步结果不受影响"
+        }
+    }
+    #endif
     func pair(qr: PairingQRCode? = nil, confirmNewModel: Bool = false) async {
         guard !busy else { return }; busy = true; error = ""; defer { busy = false }
         do {

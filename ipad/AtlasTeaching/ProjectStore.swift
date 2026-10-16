@@ -28,6 +28,36 @@ actor ProjectStore {
     func saveModel(_ data: Data, id: String) throws { try data.write(to: file(id, ext: "atls"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]) }
     func model(_ id: String) throws -> Data { try Data(contentsOf: file(id, ext: "atls"), options: .mappedIfSafe) }
     func modelURL(_ id: String) throws -> URL { try file(id, ext: "atls") }
+    private func exportsURL() throws -> URL {
+        if let exportDirectory { return exportDirectory }
+        return try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: true).appendingPathComponent("Teaching Exports", isDirectory: true)
+    }
+    func deleteLocalProject(_ id: String) throws {
+        let metadata = try file(id, ext: "json"), model = try file(id, ext: "atls")
+        let manager = FileManager.default
+        var files: [URL] = []
+        if manager.fileExists(atPath: metadata.path) {
+            let project = try JSONDecoder().decode(LocalProject.self, from: Data(contentsOf: metadata))
+            guard project.id == id, UUID(uuidString: project.result.id) != nil else {
+                throw TeachingError("本地项目标识不匹配，未执行删除")
+            }
+            let exports = try exportsURL()
+            if manager.fileExists(atPath: exports.path) {
+                // Only this result's app-generated copies on this device. Never
+                // follow a server URL or match other projects by model hash/name.
+                let suffix = "-\(project.result.id).atlas-teaching.json"
+                files = try manager.contentsOfDirectory(at: exports, includingPropertiesForKeys: nil).filter {
+                    $0.lastPathComponent.hasPrefix("Atlas-") && $0.lastPathComponent.hasSuffix(suffix)
+                }
+            }
+        }
+        // Keep metadata until all payloads are removed. If removal fails, the
+        // visible row can retry even when some files have already been removed.
+        for url in files + [model, metadata] where manager.fileExists(atPath: url.path) {
+            try manager.removeItem(at: url)
+        }
+    }
     func continueTeaching(_ project: LocalProject) throws -> LocalProject {
         guard project.result.completedAt != nil else { throw TeachingError("当前项目仍是草稿，可直接继续示教") }
         let source = try file(project.id, ext: "atls")
@@ -78,12 +108,7 @@ actor ProjectStore {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(TeachingResultFile(manifest: manifest, result: project.result))
         guard data.count <= 64 * 1024 * 1024 else { throw TeachingError("示教结果文件超过 64 MiB，无法导出") }
-        let exports: URL
-        if let exportDirectory { exports = exportDirectory }
-        else {
-            exports = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
-                appropriateFor: nil, create: true).appendingPathComponent("Teaching Exports", isDirectory: true)
-        }
+        let exports = try exportsURL()
         try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
         let stem = String(manifest.name.components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }.joined(separator: "-").prefix(60))
