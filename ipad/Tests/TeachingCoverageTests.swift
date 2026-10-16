@@ -55,11 +55,22 @@ import AppKit
         let nearGrid = try await nearEngine.rasterize(pose)
         precondition(!TeachingCoverageProfile.contains(SIMD3(0, 0, 1), depths: nearGrid),
                      "occluders closer than M70 workingNear must still block surfaces behind them")
-        let emptyEngine = try TeachingCoverageEngine(model: model(plane(z: 2), quad))
+        let distant = try model(plane(z: 2), quad)
+        let emptyEngine = try TeachingCoverageEngine(model: distant)
         let empty = try await emptyEngine.rasterize(pose)
         precondition(empty.allSatisfy { $0 == 0 }, "empty cells never extend to the far plane")
         let missing = try await emptyEngine.build([pose])
         precondition(missing.frameCount == 0 && missing.frames == nil)
+        var previewSample = TeachingSample(segmentId: "preview", kind: "keyframe", cameraPose: camera())
+        let distantPreview = try await emptyEngine.preview(previewSample)
+        precondition(distantPreview.frameCount == 1 && abs(Float(distantPreview.modelBounds!.0.z) - 2) < 0.0001,
+                     "Pose inspection includes visible surfaces beyond M70's working range")
+        previewSample.previewCameraTransform = TeachingCoordinates.opticalToARCamera.elements
+        previewSample.previewProjection = [4, 0, 0, 0, 0, 4, 0, 0, 0.3, -0.2, -1.000001, -1, 0, 0, -0.001000001, 0]
+        let offAxis = try await emptyEngine.preview(previewSample)
+        let offAxisBounds = offAxis.modelBounds!
+        precondition(abs(Float(offAxisBounds.0.x) + 0.35) < 0.0001 && abs(Float(offAxisBounds.1.y) - 0.6) < 0.0001,
+                     "preview clipping preserves the saved focal lengths, principal point and camera orientation")
 
         let q = simd_quatf(angle: 0.76, axis: simd_normalize(SIMD3<Float>(1, 2, 3)))
         let movedPose = TeachingCoveragePose(camera(position: SIMD3(0.8, -0.3, 0.4), rotation: q))!
@@ -118,6 +129,16 @@ import AppKit
         precondition(tinted[center + 3] == plain[center + 3], "source alpha is preserved")
         let outside = (128 * 256 + 240) * 4
         precondition(Array(tinted[outside..<(outside + 4)]) == Array(plain[outside..<(outside + 4)]), "outside-FOV surface color remains unchanged")
+        TeachingCoverageRenderer.apply(snapshot, opacity: 0, to: geometry.firstMaterial!, clipOutside: true)
+        let clipped = capture("pose-local-surface.png")
+        precondition(Array(clipped[center..<(center + 4)]) == Array(plain[center..<(center + 4)]),
+                     "the selected Pose keeps its original surface color")
+        precondition(clipped[outside] == 0 && clipped[outside + 1] == 0 && clipped[outside + 2] == 0,
+                     "surfaces outside the selected Pose disappear even when the inspecting camera sees them")
+        let localBounds = snapshot.modelBounds!
+        precondition(abs(Float(localBounds.0.x) + TeachingCoverageProfile.tangentX) < 0.0001
+                     && abs(Float(localBounds.1.y) - TeachingCoverageProfile.tangentY) < 0.0001,
+                     "the orbit bounds follow the selected surface, not the original model bounds")
         let repeated = try await engine.build([pose, pose])
         TeachingCoverageRenderer.apply(repeated, opacity: 0.5, to: geometry.firstMaterial!)
         let overlapped = capture()
@@ -128,6 +149,16 @@ import AppKit
         TeachingCoverageRenderer.apply(stackedSnapshot, opacity: 0.5, to: node.geometry!.firstMaterial!)
         let backTinted = capture("coverage-occlusion.png")
         precondition(Array(backPlain[center..<(center + 4)]) == Array(backTinted[center..<(center + 4)]), "a view from behind must not reveal tint through the model")
+        node.geometry = try flat.makeGeometry(settings: ModelDisplaySettings(meshQuality: .full))
+        TeachingCoverageRenderer.apply(stackedSnapshot, opacity: 0, to: node.geometry!.firstMaterial!, clipOutside: true)
+        let clippedBack = capture("pose-local-occlusion.png")
+        precondition(clippedBack[center] == 0 && clippedBack[center + 1] == 0 && clippedBack[center + 2] == 0,
+                     "rotating behind the selected Pose cannot reveal a rear surface hidden in the recorded view")
+        node.geometry = try distant.makeGeometry(settings: ModelDisplaySettings(meshQuality: .full))
+        TeachingCoverageRenderer.apply(offAxis, opacity: 0, to: node.geometry!.firstMaterial!, clipOutside: true)
+        let recordedFrustum = capture("pose-recorded-frustum.png")
+        precondition(recordedFrustum[center] > 0 && recordedFrustum[outside] == 0,
+                     "the actual preview shader uses its own depth resolution and recorded projection beyond the working range")
 
         let display = TeachingCoverageRenderer()
         let sample = TeachingSample(segmentId: "test", kind: "keyframe", cameraPose: camera())
@@ -148,6 +179,11 @@ import AppKit
                      "quality or render-mode changes reuse the same full-model coverage")
         display.attach(to: geometry)
         display.enabled = false
+        let inspection = try await display.previewSnapshot(for: sample)
+        precondition(inspection.frameCount == 1 && inspection.modelBounds != nil,
+                     "single-Pose selection works while aggregate coverage is disabled")
+        precondition(geometry.firstMaterial!.shaderModifiers == nil,
+                     "preparing a preview never enables or replaces the live model coverage")
         precondition(geometry.firstMaterial!.shaderModifiers == nil, "hiding coverage restores original rendering")
         display.enabled = true
         display.update(model: flat, samples: [])

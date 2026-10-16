@@ -594,6 +594,242 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(project.waitForExistence(timeout: 10))
     }
 
+    func testPosePreviewKeepsRecordedImageAndCameraIndependent() throws {
+        let geometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
+        let material = SCNMaterial(); material.lightingModel = .constant; material.diffuse.contents = UIColor.orange
+        geometry.materials = [material]
+        var transform = matrix_identity_float4x4; transform.columns.3 = SIMD4(0, 0, 3, 1)
+        let projection = simd_float4x4(columns: (
+            SIMD4(1.3, 0, 0, 0), SIMD4(0, 1.73, 0, 0), SIMD4(0.08, -0.04, -1.00002, -1), SIMD4(0, 0, -0.0200002, 0)))
+        var sample = TeachingSample(segmentId: "preview-test", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 3)), quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))),
+            previewCameraTransform: transform.elements, previewProjection: projection.elements, previewAspect: 4 / 3)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let original = try encoder.encode(sample)
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        func update(_ mode: PosePreviewMode, reset: Int = 0) {
+            view.update(rendered: geometry, sample: sample, mode: mode, resetRevision: reset)
+            view.layoutIfNeeded()
+        }
+        update(.image)
+        let recordedImage = try XCTUnwrap(view.imageView.image)
+        let recordedPNG = try XCTUnwrap(recordedImage.pngData())
+        let screenshot = XCTAttachment(image: recordedImage); screenshot.name = "Recorded 2D model image"
+        screenshot.lifetime = .keepAlways; add(screenshot)
+        XCTAssertTrue(view.sceneView.isHidden)
+        XCTAssertFalse(view.sceneView.isUserInteractionEnabled)
+        update(.interactive)
+        view.zoom(by: 2)
+        XCTAssertEqual(view.camera.simdPosition.z, 1.5, accuracy: 0.001, "pinch must dolly with a custom projection")
+        XCTAssertEqual(simd_float4x4(try XCTUnwrap(view.camera.camera).projectionTransform).elements, projection.elements)
+        view.translate(by: CGPoint(x: 35, y: -20))
+        XCTAssertNotEqual(view.camera.simdPosition.x, 0)
+        let inspected = view.camera.simdTransform.elements
+        update(.image)
+        view.zoom(by: 2); view.translate(by: CGPoint(x: 10, y: 10))
+        XCTAssertEqual(view.camera.simdTransform.elements, inspected, "2D must ignore model gestures")
+        XCTAssertEqual(view.imageView.image?.pngData(), recordedPNG, "2D is the saved view, not the manipulated camera")
+        update(.interactive)
+        XCTAssertEqual(view.camera.simdTransform.elements, inspected, "switching back preserves the 3D view")
+        XCTAssertEqual(try encoder.encode(sample), original)
+        sample.name = "Renamed without changing the view"
+        update(.interactive)
+        XCTAssertEqual(view.camera.simdTransform.elements, inspected, "unrelated SwiftUI updates must not reset the camera")
+        update(.interactive, reset: 1)
+        XCTAssertEqual(view.camera.simdTransform.elements, transform.elements)
+        // Force a fresh snapshot after interaction and resizing, not only a cache hit.
+        view.frame.size = CGSize(width: 800, height: 600); update(.image, reset: 1)
+        XCTAssertNotNil(view.imageView.image)
+        view.frame.size = CGSize(width: 400, height: 300); update(.image, reset: 1)
+        XCTAssertEqual(view.imageView.image?.pngData(), recordedPNG)
+        sample.id = UUID().uuidString; sample.previewCameraTransform = nil; sample.previewProjection = nil
+        sample.cameraPose.position = Point3(SIMD3(0.4, 0.2, 4))
+        update(.interactive, reset: 1)
+        XCTAssertEqual(view.camera.simdPosition, SIMD3(0.4, 0.2, 4))
+        XCTAssertNotEqual(simd_float4x4(try XCTUnwrap(view.camera.camera).projectionTransform).elements, projection.elements,
+                          "legacy samples cannot inherit another Pose's custom intrinsics")
+        view.stop()
+    }
+
+    func testPoseImageZoomPanRestoreAndResize() throws {
+        let geometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
+        var sample = TeachingSample(segmentId: "image-detail", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 3)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        func update(_ mode: PosePreviewMode, reset: Int = 0) {
+            view.update(rendered: geometry, sample: sample, mode: mode, resetRevision: reset)
+            view.layoutIfNeeded()
+        }
+        update(.interactive)
+        view.zoom(by: 2)
+        let inspected = view.camera.simdTransform.elements
+        update(.image)
+        let initialPixels = try XCTUnwrap(view.imageView.image?.cgImage).width
+        let scroll = view.imageScrollView
+        scroll.setZoomScale(2.5, animated: false)
+        scroll.setContentOffset(CGPoint(x: 180, y: 120), animated: false)
+        let offset = scroll.contentOffset
+        XCTAssertEqual(scroll.zoomScale, 2.5, accuracy: 0.001)
+        XCTAssertGreaterThan(offset.x, 0); XCTAssertGreaterThan(offset.y, 0)
+        update(.interactive); XCTAssertEqual(view.camera.simdTransform.elements, inspected)
+        update(.image)
+        XCTAssertEqual(scroll.zoomScale, 2.5, accuracy: 0.001)
+        XCTAssertEqual(scroll.contentOffset, offset, "mode switching retains the inspected image region")
+        let center = CGPoint(x: (offset.x + 200) / scroll.contentSize.width,
+                             y: (offset.y + 150) / scroll.contentSize.height)
+        view.frame.size = CGSize(width: 800, height: 600); update(.image)
+        XCTAssertEqual(scroll.zoomScale, 2.5, accuracy: 0.001)
+        XCTAssertEqual((scroll.contentOffset.x + 400) / scroll.contentSize.width, center.x, accuracy: 0.001)
+        XCTAssertEqual((scroll.contentOffset.y + 300) / scroll.contentSize.height, center.y, accuracy: 0.001)
+        view.scrollViewDidEndZooming(scroll, with: view.imageView, atScale: 2.5)
+        XCTAssertGreaterThan(try XCTUnwrap(view.imageView.image?.cgImage).width, initialPixels,
+                             "zooming refines the recorded image instead of only stretching the initial bitmap")
+        XCTAssertEqual(view.camera.simdTransform.elements, inspected)
+        update(.image, reset: 1)
+        XCTAssertEqual(scroll.zoomScale, 1, accuracy: 0.001); XCTAssertEqual(scroll.contentOffset, .zero)
+        XCTAssertEqual(view.camera.simdTransform.elements, inspected, "fitting the image does not reset the 3D camera")
+        scroll.setZoomScale(2, animated: false)
+        update(.interactive, reset: 2)
+        XCTAssertEqual(view.camera.simdPosition.z, 3, accuracy: 0.001)
+        XCTAssertEqual(scroll.zoomScale, 2, accuracy: 0.001, "resetting 3D leaves the image zoom alone")
+        sample.id = UUID().uuidString
+        update(.image, reset: 2)
+        XCTAssertEqual(scroll.zoomScale, 1, accuracy: 0.001); XCTAssertEqual(scroll.contentOffset, .zero)
+        XCTAssertNotNil(view.imageView.image, "a different Pose starts with its complete recorded frame")
+        view.stop()
+    }
+
+    func testPosePreviewLocalGeometryAndSynchronizedOverview() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let geometry = SCNBox(width: 4, height: 3, length: 0.1, chamferRadius: 0)
+        let material = SCNMaterial(); material.lightingModel = .constant; material.diffuse.contents = UIColor.orange
+        geometry.materials = [material]
+        var sample = TeachingSample(segmentId: "local-preview", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        var matrix = try XCTUnwrap(TeachingCoveragePose(sample.cameraPose)).cameraFromModel
+        let frames = try XCTUnwrap(device.makeBuffer(bytes: &matrix, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
+        let values = [Float](repeating: 1, count: TeachingCoverageProfile.columns * TeachingCoverageProfile.rows)
+        let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
+        let footprint = TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1)
+        TeachingCoverageRenderer.apply(footprint, opacity: 0.25, to: material)
+        let liveShader = material.shaderModifiers?[.fragment]
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        view.update(rendered: geometry, overview: geometry, sample: sample, mode: .interactive, resetRevision: 0)
+        XCTAssertNil(view.object.geometry, "pending selection must never flash the entire model")
+        view.update(rendered: geometry, overview: geometry, footprint: footprint, sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded()
+        let local = try XCTUnwrap(view.object.geometry)
+        XCTAssertFalse(local === geometry); XCTAssertFalse(local.firstMaterial === material)
+        XCTAssertNotNil(local.firstMaterial?.shaderModifiers)
+        XCTAssertEqual(material.shaderModifiers?[.fragment], liveShader, "preview clipping must not change the live model")
+        XCTAssertTrue(material.value(forKey: "atlasCoverageFrames") as? MTLBuffer === frames)
+        XCTAssertFalse(view.overviewObject.geometry === geometry)
+        XCTAssertLessThan(local.boundingBox.max.x - local.boundingBox.min.x, 1.2, "the orbit bounds cover only the selected surface")
+        XCTAssertEqual(view.overviewObject.boundingBox.max.x - view.overviewObject.boundingBox.min.x, 4, accuracy: 0.001)
+        view.camera.simdOrientation = simd_quatf(angle: 1.1, axis: simd_normalize(SIMD3<Float>(1, 2, 3)))
+        view.syncOverviewCamera()
+        XCTAssertLessThan(simd_length(view.camera.simdWorldFront - view.overviewCamera.simdWorldFront), 0.0001)
+        XCTAssertLessThan(simd_length(view.camera.simdWorldUp - view.overviewCamera.simdWorldUp), 0.0001)
+        let overviewTransform = view.overviewCamera.simdTransform.elements
+        let scale = view.overviewCamera.camera!.orthographicScale
+        view.translate(by: CGPoint(x: 20, y: 15)); view.zoom(by: 2); view.syncOverviewCamera()
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, overviewTransform, "global context stays centered while inspecting locally")
+        XCTAssertEqual(view.overviewCamera.camera!.orthographicScale, scale)
+        view.restoreRecordedView()
+        XCTAssertLessThan(simd_length(view.camera.simdWorldFront - view.overviewCamera.simdWorldFront), 0.0001)
+        XCTAssertNotEqual(view.overviewCamera.simdTransform.elements, overviewTransform)
+        sample.id = UUID().uuidString
+        view.update(rendered: geometry, overview: geometry, sample: sample, mode: .interactive, resetRevision: 0)
+        XCTAssertNil(view.object.geometry, "switching Poses clears the previous selection immediately")
+        XCTAssertNil(view.overviewObject.geometry?.firstMaterial?.shaderModifiers)
+        let empty = TeachingCoverageSnapshot(frames: nil, depths: nil, frameCount: 0)
+        view.update(rendered: geometry, overview: geometry, footprint: empty, sample: sample, mode: .interactive, resetRevision: 0)
+        XCTAssertNil(view.object.geometry, "an empty footprint does not fall back to the entire model")
+        view.stop()
+    }
+
+    func testPosePreviewInteractionAndImageSwitching() throws {
+        continueAfterFailure = false
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_PREVIEW_DISPOSABLE_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide a disposable completed project with two Poses; the test removes only this fixture afterward")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let review = app.buttons["review-poses"]
+        XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
+        let preview = app.otherElements["pose-review-preview"]
+        let image = app.buttons["pose-preview-mode-2d"], interactive = app.buttons["pose-preview-mode-3d"]
+        let reset = app.buttons["reset-pose-preview"]
+        let close = app.buttons["close-pose-review"]
+        XCTAssertTrue(image.waitForExistence(timeout: 10)); XCTAssertTrue(preview.exists)
+        XCTAssertFalse(app.navigationBars.staticTexts["查看 / 编辑 Pose"].exists)
+        XCTAssertGreaterThanOrEqual(close.frame.minX, reset.frame.maxX)
+        XCTAssertEqual(close.frame.midY, reset.frame.midY, accuracy: 2)
+        XCTAssertTrue(reset.isEnabled)
+        XCTAssertFalse(app.buttons["delete-review-pose"].exists, "inspection remains available for locked projects")
+        let original = preview.screenshot().pngRepresentation
+        preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: preview.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)))
+        XCTAssertNotEqual(preview.screenshot().pngRepresentation, original, "single-finger drag rotates the visible model")
+        let rotated = preview.screenshot().pngRepresentation
+        preview.pinch(withScale: 1.5, velocity: 1)
+        XCTAssertNotEqual(preview.screenshot().pngRepresentation, rotated, "pinch changes the rendered model size")
+        image.tap()
+        XCTAssertEqual(preview.value as? String, "2D 记录视角图像"); XCTAssertTrue(reset.isEnabled)
+        XCTAssertTrue(reset.label.contains("恢复完整画幅"))
+        let fullImage = preview.screenshot().pngRepresentation
+        let initial2D = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        initial2D.name = "Pose 2D before pinch"; initial2D.lifetime = .keepAlways; add(initial2D)
+        // XCTest starts with closely spaced touches; a deliberate pinch travels
+        // far enough for UIScrollView's native zoom recognizer to engage.
+        preview.pinch(withScale: 4, velocity: 1)
+        let magnified = preview.screenshot().pngRepresentation
+        let zoomed2D = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        zoomed2D.name = "Pose 2D after pinch"; zoomed2D.lifetime = .keepAlways; add(zoomed2D)
+        XCTAssertNotEqual(magnified, fullImage, "2D supports pinch-to-zoom")
+        preview.swipeLeft()
+        let panned = preview.screenshot().pngRepresentation
+        XCTAssertNotEqual(panned, magnified, "one-finger dragging moves the magnified image")
+        let detail = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        detail.name = "Pose 2D zoomed and panned"; detail.lifetime = .keepAlways; add(detail)
+        reset.tap()
+        XCTAssertNotEqual(preview.screenshot().pngRepresentation, panned, "fit restores the complete image")
+        for orientation: UIDeviceOrientation in [.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(image.isHittable); XCTAssertTrue(interactive.isHittable)
+            XCTAssertTrue(close.isHittable)
+            XCTAssertGreaterThanOrEqual(close.frame.minX, reset.frame.maxX)
+            XCTAssertEqual(close.frame.midY, reset.frame.midY, accuracy: 2)
+            let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            screenshot.name = "Pose 2D image \(orientation.isLandscape ? "landscape" : "portrait")"
+            screenshot.lifetime = .keepAlways; add(screenshot)
+        }
+        interactive.tap(); XCTAssertEqual(preview.value as? String, "3D 交互视图")
+        reset.tap()
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-pose-"))
+        XCTAssertGreaterThanOrEqual(rows.count, 2)
+        let firstLabel = preview.label
+        image.tap(); rows.element(boundBy: 1).tap()
+        XCTAssertNotEqual(preview.label, firstLabel)
+        XCTAssertEqual(preview.value as? String, "2D 记录视角图像")
+        interactive.tap(); XCTAssertTrue(reset.isEnabled)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = "Interactive Pose point cloud"; screenshot.lifetime = .keepAlways; add(screenshot)
+        app.buttons["close-pose-review"].tap()
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        app.buttons["本地项目"].tap()
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.swipeLeft(); app.buttons["swipe-delete-local-project-\(fixtureID)"].tap()
+        app.buttons["confirm-delete-local-project"].firstMatch.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: project)], timeout: 10), .completed)
+    }
+
     func testFullScreenPoseReviewLayoutEditingAndReturn() throws {
         continueAfterFailure = false
         guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_REVIEW_FIXTURE_ID"],
