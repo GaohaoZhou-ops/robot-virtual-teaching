@@ -55,6 +55,75 @@ struct TeachingCoverageSnapshot {
     let frames: MTLBuffer?
     let depths: MTLBuffer?
     let frameCount: Int
+    let frustum: TeachingCoverageFrustum
+
+    init(frames: MTLBuffer?, depths: MTLBuffer?, frameCount: Int, frustum: TeachingCoverageFrustum = .teaching) {
+        self.frames = frames; self.depths = depths; self.frameCount = frameCount; self.frustum = frustum
+    }
+
+    /// Bounds of the visible depth cells, in model coordinates. The inspection
+    /// pivot must follow the selected surface rather than the entire model.
+    var modelBounds: (SCNVector3, SCNVector3)? {
+        guard frameCount > 0, let frames, let depths else { return nil }
+        let matrices = frames.contents().bindMemory(to: simd_float4x4.self, capacity: frameCount)
+        let columns = frustum.columns, rows = frustum.rows
+        let values = depths.contents().bindMemory(to: Float.self, capacity: frameCount * columns * rows)
+        var lower = SIMD3<Float>(repeating: .infinity), upper = SIMD3<Float>(repeating: -.infinity)
+        for frame in 0..<frameCount {
+            let modelFromCamera = matrices[frame].inverse
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let depth = values[frame * columns * rows + row * columns + column]
+                    guard depth >= frustum.near, depth <= frustum.far else { continue }
+                    for corner in [SIMD2(column, row), SIMD2(column + 1, row), SIMD2(column, row + 1), SIMD2(column + 1, row + 1)] {
+                        let point = modelFromCamera * SIMD4(
+                            (Float(corner.x) / Float(columns) * 2 - 1 - frustum.offset.x) * depth * frustum.tangents.x,
+                            (Float(corner.y) / Float(rows) * 2 - 1 - frustum.offset.y) * depth * frustum.tangents.y, depth, 1)
+                        let position = SIMD3(point.x, point.y, point.z)
+                        lower = simd_min(lower, position); upper = simd_max(upper, position)
+                    }
+                }
+            }
+        }
+        guard lower.x.isFinite else { return nil }
+        return (SCNVector3(lower.x, lower.y, lower.z), SCNVector3(upper.x, upper.y, upper.z))
+    }
+}
+
+struct TeachingCoverageFrustum {
+    let columns: Int, rows: Int
+    let near: Float, far: Float
+    let tangents: SIMD2<Float>
+    let offset: SIMD2<Float>
+    // Minimum tolerance, depth-relative tolerance, maximum tolerance.
+    let tolerance: SIMD3<Float>
+
+    static let teaching = TeachingCoverageFrustum(columns: TeachingCoverageProfile.columns, rows: TeachingCoverageProfile.rows,
+        near: TeachingCoverageProfile.near, far: TeachingCoverageProfile.far,
+        tangents: SIMD2(TeachingCoverageProfile.tangentX, TeachingCoverageProfile.tangentY), offset: .zero,
+        tolerance: SIMD3(0.018, 0.025, 0.12))
+
+    static func recordedView(_ sample: TeachingSample) throws -> (cameraFromModel: simd_float4x4, frustum: Self) {
+        guard let pose = TeachingCoveragePose(sample.cameraPose) else { throw TeachingError("Pose 相机参数无效") }
+        var cameraFromModel = pose.cameraFromModel
+        if let saved = sample.previewCameraTransform, saved.count == 16, saved.allSatisfy(\.isFinite) {
+            cameraFromModel = TeachingCoordinates.opticalToARCamera * simd_float4x4(elements: saved).inverse
+        }
+        guard cameraFromModel.elements.allSatisfy(\.isFinite) else { throw TeachingError("Pose 相机变换无效") }
+        let aspect = sample.previewAspect.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? (4 / 3)
+        let tangentY = Float(tan(Double.pi / 6)) // Matches the legacy preview's 60° vertical lens.
+        var tangents = SIMD2(tangentY * aspect, tangentY), offset = SIMD2<Float>.zero
+        if let projection = sample.previewProjection, projection.count == 16, projection.allSatisfy(\.isFinite),
+           projection[0] > 0, projection[5] > 0 {
+            tangents = SIMD2(1 / projection[0], 1 / projection[5])
+            offset = SIMD2(-projection[8], projection[9])
+        }
+        // Inspection follows the saved image, including surfaces beyond the
+        // M70 working range. Use a finer depth map than the live coverage tint.
+        let frustum = Self(columns: 160, rows: 120, near: 0.001, far: 1000,
+            tangents: tangents, offset: offset, tolerance: SIMD3(0.003, 0.002, 0.05))
+        return (cameraFromModel, frustum)
+    }
 }
 
 /// The original model is rasterized on the local GPU once per distinct pose.
@@ -126,9 +195,38 @@ actor TeachingCoverageEngine {
         return TeachingCoverageSnapshot(frames: frames, depths: depthData, frameCount: matrices.count)
     }
 
+    func preview(_ sample: TeachingSample) async throws -> TeachingCoverageSnapshot {
+        let (cameraFromModel, frustum) = try TeachingCoverageFrustum.recordedView(sample)
+        let grid = try await rasterize(cameraFromModel: cameraFromModel, frustum: frustum)
+        guard grid.contains(where: { $0 >= frustum.near && $0 <= frustum.far }) else {
+            return TeachingCoverageSnapshot(frames: nil, depths: nil, frameCount: 0, frustum: frustum)
+        }
+        var matrix = cameraFromModel
+        guard let frames = device.makeBuffer(bytes: &matrix, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared),
+              let depths = grid.withUnsafeBytes({ device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }) else {
+            throw TeachingError("Pose 点云预览内存不足")
+        }
+        return TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1, frustum: frustum)
+    }
+
     func rasterize(_ pose: TeachingCoveragePose) async throws -> [Float] {
+        try await rasterize(cameraFromModel: pose.cameraFromModel, frustum: .teaching)
+    }
+
+    private func rasterize(cameraFromModel: simd_float4x4, frustum: TeachingCoverageFrustum) async throws -> [Float] {
         try Task.checkCancellation()
-        let columns = TeachingCoverageProfile.columns, rows = TeachingCoverageProfile.rows
+        let columns = frustum.columns, rows = frustum.rows
+        let colorTarget: MTLTexture, depthTarget: MTLTexture
+        if columns == target.width && rows == target.height {
+            colorTarget = target; depthTarget = zBuffer
+        } else {
+            let texture = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r32Float, width: columns, height: rows, mipmapped: false)
+            texture.usage = [.renderTarget]; texture.storageMode = .private
+            guard let color = device.makeTexture(descriptor: texture) else { throw TeachingError("无法创建 Pose 深度图") }
+            texture.pixelFormat = .depth32Float
+            guard let depth = device.makeTexture(descriptor: texture) else { throw TeachingError("无法创建 Pose 遮挡深度图") }
+            colorTarget = color; depthTarget = depth
+        }
         // A private readback buffer per command avoids races when a cancelled
         // request is followed by a new one while the GPU is still completing.
         let rowBytes = ((columns * 4 + 255) / 256) * 256
@@ -137,21 +235,22 @@ actor TeachingCoverageEngine {
               let command = queue.makeCommandBuffer() else { throw TeachingError("无法准备覆盖区域渲染") }
         invalid.contents().storeBytes(of: UInt32(0), as: UInt32.self)
         let pass = MTLRenderPassDescriptor()
-        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].texture = colorTarget
         pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
         pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0)
-        pass.depthAttachment.texture = zBuffer
+        pass.depthAttachment.texture = depthTarget
         pass.depthAttachment.loadAction = .clear; pass.depthAttachment.storeAction = .dontCare
         pass.depthAttachment.clearDepth = 1
         guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { throw TeachingError("无法绘制覆盖区域") }
         struct Parameters {
             var cameraFromModel: simd_float4x4
             var projection: SIMD4<Float>
+            var offset: SIMD4<Float>
             var counts: SIMD4<UInt32>
         }
-        var parameters = Parameters(cameraFromModel: pose.cameraFromModel,
-            projection: SIMD4(TeachingCoverageProfile.tangentX, TeachingCoverageProfile.tangentY,
-                              TeachingCoverageProfile.rasterNear, TeachingCoverageProfile.far),
+        var parameters = Parameters(cameraFromModel: cameraFromModel,
+            projection: SIMD4(frustum.tangents.x, frustum.tangents.y, TeachingCoverageProfile.rasterNear, frustum.far),
+            offset: SIMD4(frustum.offset.x, frustum.offset.y, 0, 0),
             counts: SIMD4(UInt32(vertices), 0, 0, 0))
         encoder.setRenderPipelineState(pipeline); encoder.setDepthStencilState(depthState)
         encoder.setCullMode(.none)
@@ -164,7 +263,7 @@ actor TeachingCoverageEngine {
         } else { encoder.drawPrimitives(type: .point, vertexStart: 0, vertexCount: vertices) }
         encoder.endEncoding()
         guard let blit = command.makeBlitCommandEncoder() else { throw TeachingError("无法读取覆盖深度图") }
-        blit.copy(from: target, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+        blit.copy(from: colorTarget, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
             sourceSize: MTLSize(width: columns, height: rows, depth: 1), to: readback,
             destinationOffset: 0, destinationBytesPerRow: rowBytes, destinationBytesPerImage: rowBytes * rows)
         blit.endEncoding()
@@ -184,7 +283,7 @@ actor TeachingCoverageEngine {
     private static let rasterShader = """
     #include <metal_stdlib>
     using namespace metal;
-    struct Parameters { float4x4 cameraFromModel; float4 projection; uint4 counts; };
+    struct Parameters { float4x4 cameraFromModel; float4 projection; float4 offset; uint4 counts; };
     struct RasterVertex { float4 position [[position]]; float cameraDepth; float pointSize [[point_size]]; };
     vertex RasterVertex coverageVertex(uint vertexID [[vertex_id]],
         device const packed_float3 *positions [[buffer(0)]], constant Parameters &p [[buffer(1)]],
@@ -196,7 +295,8 @@ actor TeachingCoverageEngine {
         if (!all(isfinite(point))) { atomic_store_explicit(invalid, 1u, memory_order_relaxed); return result; }
         float3 camera = (p.cameraFromModel * float4(point, 1.0)).xyz;
         float near = p.projection.z, far = p.projection.w;
-        result.position = float4(camera.x / p.projection.x, -camera.y / p.projection.y,
+        result.position = float4(camera.x / p.projection.x + p.offset.x * camera.z,
+            -camera.y / p.projection.y - p.offset.y * camera.z,
             (camera.z - near) * far / (far - near), camera.z);
         result.cameraDepth = camera.z;
         return result;
@@ -249,6 +349,18 @@ final class TeachingCoverageRenderer: ObservableObject {
     func cancel() { generation = UUID(); task?.cancel(); preparing = false }
     func resume() { if snapshot == nil || appliedPoses != poses { rebuild() } }
 
+    /// Inspection shares the original model's GPU buffer, but uses the recorded
+    /// camera frustum instead of the live M70 coverage range or union.
+    func previewSnapshot(for sample: TeachingSample) async throws -> TeachingCoverageSnapshot {
+        guard let model else {
+            throw TeachingError("无法读取此 Pose 的点云范围")
+        }
+        if engine == nil { engine = Task.detached(priority: .utility) { try TeachingCoverageEngine(model: model) } }
+        let service = try await engine!.value
+        try Task.checkCancellation()
+        return try await service.preview(sample)
+    }
+
     private func rebuild() {
         cancel(); error = ""; processed = 0
         guard enabled, !poses.isEmpty, let model else { return }
@@ -288,11 +400,17 @@ final class TeachingCoverageRenderer: ObservableObject {
         }
     }
 
-    static func apply(_ snapshot: TeachingCoverageSnapshot, opacity: Float, to material: SCNMaterial) {
+    static func apply(_ snapshot: TeachingCoverageSnapshot, opacity: Float, to material: SCNMaterial,
+                      clipOutside: Bool = false) {
         material.setValue(snapshot.frames, forKey: "atlasCoverageFrames")
         material.setValue(snapshot.depths, forKey: "atlasCoverageDepths")
         material.setValue(snapshot.frameCount, forKey: "atlasCoverageCount")
         material.setValue(opacity, forKey: "atlasCoverageOpacity")
+        material.setValue(clipOutside ? 1 : 0, forKey: "atlasCoverageClipOutside")
+        let frustum = snapshot.frustum
+        material.setValue(SCNVector4(frustum.tangents.x, frustum.tangents.y, frustum.offset.x, frustum.offset.y), forKey: "atlasCoverageProjection")
+        material.setValue(SCNVector4(frustum.near, frustum.far, Float(frustum.columns), Float(frustum.rows)), forKey: "atlasCoverageLimits")
+        material.setValue(SCNVector3(frustum.tolerance.x, frustum.tolerance.y, frustum.tolerance.z), forKey: "atlasCoverageTolerance")
         material.shaderModifiers = [.geometry: """
             #pragma varyings
             float3 atlasCoveragePosition;
@@ -304,25 +422,31 @@ final class TeachingCoverageRenderer: ObservableObject {
             float* atlasCoverageDepths;
             int atlasCoverageCount;
             float atlasCoverageOpacity;
+            int atlasCoverageClipOutside;
+            float4 atlasCoverageProjection;
+            float4 atlasCoverageLimits;
+            float3 atlasCoverageTolerance;
             #pragma body
+            bool atlasCovered = false;
             for (int frame = 0; frame < atlasCoverageCount; ++frame) {
                 float3 p = (atlasCoverageFrames[frame] * float4(in.atlasCoveragePosition, 1.0)).xyz;
-                if (p.z < \(TeachingCoverageProfile.near) || p.z > \(TeachingCoverageProfile.far)) continue;
-                float2 tangents = float2(\(TeachingCoverageProfile.tangentX), \(TeachingCoverageProfile.tangentY));
-                float2 n = p.xy / (p.z * tangents);
+                if (p.z < atlasCoverageLimits.x || p.z > atlasCoverageLimits.y) continue;
+                float2 tangents = atlasCoverageProjection.xy;
+                float2 n = p.xy / (p.z * tangents) + atlasCoverageProjection.zw;
                 if (any(abs(n) > 1.0)) continue;
-                float2 size = float2(\(TeachingCoverageProfile.columns).0, \(TeachingCoverageProfile.rows).0);
+                float2 size = atlasCoverageLimits.zw;
                 int2 cell = clamp(int2((n + 1.0) * 0.5 * size), int2(0), int2(size) - 1);
-                float depth = atlasCoverageDepths[frame * \(TeachingCoverageProfile.columns * TeachingCoverageProfile.rows)
-                    + cell.y * \(TeachingCoverageProfile.columns) + cell.x];
-                if (depth < \(TeachingCoverageProfile.near)) continue;
-                float tolerance = min(0.12, max(0.018, max(depth * 0.025,
+                float depth = atlasCoverageDepths[frame * int(size.x * size.y) + cell.y * int(size.x) + cell.x];
+                if (depth < atlasCoverageLimits.x) continue;
+                float tolerance = min(atlasCoverageTolerance.z, max(atlasCoverageTolerance.x, max(depth * atlasCoverageTolerance.y,
                     length(2.0 * tangents * depth / size) * 0.72)));
                 if (p.z <= depth + tolerance) {
+                    atlasCovered = true;
                     _output.color.rgb = mix(float3(_output.color.rgb), float3(0.1765, 0.9412, 0.5961), atlasCoverageOpacity);
                     break;
                 }
             }
+            if (atlasCoverageClipOutside != 0 && !atlasCovered) discard_fragment();
             """]
     }
 }

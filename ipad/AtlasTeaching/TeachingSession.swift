@@ -130,7 +130,7 @@ final class TeachingSession: ObservableObject {
             opened.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
             current = opened; pendingModel = nil
             serverAddress = project.resultSyncDestination?.serverURL ?? project.serverURL
-            status = project.result.completedAt == nil ? "已恢复本地草稿，请重新校准物体" : "示教已完成，等待同步或已同步"
+            status = project.result.completedAt == nil ? "" : "示教已完成，等待同步或已同步"
         } catch { self.error = error.localizedDescription }
     }
     func continueTeaching() async {

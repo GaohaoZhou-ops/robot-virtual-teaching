@@ -94,8 +94,6 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("ATLAS / IPAD PRO").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
                 Text("虚拟示教").font(.largeTitle.weight(.medium))
-                Text("每次记录一个 Pose。本机完成定位和保存，结束后通过局域网同步。")
-                    .font(.callout).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
             Image(systemName: "ipad.landscape").font(.system(size: 60, weight: .ultraLight)).foregroundStyle(accent)
@@ -186,8 +184,6 @@ struct ContentView: View {
                 Spacer()
                 Text("\(session.projects.count) 个物体").font(.caption).foregroundStyle(.secondary)
             }
-            Text("左滑条目可删除此 iPad 上的模型和全部 Pose，电脑工程不受影响。")
-                .font(.caption).foregroundStyle(.secondary)
             Divider()
             if session.projects.isEmpty {
                 VStack(spacing: 16) {
@@ -528,7 +524,6 @@ struct TeachingView: View {
                     if !completed {
                         calibrationPanel
                         if !sidebarCollapsed && !ar.adjustingPlacement { recordPoseButton }
-                        Text("移动到目标视角 → 记录 Pose → 调整下一个视角。每个 Pose 都会自动保存在 iPad。").font(.caption).foregroundStyle(.secondary)
                     }
                     Button { review = true } label: { Label("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle").frame(maxWidth: .infinity).padding(7) }
                         .buttonStyle(.bordered).disabled(count == 0)
@@ -575,7 +570,7 @@ struct TeachingView: View {
                             .buttonStyle(.bordered).disabled(session.busy || !session.serverConnection.canConnect || session.current?.requiresResultPairing == true)
                     }
                     if session.busy { ProgressView() }
-                    Text(session.status).font(.caption).foregroundStyle(.secondary)
+                    if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.secondary) }
                     if !renderer.error.isEmpty { Text(renderer.error).font(.caption).foregroundStyle(.orange) }
                     if !session.error.isEmpty {
                         Text(session.error).font(.caption).foregroundStyle(.orange)
@@ -620,7 +615,7 @@ struct TeachingView: View {
         }
         .sheet(isPresented: $displaySettingsOpen) { ModelDisplaySettingsView(geometry: geometry, renderer: renderer).environmentObject(session) }
         .fullScreenCover(isPresented: $review, onDismiss: { ar.refreshMarkers(session.current?.result.samples ?? []) }) {
-            PoseReviewView(rendered: renderer.geometry).environmentObject(session)
+            PoseReviewView(rendered: renderer.geometry, coverage: coverage).environmentObject(session)
         }
         .alert("当前 Pose 与上一个距离很近", isPresented: Binding(
             get: { nearbyPoseConfirmation != nil },
@@ -807,18 +802,11 @@ struct TeachingView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label(ar.calibrated ? "物体已放置" : ar.adjustingPlacement ? "正在调整物体" : "先放置物体", systemImage: ar.calibrated ? "checkmark.seal" : "scope").foregroundStyle(accent)
             if !ar.calibrated {
-                Text("模型基准点 / 米（默认底部中心）").font(.caption).foregroundStyle(.secondary)
                 HStack {
                     coordinate("X", $ar.referenceX); coordinate("Y", $ar.referenceY); coordinate("Z", $ar.referenceZ)
                 }.disabled(ar.repositioning)
                     .onChange(of: ar.referenceX) { _, _ in ar.updatePlacement() }
                     .onChange(of: ar.referenceY) { _, _ in ar.updatePlacement() }.onChange(of: ar.referenceZ) { _, _ in ar.updatePlacement() }
-                Text(ar.adjustingPlacement
-                    ? "点击、拖动或双指旋转调整物体，完成调整后继续示教。尺寸固定为 1:1。"
-                    : ar.groundAssistance
-                        ? "点击或拖动青色地面网格放置物体，松手后自动进入示教。尺寸固定为 1:1，之后可继续调整位置与方向。"
-                        : "点击或拖动实测表面放置物体，松手后自动进入示教。尺寸固定为 1:1，之后可继续调整位置与方向。")
-                    .font(.caption).foregroundStyle(.secondary)
                 Button(ar.repositioning ? "放到准星位置" : ar.placed ? "重新放置物体" : "放置物体") {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     if ar.placed && !ar.repositioning { ar.beginRepositioning() }
@@ -967,8 +955,12 @@ struct PoseReviewView: View {
     @State private var poseName = ""
     @State private var selectingForDeletion = false
     @State private var deletionIDs: Set<String> = []
+    @State private var previewMode: PosePreviewMode = .interactive
+    @State private var previewReset = 0
+    @StateObject private var previewPreparation = PosePreviewPreparation()
     @FocusState private var poseNameFocused: Bool
     let rendered: SCNGeometry?
+    let coverage: TeachingCoverageRenderer
     private var samples: [TeachingSample] { session.current?.result.samples ?? [] }
     private var selected: TeachingSample? { samples.first { $0.id == selectedID } ?? samples.first }
     private var completed: Bool { session.current?.result.completedAt != nil }
@@ -1007,12 +999,7 @@ struct PoseReviewView: View {
             }
             .background(Color(red: 0.025, green: 0.05, blue: 0.065))
             .accessibilityElement(children: .contain).accessibilityIdentifier("pose-review-page")
-            .navigationTitle("查看 / 编辑 Pose").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("返回示教") { poseNameFocused = false; dismiss() }.accessibilityIdentifier("close-pose-review")
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
         }.onAppear { poseName = selected?.name ?? "" }
             .onChange(of: samples.map(\.id)) { _, ids in
                 deletionIDs.formIntersection(ids)
@@ -1022,6 +1009,11 @@ struct PoseReviewView: View {
             }
             .onChange(of: completed) { _, locked in
                 if locked { endDeletionSelection() }
+            }
+            .task(id: selected?.id) {
+                if let selected, let model = session.geometry {
+                    await previewPreparation.prepare(sample: selected, model: model, coverage: coverage)
+                }
             }
     }
 
@@ -1092,17 +1084,67 @@ struct PoseReviewView: View {
     }
 
     private var posePreview: some View {
-        Group {
+        VStack(spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { previewModeButtons; Spacer(minLength: 0); previewActions }
+                VStack(alignment: .trailing, spacing: 8) {
+                    HStack { previewModeButtons; Spacer(minLength: 0) }
+                    previewActions
+                }
+            }.padding(12)
+            Divider()
             if let selected {
                 let aspect = selected.previewAspect ?? (4.0 / 3.0)
-                PosePreviewView(rendered: rendered, sample: selected)
+                let ready = previewPreparation.sampleID == selected.id
+                PosePreviewView(rendered: rendered, overview: previewPreparation.overview,
+                                footprint: ready ? previewPreparation.footprint : nil,
+                                status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
+                                sample: selected, mode: previewMode, resetRevision: previewReset)
                     .aspectRatio(CGFloat(aspect.isFinite && aspect > 0 ? aspect : 4.0 / 3.0), contentMode: .fit)
                     .accessibilityLabel("\(selected.name) 的物体视角")
+                    .accessibilityValue(previewMode == .interactive ? "3D 交互视图" : "2D 记录视角图像")
                     .accessibilityIdentifier("pose-review-preview")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text(previewMode == .interactive ? "当前 Pose 点云 · 单指旋转 · 双指平移 · 捏合缩放" : "记录视角图像 · 单指平移 · 捏合缩放")
+                    .font(.caption).foregroundStyle(.secondary).padding(10)
+                    .accessibilityIdentifier("pose-preview-hint")
             } else { ContentUnavailableView("还没有 Pose", systemImage: "viewfinder") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black.opacity(0.25))
             .accessibilityElement(children: .contain).accessibilityIdentifier("pose-review-viewport")
+    }
+
+    private var previewModeButtons: some View {
+        HStack(spacing: 6) {
+            ForEach(PosePreviewMode.allCases) { mode in
+                Button { poseNameFocused = false; previewMode = mode } label: {
+                    Label(mode == .interactive ? "3D 点云 / 模型" : "2D 图像",
+                          systemImage: mode == .interactive ? "cube.transparent" : "photo")
+                        .font(.subheadline.weight(.medium)).padding(.vertical, 5)
+                }.buttonStyle(.bordered).tint(previewMode == mode ? accent : .secondary)
+                    .accessibilityAddTraits(previewMode == mode ? .isSelected : [])
+                    .accessibilityIdentifier("pose-preview-mode-\(mode.rawValue)")
+            }
+        }.fixedSize(horizontal: true, vertical: false).disabled(selected == nil)
+    }
+
+    private var previewActions: some View {
+        HStack(spacing: 8) {
+            resetPreviewButton
+            Button { poseNameFocused = false; dismiss() } label: {
+                Label("返回示教", systemImage: "arrow.uturn.backward")
+                    .font(.subheadline).padding(.vertical, 5)
+            }.buttonStyle(.bordered).tint(accent)
+                .accessibilityIdentifier("close-pose-review")
+        }.fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var resetPreviewButton: some View {
+        Button { previewReset += 1 } label: {
+            Label(previewMode == .image ? "恢复完整画幅" : "恢复记录视角", systemImage: "arrow.counterclockwise").font(.subheadline)
+                .padding(.vertical, 5)
+        }.buttonStyle(.bordered).disabled(selected == nil)
+            .accessibilityIdentifier("reset-pose-preview")
     }
 
     @ViewBuilder private var poseEditor: some View {
@@ -1160,31 +1202,5 @@ struct PoseReviewView: View {
 
     private func endDeletionSelection() {
         selectingForDeletion = false; deletionIDs = []
-    }
-}
-
-struct PosePreviewView: UIViewRepresentable {
-    let rendered: SCNGeometry?
-    let sample: TeachingSample
-    func makeUIView(context: Context) -> SCNView {
-        let view = SCNView(); view.scene = SCNScene(); view.backgroundColor = UIColor(red: 0.025, green: 0.05, blue: 0.065, alpha: 1)
-        let object = SCNNode(geometry: rendered); object.name = "preview-object"; view.scene?.rootNode.addChildNode(object)
-        let camera = SCNNode(); camera.camera = SCNCamera(); camera.camera?.zNear = 0.01; camera.camera?.zFar = 1000
-        view.scene?.rootNode.addChildNode(camera); view.pointOfView = camera
-        return view
-    }
-    func updateUIView(_ view: SCNView, context: Context) {
-        let object = view.scene?.rootNode.childNode(withName: "preview-object", recursively: false)
-        if object?.geometry !== rendered { object?.geometry = rendered }
-        if let matrix = sample.previewCameraTransform, matrix.count == 16,
-           let projection = sample.previewProjection, projection.count == 16 {
-            view.pointOfView?.simdTransform = simd_float4x4(elements: matrix)
-            view.pointOfView?.camera?.projectionTransform = SCNMatrix4(simd_float4x4(elements: projection))
-            return
-        }
-        let q = sample.cameraPose.quaternion
-        var transform = simd_float4x4(simd_quatf(ix: q.x, iy: q.y, iz: q.z, r: q.w)) * TeachingCoordinates.opticalToARCamera
-        transform.columns.3 = SIMD4(sample.cameraPose.position.simd, 1)
-        view.pointOfView?.simdTransform = transform
     }
 }
