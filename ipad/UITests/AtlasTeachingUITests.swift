@@ -7,6 +7,89 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    func testLocalProjectSwipeDeletionStaysOnIPad() throws {
+        continueAfterFailure = false
+        let ids = (ProcessInfo.processInfo.environment["ATLAS_DISPOSABLE_DELETE_IDS"] ?? "").split(separator: ",").map(String.init)
+        guard ids.count == 2, ids.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+            throw XCTSkip("Provide two disposable local projects; this test deletes only those fixtures")
+        }
+        let protectedIDs = (ProcessInfo.processInfo.environment["ATLAS_DELETE_PROTECTED_IDS"] ?? "").split(separator: ",").map(String.init)
+        let app = XCUIApplication(); app.launch()
+        func reveal(_ row: XCUIElement) {
+            for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+            XCTAssertTrue(row.isHittable, app.debugDescription)
+            row.swipeLeft()
+        }
+        for (index, id) in ids.enumerated() {
+            XCUIDevice.shared.orientation = index == 0 ? .landscapeLeft : .portrait
+            let row = app.buttons["local-project-\(id)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 15))
+            reveal(row)
+            let action = app.buttons["swipe-delete-local-project-\(id)"]
+            XCTAssertTrue(action.waitForExistence(timeout: 5), app.debugDescription)
+            XCTAssertTrue(action.isHittable, "swiping reveals a tappable delete action")
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)).tap()
+            XCTAssertFalse(action.isHittable, "tapping page whitespace closes the action")
+            XCTAssertTrue(row.exists)
+            reveal(row)
+            XCTAssertTrue(action.waitForExistence(timeout: 5))
+            app.staticTexts["保存在此 iPad"].tap()
+            XCTAssertFalse(action.isHittable, "tapping other content closes the action")
+            reveal(row)
+            XCTAssertTrue(action.waitForExistence(timeout: 5))
+            app.buttons["scan-pairing-code"].tap()
+            let cancelScan = app.buttons["cancel-pairing-scan"].firstMatch
+            XCTAssertTrue(cancelScan.waitForExistence(timeout: 10), "outside buttons still perform their action")
+            cancelScan.tap()
+            XCTAssertTrue(row.waitForExistence(timeout: 10))
+            XCTAssertFalse(action.isHittable, "outside button taps also close the action")
+            reveal(row)
+            XCTAssertTrue(action.waitForExistence(timeout: 5))
+            row.swipeRight()
+            XCTAssertFalse(action.isHittable, "swiping back closes the action")
+            reveal(row)
+            XCTAssertTrue(action.waitForExistence(timeout: 5))
+            if index == 0 {
+                let sibling = app.buttons["local-project-\(ids[1])"]
+                reveal(sibling)
+                XCTAssertTrue(app.buttons["swipe-delete-local-project-\(ids[1])"].isHittable)
+                XCTAssertFalse(action.isHittable, "revealing another row closes the previous action")
+                reveal(row)
+                XCTAssertTrue(action.waitForExistence(timeout: 5))
+            }
+            XCTAssertTrue(row.exists, "even a full left swipe only reveals the action")
+            let swipeAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            swipeAttachment.name = "Local deletion swipe - \(index)"; swipeAttachment.lifetime = .keepAlways; add(swipeAttachment)
+            print("Local deletion layout: card=\(row.frame), action=\(action.frame)")
+            action.tap()
+            let confirm = app.buttons["confirm-delete-local-project"].firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "电脑上的工程和已同步结果不受影响")).firstMatch.exists)
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "Local deletion confirmation - \(index)"; attachment.lifetime = .keepAlways; add(attachment)
+            app.buttons["cancel-delete-local-project"].firstMatch.tap()
+            XCTAssertTrue(row.exists, "cancelling preserves the project")
+            row.tap()
+            XCTAssertTrue(app.buttons["display-settings"].waitForExistence(timeout: 30), "the cancelled project still opens")
+            app.buttons["本地项目"].tap()
+            XCTAssertTrue(row.waitForExistence(timeout: 10))
+            reveal(row)
+            XCTAssertTrue(action.waitForExistence(timeout: 5)); action.tap()
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+            for protectedID in protectedIDs { XCTAssertTrue(app.buttons["local-project-\(protectedID)"].exists) }
+            if index == 0 { XCTAssertTrue(app.buttons["local-project-\(ids[1])"].exists) }
+            app.terminate(); app.launch()
+            XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 15))
+            XCTAssertFalse(row.exists, "deleted projects stay removed after relaunch")
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        for protectedID in protectedIDs { XCTAssertTrue(app.buttons["local-project-\(protectedID)"].exists) }
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Library after deleting test fixtures"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     func testCompletedProjectContinuationStartsCamera() throws {
         continueAfterFailure = false
         guard let sourceID = ProcessInfo.processInfo.environment["ATLAS_CONTINUE_SOURCE_ID"],

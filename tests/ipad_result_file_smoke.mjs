@@ -28,6 +28,10 @@ try {
   await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift',
     'ipad/AtlasTeaching/LANClient.swift', 'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/Tests/ResultFileTests.swift', '-o', binary]);
   await run(binary, [fixture, path.join(directory, 'private'), exports]);
+  const deletionBinary = path.join(directory, 'native-delete-test');
+  await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift',
+    'ipad/AtlasTeaching/LANClient.swift', 'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/Tests/LocalProjectDeletionTests.swift', '-o', deletionBinary]);
+  await run(deletionBinary, [fixture, path.join(directory, 'local-delete')]);
   const files = await readdir(exports);
   assert.equal(files.length, 1, 'retry creates no duplicate file');
   assert.match(files[0], /\.atlas-teaching\.json$/);

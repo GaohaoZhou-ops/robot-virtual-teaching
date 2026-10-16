@@ -37,10 +37,20 @@ struct ProjectThumbnailView: View {
 
 // Serial rendering keeps large models off the main thread and limits peak memory.
 // Only the finished image is cached; no model, pose or display setting is changed.
-private actor ProjectThumbnailStore {
+actor ProjectThumbnailStore {
     static let shared = ProjectThumbnailStore()
     private let memory = NSCache<NSString, NSData>()
     init() { memory.totalCostLimit = 12 * 1024 * 1024; memory.countLimit = 64 }
+
+    func removeThumbnail(modelHash: String) {
+        guard modelHash.utf8.count == 64, modelHash.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return }
+        let key = "v1-\(modelHash)"
+        memory.removeObject(forKey: key as NSString)
+        if let caches = try? FileManager.default.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: false) {
+            try? FileManager.default.removeItem(at: caches.appendingPathComponent("AtlasModelThumbnails")
+                .appendingPathComponent(key).appendingPathExtension("png"))
+        }
+    }
 
     func thumbnail(for project: LocalProject) async throws -> Data {
         let hash = project.session.manifest.modelHash
