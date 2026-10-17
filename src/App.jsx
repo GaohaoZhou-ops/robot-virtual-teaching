@@ -40,6 +40,9 @@ import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
 import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
+import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
+import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
+import { buildMobileSolvedTask, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceLabel } from './lib/ipadProtocol.js';
@@ -58,6 +61,7 @@ import {
   createId,
   fetchBufferWithProgress,
   normalizeProject,
+  normalizeTeachingTasks,
   normalizeTeachingSpaceMode,
   readFileWithProgress,
   teachingCoordinateFrame,
@@ -445,6 +449,8 @@ export default function App() {
   const cameraTeachingRevisionRef = useRef(0);
   const zividCaptureProviderRef = useRef(null);
   const parkingMergePlannerRef = useRef(null);
+  const mobileTeachingSolverRef = useRef(null);
+  const mobileTeachingRunRef = useRef(null);
   const teachingCaptureBusyRef = useRef(false);
   const projectExportBusyRef = useRef(false);
   const [abxExportSnapshot, setAbxExportSnapshot] = useState(null);
@@ -465,6 +471,8 @@ export default function App() {
   const [directoryAutosaveSuspended, setDirectoryAutosaveSuspended] = useState(false);
   const [teachingTransferDialog, setTeachingTransferDialog] = useState(null);
   const [ipadTeachingOpen, setIPadTeachingOpen] = useState(false);
+  const [mobileSolveTaskId, setMobileSolveTaskId] = useState(null);
+  const [mobileComputation, setMobileComputation] = useState(null);
   const [ipadTeachingEntry, setIPadTeachingEntry] = useState({ action: 'pairing' });
   const teachingTransferBusyRef = useRef(false);
   const [mapData, setMapData] = useState(null);
@@ -517,6 +525,7 @@ export default function App() {
     message: '',
   });
   const [parkingMergePlannerReady, setParkingMergePlannerReady] = useState(false);
+  const [mobileTeachingSolverReady, setMobileTeachingSolverReady] = useState(false);
   const [projectExportState, setProjectExportState] = useState({
     status: 'idle',
     byteLength: 0,
@@ -597,6 +606,24 @@ export default function App() {
     activeTeachingParkingPointId,
     jointPoses,
   };
+
+  useEffect(() => {
+    const run = mobileTeachingRunRef.current;
+    if (!run) return;
+    const task = teachingTasks.find((item) => item.id === run.taskId);
+    if (run.map !== mapData || run.robot !== selectedRobot || run.workspaceId !== sessionIdRef.current
+      || run.sourceCapture !== task?.mobileCapture || run.sourceTransform !== JSON.stringify(task?.mobileTransform)) {
+      mobileTeachingRunRef.current = null;
+      run.controller.abort();
+      setMobileComputation(null);
+      setMobileSolveTaskId(null);
+    }
+  }, [mapData, selectedRobot, teachingTasks, teachingSpaceMode]);
+
+  useEffect(() => () => {
+    mobileTeachingRunRef.current?.controller.abort();
+    mobileTeachingRunRef.current = null;
+  }, []);
 
   useEffect(() => {
     if (!mapData?.mapId || !activeTeachingTask) return;
@@ -2742,6 +2769,7 @@ export default function App() {
   }, []);
 
   const previewTeachingParkingPoint = useCallback((id, poseId = null) => {
+    setMobileComputation((current) => current ? { ...current, preview: null, followLatest: false } : current);
     const task = teachingTasks.find((item) => (
       (item.parkingPoints || []).some((parkingPoint) => parkingPoint.id === id)
     ));
@@ -2827,6 +2855,7 @@ export default function App() {
 
   const clearRobotParkingGhost = useCallback(() => {
     setRobotParkingGhost(null);
+    setMobileComputation((current) => current ? { ...current, preview: null, followLatest: false } : current);
   }, []);
 
   const selectNavigationWaypoint = useCallback((id) => {
@@ -3131,6 +3160,11 @@ export default function App() {
     const normalized = typeof provider === 'function' ? provider : null;
     parkingMergePlannerRef.current = normalized;
     setParkingMergePlannerReady(Boolean(normalized));
+  }, []);
+
+  const handleMobileTeachingSolverChange = useCallback((provider) => {
+    mobileTeachingSolverRef.current = provider;
+    setMobileTeachingSolverReady(typeof provider === 'function');
   }, []);
 
   const analyzeTeachingParkingPointMerge = useCallback(
@@ -4556,6 +4590,167 @@ export default function App() {
     setIPadTeachingOpen(true);
   };
 
+  const openMobileTeachingSolve = (taskId) => {
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    setMobileSolveTaskId(taskId);
+  };
+
+  const mobileSolveContext = (taskId, report = null) => {
+    const current = latestWorkspaceRef.current;
+    const task = current.teachingTasks.find((item) => item.id === taskId);
+    if (!task?.mobileCapture) throw new Error('设备示教任务不存在');
+    const sameMap = task.map?.sourceHash && current.mapData?.sourceHash
+      ? task.map.sourceHash === current.mapData.sourceHash : task.map?.fileName === current.mapData?.name;
+    if (!sameMap || task.coordinateFrame !== teachingCoordinateFrame(current.teachingSpaceMode)) throw new Error('请打开该采样任务对应的工程');
+    if (!current.selectedRobot || robotLoadState.status !== 'loaded') throw new Error('请先加载机器人模型');
+    if (report && (report.robot?.id !== (current.selectedRobot.id || current.selectedRobot.relativePath)
+      || report.captureId !== task.mobileCapture.id || task.mobileSolve?.computedAt !== report.computedAt)) {
+      throw new Error('机器人或采样数据已变化，请重新计算');
+    }
+    return { current, task };
+  };
+
+  const calculateMobileTeaching = (taskId, rawOptions) => {
+    const { current, task } = mobileSolveContext(taskId);
+    const solver = mobileTeachingSolverRef.current;
+    if (!solver) throw new Error('运动学求解器尚未就绪，请稍后重试');
+    const options = validateMobileSolveOptions(rawOptions);
+    const total = task.mobileCapture.samples.filter((sample) => !options.keyframesOnly || sample.kind === 'keyframe').length;
+    if (!total) throw new Error('没有可计算的采样点');
+    mobileTeachingRunRef.current?.controller.abort();
+    const run = { id: createId('mobile-compute'), taskId, taskName: task.name, options,
+      controller: new AbortController(), status: 'running', controls: null, previews: [],
+      map: current.mapData, robot: current.selectedRobot, workspaceId: sessionIdRef.current,
+      sourceCapture: task.mobileCapture, sourceTransform: JSON.stringify(task.mobileTransform) };
+    mobileTeachingRunRef.current = run;
+    const isCurrent = () => mobileTeachingRunRef.current === run && !run.controller.signal.aborted;
+    const update = (change) => {
+      if (isCurrent()) setMobileComputation((value) => value?.id === run.id ? { ...value, ...change } : value);
+    };
+    setMobileComputation({ id: run.id, taskId, taskName: task.name, options, status: 'running', total, completed: 0,
+      feasibleCount: 0, name: '', side: '', error: '', preview: null, previewCount: 0, previewIndex: -1, followLatest: true });
+    setMobileSolveTaskId(null);
+    setRobotParkingGhost(null);
+    setRobotControlEnabled(false);
+    setShowRobotModel(true);
+    setCollapsedPanel((value) => value === '3d' ? null : value);
+    stopTeachingTaskPlayback(false);
+    navigateAppPage(APP_PAGE_WORKBENCH);
+
+    // The run is owned by the workbench, independently of the configuration dialog.
+    void (async () => {
+      try {
+        const result = await solver({ task, options, signal: run.controller.signal,
+          onControl: (controls) => { run.controls = controls; },
+          onStatus: (status) => { if (isCurrent()) { run.status = status; update({ status }); } },
+          onProgress: (progress) => update(progress),
+          onSample: ({ row, mapPose }) => {
+            if (!isCurrent() || !row.feasible) return;
+            const preview = { kind: 'mobile-solve', taskId, taskName: task.name, revision: `${run.id}:${row.sampleId}`,
+              parkingPointId: run.id, parkingPointName: '计算停车点', poseId: row.sampleId, poseName: row.name,
+              side: row.selectedSide, targetPose: mapPose, sourceName: '计算预览',
+              jointValues: row.solutions[row.selectedSide].jointValues };
+            run.previews.push(preview);
+            const previewCount = run.previews.length;
+            setMobileComputation((value) => value?.id === run.id ? { ...value, previewCount,
+              ...(value.followLatest ? { preview, previewIndex: previewCount - 1 } : {}) } : value);
+            if (previewCount === 1) requestSynchronizedFocus('robot-ghost', run.id);
+          },
+        });
+        if (!isCurrent()) return;
+        const latest = latestWorkspaceRef.current;
+        if (run.map !== latest.mapData || run.robot !== latest.selectedRobot || run.workspaceId !== sessionIdRef.current
+          || latest.teachingTasks.find((item) => item.id === taskId)?.mobileCapture !== run.sourceCapture) return;
+        const report = { ...result, robot: { id: run.robot.id || run.robot.relativePath, name: run.robot.name } };
+        const next = latest.teachingTasks.map((item) => item.id === taskId ? { ...item, mobileSolve: report, updatedAt: report.computedAt } : item);
+        latestWorkspaceRef.current = { ...latest, teachingTasks: next };
+        setTeachingTasks(next);
+        run.status = 'completed';
+        update({ status: 'completed', completed: total, feasibleCount: report.feasibleCount, side: '' });
+      } catch (error) {
+        if (isCurrent()) { run.status = 'error'; update({ status: 'error', error: error.message }); }
+      }
+    })();
+  };
+
+  const pauseMobileTeaching = () => {
+    const run = mobileTeachingRunRef.current;
+    if (run?.status !== 'running') return;
+    run.status = 'pausing';
+    setMobileComputation((value) => value?.id === run.id ? { ...value, status: 'pausing' } : value);
+    run.controls?.pause();
+  };
+
+  const resumeMobileTeaching = () => {
+    const run = mobileTeachingRunRef.current;
+    if (run?.status === 'paused') run.controls?.resume();
+  };
+
+  const cancelMobileTeaching = () => {
+    const run = mobileTeachingRunRef.current;
+    if (!run || !['running', 'pausing', 'paused'].includes(run.status)) return;
+    run.controller.abort();
+    run.status = 'cancelled';
+    run.previews = [];
+    setMobileComputation((value) => value?.id === run.id ? { ...value, status: 'cancelled', preview: null,
+      previewCount: 0, previewIndex: -1, followLatest: false } : value);
+  };
+
+  const restartMobileTeaching = () => {
+    const run = mobileTeachingRunRef.current;
+    if (!run) return;
+    try { calculateMobileTeaching(run.taskId, run.options); }
+    catch (error) { notify(error.message, 'error'); }
+  };
+
+  const dismissMobileTeaching = () => {
+    mobileTeachingRunRef.current?.controller.abort();
+    mobileTeachingRunRef.current = null;
+    setMobileComputation(null);
+  };
+
+  const previewMobileTeaching = (index, followLatest = false) => {
+    const run = mobileTeachingRunRef.current;
+    const preview = run?.previews[index];
+    if (!preview) return;
+    setShowRobotModel(true);
+    setMobileComputation((value) => value?.id === run.id ? { ...value, preview, previewIndex: index, followLatest } : value);
+  };
+
+  const applyMobileTeachingSolution = (taskId, report, sampleId, side) => {
+    mobileSolveContext(taskId, report);
+    const row = report.rows.find((item) => item.sampleId === sampleId), solution = row?.solutions[side];
+    if (!row?.feasible || !solution?.feasible) throw new Error('该姿态未满足当前计算约束');
+    dismissMobileTeaching();
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    setRobotParkingGhost(null);
+    setRobotPose(normalizeRobotPose(report.mapPose));
+    setRobotJointValues(normalizeRobotJointValues(solution.jointValues));
+    setShowRobotModel(true);
+    setMobileSolveTaskId(null);
+    navigateAppPage(APP_PAGE_WORKBENCH);
+    notify(`${row.name} · ${side === 'left' ? '左臂' : '右臂'}解已应用到虚拟机器人`, 'success');
+  };
+
+  const saveMobileTeachingSolutions = (taskId, report) => {
+    const { current, task } = mobileSolveContext(taskId, report);
+    dismissMobileTeaching();
+    const existing = current.teachingTasks.find((item) => item.id === report.savedTaskId);
+    const solved = existing || normalizeTeachingTasks([buildMobileSolvedTask(task, report, current.selectedRobot, createId('mobile-solved'))])[0];
+    if (!existing) {
+      const next = [...current.teachingTasks.map((item) => item.id === taskId ? { ...item, mobileSolve: { ...report, savedTaskId: solved.id } } : item), solved];
+      latestWorkspaceRef.current = { ...current, teachingTasks: next };
+      setTeachingTasks(next);
+    }
+    setActiveTeachingTaskId(solved.id);
+    setActiveTeachingParkingPointId(solved.parkingPoints[0]?.id || null);
+    setMobileSolveTaskId(null);
+    navigateAppPage(APP_PAGE_WORKBENCH);
+    notify(`已保存 ${solved.parkingPoints[0]?.poses.length || 0} 个可达姿态，可在独立示教中预览和继续编辑`, 'success');
+  };
+
   const importIPadTeaching = async (result, ticket) => {
     const current = latestWorkspaceRef.current;
     const workspaceId = sessionIdRef.current;
@@ -4722,12 +4917,12 @@ export default function App() {
           {isIndependentTeachingSpace && <IPadTeachingMenu mapData={mapData} source={teachingSource}
             desktopCount={desktopTeachingTasks.length} mobileCount={mobileTeachingTasks.length} mobileLabel={mobileTeachingLabel}
             disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
+            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
             onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />}
           <SpaceMouseControl
             inputRef={spaceMouseInputRef}
             onNotify={notify}
-            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
+            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
           />
           <button
             type="button"
@@ -4816,7 +5011,7 @@ export default function App() {
                 disabled={!mapData?.geometry}
                 collapsed={heightRangeCollapsed}
                 onCollapsedChange={setHeightRangeCollapsed}
-                isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
+                isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
               />
               {!isIndependentTeachingSpace && (
                 <button
@@ -4886,7 +5081,7 @@ export default function App() {
                 robotHeightLocked={robotHeightLocked}
                 robotTrajectoryActive={['playing', 'paused'].includes(teachingPlayback.status)}
                 teachingPlayback={teachingPlayback}
-                robotParkingGhost={robotParkingGhost}
+                robotParkingGhost={mobileComputation?.preview || robotParkingGhost}
                 teachingCaptureBusy={teachingCaptureState.status === 'capturing'}
                 teachingSpaceMode={teachingSpaceMode}
                 teachingTasks={workbenchTeachingTasks}
@@ -4903,6 +5098,7 @@ export default function App() {
                 onZividCameraPoseChange={handleZividCameraPoseChange}
                 onCameraTeachingResult={handleCameraTeachingResult}
                 onParkingMergePlannerChange={handleParkingMergePlannerChange}
+                onMobileTeachingSolverChange={handleMobileTeachingSolverChange}
                 onCollisionProtectionChange={handleRobotCollisionProtectionChange}
                 onClearRobotParkingGhost={clearRobotParkingGhost}
                 onMoveToParkingPoint={applyTeachingParkingPoint}
@@ -4911,7 +5107,7 @@ export default function App() {
                 onRecordParkingPointPosition={recordTeachingParkingPointPosition}
                 onEditTeachingPose={beginTeachingPoseEdit}
                 onConfirmTeachingPose={captureTeachingPoint}
-                isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
+                isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
               />
               <TeachingPlaybackDock
                 key={teachingPlayback.taskId}
@@ -5064,6 +5260,7 @@ export default function App() {
           onCreateTeachingParkingPoint={createTeachingParkingPoint}
           onSelectTeachingParkingPoint={previewTeachingParkingPoint}
           onCaptureTeachingPoint={captureTeachingPoint}
+          onSolveMobileTask={openMobileTeachingSolve}
           onUpdateRobotJointValue={updateRobotJointValue}
           onToggleRobotJointLock={toggleRobotJointLock}
           onUnlockAllRobotJoints={unlockAllRobotJoints}
@@ -5225,6 +5422,7 @@ export default function App() {
           onMergeParkingPoints={mergeTeachingParkingPoints}
           onExportProject={exportProject}
           onExportAbxTeaching={teachingSpaceMode === 'map' ? openAbxTeachingExport : undefined}
+          onSolveMobileTask={openMobileTeachingSolve}
         />
 
         {loadState.loading && (
@@ -5246,6 +5444,20 @@ export default function App() {
       </div>
     )}
     {abxExportSnapshot && <AbxTeachingExportDialog snapshot={abxExportSnapshot} onClose={() => setAbxExportSnapshot(null)} />}
+    <MobileTeachingComputeDock computation={mobileComputation} inWorkbench={appPage === APP_PAGE_WORKBENCH}
+      onPause={pauseMobileTeaching} onResume={resumeMobileTeaching} onCancel={cancelMobileTeaching}
+      onRestart={restartMobileTeaching} onDismiss={dismissMobileTeaching}
+      onConfigure={() => openMobileTeachingSolve(mobileComputation.taskId)} onPreview={previewMobileTeaching}
+      onFollowLatest={(follow) => follow ? previewMobileTeaching(mobileTeachingRunRef.current.previews.length - 1, true)
+        : setMobileComputation((value) => ({ ...value, followLatest: false }))}
+      onFocusPreview={() => requestSynchronizedFocus('robot-ghost', mobileComputation.preview?.parkingPointId)} />
+    {mobileSolveTaskId && teachingTasks.find((task) => task.id === mobileSolveTaskId)?.mobileCapture && <MobileTeachingSolveDialog
+      key={mobileSolveTaskId} task={teachingTasks.find((task) => task.id === mobileSolveTaskId)} robot={selectedRobot} robotPose={robotPose}
+      initialOptions={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.options : undefined}
+      running={['running', 'pausing', 'paused'].includes(mobileComputation?.status)}
+      ready={mobileTeachingSolverReady && robotLoadState.status === 'loaded' && sessionState.status === 'ready'}
+      onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
+      onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} />}
     {ipadTeachingOpen && <IPadTeachingDialog mapData={mapData} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createIPadCaptureLayer, disposeIPadCaptureLayer } from '../lib/ipadCaptureDisplay.js';
+import { solveMobileTeachingInWorker } from '../lib/mobileTeachingWorker.js';
 import * as THREE from 'three';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
@@ -1119,6 +1120,7 @@ const clearRobotParkingGhostLayer = (layer) => {
 const writeRobotParkingGhostHiddenDataset = (canvas) => {
   if (!canvas) return;
   canvas.dataset.parkingGhostState = 'hidden';
+  canvas.dataset.parkingGhostKind = '';
   canvas.dataset.parkingGhostTargetId = '';
   canvas.dataset.parkingGhostPoseId = '';
   canvas.dataset.parkingGhostMeshCount = '0';
@@ -1529,6 +1531,7 @@ export default function PointCloudViewer({
   onZividCameraPoseChange,
   onCameraTeachingResult,
   onParkingMergePlannerChange,
+  onMobileTeachingSolverChange,
   onCollisionProtectionChange,
   onClearRobotParkingGhost,
   onMoveToParkingPoint,
@@ -2195,6 +2198,16 @@ export default function PointCloudViewer({
     onParkingMergePlannerChange(provider);
     return () => onParkingMergePlannerChange(null);
   }, [onParkingMergePlannerChange]);
+
+  useEffect(() => {
+    if (!onMobileTeachingSolverChange) return undefined;
+    onMobileTeachingSolverChange((request) => {
+      if (robotLoadStateRef.current?.status !== 'loaded') throw new Error('机器人模型尚未就绪');
+      return solveMobileTeachingInWorker({ ...request, robot: loadedRobotRef.current,
+        mapPose: robotPoseRef.current, lockedJointNames: lockedRobotJointNamesRef.current });
+    });
+    return () => onMobileTeachingSolverChange(null);
+  }, [onMobileTeachingSolverChange]);
 
   const currentEndEffectorLockModes = () =>
     endEffectorLockModes(lockedEndEffectorsRef.current);
@@ -5703,6 +5716,7 @@ export default function PointCloudViewer({
       robotParkingGhostVisualRef.current = visual;
       updateRobotParkingGhostGuide(visual, robotPoseRef.current, canvas);
       canvas.dataset.parkingGhostState = showRobotRef.current ? 'visible' : 'hidden';
+      canvas.dataset.parkingGhostKind = robotParkingGhost.kind || 'parking';
       canvas.dataset.parkingGhostTargetId = robotParkingGhost.parkingPointId;
       canvas.dataset.parkingGhostPoseId = robotParkingGhost.poseId || '';
       canvas.dataset.parkingGhostMeshCount = String(visual.meshCount);
@@ -7461,7 +7475,7 @@ export default function PointCloudViewer({
               className="robot-parking-ghost-readout"
               role="status"
               aria-live="polite"
-              aria-label="停车点机器人虚影"
+              aria-label={robotParkingGhost.kind === 'mobile-solve' ? '计算姿态机器人虚影' : '停车点机器人虚影'}
               data-parking-point-id={robotParkingGhost.parkingPointId}
               data-pose-id={robotParkingGhost.poseId || ''}
               data-parking-edit-state={robotParkingGhost.editing && !robotParkingGhost.poseId ? 'editing' : 'idle'}
@@ -7474,7 +7488,7 @@ export default function PointCloudViewer({
                 <MapPin size={10} />
               </span>
               <div className="robot-parking-ghost-readout__body">
-                <small>ROBOT GHOST · MAP COMPARISON</small>
+                <small>{robotParkingGhost.kind === 'mobile-solve' ? 'ROBOT GHOST · COMPUTED POSE' : 'ROBOT GHOST · MAP COMPARISON'}</small>
                 <strong>
                   <span>{robotParkingGhost.sourceName || '当前机器人'}</span>
                   <i>→</i>
@@ -7494,9 +7508,12 @@ export default function PointCloudViewer({
                   ? robotParkingGhost.poseId
                     ? '调整关节 · 确认修改保存 · Esc 取消'
                     : 'WASD 移动 · ←/→ 转向 · Esc 取消修改'
-                  : `${Object.keys(robotParkingGhost.jointValues || {}).length} JOINTS FROZEN · 虚影不改变当前机器人`}</em>
+                  : robotParkingGhost.kind === 'mobile-solve'
+                    ? `${robotParkingGhost.side === 'left' ? '左臂' : '右臂'}可达 · 在进度面板回看已计算姿态`
+                    : `${Object.keys(robotParkingGhost.jointValues || {}).length} JOINTS FROZEN · 虚影不改变当前机器人`}</em>
               </div>
               <div className="robot-parking-ghost-readout__actions">
+                {robotParkingGhost.kind !== 'mobile-solve' && <>
                 {robotParkingGhost.poseId && (
                   <button
                     type="button"
@@ -7576,13 +7593,14 @@ export default function PointCloudViewer({
                   {robotParkingGhost.poseId ? <Bot size={12} /> : <MapPin size={12} />}
                   {robotParkingGhost.poseId ? '使用当前姿态' : '移动到当前停车点'}
                 </button>
+                </>}
               </div>
               <button
                 type="button"
                 className="robot-parking-ghost-readout__close"
-                aria-label="清除停车点机器人虚影"
+                aria-label={robotParkingGhost.kind === 'mobile-solve' ? '隐藏计算姿态虚影' : '清除停车点机器人虚影'}
                 aria-keyshortcuts="Escape"
-                title="移除停车点机器人虚影与距离连线 · Esc"
+                title={robotParkingGhost.kind === 'mobile-solve' ? '隐藏当前计算虚影，关闭跟随最新 · Esc' : '移除停车点机器人虚影与距离连线 · Esc'}
                 onClick={() => onClearRobotParkingGhost?.()}
               >
                 <X size={12} />

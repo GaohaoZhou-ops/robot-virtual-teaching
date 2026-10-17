@@ -2,6 +2,7 @@ import { calculatePathDistances } from './pathMetrics.js';
 import { normalizeRobotJointLocks } from './robotJointLocks.js';
 import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult } from './ipadProtocol.js';
+import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -392,6 +393,7 @@ const normalizeTeachingPoint = (point, pointIndex) => {
       point?.cameraCapture || point?.visionCapture || point?.cameraFrames,
     ),
     replanningHistory: normalizeTeachingReplanningHistory(point?.replanningHistory),
+    ...(typeof point?.mobileSampleId === 'string' ? { mobileSampleId: point.mobileSampleId } : {}),
   };
 };
 
@@ -457,6 +459,7 @@ export function normalizeTeachingTasks(payload) {
         : [];
     const robot = task?.robot && typeof task.robot === 'object' ? task.robot : {};
     const map = task?.map && typeof task.map === 'object' ? task.map : {};
+    const mobileSolve = task.mobileCapture ? normalizeMobileSolveReport(task.mobileSolve) : null;
     return {
       id: String(task?.id || createId('teach-task')),
       name: String(task?.name || `示教任务 ${String(taskIndex + 1).padStart(2, '0')}`),
@@ -476,10 +479,12 @@ export function normalizeTeachingTasks(payload) {
         coordinateFrame: String(map.coordinateFrame || task?.coordinateFrame || 'map'),
       },
       parkingPoints,
+      ...(task.mobileSolveSource && typeof task.mobileSolveSource === 'object' ? { mobileSolveSource: structuredClone(task.mobileSolveSource) } : {}),
       ...(task.mobileCapture ? {
         mobileCapture: validateIPadResult(task.mobileCapture, { modelHash: task.mobileCapture.modelHash }, task.mobileCapture.sessionId),
         mobileTransform: Array.isArray(task.mobileTransform) && task.mobileTransform.length === 16 && task.mobileTransform.every(Number.isFinite)
           ? [...task.mobileTransform] : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        ...(mobileSolve ? { mobileSolve } : {}),
       } : {}),
     };
   });
