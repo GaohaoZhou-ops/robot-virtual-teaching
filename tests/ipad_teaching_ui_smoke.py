@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright, expect
+from ipad_menu_helpers import open_ipad_dialog
 
 BASE = os.environ.get("BASE_URL", "http://127.0.0.1:22001")
 CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -38,7 +39,7 @@ with sync_playwright() as playwright:
     ready(page)
     page.locator('[data-independent-teaching-input="true"]').set_input_files(str(Path(__file__).parent / 'fixtures/rotation-map.ply'))
     ready(page)
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page)
     dialog = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
     expect(dialog).to_be_visible()
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
@@ -47,7 +48,7 @@ with sync_playwright() as playwright:
     page.screenshot(path='/tmp/atlas-ipad-pairing.png', full_page=True)
     ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
     page.get_by_role('button', name='关闭设备示教窗口').click()
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page)
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     expect(dialog.locator('.ipad-code')).to_have_text(ticket['pairingCode'])
     assert len(creations) == 1, 'reopening must reuse the ready transfer'
@@ -65,7 +66,7 @@ with sync_playwright() as playwright:
         items[0].pairingExpiresAt = Date.now() - 1000;
         localStorage.setItem('atlas-ipad-handoffs-v1', JSON.stringify(items));
     }""")
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page)
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     renewed = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
     assert renewed['id'] == ticket['id'] and renewed['pairingCode'] != ticket['pairingCode']
@@ -76,7 +77,7 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='关闭设备示教窗口').click()
     device_id = str(uuid.uuid4())
     paired = api('/pair', {"code": ticket['pairingCode'], "deviceId": device_id, "deviceName": "iPad Pro UI test"})
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page)
     expect(dialog.locator('[data-ipad-status="paired"]')).to_be_visible()
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     expect(dialog).to_contain_text('扫描二维码，同步示教结果')
@@ -136,7 +137,7 @@ with sync_playwright() as playwright:
     ready(page)
     expect(page.get_by_role('region', name='iPad 示教结果')).to_contain_text('2 个 Pose')
     page.get_by_role('button', name='继续工作 · 返回主工作台继续示教').click()
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page)
     expect(page.locator('[data-ipad-status="imported"]')).to_be_visible()
     # The imported label comes from localStorage on the initial render. Wait
     # for opening preparation to reach the network response before checking
@@ -147,7 +148,7 @@ with sync_playwright() as playwright:
     expect(dialog).not_to_be_visible()
     # Narrow desktop viewport: the entry and dialog remain reachable.
     page.set_viewport_size({"width": 1280, "height": 800})
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page)
     expect(dialog).to_be_visible()
     page.screenshot(path='/tmp/atlas-ipad-pairing-1280.png', full_page=True)
     assert len(creations) == 2, 'opening must preserve completed/imported tasks after the explicit new transfer'
@@ -165,7 +166,7 @@ with sync_playwright() as playwright:
     ready(retry_page)
     retry_page.route('**/__atlas/ipad/sessions/*/model', lambda route: route.fulfill(
         status=503, content_type='application/json', body=json.dumps({'error': '测试模型上传中断'})))
-    retry_page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(retry_page)
     expect(retry_page.get_by_role('alert')).to_have_text('测试模型上传中断')
     failed = retry_page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
     retry_page.unroute('**/__atlas/ipad/sessions/*/model')

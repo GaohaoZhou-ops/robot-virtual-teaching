@@ -19,7 +19,7 @@ const statusLabel = {
   error: '加载失败',
 };
 
-export default function RobotPicker({ selectedRobot, loadState, onSelect }) {
+export default function RobotPicker({ selectedRobot, loadState, onSelect, showRobot = true, onShowRobotChange, visibilityDisabled = false }) {
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -117,7 +117,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect }) {
         type="button"
         className={`action-button robot-picker__trigger ${selectedRobot ? 'has-model' : ''}`}
         aria-label="加载机器人"
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-expanded={open}
         title={selectedRobot ? `${selectedRobot.name} · 位于地图原点` : '从 robots 目录选择机器人模型'}
         onClick={() => setOpen((current) => !current)}
@@ -143,6 +143,16 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect }) {
             </div>
             <button type="button" aria-label="刷新机器人列表" onClick={refreshCatalog}>
               <RefreshCw className={catalogState === 'loading' ? 'is-spinning' : ''} size={13} />
+            </button>
+          </div>
+
+          <div className="robot-picker__visibility">
+            <button type="button" className="robot-visibility-switch" role="switch"
+              aria-label="显示机器人" aria-checked={showRobot}
+              disabled={visibilityDisabled || !selectedRobot || currentStatus !== 'loaded'}
+              title={showRobot ? '隐藏机器人模型' : '显示机器人模型'}
+              onClick={() => onShowRobotChange?.(!showRobot)}>
+              <span>显示机器人</span><span className="robot-visibility-switch__track" aria-hidden="true" />
             </button>
           </div>
 

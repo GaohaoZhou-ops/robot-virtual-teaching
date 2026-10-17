@@ -39,6 +39,7 @@ import TeachingDataPage from './components/TeachingDataPage.jsx';
 import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
+import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceLabel } from './lib/ipadProtocol.js';
@@ -464,6 +465,7 @@ export default function App() {
   const [directoryAutosaveSuspended, setDirectoryAutosaveSuspended] = useState(false);
   const [teachingTransferDialog, setTeachingTransferDialog] = useState(null);
   const [ipadTeachingOpen, setIPadTeachingOpen] = useState(false);
+  const [ipadTeachingEntry, setIPadTeachingEntry] = useState({ action: 'pairing' });
   const teachingTransferBusyRef = useRef(false);
   const [mapData, setMapData] = useState(null);
   const [teachingSpaceMode, setTeachingSpaceMode] = useState('map');
@@ -482,6 +484,7 @@ export default function App() {
   const [pointColorMode, setPointColorMode] = useState('height');
   const [meshRenderQuality, setMeshRenderQuality] = useState('auto');
   const [showWaypoints3D, setShowWaypoints3D] = useState(true);
+  const [showRobotModel, setShowRobotModel] = useState(true);
   const [collapsedPanel, setCollapsedPanel] = useState(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [mapDetailsOpen, setMapDetailsOpen] = useState(false);
@@ -3747,6 +3750,7 @@ export default function App() {
   const handleRobotControlChange = useCallback(
     (enabled, { announce = true } = {}) => {
       const nextEnabled = Boolean(enabled) && robotLoadState.status === 'loaded';
+      if (nextEnabled) setShowRobotModel(true);
       setRobotControlEnabled(nextEnabled);
       if (announce) notify(
         nextEnabled
@@ -4545,6 +4549,13 @@ export default function App() {
     selectTeachingTask(task?.id || null, saved?.parkingPointId);
   };
 
+  const openIPadTeaching = (entry) => {
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    setIPadTeachingEntry(entry);
+    setIPadTeachingOpen(true);
+  };
+
   const importIPadTeaching = async (result, ticket) => {
     const current = latestWorkspaceRef.current;
     const workspaceId = sessionIdRef.current;
@@ -4701,12 +4712,18 @@ export default function App() {
             selectedRobot={selectedRobot}
             loadState={robotLoadState}
             onSelect={handleSelectRobot}
+            showRobot={showRobotModel}
+            visibilityDisabled={teachingCaptureState.status === 'capturing'}
+            onShowRobotChange={(visible) => {
+              if (!visible) setRobotControlEnabled(false);
+              setShowRobotModel(visible);
+            }}
           />
-          {isIndependentTeachingSpace && <button type="button" className="action-button ipad-teaching-action"
-            aria-label="移动到 iPad 或 Vision Pro 上运行" disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready'}
-            onClick={() => { stopTeachingTaskPlayback(false); setRobotControlEnabled(false); setIPadTeachingOpen(true); }}>
-            <Tablet size={15}/><span>iPad / Vision Pro</span>
-          </button>}
+          {isIndependentTeachingSpace && <IPadTeachingMenu mapData={mapData} source={teachingSource}
+            desktopCount={desktopTeachingTasks.length} mobileCount={mobileTeachingTasks.length} mobileLabel={mobileTeachingLabel}
+            disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
+            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen}
+            onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />}
           <SpaceMouseControl
             inputRef={spaceMouseInputRef}
             onNotify={notify}
@@ -4754,7 +4771,7 @@ export default function App() {
           data-collapsed-panel={activeCollapsedPanel || 'none'}
         >
           <section
-            className={`viewport-panel panel-3d ${mobileTeachingTasks.length ? 'has-teaching-source-switch' : ''} ${activeCollapsedPanel === '3d' ? 'is-collapsed' : ''}`}
+            className={`viewport-panel panel-3d ${!isIndependentTeachingSpace && mobileTeachingTasks.length ? 'has-teaching-source-switch' : ''} ${activeCollapsedPanel === '3d' ? 'is-collapsed' : ''}`}
             data-collapsed={activeCollapsedPanel === '3d' ? 'true' : 'false'}
           >
             <div className="panel-heading">
@@ -4815,7 +4832,7 @@ export default function App() {
                 </button>
               )}
             </div>
-            {mobileTeachingTasks.length > 0 && (
+            {!isIndependentTeachingSpace && mobileTeachingTasks.length > 0 && (
               <div className="teaching-source-bar" role="group" aria-label="示教来源">
                 <span>示教来源</span>
                 <div className="teaching-source-switch">
@@ -4860,6 +4877,7 @@ export default function App() {
                 initialView={restoredView3d}
                 onViewChange={handleView3dChange}
                 robotDescriptor={selectedRobot}
+                showRobot={showRobotModel}
                 robotLoadState={robotLoadState}
                 robotPose={robotPose}
                 robotJointValues={robotJointValues}
@@ -5228,7 +5246,8 @@ export default function App() {
       </div>
     )}
     {abxExportSnapshot && <AbxTeachingExportDialog snapshot={abxExportSnapshot} onClose={() => setAbxExportSnapshot(null)} />}
-    {ipadTeachingOpen && <IPadTeachingDialog mapData={mapData} onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
+    {ipadTeachingOpen && <IPadTeachingDialog mapData={mapData} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
+      onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog
       state={teachingTransferDialog}
       onClose={() => { if (!teachingTransferBusyRef.current) setTeachingTransferDialog(null); }}
