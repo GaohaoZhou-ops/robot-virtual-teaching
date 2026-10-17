@@ -4,7 +4,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:22063")
@@ -139,7 +139,7 @@ def run():
             exact=True,
         ).is_visible()
         export_button = page.get_by_role(
-            "button", name="导出示教工程 ZIP", exact=True
+            "button", name="导出工程", exact=True
         )
         assert export_button.is_disabled()
         page.screenshot(path="/tmp/atlas-teaching-data-page-empty.png", full_page=True)
@@ -174,14 +174,14 @@ def run():
 
         data_page = open_teaching_data(page)
         export_button = page.get_by_role(
-            "button", name="导出示教工程 ZIP", exact=True
+            "button", name="导出工程", exact=True
         )
         assert export_button.is_enabled()
         with page.expect_download() as download_info:
-            export_button.click()
+            start_project_download(page)
         download = download_info.value
         exported = read_exported_project(download)
-        assert download.suggested_filename.startswith("virtual-teaching-")
+        assert download.suggested_filename.startswith("atlas-project-")
         assert download.suggested_filename.endswith(".zip")
         assert len(exported["waypoints"]) == 1
         assert exported["virtualTeaching"]["tasks"] == []

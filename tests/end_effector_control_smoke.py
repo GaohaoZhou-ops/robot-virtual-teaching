@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 from viewer_tools_helpers import viewer_tool
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
@@ -111,7 +111,7 @@ def run():
         page.get_by_role("button", name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         locked_export = read_exported_project(download_info.value)
         locked_joint_values = locked_export["robot"]["joints"]
         locked_joint_names = [
@@ -176,7 +176,7 @@ def run():
         page.get_by_role("button", name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         exported = read_exported_project(download_info.value)
         joints = exported["robot"]["joints"]
         assert all(f"left_J{index}" in joints for index in range(1, 8))
@@ -211,7 +211,7 @@ def run():
         page.get_by_role("button", name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         before_global_move = read_exported_project(download_info.value)
         before_global_joints = before_global_move["robot"]["joints"]
         page.get_by_role("button", name="返回主工作台继续示教").click()
@@ -267,7 +267,7 @@ def run():
         page.get_by_role("button", name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         after_global_move = read_exported_project(download_info.value)
         after_global_joints = after_global_move["robot"]["joints"]
         global_chain_names = [

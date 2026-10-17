@@ -10,6 +10,7 @@ import {
 import TeachingArchiveTree from './TeachingArchiveTree.jsx';
 import TeachingPoseRobotPreview from './TeachingPoseRobotPreview.jsx';
 import IPadCaptureDetails from './IPadCaptureDetails.jsx';
+import ProjectExportButton from './ProjectExportButton.jsx';
 
 const formatBytes = (value) => {
   const bytes = Math.max(0, Number(value) || 0);
@@ -52,6 +53,8 @@ export default function TeachingDataPage({
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
   onExportProject,
+  onExportTeachingData,
+  canExportTeachingData = false,
   onExportAbxTeaching,
   onSolveMobileTask,
 }) {
@@ -182,6 +185,12 @@ export default function TeachingDataPage({
           <ShieldCheck size={12} />
           <span>{sessionState?.status === 'ready' ? 'SESSION SYNCED' : 'SESSION CHECK'}</span>
         </div>
+        <ProjectExportButton
+          mapData={mapData}
+          exportState={projectExportState}
+          disabled={captureState?.status === 'capturing'}
+          onExport={onExportProject}
+        />
         <button
           type="button"
           className="teaching-data-page__back"
@@ -234,7 +243,8 @@ export default function TeachingDataPage({
                 onPlayTask={onPlayTask}
                 onAnalyzeParkingPointMerge={onAnalyzeParkingPointMerge}
                 onMergeParkingPoints={onMergeParkingPoints}
-                onExportProject={onExportProject}
+                onExportTeachingData={onExportTeachingData}
+                canExportTeachingData={canExportTeachingData}
                 onExportAbxTeaching={onExportAbxTeaching}
                 onOpenCapturePage={onBack}
                 onSelectionChange={handleArchiveSelection}

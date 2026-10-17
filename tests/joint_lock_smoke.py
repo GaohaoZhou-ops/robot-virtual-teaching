@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 from viewer_tools_helpers import viewer_tool
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
@@ -131,7 +131,7 @@ def run():
         page.get_by_role("button", name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         exported = read_exported_project(download_info.value)
         assert exported["robot"]["lockedJoints"] == default_body_locks
         print("stage=export-lock-recorded", flush=True)

@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 
 from viewer_tools_helpers import viewer_tool
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:22060")
@@ -256,7 +256,7 @@ def run():
         assert canvas.get_attribute("data-robot-control-enabled") == "false"
 
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         exported = read_exported_project(download_info.value)
         teaching = exported["virtualTeaching"]
         assert teaching["coordinateFrame"] == "map"
@@ -390,7 +390,7 @@ def run():
         assert page.locator(".teaching-tree-node--parking").count() == 1
 
         with page.expect_download() as merged_download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         merged_export = read_exported_project(merged_download_info.value)
         merged_task = merged_export["virtualTeaching"]["tasks"][0]
         assert len(merged_task["parkingPoints"]) == 1
@@ -420,7 +420,7 @@ def run():
         assert page.locator(".teaching-tree-node--parking").count() == 1
 
         with page.expect_download() as restored_download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         restored_export = read_exported_project(restored_download_info.value)
         restored_parking = restored_export["virtualTeaching"]["tasks"][0]["parkingPoints"][0]
         assert len(restored_parking["mergeHistory"]) == 1

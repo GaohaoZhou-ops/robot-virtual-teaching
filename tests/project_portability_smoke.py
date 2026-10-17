@@ -1,3 +1,5 @@
+from archive_helpers import start_project_download
+
 import hashlib
 import json
 import os
@@ -131,7 +133,7 @@ def run():
             assert archive_tree.get_attribute("data-parking-point-count") == "1"
             assert archive_tree.get_attribute("data-teaching-point-count") == "1"
             with page.expect_download() as download_info:
-                page.get_by_role("button", name="导出示教工程 ZIP").click()
+                start_project_download(page)
             validate_download(Path(download_info.value.path()))
             page.get_by_role("button", name="返回主工作台继续示教").click()
             page.locator('[data-app-page="teaching-data"]').wait_for(state="detached")

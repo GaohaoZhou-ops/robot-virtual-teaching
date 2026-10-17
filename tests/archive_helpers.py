@@ -6,6 +6,16 @@ from pathlib import Path
 PROJECT_CONFIG_PATH = "config/project.json"
 
 
+def start_project_download(page, name=None):
+    """Use the browser fallback so existing ZIP-content tests get a Download."""
+    page.evaluate("window.showSaveFilePicker = undefined")
+    page.get_by_role("button", name="导出工程", exact=True).click()
+    dialog = page.get_by_role("dialog", name="保存工程副本")
+    if name is not None:
+        dialog.get_by_label("工程名称", exact=True).fill(name)
+    dialog.get_by_role("button", name="保存工程 ZIP", exact=True).click()
+
+
 def read_exported_project(download):
     path = Path(download.path())
     if zipfile.is_zipfile(path):
