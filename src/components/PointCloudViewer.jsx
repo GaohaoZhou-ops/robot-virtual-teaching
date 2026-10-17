@@ -34,6 +34,7 @@ import EndEffectorControlPanel from './EndEffectorControlPanel.jsx';
 import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
+import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import {
   createUniformMeshIndex,
   MESH_RENDER_QUALITY_OPTIONS,
@@ -1641,6 +1642,7 @@ export default function PointCloudViewer({
   const [robotCollisionStatus, setRobotCollisionStatus] = useState(
     () => createRobotCollisionStatus(),
   );
+  const [showDistanceWarnings, setShowDistanceWarnings] = useState(true);
   const [visionCoverageStats, setVisionCoverageStats] = useState(
     EMPTY_VISION_COVERAGE_STATS,
   );
@@ -7428,6 +7430,9 @@ export default function PointCloudViewer({
       )}
       {mapData?.geometry && (
         <>
+          {showDistanceWarnings && collisionProtectionEnabled && (
+            <RobotDistanceWarning status={robotCollisionStatus} />
+          )}
           <div
             ref={spaceMouseAxisHudRef}
             className="spacemouse-axis-hud"
@@ -7783,7 +7788,7 @@ export default function PointCloudViewer({
               <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title="点云颜色、显示密度与网格质量"
+              title="点云颜色、距离警告、显示密度与网格质量"
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -7800,6 +7805,21 @@ export default function PointCloudViewer({
                   <i aria-hidden="true" />
                   <span>{colorModeMeta.label}</span>
                   <RotateCcw size={11} />
+                </button>
+              </div>
+              <div className="viewer-display-settings__warnings">
+                <span><ShieldAlert size={13} /> 距离警告</span>
+                <button
+                  type="button"
+                  role="switch"
+                  className="distance-warning-toggle"
+                  aria-label="显示距离警告"
+                  aria-checked={showDistanceWarnings}
+                  title="在 3D 视图右上角显示距离警告"
+                  onClick={() => setShowDistanceWarnings((current) => !current)}
+                >
+                  {showDistanceWarnings ? <Eye size={12} /> : <EyeOff size={12} />}
+                  {showDistanceWarnings ? '显示' : '隐藏'}
                 </button>
               </div>
               <div

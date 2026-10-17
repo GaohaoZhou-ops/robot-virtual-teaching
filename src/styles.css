@@ -2575,6 +2575,58 @@ code {
   --collision-rgb: 255, 112, 110;
 }
 
+.robot-distance-warning {
+  --distance-warning-rgb: 244, 201, 93;
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 7;
+  width: min(250px, calc(100% - 24px));
+  padding: 10px 12px;
+  border: 1px solid rgba(var(--distance-warning-rgb), 0.38);
+  border-left: 2px solid rgb(var(--distance-warning-rgb));
+  color: rgb(var(--distance-warning-rgb));
+  background: rgba(9, 17, 19, 0.93);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.robot-distance-warning.is-collision { --distance-warning-rgb: 255, 112, 110; }
+
+.robot-distance-warning > header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.robot-distance-warning > header > strong { font-size: 11px; }
+.robot-distance-warning > header > span { margin-left: auto; font-size: 9px; }
+.robot-distance-warning > header b { font: 600 11px "SFMono-Regular", Menlo, monospace; }
+.robot-distance-warning > p { margin: 6px 0 0; color: #b9c5c3; font-size: 10px; }
+
+.robot-distance-warning ul {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid rgba(var(--distance-warning-rgb), 0.18);
+  list-style: none;
+}
+
+.robot-distance-warning li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--amber);
+  font-size: 10px;
+}
+
+.robot-distance-warning li.is-collision { color: var(--red); }
+.robot-distance-warning li > span { color: #c6d4d0; }
+.robot-distance-warning li > strong { font-weight: 500; }
+.robot-distance-warning li > small { margin-left: auto; font-size: 9px; opacity: 0.7; }
+
 .robot-parking-ghost-readout {
   position: absolute;
   bottom: 38px;
@@ -3649,7 +3701,8 @@ code {
   background: rgba(89, 219, 232, 0.08);
 }
 
-.viewer-display-settings__color {
+.viewer-display-settings__color,
+.viewer-display-settings__warnings {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3658,7 +3711,8 @@ code {
   border-bottom: 1px solid var(--line);
 }
 
-.viewer-display-settings__color > span {
+.viewer-display-settings__color > span,
+.viewer-display-settings__warnings > span {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3666,7 +3720,8 @@ code {
   font-size: 10px;
 }
 
-.viewer-display-settings__color .height-color-toggle {
+.viewer-display-settings__color .height-color-toggle,
+.distance-warning-toggle {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3679,9 +3734,15 @@ code {
   cursor: pointer;
 }
 
-.viewer-display-settings__color .height-color-toggle:hover {
+.viewer-display-settings__color .height-color-toggle:hover,
+.distance-warning-toggle:hover {
   border-color: var(--cyan);
   background: #153139;
+}
+
+.distance-warning-toggle[aria-checked="false"] {
+  color: var(--muted);
+  background: transparent;
 }
 
 .height-color-toggle > i {
@@ -5328,7 +5389,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-archive-tree {
   display: grid;
-  grid-template-rows: minmax(56px, auto) auto minmax(650px, auto);
+  grid-template-rows: minmax(56px, auto) minmax(650px, auto);
   min-width: 0;
   color: #b7c6c4;
   background: #071115;
@@ -5402,15 +5463,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .teaching-tree-toolbar > button:disabled {
   cursor: not-allowed;
   opacity: 0.32;
-}
-
-.teaching-data-export-hint {
-  margin: 0;
-  padding: 9px 12px;
-  border-bottom: 1px solid rgba(137, 177, 179, 0.14);
-  color: #849b9b;
-  font-size: 11px;
-  line-height: 1.6;
 }
 
 .teaching-tree-workspace {
@@ -8733,7 +8785,6 @@ input[type="number"]::-webkit-inner-spin-button {
   font-weight: 550;
 }
 
-.teaching-pose-robot-preview__empty small,
 .teaching-pose-robot-preview__loading small {
   max-width: 270px;
   margin-top: 7px;
@@ -14481,30 +14532,6 @@ input[type="number"]::-webkit-inner-spin-button {
   user-select: none;
 }
 
-.zivid-camera-viewport::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  border: 1px solid transparent;
-  pointer-events: none;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-.zivid-camera-viewport.is-collision-warning-near::after {
-  border-color: rgba(244, 201, 93, 0.78);
-  box-shadow:
-    inset 0 0 0 2px rgba(244, 201, 93, 0.11),
-    inset 0 0 44px rgba(244, 201, 93, 0.1);
-}
-
-.zivid-camera-viewport.is-collision-warning-collision::after {
-  border-color: rgba(255, 69, 69, 0.9);
-  box-shadow:
-    inset 0 0 0 2px rgba(255, 69, 69, 0.16),
-    inset 0 0 56px rgba(255, 69, 69, 0.16);
-}
-
 .zivid-camera-viewport.is-dragging {
   cursor: grabbing;
 }
@@ -15037,84 +15064,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .zivid-camera-frame-meta.bottom { bottom: 16px; }
 .zivid-camera-frame-meta strong { color: rgba(89, 219, 232, 0.82); font-weight: 500; }
 
-.zivid-camera-collision-alert {
-  --camera-collision-tone: 244, 201, 93;
-  position: absolute;
-  bottom: 34px;
-  left: 50%;
-  z-index: 8;
-  display: grid;
-  grid-template-columns: 27px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 7px;
-  width: min(330px, calc(100% - 32px));
-  min-height: 42px;
-  padding: 6px 7px;
-  border: 1px solid rgba(var(--camera-collision-tone), 0.62);
-  color: rgb(var(--camera-collision-tone));
-  background:
-    linear-gradient(90deg, rgba(var(--camera-collision-tone), 0.16), transparent 68%),
-    rgba(9, 10, 8, 0.88);
-  box-shadow:
-    inset 2px 0 rgb(var(--camera-collision-tone)),
-    0 0 22px rgba(var(--camera-collision-tone), 0.14);
-  transform: translateX(-50%);
-  pointer-events: none;
-  backdrop-filter: blur(7px);
-}
-
-.zivid-camera-collision-alert.is-collision {
-  --camera-collision-tone: 255, 69, 69;
-  background:
-    linear-gradient(90deg, rgba(var(--camera-collision-tone), 0.2), transparent 72%),
-    rgba(15, 7, 8, 0.91);
-}
-
-.zivid-camera-collision-alert > span {
-  display: grid;
-  place-items: center;
-  width: 25px;
-  height: 25px;
-  border: 1px solid rgba(var(--camera-collision-tone), 0.34);
-  background: rgba(var(--camera-collision-tone), 0.1);
-}
-
-.zivid-camera-collision-alert > div {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.zivid-camera-collision-alert small {
-  color: rgba(var(--camera-collision-tone), 0.67);
-  font: 4px "SFMono-Regular", Menlo, monospace;
-  letter-spacing: 0.08em;
-}
-
-.zivid-camera-collision-alert strong {
-  margin-top: 2px;
-  color: #f4e6df;
-  font-size: 7px;
-  font-weight: 640;
-}
-
-.zivid-camera-collision-alert em {
-  margin-top: 2px;
-  overflow: hidden;
-  color: rgba(222, 206, 195, 0.62);
-  font: normal 5px "SFMono-Regular", Menlo, monospace;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.zivid-camera-collision-alert > b {
-  min-width: 45px;
-  color: rgb(var(--camera-collision-tone));
-  font: 650 7px "SFMono-Regular", Menlo, monospace;
-  text-align: right;
-  white-space: nowrap;
-}
-
 .zivid-camera-empty,
 .zivid-camera-rgb-warning {
   position: absolute;
@@ -15364,22 +15313,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .zivid-camera-panel.is-expanded .zivid-camera-quality { height: 31px; padding-inline: 9px; }
 .zivid-camera-panel.is-expanded .zivid-camera-quality select { width: 78px; font-size: 9px; }
 .zivid-camera-panel.is-expanded .zivid-camera-reticle { width: 38px; height: 38px; }
-.zivid-camera-panel.is-expanded .zivid-camera-collision-alert {
-  bottom: 40px;
-  grid-template-columns: 34px minmax(0, 1fr) auto;
-  gap: 9px;
-  width: min(430px, calc(100% - 48px));
-  min-height: 54px;
-  padding: 8px 10px;
-}
-.zivid-camera-panel.is-expanded .zivid-camera-collision-alert > span {
-  width: 31px;
-  height: 31px;
-}
-.zivid-camera-panel.is-expanded .zivid-camera-collision-alert small { font-size: 6px; }
-.zivid-camera-panel.is-expanded .zivid-camera-collision-alert strong { font-size: 9px; }
-.zivid-camera-panel.is-expanded .zivid-camera-collision-alert em { font-size: 6px; }
-.zivid-camera-panel.is-expanded .zivid-camera-collision-alert > b { font-size: 9px; }
 .zivid-camera-panel.is-expanded .zivid-camera-specs > span { padding-inline: 13px; font-size: 9px; }
 .zivid-camera-panel.is-expanded .zivid-camera-specs small { font-size: 7px; }
 .zivid-camera-panel.is-expanded .zivid-camera-zoom-controls { top: 52px; right: 18px; }

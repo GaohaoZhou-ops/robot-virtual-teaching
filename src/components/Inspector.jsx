@@ -219,7 +219,7 @@ export default function Inspector({
       ? { title: '全图强连通', detail: '所有导航点均可往返到达', icon: CheckCircle2 }
       : validation.status === 'partial'
         ? { title: '存在单向断路', detail: `${validation.unreachableCount} 条路径尚未形成回路`, icon: TriangleAlert }
-        : { title: '等待连通性检测', detail: '按有向图检查任意两点能否互达', icon: ScanSearch };
+        : { title: '等待连通性检测', icon: ScanSearch };
   const ValidationIcon = validationCopy.icon;
 
   const updatePose = (key, value) => {
@@ -388,7 +388,7 @@ export default function Inspector({
               <div className="connectivity-card__icon"><ValidationIcon size={18} /></div>
               <div className="connectivity-card__copy">
                 <strong>{validationCopy.title}</strong>
-                <span>{validationCopy.detail}</span>
+                {validationCopy.detail && <span>{validationCopy.detail}</span>}
               </div>
               <button
                 type="button"
