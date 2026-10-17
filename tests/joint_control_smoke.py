@@ -4,7 +4,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:22070")
@@ -488,7 +488,7 @@ def run():
         page.get_by_role("button", name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         exported = read_exported_project(download_info.value)
         joint_poses = exported["virtualTeaching"]["jointPoses"]
         assert len(joint_poses) == 1

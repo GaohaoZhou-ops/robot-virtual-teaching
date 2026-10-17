@@ -32,6 +32,8 @@ import Map2DView from './components/Map2DView.jsx';
 import MapDetailsDialog from './components/MapDetailsDialog.jsx';
 import PointCloudViewer from './components/PointCloudViewer.jsx';
 import ProjectLoadDialog from './components/ProjectLoadDialog.jsx';
+import ProjectExportButton from './components/ProjectExportButton.jsx';
+import ProjectExportDialog from './components/ProjectExportDialog.jsx';
 import RobotPicker from './components/RobotPicker.jsx';
 import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
@@ -59,6 +61,7 @@ import {
   buildExport,
   clampSlice,
   createId,
+  downloadJson,
   fetchBufferWithProgress,
   normalizeProject,
   normalizeTeachingTasks,
@@ -66,6 +69,7 @@ import {
   readFileWithProgress,
   teachingCoordinateFrame,
 } from './lib/io.js';
+import { buildTeachingDataExport } from './lib/teachingData.js';
 import {
   normalizeRobotDescriptor,
   normalizeRobotJointValues,
@@ -530,6 +534,7 @@ export default function App() {
     status: 'idle',
     byteLength: 0,
   });
+  const [projectExportDialog, setProjectExportDialog] = useState(null);
   const [projectDirectoryState, setProjectDirectoryState] = useState({
     status: 'detached',
     name: '',
@@ -767,7 +772,7 @@ export default function App() {
       setSessionState({ status: 'error', restored: false });
       if (!sessionFailureNotifiedRef.current) {
         sessionFailureNotifiedRef.current = true;
-        notify('自动保护暂不可用，请到虚拟示教页导出工程备份', 'warning');
+        notify('自动保护暂不可用，请使用顶部“导出工程”保存备份', 'warning');
       }
     },
     [notify],
@@ -3522,7 +3527,18 @@ export default function App() {
       robotPackage: portableRobotPackageRef.current });
   };
 
-  const exportProject = async () => {
+  const exportTeachingData = () => {
+    try {
+      const data = buildTeachingDataExport(currentExportPayload());
+      const stamp = data.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
+      downloadJson(data, `atlas-teaching-${teachingSpaceMode}-${stamp}.json`);
+      notify(`示教数据已导出 · ${data.statistics.taskCount} 任务 / ${data.statistics.parkingPointCount} 停车点 / ${data.statistics.poseCount} 机器人姿态 / ${data.statistics.devicePoseCount} 设备姿态`, 'success');
+    } catch (error) {
+      notify(`示教数据导出失败：${error.message}`, 'error');
+    }
+  };
+
+  const exportProject = async (downloadName) => {
     if (!mapData?.geometry) {
       notify('请先加载完整地图；仅有配置元数据时无法生成便携工程包', 'error');
       return;
@@ -3539,18 +3555,45 @@ export default function App() {
       return;
     }
     projectExportBusyRef.current = true;
-    setProjectExportState({
-      status: 'packing',
-      byteLength: 0,
-      phase: '冻结地图资源',
-      detail: mapData.name,
-      progress: 0,
-    });
-    notify('正在打包地图、机器人、配置与示教视觉资源…', 'info');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = typeof downloadName === 'string'
+      ? downloadName : `atlas-project-${teachingSpaceMode}-${stamp}.zip`;
+    let fileHandle = null;
     try {
+      if (typeof downloadName !== 'string') {
+        if (typeof window.showSaveFilePicker !== 'function') {
+          setProjectExportDialog({ filename });
+          return;
+        }
+        setProjectExportState({ status: 'selecting', byteLength: 0, phase: '选择保存位置' });
+        try {
+          // Invoke directly from the click, before imports or packing consume user activation.
+          fileHandle = await window.showSaveFilePicker({
+            id: `atlas-project-export-${teachingSpaceMode}`,
+            suggestedName: filename,
+            excludeAcceptAllOption: true,
+            types: [{ description: '完整示教工程 ZIP', accept: { 'application/zip': ['.zip'] } }],
+          });
+        } catch (error) {
+          if (error?.name === 'AbortError') {
+            setProjectExportState(projectExportState);
+            return;
+          }
+          if (['SecurityError', 'NotSupportedError'].includes(error?.name)) {
+            setProjectExportState(projectExportState);
+            setProjectExportDialog({ filename });
+            return;
+          }
+          throw error;
+        }
+      }
+      setProjectExportDialog(null);
+      setProjectExportState({
+        status: 'packing', byteLength: 0, phase: '冻结地图资源', detail: mapData.name, progress: 0,
+      });
+      notify('正在打包地图、机器人、配置与示教视觉资源…', 'info');
       const payload = currentExportPayload();
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const { downloadProjectArchive } = await import('./lib/projectArchive.js');
+      const { downloadProjectArchive, saveProjectArchive } = await import('./lib/projectArchive.js');
       const mapResource = createGeometryCache(
         mapData.geometry,
         mapData.bounds,
@@ -3570,11 +3613,10 @@ export default function App() {
         === selectedRobot?.relativePath
         ? portableRobotPackageRef.current
         : null;
-      const archive = await downloadProjectArchive(
+      const archive = await (fileHandle ? saveProjectArchive : downloadProjectArchive)(
         payload,
-        `virtual-teaching-${stamp}.zip`,
+        fileHandle || filename,
         {
-          includeAbxTeaching: teachingSpaceMode === 'map',
           mapResource,
           existingRobotPackage: reusableRobotPackage,
           onProgress: ({ phase, detail, progress }) => setProjectExportState({
@@ -3592,19 +3634,14 @@ export default function App() {
         statistics: archive.manifest.statistics,
       });
       const sizeMb = archive.byteLength / (1024 * 1024);
-      if (archive.manifest.abxExport?.status === 'blocked') {
-        notify(`工程 ZIP 备份已导出；ABX 任务未生成：${archive.manifest.abxExport.message}`, 'warning');
-        return;
-      }
+      const sizeLabel = sizeMb >= 0.1 ? `${sizeMb.toFixed(1)} MB` : `${Math.max(1, Math.round(archive.byteLength / 1024))} KB`;
       notify(
-        teachingTasks.length
-          ? `便携工程 ZIP 已导出 · ${sizeMb >= 0.1 ? `${sizeMb.toFixed(1)} MB` : `${Math.max(1, Math.round(archive.byteLength / 1024))} KB`}`
-          : '便携工程 ZIP 已导出 · 已包含地图与机器人资源，当前未包含示教任务',
-        teachingTasks.length ? 'success' : 'info',
+        fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}` : `工程下载已开始 · ${filename} · ${sizeLabel}`,
+        'success',
       );
     } catch (error) {
       setProjectExportState({ status: 'error', byteLength: 0 });
-      notify(`工程打包失败：${error.message}`, 'error');
+      notify(`工程导出失败：${error.message}`, 'error');
     } finally {
       projectExportBusyRef.current = false;
     }
@@ -4891,6 +4928,12 @@ export default function App() {
             <FileSearch size={15} />
             <span>地图与工程配置</span>
           </button>
+          <ProjectExportButton
+            mapData={mapData}
+            exportState={projectExportState}
+            disabled={loadState.loading || teachingCaptureState.status === 'capturing'}
+            onExport={exportProject}
+          />
           <button
             type="button"
             className={`action-button teaching-mode-action ${isIndependentTeachingSpace ? '' : 'independent-teaching-action'}`}
@@ -5285,7 +5328,7 @@ export default function App() {
           data-recovery-available={lastProjectRecovery?.available ? 'true' : 'false'}
           title={
             sessionState.status === 'error'
-              ? '自动保护不可用，请到虚拟示教页导出工程备份'
+              ? '自动保护不可用，请使用顶部“导出工程”保存备份'
               : '刷新页面自动恢复当前工作现场；服务或计算机重启后可前往示教数据页恢复工程'
           }
         >
@@ -5421,6 +5464,8 @@ export default function App() {
           onAnalyzeParkingPointMerge={analyzeTeachingParkingPointMerge}
           onMergeParkingPoints={mergeTeachingParkingPoints}
           onExportProject={exportProject}
+          onExportTeachingData={exportTeachingData}
+          canExportTeachingData={Boolean(mapData || selectedRobot || teachingTasks.length || jointPoses.length || waypoints.length)}
           onExportAbxTeaching={teachingSpaceMode === 'map' ? openAbxTeachingExport : undefined}
           onSolveMobileTask={openMobileTeachingSolve}
         />
@@ -5443,6 +5488,11 @@ export default function App() {
         )}
       </div>
     )}
+    {projectExportDialog && <ProjectExportDialog
+      filename={projectExportDialog.filename}
+      onSave={exportProject}
+      onClose={() => setProjectExportDialog(null)}
+    />}
     {abxExportSnapshot && <AbxTeachingExportDialog snapshot={abxExportSnapshot} onClose={() => setAbxExportSnapshot(null)} />}
     <MobileTeachingComputeDock computation={mobileComputation} inWorkbench={appPage === APP_PAGE_WORKBENCH}
       onPause={pauseMobileTeaching} onResume={resumeMobileTeaching} onCancel={cancelMobileTeaching}

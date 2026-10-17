@@ -1,0 +1,60 @@
+.project-export-dialog {
+  width: min(540px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 1px solid #29555b;
+  background: #0a161b;
+  color: #c4d4d5;
+  box-shadow: 0 24px 80px #0009;
+}
+
+.project-export-dialog::backdrop { background: #02090dc9; backdrop-filter: blur(4px); }
+.project-export-dialog header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 22px 24px;
+  border-bottom: 1px solid #21363c;
+  color: #75d6df;
+}
+.project-export-dialog header div { flex: 1; }
+.project-export-dialog header small { font-size: 9px; letter-spacing: 1.3px; color: #819fa6; }
+.project-export-dialog h2 { margin: 5px 0 0; font-size: 19px; color: #e0eeee; }
+.project-export-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border: 1px solid #2d464d;
+  background: transparent;
+  color: #aec6ca;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.project-export-dialog header button { padding: 7px; border-color: transparent; }
+.project-export-dialog button:hover:not(:disabled) { border-color: #71d5df; color: #d9f6f8; }
+.project-export-dialog button:focus-visible { outline: 2px solid #71d5df; outline-offset: 3px; }
+.project-export-dialog__body { padding: 24px; }
+.project-export-dialog__body label { display: block; margin-bottom: 10px; font-size: 12px; }
+.project-export-dialog__filename { display: flex; align-items: center; background: #071014; border: 1px solid #34545b; }
+.project-export-dialog__filename:focus-within { border-color: #71d5df; }
+.project-export-dialog__filename input {
+  min-width: 0;
+  width: 100%;
+  padding: 12px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e0eeee;
+  font: inherit;
+  font-size: 13px;
+}
+.project-export-dialog__filename input:focus-visible { outline: 0; }
+.project-export-dialog__filename span { padding: 0 12px; color: #7a9a9f; font-size: 12px; }
+.project-export-dialog__body p { margin: 16px 0 0; color: #8ba4aa; font-size: 12px; line-height: 1.8; }
+.project-export-dialog__body .project-export-dialog__error { margin-top: 8px; color: #ff9d92; }
+.project-export-dialog footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid #21363c; }
+.project-export-dialog .project-export-dialog__save { background: #14353d; border-color: #4ca4b0; color: #c1f1f5; }
+.project-export-dialog button:disabled { opacity: 0.4; cursor: not-allowed; }

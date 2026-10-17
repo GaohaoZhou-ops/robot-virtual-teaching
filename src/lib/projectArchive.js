@@ -1,6 +1,7 @@
 import { strFromU8, strToU8, unzip, zip } from 'fflate';
 import { sha256Bytes } from './hash.js';
 import { buildAbxTeachingExport } from './abxTeachingExport.js';
+import { TEACHING_DATA_FORMAT } from './teachingData.js';
 
 export const PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-project';
 export const PROJECT_ARCHIVE_VERSION = 2;
@@ -853,6 +854,25 @@ export async function downloadProjectArchive(payload, filename, options = {}) {
   return archive;
 }
 
+export async function saveProjectArchive(payload, fileHandle, options = {}) {
+  const archive = await buildProjectArchive(payload, options);
+  options.onProgress?.({ phase: '保存工程 ZIP', detail: fileHandle.name, progress: 1 });
+  // Open the writable only after packing succeeds; close commits the new file.
+  const writable = await fileHandle.createWritable();
+  try {
+    await writable.write(archive.blob);
+    await writable.close();
+  } catch (error) {
+    try {
+      await writable.abort();
+    } catch {
+      // Preserve the original write/close failure.
+    }
+    throw error;
+  }
+  return archive;
+}
+
 const readJsonEntry = (files, path, label) => {
   const bytes = files[path];
   if (!bytes) throw new Error(`${label}不存在：${path}`);
@@ -1626,18 +1646,22 @@ export async function readProjectFile(file, options = {}) {
   if (hasZipSignature(bytes) || String(file.name || '').toLowerCase().endsWith('.zip')) {
     return readProjectArchive(bytes, options);
   }
+  let payload;
   try {
-    const payload = JSON.parse(strFromU8(bytes).replace(/^\uFEFF/, ''));
-    return {
-      payload,
-      rawPayload: payload,
-      source: 'json',
-      manifest: null,
-      resources: { map: null, robot: null },
-      portable: false,
-      archiveFileCount: 0,
-    };
+    payload = JSON.parse(strFromU8(bytes).replace(/^\uFEFF/, ''));
   } catch (error) {
     throw new Error(`JSON 解析失败：${error.message}`);
   }
+  if (payload?.format === TEACHING_DATA_FORMAT) {
+    throw new Error('这是轻量示教数据文件，不能作为完整工程加载；请使用工程 ZIP 或工程目录');
+  }
+  return {
+    payload,
+    rawPayload: payload,
+    source: 'json',
+    manifest: null,
+    resources: { map: null, robot: null },
+    portable: false,
+    archiveFileCount: 0,
+  };
 }

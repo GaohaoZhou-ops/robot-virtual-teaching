@@ -5,7 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 from parking_ghost_smoke import read_robot_pose
 from viewer_tools_helpers import viewer_tool
 
@@ -17,7 +17,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
 def export_project(page):
     page.get_by_role("button", name="打开示教数据管理页", exact=True).click()
     with page.expect_download() as info:
-        page.get_by_role("button", name="导出示教工程 ZIP", exact=True).click()
+        start_project_download(page)
     project = read_exported_project(info.value)
     page.get_by_role("button", name="返回主工作台继续示教").click()
     return project

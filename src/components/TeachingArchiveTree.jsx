@@ -13,7 +13,6 @@ import {
   FolderOpen,
   GitMerge,
   ListTree,
-  LoaderCircle,
   MapPin,
   Maximize2,
   Play,
@@ -116,7 +115,8 @@ export default function TeachingArchiveTree({
   onPlayTask,
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
-  onExportProject,
+  onExportTeachingData,
+  canExportTeachingData = false,
   onExportAbxTeaching,
   onOpenCapturePage,
   onSelectionChange,
@@ -641,19 +641,15 @@ export default function TeachingArchiveTree({
             title="生成大脑可直接导入的 Pose ZIP，并附带自由导航目标清单">机器人导出</button>}
           <button
             type="button"
-            aria-label={exportPacking ? '正在打包示教工程 ZIP' : '导出示教工程 ZIP'}
-            onClick={onExportProject}
-            disabled={!mapData?.geometry || exportPacking}
-            title={exportPacking
-              ? `${projectExportState?.phase || '正在打包'}${projectExportState?.detail ? ` · ${projectExportState.detail}` : ''}`
-              : '导出可跨设备恢复的地图、机器人、配置、RGB 与点云完整工程包'}
+            aria-label="导出示教数据"
+            onClick={onExportTeachingData}
+            disabled={!canExportTeachingData || exportPacking}
+            title="导出当前工程全部轻量示教数据 JSON：机器人定位、关节值、停车点、姿态与导航关系，用于后续跨工程复用"
           >
-            {exportPacking
-              ? <LoaderCircle className="is-spinning" size={11} />
-              : <Download size={11} />}
-            {exportPacking ? '打包中' : '导出 ZIP'}
+            <Download size={11} /> 导出示教数据
           </button>
         </header>
+        <p className="teaching-data-export-hint">示教数据导出为轻量 JSON，保留坐标系、定位与关节信息。完整场景使用页顶的“导出工程”保存。</p>
 
         <div className="teaching-tree-workspace">
           <aside className="teaching-tree-pane" aria-label="示教层级树">

@@ -7,7 +7,7 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 from ipad_teaching_source_ui_smoke import fixture_data, import_result, ready
 from ipad_menu_helpers import select_teaching_source
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:21990')
@@ -137,7 +137,7 @@ def run():
             assert len(config['project']['virtualTeaching']['tasks']) == 2, 'saving twice must not duplicate the output task'
             page.get_by_role('button', name='打开示教数据管理页').click()
             with page.expect_download() as download:
-                page.get_by_role('button', name='导出示教工程 ZIP', exact=True).click()
+                start_project_download(page)
             exported = read_exported_project(download.value)['virtualTeaching']['tasks']
             assert exported[0]['mobileCapture'] == original_capture
             assert exported[0]['mobileSolve']['feasibleCount'] == 1

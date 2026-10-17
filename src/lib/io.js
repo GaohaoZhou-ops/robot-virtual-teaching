@@ -3,6 +3,7 @@ import { normalizeRobotJointLocks } from './robotJointLocks.js';
 import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
+import { TEACHING_DATA_FORMAT } from './teachingData.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -526,6 +527,9 @@ export function normalizeJointPoses(payload) {
 export function normalizeProject(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('JSON 根节点必须是对象');
+  }
+  if (payload.format === TEACHING_DATA_FORMAT) {
+    throw new Error('这是轻量示教数据文件，不能作为完整工程加载；请使用工程 ZIP 或工程目录');
   }
 
   const rawPoints =

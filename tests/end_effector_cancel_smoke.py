@@ -3,7 +3,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 from end_effector_control_smoke import double_click_tool, load_robot, number_attr
 from robot_drag_undo_smoke import assert_restored, drag, state, undo_depth
 from viewer_tools_helpers import viewer_tool
@@ -154,7 +154,7 @@ def run():
         # Export and reload must also see the restored pose, not only the renderer.
         page.get_by_role("button", name="打开示教数据管理页").click()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP", exact=True).click()
+            start_project_download(page)
         project = read_exported_project(download_info.value)
         assert all(abs(project["robot"]["joints"][name] - value) < 1e-7
                    for name, value in original["joints"].items())

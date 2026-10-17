@@ -8,7 +8,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 from ipad_menu_helpers import open_ipad_dialog, open_ipad_menu, select_teaching_source
 
 
@@ -217,7 +217,7 @@ def run():
             page.get_by_role('button', name='打开示教数据管理页').click()
             expect(page.locator('.teaching-data-page')).to_have_attribute('data-teaching-task-count', '3')
             with page.expect_download() as download:
-                page.get_by_role('button', name='导出示教工程 ZIP', exact=True).click()
+                start_project_download(page)
             exported = read_exported_project(download.value)['virtualTeaching']['tasks']
             assert exported[:2] == original
             assert exported[2]['mobileCapture'] == archive['result'], 'hidden device data must remain in project exports'

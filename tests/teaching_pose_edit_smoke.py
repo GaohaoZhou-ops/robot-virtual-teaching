@@ -4,7 +4,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 from end_effector_control_smoke import double_click_tool, number_attr
 from parking_ghost_smoke import read_robot_pose, wait_for_pose
 from parking_position_edit_smoke import assert_map_pose
@@ -35,7 +35,7 @@ def wait_for_joints(page, expected):
 def export_task(page, task_id):
     page.get_by_role("button", name="打开示教数据管理页").click()
     with page.expect_download() as download_info:
-        page.get_by_role("button", name="导出示教工程 ZIP", exact=True).click()
+        start_project_download(page)
     project = read_exported_project(download_info.value)
     task = next(task for task in project["virtualTeaching"]["tasks"] if task["id"] == task_id)
     page.get_by_role("button", name="返回主工作台继续示教").click()

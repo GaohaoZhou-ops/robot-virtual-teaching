@@ -12,7 +12,6 @@ import {
   Crosshair,
   Database,
   Download,
-  FileArchive,
   Folder,
   FolderOpen,
   MapPin,
@@ -127,7 +126,7 @@ export default function VirtualTeachingPanel({
   onRenamePoint,
   onDeletePoint,
   onApplyPoint,
-  onExportProject,
+  onExportTeachingData,
   onOpenCapturePage,
   onSolveMobileTask,
 }) {
@@ -262,7 +261,7 @@ export default function VirtualTeachingPanel({
   const canCapture = Boolean(activeTask && activeParkingPoint && robotReady && contextMatches);
   const canCreateParkingPoint = Boolean(activeTask && robotReady && contextMatches);
   const captureInProgress = captureState?.status === 'capturing';
-  const canExport = Boolean(mapData?.geometry);
+  const canExport = Boolean(onExportTeachingData && (mapData || robot || tasks.length));
   const teachingPointCount = tasks.reduce(
     (count, task) => count + (task.parkingPoints || []).reduce(
       (poseCount, parkingPoint) => poseCount + (parkingPoint.poses?.length || 0),
@@ -444,22 +443,22 @@ export default function VirtualTeachingPanel({
         data-export-point-count={teachingPointCount}
       >
         <div className="teaching-project-export__identity">
-          <span><FileArchive size={14} /></span>
+          <span><Database size={14} /></span>
           <div>
-            <strong>便携示教工程包</strong>
+            <strong>轻量示教数据</strong>
             <small>{tasks.length} TASKS · {parkingPointCount} STOPS · {teachingPointCount} POSES</small>
           </div>
         </div>
         <button
           type="button"
-          onClick={onExportProject}
+          onClick={onExportTeachingData}
           disabled={!canExport}
-          aria-label="导出示教工程 ZIP"
+          aria-label="导出示教数据"
           title={canExport
-            ? '导出地图几何、机器人模型、导航图与全部示教任务，可在其他设备直接恢复'
-            : '请先加载完整地图'}
+            ? '导出机器人定位、关节值、停车点和姿态等轻量 JSON 数据'
+            : '请先打开示教工程'}
         >
-          <Download size={12} /> 导出 ZIP
+          <Download size={12} /> 导出示教数据
         </button>
       </div>}
 

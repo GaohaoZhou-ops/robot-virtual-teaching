@@ -266,6 +266,24 @@ code {
   transform: translateY(-1px);
 }
 
+.project-export-action {
+  flex-shrink: 0;
+  white-space: nowrap;
+  border-color: rgba(89, 219, 232, 0.3);
+  color: #a7d8d8;
+}
+
+.project-export-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.teaching-data-page__topbar > .project-export-action {
+  align-self: center;
+  margin-right: 12px;
+}
+
 .action-button.independent-teaching-action {
   border-color: rgba(154, 126, 255, 0.28);
   color: #c5b9ed;
@@ -5310,7 +5328,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-archive-tree {
   display: grid;
-  grid-template-rows: minmax(56px, auto) minmax(650px, auto);
+  grid-template-rows: minmax(56px, auto) auto minmax(650px, auto);
   min-width: 0;
   color: #b7c6c4;
   background: #071115;
@@ -5384,6 +5402,15 @@ input[type="number"]::-webkit-inner-spin-button {
 .teaching-tree-toolbar > button:disabled {
   cursor: not-allowed;
   opacity: 0.32;
+}
+
+.teaching-data-export-hint {
+  margin: 0;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(137, 177, 179, 0.14);
+  color: #849b9b;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .teaching-tree-workspace {

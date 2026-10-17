@@ -4,7 +4,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 from chassis_drag_smoke import read_camera
 from parking_ghost_smoke import read_robot_pose, wait_for_pose
 from teaching_capture_pose_ghost_smoke import capture, set_joints
@@ -213,7 +213,7 @@ def run():
         # parking pose for every bound pose. Other stops remain unchanged.
         page.get_by_role("button", name="打开示教数据管理页").click()
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP", exact=True).click()
+            start_project_download(page)
         exported = read_exported_project(download_info.value)
         task = next(task for task in exported["virtualTeaching"]["tasks"] if task["id"] == task_id)
         parking = next(point for point in task["parkingPoints"] if point["id"] == parking_id)

@@ -275,6 +275,11 @@ playwright/.auth/
 /atlas-file-picker-*/
 /atlas-portable-test-*/
 /atlas-server-result-*/
+# Export separation and Save As tests when TMPDIR is inside the repository.
+/atlas-export-separation-*/
+/atlas-save-picker-*/
+/tests/atlas-export-separation-*/
+/tests/atlas-save-picker-*/
 # tests/ipad_result_file_smoke.mjs creates these import/result stores under TMPDIR.
 /atlas-result-file-*/
 /tests/atlas-result-file-*/
@@ -414,6 +419,15 @@ Desktop.ini
 /recovered-projects/
 *.atlas-project/
 *.atlas-project.zip
+
+# Complete project ZIPs and lightweight teaching-data exports.
+# Keep arbitrary source ZIP/JSON files trackable; only ignore export names.
+atlas-project-*.[zZ][iI][pP]
+atlas-teaching-*.json
+*.atlas-teaching.json
+# Unpacked default project exports in local output locations.
+/atlas-project-*/
+/tests/atlas-project-*/
 
 # Exported teaching archives and parking-merge jobs/results
 virtual-teaching-*.zip

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from archive_helpers import read_exported_project
+from archive_helpers import start_project_download, read_exported_project
 from chassis_drag_smoke import chassis_screen_point, enter_chassis_drag, read_camera
 from end_effector_control_smoke import double_click_tool, load_robot
 from viewer_tools_helpers import viewer_tool
@@ -220,7 +220,7 @@ def run():
         undo(page, canvas, numeric, target=True)
         page.get_by_role('button', name='打开示教数据管理页').click()
         with page.expect_download() as info:
-            page.get_by_role('button', name='导出示教工程 ZIP').click()
+            start_project_download(page)
         project = read_exported_project(info.value)
         assert all(abs(project['robot']['joints'][key] - value) < 1e-7
                    for key, value in numeric['joints'].items())

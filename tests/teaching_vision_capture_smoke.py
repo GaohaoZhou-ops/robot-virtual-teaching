@@ -5,7 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from archive_helpers import read_exported_archive
+from archive_helpers import start_project_download, read_exported_archive
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:22083")
@@ -181,7 +181,7 @@ def run():
         modal.wait_for(state="detached")
 
         with page.expect_download() as download_info:
-            page.get_by_role("button", name="导出示教工程 ZIP").click()
+            start_project_download(page)
         download = download_info.value
         archive = read_exported_archive(download)
         exported = archive["project"]
