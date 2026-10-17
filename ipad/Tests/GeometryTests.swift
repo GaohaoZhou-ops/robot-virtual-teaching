@@ -1,6 +1,7 @@
 import Foundation
 import SceneKit
 import CryptoKit
+import Combine
 
 @main struct GeometryTests {
     @MainActor static func main() async throws {
@@ -107,7 +108,7 @@ import CryptoKit
         }
         let pointOpening = denseSettings.forOpening()
         precondition(pointOpening.mode == .points && pointOpening.pointDensity == .preview && pointOpening.meshQuality == .preview,
-                     "reopening retains display mode while resetting both expensive quality choices")
+                     "the explicit lightweight preset retains display mode and bounds both quality budgets")
         let lightPoints = try model.makeGeometry(settings: pointOpening)
         precondition(lightPoints.elements[0].primitiveCount == 50_000 && lightPoints.sources(for: .vertex)[0].data.count <= 1_400_000,
                      "light point clouds prepare at most 50k vertices")
@@ -179,7 +180,35 @@ import CryptoKit
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         precondition(renderer.appliedSettings == denseSettings && renderer.geometry?.elements[0].primitiveCount == 50_625, "latest selection wins over cancelled rendering")
+
+        let sharedSettings = CurrentValueSubject<ModelDisplaySettings, Never>(sparseSettings)
+        renderer.bind(model, settings: sharedSettings.eraseToAnyPublisher())
+        func expectSharedRendering(_ settings: ModelDisplaySettings) async throws {
+            for _ in 0..<300 {
+                if !renderer.preparing { break }
+                try await Task.sleep(nanoseconds: 20_000_000)
+            }
+            precondition(renderer.error.isEmpty && renderer.appliedSettings == settings)
+            precondition(renderer.geometry?.elements[0].primitiveCount == model.renderedCount(settings),
+                         "a shared quality change updates actual geometry without a view lifecycle callback")
+        }
+        try await expectSharedRendering(sparseSettings)
+        sharedSettings.send(denseSettings)
+        try await expectSharedRendering(denseSettings)
+        let unchanged = renderer.geometry
+        sharedSettings.send(denseSettings)
+        precondition(!renderer.preparing && renderer.geometry === unchanged, "unrelated project saves do not rebuild the same quality")
+        sharedSettings.send(ModelDisplaySettings(meshQuality: .full))
+        sharedSettings.send(sparseSettings)
+        sharedSettings.send(denseSettings)
+        try await expectSharedRendering(denseSettings)
+        renderer.cancel()
+        sharedSettings.send(sparseSettings)
+        precondition(!renderer.preparing && renderer.appliedSettings == denseSettings, "leaving a model detaches its quality subscription")
+        renderer.bind(model, settings: sharedSettings.eraseToAnyPublisher())
+        try await expectSharedRendering(sparseSettings)
+        renderer.cancel()
         precondition(model.data == data && manifest.modelHash == digest, "source data remain intact")
-        print("Lightweight opening budgets, compact GPU buffers, source topology/colors, full-file integrity, lazy validation, legacy bounds and render cancellation passed.")
+        print("Lightweight budgets, compact GPU buffers, source integrity, shared quality updates, duplicate suppression and render cancellation passed.")
     }
 }

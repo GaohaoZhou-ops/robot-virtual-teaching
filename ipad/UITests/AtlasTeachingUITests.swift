@@ -1931,7 +1931,80 @@ final class AtlasTeachingUITests: XCTestCase {
         app.buttons["本地项目"].tap()
     }
 
-    func testLightweightOpeningAndManualQuality() throws {
+    func testSharedDisplayQualityAcrossSettingsAndPoseReview() throws {
+        continueAfterFailure = false
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_SHARED_QUALITY_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide a disposable completed project with Poses; this test removes only that fixture")
+        }
+        let app = XCUIApplication(); XCUIDevice.shared.orientation = .landscapeLeft; app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let settings = app.buttons["display-settings"], review = app.buttons["review-poses"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 30))
+        let summary = app.staticTexts["model-render-summary"]
+        let quality = app.sliders["pose-preview-quality"]
+        for (mode, picker, preset, full, prefix, unit) in [
+            ("points", "point-density", "25%", "100%", "点云", "点"),
+            ("mesh", "mesh-quality", "流畅", "全量", "Mesh", "面")
+        ] {
+            settings.tap()
+            XCTAssertTrue(app.buttons["display-mode-\(mode)"].waitForExistence(timeout: 10))
+            app.buttons["display-mode-\(mode)"].tap()
+            app.buttons[picker].tap(); app.buttons[preset].tap()
+            let rendered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                summary.label.hasPrefix("\(prefix) · ")
+                    && !app.descendants(matching: .any)["model-render-progress"].firstMatch.exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [rendered], timeout: 60), .completed)
+            let selectedSummary = summary.label
+            let parts = selectedSummary.components(separatedBy: " / ")
+            XCTAssertEqual(parts.count, 2)
+            let count = try XCTUnwrap(Int(parts[0].filter(\.isNumber)))
+            let total = try XCTUnwrap(Int(parts[1].filter(\.isNumber)))
+            XCTAssertGreaterThan(total, count, "fixture must expose more than one quality level")
+            let percentage = (Double(count) / Double(total)).formatted(.percent.precision(.fractionLength(0...1)))
+            app.buttons["close-display-settings"].tap()
+            XCTAssertEqual(app.staticTexts["teaching-render-summary"].label, selectedSummary)
+            review.tap()
+            XCTAssertTrue(quality.waitForExistence(timeout: 15))
+            XCTAssertEqual(quality.value as? String, percentage, "Pose review inherits the actual teaching quality")
+            quality.adjust(toNormalizedSliderPosition: 1)
+            let progress = app.descendants(matching: .any)["pose-preview-quality-progress"].firstMatch
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: progress)], timeout: 60), .completed)
+            XCTAssertEqual(quality.value as? String, "100%")
+            let poseShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            poseShot.name = "Shared \(mode) quality in Pose review"; poseShot.lifetime = .keepAlways; add(poseShot)
+            app.buttons["close-pose-review"].tap()
+            let fullSummary = "\(prefix) · \(total.formatted()) / \(total.formatted()) \(unit)"
+            XCTAssertEqual(app.staticTexts["teaching-render-summary"].label, fullSummary,
+                           "returning to teaching uses the geometry selected in Pose review")
+            settings.tap(); waitForRenderSummary(app, label: fullSummary)
+            XCTAssertTrue(app.buttons[picker].label.contains(full), "the settings picker reflects the Pose slider")
+            let settingsShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            settingsShot.name = "Shared \(mode) quality in display settings"; settingsShot.lifetime = .keepAlways; add(settingsShot)
+            app.buttons["close-display-settings"].tap()
+        }
+        let retainedSummary = app.staticTexts["teaching-render-summary"].label
+        app.buttons["本地项目"].tap()
+        app.terminate(); app.launch()
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        XCTAssertTrue(settings.waitForExistence(timeout: 30)); settings.tap()
+        waitForRenderSummary(app, label: retainedSummary)
+        XCTAssertTrue(app.buttons["point-density"].label.contains("100%"))
+        XCTAssertTrue(app.buttons["mesh-quality"].label.contains("全量"))
+        app.buttons["close-display-settings"].tap(); review.tap()
+        XCTAssertTrue(quality.waitForExistence(timeout: 15)); XCTAssertEqual(quality.value as? String, "100%")
+        app.buttons["close-pose-review"].tap(); app.buttons["本地项目"].tap()
+        XCTAssertTrue(project.waitForExistence(timeout: 10))
+        project.swipeLeft(); app.buttons["swipe-delete-local-project-\(fixtureID)"].tap()
+        app.buttons["confirm-delete-local-project"].firstMatch.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: project)], timeout: 10), .completed)
+    }
+
+    func testLightweightDefaultAndRetainedManualQuality() throws {
         continueAfterFailure = false
         let app = XCUIApplication()
         app.launch()
@@ -1980,8 +2053,10 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(app.buttons["display-settings"].waitForExistence(timeout: 10))
         app.buttons["display-settings"].tap()
         XCTAssertTrue(app.buttons["display-mode-points"].isSelected, "opening retains the last display mode")
-        XCTAssertTrue(app.buttons["point-density"].label.contains("轻量"), "reopening must not automatically restore dense points")
-        XCTAssertTrue(app.buttons["mesh-quality"].label.contains("轻量"), "reopening must not automatically restore full Mesh")
+        XCTAssertTrue(app.buttons["point-density"].label.contains("25%"), "reopening retains the selected point density")
+        if mesh.isEnabled {
+            XCTAssertTrue(app.buttons["mesh-quality"].label.contains("全量"), "reopening retains the selected Mesh quality")
+        }
         app.buttons["display-mode-\(originalMode)"].tap()
         app.buttons["close-display-settings"].tap()
         app.buttons["本地项目"].tap()
@@ -2241,10 +2316,10 @@ final class AtlasTeachingUITests: XCTestCase {
         if let vertices = environment["ATLAS_DISPLAY_VERTICES"].flatMap(Int.init),
            let faces = environment["ATLAS_DISPLAY_FACES"].flatMap(Int.init) {
             app.buttons["display-settings"].tap()
-            waitForRenderSummary(app, label: "点云 · \(min(vertices, 50_000).formatted()) / \(vertices.formatted()) 点")
-            XCTAssertTrue(app.buttons["point-density"].label.contains("轻量"), "opening preserves point mode with a lightweight budget")
+            waitForRenderSummary(app, label: "点云 · \(PointDensity.quarter.count(for: vertices).formatted()) / \(vertices.formatted()) 点")
+            XCTAssertTrue(app.buttons["point-density"].label.contains("25%"), "opening preserves the selected point density")
             app.buttons["display-mode-mesh"].tap()
-            waitForRenderSummary(app, label: "Mesh · \(min(faces, 40_000).formatted()) / \(faces.formatted()) 面")
+            waitForRenderSummary(app, label: "Mesh · \(faces.formatted()) / \(faces.formatted()) 面")
             app.buttons["mesh-quality"].tap(); app.buttons["自动"].tap()
             app.buttons["close-display-settings"].tap()
             XCTAssertFalse(capture.isEnabled, "display changes never calibrate or record a Pose")

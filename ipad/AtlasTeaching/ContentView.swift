@@ -575,7 +575,10 @@ struct TeachingView: View {
             guard loadedProjectID != projectID, let project = session.current else { return }
             loadedProjectID = projectID
             ar.load(manifest: project.session.manifest, samples: project.result.samples)
-            renderer.update(geometry, settings: session.displaySettings)
+            renderer.bind(geometry, settings: session.$current.compactMap { project in
+                guard let project, project.id == projectID else { return nil }
+                return project.displaySettings ?? ModelDisplaySettings().forOpening()
+            }.eraseToAnyPublisher())
             coverage.update(model: geometry, samples: project.result.samples)
             ar.onCalibration = { session.addCalibration($0) }
             ar.onSample = { session.addSample($0) }
@@ -588,10 +591,6 @@ struct TeachingView: View {
         .onReceive(renderer.$geometry) { ar.display($0); coverage.attach(to: $0) }
         .onReceive(session.$current) { project in
             if let project, project.id == projectID { coverage.update(model: geometry, samples: project.result.samples) }
-        }
-        .onChange(of: session.displaySettings) { _, settings in
-            guard !review, renderer.appliedSettings != settings else { return }
-            renderer.update(geometry, settings: settings)
         }
         .onChange(of: canRecordPose) { _, available in
             if !available { nearbyPoseConfirmation = nil }
@@ -948,6 +947,7 @@ struct PoseReviewView: View {
     @State private var deletionIDs: Set<String> = []
     @State private var previewMode: PosePreviewMode = .interactive
     @State private var previewReset = 0
+    @State private var poseEditorHeight: CGFloat = 0
     @StateObject private var previewPreparation = PosePreviewPreparation()
     @FocusState private var poseNameFocused: Bool
     let geometry: ModelGeometry
@@ -963,9 +963,7 @@ struct PoseReviewView: View {
                     HStack(spacing: 0) {
                         VStack(spacing: 0) {
                             poseList
-                            Divider()
-                            ScrollView { poseEditor.padding(20) }
-                                .frame(maxHeight: 290)
+                            poseEditorPanel(maximumHeight: min(290, viewport.size.height * 0.45))
                         }.frame(width: 280)
                         Divider()
                         posePreview
@@ -975,15 +973,15 @@ struct PoseReviewView: View {
                         posePreview.frame(height: max(180, viewport.size.height * 0.62))
                         Divider()
                         if viewport.size.width >= 600 {
-                            HStack(spacing: 0) {
+                            HStack(alignment: .top, spacing: 0) {
                                 poseList.frame(width: viewport.size.width * 0.38)
                                 Divider()
-                                ScrollView { poseEditor.padding(20) }
+                                poseEditorPanel(maximumHeight: max(0, viewport.size.height - max(180, viewport.size.height * 0.62) - 1))
                             }
                         } else {
                             VStack(spacing: 0) {
                                 poseList
-                                ScrollView { poseEditor.padding(12) }.frame(maxHeight: 190)
+                                poseEditorPanel(maximumHeight: min(190, viewport.size.height * 0.3))
                             }
                         }
                     }
@@ -1162,8 +1160,6 @@ struct PoseReviewView: View {
                 let settings = options[index]
                 guard settings != session.displaySettings else { return }
                 session.setDisplaySettings(settings)
-                // The covered teaching page may defer its onChange until return.
-                renderer.update(geometry, settings: settings, debounce: true)
             })
         return HStack(spacing: 6) {
             Text("质量").font(.caption).foregroundStyle(.secondary)
@@ -1205,6 +1201,21 @@ struct PoseReviewView: View {
             .accessibilityIdentifier("reset-pose-preview")
     }
 
+    private func poseEditorPanel(maximumHeight: CGFloat) -> some View {
+        ScrollView {
+            poseEditor.padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { poseEditorHeight = $0 }
+        }
+        // Fit short details to their content; retain scrolling for editing and larger text.
+        .frame(height: min(poseEditorHeight, maximumHeight))
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollDismissesKeyboard(.interactively)
+        .background(Color(red: 0.055, green: 0.10, blue: 0.12))
+        .overlay(alignment: .top) { Rectangle().fill(accent.opacity(0.4)).frame(height: 1) }
+        .accessibilityElement(children: .contain).accessibilityIdentifier("pose-review-details")
+    }
+
     @ViewBuilder private var poseEditor: some View {
         if selectingForDeletion {
             VStack(alignment: .leading, spacing: 14) {
@@ -1222,7 +1233,13 @@ struct PoseReviewView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         } else if let selected {
             VStack(alignment: .leading, spacing: 14) {
-                Text(selected.name.isEmpty ? "Pose" : selected.name).font(.headline)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Pose 详情").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer(minLength: 0)
+                    Text(selected.name.isEmpty ? "Pose" : selected.name).font(.headline)
+                        .multilineTextAlignment(.trailing)
+                }
                 let p = selected.cameraPose.position
                 Text("X \(p.x, specifier: "%.4f") m\nY \(p.y, specifier: "%.4f") m\nZ \(p.z, specifier: "%.4f") m")
                     .font(.system(.caption, design: .monospaced)).textSelection(.enabled)

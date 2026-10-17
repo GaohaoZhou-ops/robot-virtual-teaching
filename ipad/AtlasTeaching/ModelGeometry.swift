@@ -207,6 +207,18 @@ final class ModelRenderer: ObservableObject {
     @Published private(set) var preparing = false
     @Published private(set) var error = ""
     private var task: Task<Void, Never>?
+    private var settingsSubscription: AnyCancellable?
+
+    func bind(_ model: ModelGeometry, settings: AnyPublisher<ModelDisplaySettings, Never>) {
+        cancel()
+        var initial = true
+        // Observe the shared settings directly: presentation of a sheet or a
+        // full-screen Pose view must not defer rendering until it is dismissed.
+        settingsSubscription = settings.removeDuplicates().sink { [weak self] settings in
+            self?.update(model, settings: settings, debounce: !initial)
+            initial = false
+        }
+    }
 
     func update(_ model: ModelGeometry, settings: ModelDisplaySettings, debounce: Bool = false) {
         task?.cancel(); preparing = true; error = ""
@@ -225,5 +237,8 @@ final class ModelRenderer: ObservableObject {
             }
         }
     }
-    func cancel() { task?.cancel(); preparing = false }
+    func cancel() {
+        settingsSubscription?.cancel(); settingsSubscription = nil
+        task?.cancel(); preparing = false
+    }
 }
