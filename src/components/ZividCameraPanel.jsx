@@ -13,7 +13,6 @@ import {
   Plus,
   Rotate3D,
   RotateCcw,
-  ShieldAlert,
   SlidersHorizontal,
   X,
 } from 'lucide-react';
@@ -1231,14 +1230,6 @@ const EMPTY_CAMERA_MESH_STATS = Object.freeze({
   surfaceSelectionMode: 'none',
 });
 
-const EMPTY_CAMERA_COLLISION_STATUS = Object.freeze({
-  enabled: false,
-  state: 'disabled',
-  minimumDistance: null,
-  links: [],
-  checkCount: 0,
-});
-
 function MainViewportPane({ sourceCanvasRef }) {
   const rootRef = useRef(null);
   const videoRef = useRef(null);
@@ -1715,9 +1706,6 @@ export default function ZividCameraPanel({
   const [dragging, setDragging] = useState(false);
   const [rendererStatus, setRendererStatus] = useState('waiting');
   const [cameraMeshStats, setCameraMeshStats] = useState(EMPTY_CAMERA_MESH_STATS);
-  const [cameraCollisionStatus, setCameraCollisionStatus] = useState(
-    EMPTY_CAMERA_COLLISION_STATUS,
-  );
   const mountRef = useRef(null);
   const poseRef = useRef(null);
   const cameraPosesRef = useRef(cameraPoses);
@@ -1730,7 +1718,6 @@ export default function ZividCameraPanel({
   const spaceMouseHudVisibleRef = useRef(false);
   const spaceMouseInputCountRef = useRef(0);
   const spaceMouseStatusSignatureRef = useRef('');
-  const cameraCollisionSignatureRef = useRef('');
   const activePose = cameraPoses?.[activeSide] || null;
   const hasRgb = Boolean(mapData?.geometry?.getAttribute('color'));
   const meshInfo = mapData?.meshInfo || mapData?.geometry?.userData?.mapTopology || null;
@@ -1836,46 +1823,6 @@ export default function ZividCameraPanel({
     const statusTimer = window.setInterval(syncStatus, 100);
     return () => window.clearInterval(statusTimer);
   }, [expanded, spaceMouseInputRef]);
-
-  useEffect(() => {
-    if (!viewEnabled) return undefined;
-    const syncCollisionStatus = () => {
-      const dataset = mainViewportCanvasRef?.current?.dataset;
-      const protectionEnabled = dataset?.collisionProtectionEnabled === 'true';
-      const state = protectionEnabled ? String(dataset?.collisionState || 'waiting') : 'disabled';
-      const rawDistance = String(dataset?.collisionMinimumDistance || '').trim();
-      const minimumDistance = rawDistance && Number.isFinite(Number(rawDistance))
-        ? Math.max(0, Number(rawDistance))
-        : null;
-      const rawLinks = state === 'collision'
-        ? dataset?.collisionLinks
-        : state === 'near' ? dataset?.collisionNearLinks : '';
-      const links = String(rawLinks || '')
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean);
-      const nextStatus = {
-        enabled: protectionEnabled,
-        state,
-        minimumDistance,
-        links,
-        checkCount: Math.max(0, Number(dataset?.collisionCheckCount || 0)),
-      };
-      const signature = [
-        nextStatus.enabled,
-        nextStatus.state,
-        nextStatus.minimumDistance ?? '',
-        nextStatus.links.join(','),
-        nextStatus.checkCount,
-      ].join('|');
-      if (signature === cameraCollisionSignatureRef.current) return;
-      cameraCollisionSignatureRef.current = signature;
-      setCameraCollisionStatus(nextStatus);
-    };
-    syncCollisionStatus();
-    const statusTimer = window.setInterval(syncCollisionStatus, 120);
-    return () => window.clearInterval(statusTimer);
-  }, [mainViewportCanvasRef, viewEnabled]);
 
   useEffect(() => {
     const deviceUnavailable = !spaceMouseStatus.connected
@@ -2543,16 +2490,6 @@ export default function ZividCameraPanel({
         : spaceMouseViewEnabled
           ? '关闭后 SpaceMouse 将恢复控制主 3D 视角'
           : '驱动当前 Zivid optical frame 与机械臂 IK；缩放仍只由鼠标控制';
-  const collisionWarningVisible = Boolean(
-    cameraCollisionStatus.enabled
-    && ['near', 'collision'].includes(cameraCollisionStatus.state),
-  );
-  const collisionDistanceMillimeters = Number.isFinite(cameraCollisionStatus.minimumDistance)
-    ? cameraCollisionStatus.minimumDistance * 1000
-    : null;
-  const collisionLinkSummary = cameraCollisionStatus.links.length
-    ? cameraCollisionStatus.links.slice(0, 3).join(' · ')
-    : '非底盘结构';
 
   const handleSpaceMouseViewToggle = () => {
     if (spaceMouseViewEnabled) {
@@ -2617,9 +2554,6 @@ export default function ZividCameraPanel({
       data-spacemouse-input-count={spaceMouseHud.inputCount}
       data-expanded-layout={expanded ? 'camera-priority' : 'compact'}
       data-main-view-preview={expanded ? 'below-camera-controls' : 'hidden'}
-      data-collision-protection-enabled={cameraCollisionStatus.enabled ? 'true' : 'false'}
-      data-camera-collision-state={cameraCollisionStatus.state}
-      data-camera-collision-warning={collisionWarningVisible ? 'visible' : 'hidden'}
     >
       <header className="zivid-camera-panel__header">
         <div className="zivid-camera-panel__identity">
@@ -2763,7 +2697,7 @@ export default function ZividCameraPanel({
         data-native-aspect-ratio={`${ZIVID_M70_PROFILE.nativeWidth}:${ZIVID_M70_PROFILE.nativeHeight}`}
       >
         <div
-          className={`zivid-camera-viewport ${dragging ? 'is-dragging' : ''} ${collisionWarningVisible ? `is-collision-warning-${cameraCollisionStatus.state}` : ''}`}
+          className={`zivid-camera-viewport ${dragging ? 'is-dragging' : ''}`}
           aria-label="M70 相机画面交互区"
           onWheel={(event) => {
             event.preventDefault();
@@ -2812,28 +2746,6 @@ export default function ZividCameraPanel({
         >
         <div ref={mountRef} className="zivid-camera-render-mount" />
         <div className="zivid-camera-scan-grid" aria-hidden="true" />
-        {collisionWarningVisible && (
-          <div
-            className={`zivid-camera-collision-alert is-${cameraCollisionStatus.state}`}
-            role="alert"
-            aria-live="assertive"
-            data-collision-state={cameraCollisionStatus.state}
-            data-collision-distance={collisionDistanceMillimeters ?? ''}
-            data-collision-links={cameraCollisionStatus.links.join(',')}
-          >
-            <span><ShieldAlert size={14} /></span>
-            <div>
-              <small>COLLISION PROTECTION · CAMERA FEEDBACK</small>
-              <strong>{cameraCollisionStatus.state === 'collision'
-                ? '检测到环境干涉'
-                : '距离低于 10 cm 安全阈值'}</strong>
-              <em>{collisionLinkSummary}</em>
-            </div>
-            <b>{collisionDistanceMillimeters !== null
-              ? `${collisionDistanceMillimeters.toFixed(0)} mm`
-              : cameraCollisionStatus.state === 'collision' ? 'CONTACT' : '<100 mm'}</b>
-          </div>
-        )}
         {expanded && (
           <div
             className={`zivid-camera-spacemouse-hud ${spaceMouseHud.visible ? 'is-visible' : ''} ${spaceMouseHud.active ? 'is-active' : ''}`}

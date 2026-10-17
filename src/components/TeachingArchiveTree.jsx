@@ -649,8 +649,6 @@ export default function TeachingArchiveTree({
             <Download size={11} /> 导出示教数据
           </button>
         </header>
-        <p className="teaching-data-export-hint">示教数据导出为轻量 JSON，保留坐标系、定位与关节信息。完整场景使用页顶的“导出工程”保存。</p>
-
         <div className="teaching-tree-workspace">
           <aside className="teaching-tree-pane" aria-label="示教层级树">
             <header><span>数据结构</span><small>名称 · 子项</small></header>

@@ -103,7 +103,6 @@ def run():
             "button", name="关闭碰撞保护"
         ).is_visible()
         assert canvas.get_attribute("data-collision-protection-enabled") == "true"
-        assert page.locator(".robot-collision-alert").count() == 0
 
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.collisionState === 'safe'"
@@ -121,7 +120,7 @@ def run():
         expect(distance_readout).to_have_attribute("data-collision-state", "safe")
         assert "非底盘结构安全" in distance_readout.get_attribute("title")
         assert distance_readout.inner_text() == "≥100 mm"
-        assert page.locator(".robot-collision-alert").count() == 0
+        expect(page.get_by_label("机器人距离警告", exact=True)).to_have_count(0)
         distance_box = distance_readout.bounding_box()
         settings_box = page.get_by_role("button", name="显示设置", exact=True).bounding_box()
         assert distance_box["x"] + distance_box["width"] < settings_box["x"]
@@ -143,7 +142,7 @@ def run():
         )
         assert canvas.get_attribute("data-collision-worker") == "inactive"
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
-        assert page.locator(".robot-collision-alert").count() == 0
+        expect(page.get_by_label("机器人距离警告", exact=True)).to_have_count(0)
         expect(distance_readout).to_have_count(0)
         viewer_tool(page, name="开启碰撞保护").click()
         expect(canvas).to_have_attribute("data-collision-state", "safe")
@@ -179,22 +178,20 @@ def run():
         assert "检测到环境干涉" in distance_readout.get_attribute("title")
         assert "红色部件" in distance_readout.get_attribute("title")
         assert distance_readout.inner_text() == "0 mm"
-        assert page.locator(".robot-collision-alert").count() == 0
+        warning = page.locator(".point-cloud-view").get_by_label("机器人距离警告", exact=True)
+        expect(warning).to_be_visible()
+        expect(warning).to_have_attribute("data-collision-state", "collision")
+        assert probe_link in warning.get_attribute("data-collision-links")
+        assert "检测到环境干涉" in warning.inner_text()
+        assert page.locator(".zivid-camera-collision-alert").count() == 0
         print("collision distance and robot highlights updated", flush=True)
         camera_panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
-        page.wait_for_function(
-            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionState === 'collision'"
-        )
-        assert camera_panel.get_attribute("data-collision-protection-enabled") == "true"
-        assert camera_panel.get_attribute("data-camera-collision-warning") == "visible"
         camera_panel.get_by_role("button", name="放大 Zivid 相机视图").click()
         camera_dialog = page.get_by_role("dialog", name="Zivid 2 M70 相机大图")
         camera_dialog.wait_for()
-        camera_warning = camera_dialog.locator(".zivid-camera-collision-alert.is-collision")
-        assert camera_warning.is_visible()
-        assert "检测到环境干涉" in camera_warning.inner_text()
-        assert probe_link in camera_warning.get_attribute("data-collision-links")
-        camera_dialog.screenshot(path="/tmp/atlas-zivid-camera-collision.png")
+        assert camera_dialog.get_by_label("机器人距离警告", exact=True).count() == 0
+        assert camera_dialog.locator(".zivid-camera-collision-alert").count() == 0
+        camera_dialog.screenshot(path="/tmp/atlas-zivid-camera-unobstructed.png")
         camera_dialog.get_by_role("button", name="关闭 Zivid 相机大图").click()
         camera_dialog.wait_for(state="detached")
         viewer_tool(page, name="定位机器人模型").click()
@@ -204,6 +201,7 @@ def run():
         canvas.focus()
         observed_near = False
         observed_safe_after_near = False
+        observed_states = set()
         for _ in range(80):
             page.keyboard.press("w", delay=120)
             # The detector intentionally coalesces rapid scene updates. Sample
@@ -214,6 +212,7 @@ def run():
                 """() => ({ ...document.querySelector('.three-canvas')?.dataset })"""
             )
             state = snapshot.get("collisionState")
+            observed_states.add(state)
             if state == "near" and not observed_near:
                 observed_near = True
                 distance = float(snapshot["collisionMinimumDistance"])
@@ -224,24 +223,40 @@ def run():
                 assert "进入 100 mm 安全边界" in distance_readout.get_attribute("title")
                 displayed_distance = float(distance_readout.inner_text().removesuffix(" mm"))
                 assert abs(displayed_distance - distance * 1000) <= 0.501
-                page.wait_for_function(
-                    "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionState === 'near'"
-                )
-                camera_warning = camera_panel.locator(".zivid-camera-collision-alert.is-near")
-                assert camera_warning.is_visible()
-                assert "距离低于 10 cm 安全阈值" in camera_warning.inner_text()
+                expect(warning).to_have_attribute("data-collision-state", "near")
+                assert "距离低于 10 cm 安全阈值" in warning.inner_text()
+                assert page.locator(".zivid-camera-collision-alert").count() == 0
+                page.screenshot(path="/tmp/atlas-distance-warning-near.png", full_page=True)
+                page.get_by_role("button", name="显示设置", exact=True).click()
+                warning_switch = page.get_by_role("switch", name="显示距离警告", exact=True)
+                expect(warning_switch).to_be_checked()
+                warning_switch.click()
+                expect(warning_switch).not_to_be_checked()
+                expect(warning).to_have_count(0)
+                expect(canvas).to_have_attribute("data-collision-protection-enabled", "true")
+                expect(canvas).to_have_attribute("data-collision-worker", "dedicated")
+                expect(canvas).to_have_attribute("data-collision-highlight-color", "#ffc84a")
+                warning_switch.click()
+                expect(warning).to_be_visible()
+                page.get_by_role("button", name="关闭显示设置", exact=True).click()
+                canvas.focus()
             if observed_near and state == "safe":
                 observed_safe_after_near = True
                 break
 
-        assert observed_near
+        assert observed_near, {
+            "states": sorted(observed_states),
+            "pose": snapshot.get("robotPosition"),
+            "owner": snapshot.get("keyboardControlOwner"),
+            "distance": snapshot.get("collisionMinimumDistance"),
+            "checks": snapshot.get("collisionCheckCount"),
+            "probe": probe_link,
+        }
         assert observed_safe_after_near
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         assert canvas.get_attribute("data-collision-highlight-color") == "none"
         expect(distance_readout).to_have_attribute("data-collision-state", "safe")
-        page.wait_for_function(
-            "document.querySelector('[data-camera-slot=\"left\"]')?.dataset.cameraCollisionWarning === 'hidden'"
-        )
+        expect(warning).to_have_count(0)
         assert page.locator(".zivid-camera-collision-alert").count() == 0
         page.screenshot(path="/tmp/atlas-collision-protection.png", full_page=True)
 

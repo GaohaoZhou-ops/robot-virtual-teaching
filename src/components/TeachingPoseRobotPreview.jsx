@@ -439,7 +439,6 @@ export default function TeachingPoseRobotPreview({
           <div className="teaching-pose-robot-preview__empty">
             <span><Bot size={34} strokeWidth={1.2} /></span>
             <strong>选择一组机械臂姿态</strong>
-            <small>点击左侧树中的姿态节点后，将在这里还原机器人全身关节。</small>
           </div>
         )}
         {hasPose && loadState.status === 'loading' && (

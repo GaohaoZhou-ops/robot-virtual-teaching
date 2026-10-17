@@ -108,8 +108,12 @@ def run():
                 assert data['robot']['mapPose']['position']['x'] == 10
                 assert 'cameraCapture' not in lightweight_path.read_text()
                 assert 'view3d' not in data
-                hint = data_page.locator('.teaching-data-export-hint').bounding_box()
-                assert hint and hint['height'] < 100, 'export help must not stretch the archive layout'
+                toolbar = tree.locator('.teaching-tree-toolbar').bounding_box()
+                workspace = tree.locator('.teaching-tree-workspace').bounding_box()
+                archive = tree.bounding_box()
+                assert toolbar and workspace and archive
+                assert abs(workspace['y'] - toolbar['y'] - toolbar['height']) < 2, 'workspace must follow the toolbar without a gap'
+                assert abs(archive['y'] + archive['height'] - workspace['y'] - workspace['height']) < 2, 'archive must not retain an empty grid row'
                 page.screenshot(path=f'/tmp/atlas-export-{mode}-data.png', full_page=True)
 
                 # Import on a fresh browser profile with no project cache or robot files.
