@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -10,7 +12,7 @@ CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 
 def menu_snapshot(page, label):
-    trigger = page.get_by_role("button", name="加载机器人")
+    trigger = topbar_action(page, name="加载机器人")
     trigger.click()
     menu = page.locator(".robot-picker__menu")
     menu.wait_for()
@@ -95,7 +97,7 @@ def run():
         map_report = menu_snapshot(page, "map")
         assert_menu_is_unobscured(map_report)
 
-        page.get_by_role("button", name="加载机器人").click()
+        page.keyboard.press("Escape")
         page.locator('[data-independent-teaching-input="true"]').set_input_files(str(FIXTURE))
         page.locator('.app-shell[data-teaching-space-mode="independent"]').wait_for()
         page.locator(".loading-curtain").wait_for(state="hidden")

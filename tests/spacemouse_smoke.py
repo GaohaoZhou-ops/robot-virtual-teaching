@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import math
 import os
@@ -213,11 +215,10 @@ def run():
       page.goto(f"{BASE_URL.rstrip('/')}/workbench", wait_until="networkidle")
       page.locator('[data-session-state="ready"]').wait_for()
       control = page.locator(".spacemouse-control")
-      trigger = page.get_by_role("button", name="检测3D鼠标")
       assert control.get_attribute("data-spacemouse-state") == "idle"
       assert control.get_attribute("data-spacemouse-calibrated") == "false"
 
-      trigger.click()
+      topbar_action(page, name="检测3D鼠标").click()
       page.wait_for_function(
           "document.querySelector('.spacemouse-control')?.dataset.spacemouseState === 'connected'"
       )
@@ -402,7 +403,7 @@ def run():
       # Real hardware normally sends T and R as two reports in the same paint
       # frame. After the calibration state closes, the live panel must retain
       # the second packet and expose one complete TX..RZ snapshot.
-      live_axes = control.locator(".spacemouse-live-axes")
+      live_axes = page.get_by_role("dialog", name="3D鼠标控制器").locator(".spacemouse-live-axes")
       live_axes.wait_for()
       split_live_values = [147, -93, 61, 118, -72, 204]
       emit_split_vector(page, split_live_values)
@@ -461,6 +462,9 @@ def run():
       )
       assert control.get_attribute("data-spacemouse-pointer-lock-strategy") == (
           "gesture-primed-transient"
+      )
+      page.wait_for_function(
+          "document.querySelector('.spacemouse-control')?.dataset.spacemousePointerGuard === 'idle'"
       )
       assert control.get_attribute("data-spacemouse-pointer-guard") == "idle"
       assert float(canvas.get_attribute("data-spacemouse-filter-attack-ms")) < 50
@@ -552,7 +556,7 @@ def run():
           page.wait_for_function(
               "document.querySelector('.spacemouse-control')?.dataset.spacemousePointerGuard === 'idle'"
           )
-          trigger.click()
+          topbar_action(page, name="检测3D鼠标").click()
           paused_panel.wait_for()
       assert "SpaceMouse 控制已暂停" in paused_panel.inner_text()
       assert "单击任意实体键立即恢复" in paused_panel.inner_text()
@@ -970,7 +974,7 @@ def run():
       assert control.get_attribute("data-spacemouse-calibrated") == "true"
       assert page.get_by_role("dialog", name="SpaceMouse 首次校准").count() == 0
 
-      trigger.click()
+      topbar_action(page, name="检测3D鼠标").click()
       panel = page.get_by_role("dialog", name="3D鼠标控制器")
       panel.wait_for()
       assert "X 单轴通道已启用" in panel.inner_text()
@@ -999,6 +1003,9 @@ def run():
       assert read_camera(canvas) == calibration_view_before
       assert float(canvas.get_attribute("data-effective-camera-distance")) == (
           calibration_distance_before
+      )
+      page.wait_for_function(
+          "document.querySelector('.spacemouse-control')?.dataset.spacemousePointerGuard === 'idle'"
       )
       page.get_by_role("button", name="关闭SpaceMouse校准").click()
       page.wait_for_function(

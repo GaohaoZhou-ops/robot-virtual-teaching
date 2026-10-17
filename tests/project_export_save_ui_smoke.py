@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import base64
 import json
 import tempfile
@@ -22,6 +24,7 @@ window.showSaveFilePicker = async options => {
   const directory = await root.getDirectoryHandle('chosen-export-folder', { create: true });
   const handle = await directory.getFileHandle(choice.name, { create: true });
   window.__writtenHandles.push(handle);
+  if (!choice.writeError) return handle;
   return {
     name: handle.name,
     createWritable: async () => {
@@ -62,18 +65,18 @@ def run():
                 page.on('download', lambda download: downloads.append(download))
                 load_project(page, mode, directory / f'{mode}.zip')
                 # Inspect the actual export control before testing its save flow.
-                export = page.get_by_role('button', name='导出工程', exact=True)
+                export = topbar_action(page, name='另存为工程', exact=True)
                 assert export.is_visible() and export.is_enabled()
                 page.evaluate(SAVE_PICKER)
                 page.evaluate("""() => {
                   window.__exportStates = [];
-                  const button = document.querySelector('button[aria-label="导出工程"]');
+                  const button = document.querySelector('button[aria-label="另存为工程"]');
                   new MutationObserver(() => window.__exportStates.push(button.dataset.projectExportState))
                     .observe(button, { attributes: true, attributeFilter: ['data-project-export-state'] });
                 }""")
 
                 export.click()
-                page.wait_for_function("document.querySelector('button[aria-label=\"导出工程\"]').dataset.projectExportState === 'idle'")
+                page.wait_for_function("document.querySelector('button[aria-label=\"另存为工程\"]').dataset.projectExportState === 'idle'")
                 assert 'packing' not in page.evaluate('window.__exportStates')
                 assert not downloads
                 call = page.evaluate('window.__saveCalls.at(-1)')
@@ -86,7 +89,7 @@ def run():
                 # The picker supplies a real FileSystemFileHandle in the chosen test folder.
                 name = f'{mode}-装配工位 新名称.zip'
                 page.evaluate('choice => window.__saveChoice = choice', {'name': name, 'defer': True})
-                export.click()
+                topbar_action(page, name='另存为工程', exact=True).click()
                 page.wait_for_function('typeof window.__resolvePicker === "function"')
                 assert export.is_disabled()
                 assert export.get_attribute('data-project-export-state') == 'selecting'
@@ -107,11 +110,11 @@ def run():
                 assert_archive(saved_path, mode)
 
                 # The teaching-data page shares the same native save path and reports write failures.
-                page.get_by_role('button', name='打开示教数据管理页').click()
-                export = page.get_by_role('button', name='导出工程', exact=True)
+                topbar_action(page, name='打开示教数据管理页').click()
+                export = topbar_action(page, name='导出工程', exact=True)
                 page.evaluate('choice => window.__saveChoice = choice', {'name': name, 'writeError': True})
                 export.click()
-                page.get_by_text('工程导出失败：destination is read-only', exact=True).wait_for()
+                page.get_by_text('工程保存失败：destination is read-only', exact=True).wait_for()
                 assert export.get_attribute('data-project-export-state') == 'error'
                 assert export.is_enabled() and not downloads
                 page.evaluate('choice => window.__saveChoice = choice', {'name': name})
@@ -155,12 +158,14 @@ def run():
                 download.value.save_as(fallback_path)
                 assert_archive(fallback_path, mode)
                 modal.wait_for(state='detached')
+                assert page.locator('button[aria-label="保存工程"]').is_disabled()
 
                 fresh = browser.new_context()
                 restored = fresh.new_page()
                 restored.set_default_timeout(60_000)
                 restored.on('pageerror', lambda error: errors.append(str(error)))
                 load_project(restored, mode, saved_path)
+                assert topbar_action(restored, name='保存工程', exact=True).is_disabled()
                 assert restored.locator('.map-identity strong').inner_text() == f'{mode}-transfer.ply'
                 fresh.close()
                 context.close()

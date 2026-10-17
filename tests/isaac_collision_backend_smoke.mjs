@@ -4,6 +4,7 @@ import {
   applyRobotCollisionHighlights,
   collectRobotCollisionProxies,
   disposeRobotCollisionProxies,
+  getRobotCollisionJointOptions,
   serializeRobotCollisionProxies,
 } from '../src/lib/robotCollision.js';
 import { resolveRobotCollisionBackend } from '../src/lib/robotCollisionBackend.js';
@@ -75,6 +76,47 @@ assert.deepEqual(
   [3, 2, 2],
 );
 
+// Ignoring a joint removes only its child link from both collision and distance
+// queries. Downstream joints and the other arm remain independently monitored.
+const articulated = new THREE.Group();
+const left = createLink('left_L1');
+const elbow = createLink('left_L2', { collision: false });
+const right = createLink('right_L1');
+const wheel = createLink('wheel_left');
+const joint = (name, child, type = 'fixed') => {
+  const node = new THREE.Group();
+  node.name = name;
+  node.userData = { urdfType: 'joint', jointType: type };
+  node.add(child);
+  return node;
+};
+left.link.add(joint('left_elbow', elbow.link, 'revolute'));
+articulated.add(joint('left_shoulder', left.link, 'revolute'),
+  joint('right_mount', right.link), joint('wheel_joint', wheel.link));
+assert.deepEqual(getRobotCollisionJointOptions(articulated).map((option) => option.name),
+  ['left_elbow', 'left_shoulder', 'right_mount']);
+const initial = collectRobotCollisionProxies(articulated);
+const leftMaterial = left.visual.material;
+applyRobotCollisionHighlights(initial, { collisionLinks: ['left_L1'], nearLinks: ['right_L1'] });
+disposeRobotCollisionProxies(initial);
+assert.equal(left.visual.material, leftMaterial);
+const ignored = collectRobotCollisionProxies(articulated, ['left_shoulder', 'left_shoulder', 'unknown']);
+assert.deepEqual(ignored.ignoredLinks, ['left_L1']);
+assert.deepEqual(ignored.excludedLinks, ['left_L1', 'wheel_left']);
+assert.deepEqual(ignored.monitoredLinks, ['left_L2', 'right_L1']);
+assert.deepEqual(serializeRobotCollisionProxies(ignored).records.map((record) => record.linkName).sort(),
+  ['left_L2', 'right_L1']);
+applyRobotCollisionHighlights(ignored, { collisionLinks: ['left_L1'], nearLinks: ['right_L1'] });
+assert.equal(left.visual.material, leftMaterial);
+disposeRobotCollisionProxies(ignored);
+const allIgnored = collectRobotCollisionProxies(articulated, ['left_shoulder', 'left_elbow', 'right_mount']);
+assert.equal(allIgnored.proxies.length, 0);
+assert.equal(allIgnored.highlightEntries.length, 0);
+disposeRobotCollisionProxies(allIgnored);
+const restored = collectRobotCollisionProxies(articulated);
+assert.equal(restored.proxies.length, 3);
+disposeRobotCollisionProxies(restored);
+
 const originalFetch = globalThis.fetch;
 try {
   globalThis.fetch = async () => new Response(JSON.stringify({
@@ -100,4 +142,4 @@ try {
   globalThis.fetch = originalFetch;
 }
 
-console.log('URDF collision preference, visual fallback/highlight, and backend policy passed.');
+console.log('URDF collision preference, joint exclusions, visual fallback/highlight, and backend policy passed.');

@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -47,7 +49,7 @@ def run():
             str(ROOT / "tests/fixtures/rotation-map.ply")
         )
         page.locator(".loading-curtain").wait_for(state="hidden")
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         canvas = page.locator(".three-canvas")
         page.wait_for_function(
@@ -142,7 +144,7 @@ def run():
         page.keyboard.press("Escape")
         expect(dialog).to_have_count(0)
         expect(ghost_card).to_be_visible()
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.keyboard.press("Escape")
         expect(canvas).to_have_attribute("data-parking-ghost-state", "visible")
         page.get_by_role("button", name="返回主工作台继续示教").click()
@@ -218,7 +220,7 @@ def run():
 
         # An explicit move must stop looping playback so later frames cannot
         # pull the robot away from the selected operating position.
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.get_by_role("button", name="选择示教任务 示教任务 01", exact=True).click()
         page.get_by_role("button", name="播放示教任务 示教任务 01", exact=True).click()
         dock = page.get_by_label("示教任务轨迹播放控制", exact=True)

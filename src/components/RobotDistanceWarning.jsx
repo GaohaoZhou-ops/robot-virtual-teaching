@@ -1,5 +1,6 @@
 import { ShieldAlert } from 'lucide-react';
 import { ROBOT_COLLISION_SAFETY_DISTANCE } from '../lib/robotCollision.js';
+import { collisionSideForLink } from '../lib/robotCollisionSettings.js';
 
 const WARNING_GROUPS = [
   { id: 'left', label: '左臂' },
@@ -7,18 +8,13 @@ const WARNING_GROUPS = [
   { id: 'body', label: '本体' },
 ];
 
-const warningGroupForLink = (name) => {
-  const side = String(name).match(/^(?:(?:arm|tool|zivid)[_-])?(left|right)(?:[_-]|$)/i)?.[1];
-  return side?.toLowerCase() || 'body';
-};
-
 export default function RobotDistanceWarning({ status }) {
   if (!status.enabled || !['near', 'collision'].includes(status.state)) return null;
 
   const collisions = new Set(status.collisionLinks || []);
   const links = [...new Set([...collisions, ...(status.nearLinks || [])])];
   const groups = WARNING_GROUPS.map((group) => {
-    const groupLinks = links.filter((link) => warningGroupForLink(link) === group.id);
+    const groupLinks = links.filter((link) => collisionSideForLink(link) === group.id);
     return {
       ...group,
       links: groupLinks,

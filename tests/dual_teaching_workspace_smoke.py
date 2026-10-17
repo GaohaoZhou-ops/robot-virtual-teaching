@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -58,7 +60,7 @@ def set_color_mode(page, expected):
 
 
 def return_home(page):
-    page.get_by_role("button", name="返回主页面").click()
+    topbar_action(page, name="返回主页面").click()
     page.wait_for_url(f"{BASE_URL}/")
     wait_for_home(page)
 
@@ -71,7 +73,7 @@ def continue_mode(page, mode):
 
 def switch_mode(page, mode):
     label = "独立示教" if mode == "independent" else "地图示教"
-    button = page.get_by_role("button", name=f"切换到{label}", exact=True)
+    button = topbar_action(page, name=f"切换到{label}", exact=True)
     assert button.inner_text() == label
     button.click()
 

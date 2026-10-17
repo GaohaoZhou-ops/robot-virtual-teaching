@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import hashlib
 import json
 import os
@@ -123,7 +125,7 @@ with sync_playwright() as playwright:
     page.get_by_role('button', name='接收示教结果', exact=True).click()
     page.locator('[data-ipad-status="imported"]').wait_for()
     page.get_by_role('button', name='关闭设备示教窗口').click()
-    page.get_by_role('button', name='打开示教数据管理页').click()
+    topbar_action(page, name='打开示教数据管理页').click()
     detail = page.get_by_role('region', name='iPad 示教结果')
     expect(detail).to_contain_text('2 个 Pose')
     assert page.locator('.teaching-data-page').get_attribute('data-teaching-task-count') == '1'

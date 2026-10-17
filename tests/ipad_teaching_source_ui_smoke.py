@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import copy
 import json
 import os
@@ -142,9 +144,9 @@ def run():
             expect(tree).to_have_attribute('data-active-parking-point', 'stop-1-1')
             original = saved_workspace(page, 'desktop-task-1', 2)['project']['virtualTeaching']['tasks']
             # Keyboard navigation traverses both menu levels and returns focus to the trigger.
-            trigger = page.get_by_role('button', name='iPad / Vision Pro', exact=True)
+            trigger = topbar_action(page, name='iPad / Vision Pro', exact=True)
             trigger.focus()
-            trigger.press('ArrowDown')
+            trigger.press('Enter')
             page.get_by_role('menu', name='iPad / Vision Pro', exact=True).press('ArrowDown')
             parent = page.get_by_role('menuitem', name='示教来源', exact=True)
             expect(parent).to_be_focused()
@@ -167,9 +169,9 @@ def run():
             first.press('Escape')
             expect(sync_parent).to_be_focused()
             sync_parent.press('Escape')
-            expect(trigger).to_be_focused()
+            expect(page.get_by_role('button', name='设备菜单', exact=True)).to_be_focused()
             expect(trigger).to_have_attribute('aria-expanded', 'false')
-            trigger.click()
+            topbar_action(page, name='iPad / Vision Pro', exact=True).click()
             parent.hover()
             expect(source_item).to_be_visible()
             page.locator('.panel-3d .panel-heading').click(position={'x': 30, 'y': 20})
@@ -214,7 +216,7 @@ def run():
                     && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
             })''')
             page.screenshot(path=str(ARTIFACTS / 'desktop-view-1280.png'), full_page=True)
-            page.get_by_role('button', name='打开示教数据管理页').click()
+            topbar_action(page, name='打开示教数据管理页').click()
             expect(page.locator('.teaching-data-page')).to_have_attribute('data-teaching-task-count', '3')
             with page.expect_download() as download:
                 start_project_download(page)

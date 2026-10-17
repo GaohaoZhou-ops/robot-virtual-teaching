@@ -1,0 +1,21 @@
+.collision-joint-settings { padding: 0 14px 12px; border-bottom: 1px solid var(--line); }
+.collision-joint-settings__toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 0; border: 0; color: var(--text); background: transparent; text-align: left; font-size: 10px; cursor: pointer; }
+.collision-joint-settings__toggle small { margin-left: auto; color: var(--muted); font-size: 9px; }
+.collision-joint-settings__toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.collision-joint-settings__body > p { margin: 3px 0 10px; color: var(--muted); font-size: 10px; line-height: 1.6; }
+.collision-joint-settings__search { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border: 1px solid var(--line); color: var(--muted); }
+.collision-joint-settings__search input { width: 100%; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 10px; }
+.collision-joint-settings__list { max-height: 220px; overflow: auto; margin: 8px 0; overscroll-behavior: contain; }
+.collision-joint-settings__list fieldset { min-width: 0; margin: 0 0 8px; padding: 0; border: 0; }
+.collision-joint-settings__list legend { padding: 7px 0; color: var(--muted); font-size: 10px; }
+.collision-joint-settings__list label { display: flex; align-items: center; gap: 8px; padding: 7px 4px; cursor: pointer; }
+.collision-joint-settings__list label:hover { background: #59dbe80a; }
+.collision-joint-settings__list input { flex: 0 0 auto; accent-color: var(--cyan); }
+.collision-joint-settings__list label > span { flex: 1; min-width: 0; }
+.collision-joint-settings__list strong, .collision-joint-settings__list small { display: block; overflow-wrap: anywhere; font-size: 10px; font-weight: 400; }
+.collision-joint-settings__list small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.collision-joint-settings__list em { flex: 0 0 auto; color: var(--muted); font-size: 9px; font-style: normal; }
+.collision-joint-settings__list > p { color: var(--muted); font-size: 10px; }
+.collision-joint-settings__reset { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 7px; border: 1px solid var(--line); color: var(--text); background: transparent; font-size: 10px; cursor: pointer; }
+.collision-joint-settings__reset:disabled { opacity: 0.4; cursor: default; }
+.collision-joint-settings button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }

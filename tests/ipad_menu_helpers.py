@@ -1,10 +1,11 @@
+from topbar_tools_helpers import topbar_action
+
 from playwright.sync_api import expect
 
 
 def open_ipad_menu(page, section):
-    trigger = page.get_by_role('button', name='iPad / Vision Pro', exact=True)
-    if trigger.get_attribute('aria-expanded') != 'true':
-        trigger.click()
+    if not page.get_by_role('menu', name='iPad / Vision Pro', exact=True).count():
+        topbar_action(page, name='iPad / Vision Pro', exact=True).click()
     page.get_by_role('menuitem', name=section, exact=True).click()
     menu = page.get_by_role('menu', name=section, exact=True)
     expect(menu).to_be_visible()

@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -12,7 +14,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "rotation-map.ply"
 
 
 def open_teaching_data(page):
-    page.get_by_role("button", name="打开示教数据管理页").click()
+    topbar_action(page, name="打开示教数据管理页").click()
     data_page = page.locator('[data-app-page="teaching-data"]')
     data_page.wait_for()
     assert page.url.endswith("/teaching-data")
@@ -46,7 +48,7 @@ def run():
         navigation_tab = page.get_by_role("tab", name="路径与导航")
         camera_tab = page.get_by_role("tab", name="相机", exact=True)
         teaching_tab = page.get_by_role("tab", name="示教")
-        data_page_link = page.get_by_role("button", name="打开示教数据管理页")
+        data_page_link = topbar_action(page, name="打开示教数据管理页")
 
         assert tabs.get_by_role("tab").count() == 3
         assert page.get_by_role("tab", name="示教数据管理").count() == 0
@@ -201,7 +203,7 @@ def run():
         page.get_by_text("ZIP 工程包已加载", exact=False).wait_for()
         assert page.locator(".waypoint-marker").count() == 1
 
-        page.get_by_role("button", name="查看地图与工程配置").click()
+        topbar_action(page, name="查看地图与工程配置").click()
         configuration = page.get_by_role("dialog", name="地图与工程配置")
         assert configuration.is_visible()
         assert "rotation-map.ply" in configuration.inner_text()

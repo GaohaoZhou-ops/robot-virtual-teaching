@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import base64
 import copy
 import json
@@ -95,7 +97,7 @@ def run():
                         'name': 'desktop.json', 'mimeType': 'application/json', 'buffer': json.dumps(project).encode()})
                     original = saved_workspace(page, 'desktop-task-1', 2)['project']['virtualTeaching']['tasks']
                     expect(open_ipad_menu(page, '传输任务')).to_contain_text('暂无传输任务')
-                    page.get_by_role('button', name='iPad / Vision Pro', exact=True).click()
+                    topbar_action(page, name='iPad / Vision Pro', exact=True).click()
                     assert not mutations, 'browsing menus must not create a transfer'
                     open_ipad_dialog(page)
                     dialog = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
@@ -116,7 +118,7 @@ def run():
                     ticket, good_result = complete(ticket, archive['result'])
                     expect(sync_menu.get_by_role('menuitem', name='接收示教结果', exact=True)).to_be_visible(timeout=10000)
                     page.screenshot(path=str(ARTIFACTS / 'sync-menu-1280.png'), full_page=True)
-                    page.get_by_role('button', name='iPad / Vision Pro', exact=True).click()
+                    topbar_action(page, name='iPad / Vision Pro', exact=True).click()
                     wrong = api('/sessions', {'manifest': changed['manifest']})
                     api('/sessions/' + wrong['id'] + '/model', base64.b64decode(changed['bytes']), wrong['ownerToken'], 'PUT')
                     wrong, bad_result = complete(wrong, {**archive['result'], 'id': str(uuid.uuid4())})

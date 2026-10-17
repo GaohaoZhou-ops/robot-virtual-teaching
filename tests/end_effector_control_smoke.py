@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -18,7 +20,7 @@ def number_attr(canvas, name):
 
 
 def load_robot(page):
-    page.get_by_role("button", name="加载机器人", exact=True).click()
+    topbar_action(page, name="加载机器人", exact=True).click()
     page.get_by_role("dialog", name="robots 目录模型").wait_for()
     page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
     page.wait_for_function(
@@ -108,7 +110,7 @@ def run():
         assert canvas.get_attribute("data-end-effector-ik-status") in ("tracking", "limited")
         final_ik_status = canvas.get_attribute("data-end-effector-ik-status")
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)
@@ -173,7 +175,7 @@ def run():
         )
         page.screenshot(path="/tmp/atlas-end-effector-lock.png", full_page=True)
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)
@@ -208,7 +210,7 @@ def run():
             axis: number_attr(canvas, f"robot-left-tool-world-{axis}")
             for axis in ("x", "y", "z")
         }
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)
@@ -264,7 +266,7 @@ def run():
         assert global_position_error < 0.006
         assert global_rotation_error < 2.0
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)

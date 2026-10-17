@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 import re
 from pathlib import Path
@@ -59,7 +61,7 @@ def snapshot(page, mode):
 
 
 def open_transfer(page):
-    page.get_by_role("button", name="打开示教转换", exact=True).click()
+    topbar_action(page, name="打开示教转换", exact=True).click()
     dialog = page.get_by_role("dialog", name="示教转换", exact=True)
     dialog.wait_for()
     dialog.locator(".transfer-route").wait_for()
@@ -160,7 +162,7 @@ def run():
             assert directory_project(page, "independent") == original_independent_directory
 
             # Refine through the existing teaching-data UI and return to the source.
-            page.get_by_role("button", name="打开示教数据管理页", exact=True).click()
+            topbar_action(page, name="打开示教数据管理页", exact=True).click()
             page.get_by_role("button", name="选择停车点 map-inside", exact=True).click()
             page.get_by_label("停车点名称", exact=True).fill("局部精调后的停车点")
             page.get_by_label("停车点名称", exact=True).press("Enter")
@@ -184,7 +186,7 @@ def run():
               return project.virtualTeaching.tasks[0].parkingPoints[0].name === '局部精调后的停车点';
             }""")
 
-            page.get_by_role("button", name="切换到独立示教", exact=True).click()
+            topbar_action(page, name="切换到独立示教", exact=True).click()
             ready(page, "independent")
             assert snapshot(page, "independent")["project"]["workspace"]["transfer"]["lastWrittenAt"]
             dialog = open_transfer(page)
@@ -193,7 +195,7 @@ def run():
             assert len(snapshot(page, "map")["project"]["virtualTeaching"]["tasks"][0]["parkingPoints"]) == 2
 
             # A concurrent target edit after preview must abort the entire commit.
-            page.get_by_role("button", name="切换到独立示教", exact=True).click()
+            topbar_action(page, name="切换到独立示教", exact=True).click()
             ready(page, "independent")
             dialog = open_transfer(page)
             page.evaluate("""async () => {

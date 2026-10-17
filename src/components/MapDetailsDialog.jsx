@@ -101,9 +101,7 @@ export default function MapDetailsDialog({
   }), [bounds]);
   const diagonal = Math.hypot(...axes.map((entry) => entry.span));
   const fileName = mapData?.name || '未命名地图';
-  const extension = fileName.includes('.') ? fileName.split('.').at(-1).toUpperCase() : 'PLY';
   const sourceKind = mapData?.sourceKind || (mapData?.metadataOnly ? 'project-metadata' : 'unknown');
-  const geometryLabel = mapData?.faceCount > 0 ? '点云 + 三角网格' : '点云';
   const hash = mapData?.sourceHash || null;
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
   const coordinateFrame = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
@@ -161,12 +159,6 @@ export default function MapDetailsDialog({
             <small>MAP / PROJECT CONFIGURATION</small>
             <h2 id="map-details-title">地图与工程配置</h2>
             <strong title={fileName}>{fileName}</strong>
-          </div>
-          <div className="map-details-dialog__badges" aria-label="地图类型">
-            <span>{extension}</span>
-            <span>{geometryLabel}</span>
-            {isIndependentTeachingSpace && <span className="is-virtual">独立示教空间</span>}
-            {mapData.metadataOnly && <span className="is-warning">仅元数据</span>}
           </div>
           <button
             type="button"

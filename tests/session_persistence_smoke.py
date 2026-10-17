@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -419,12 +421,12 @@ def run():
         assert page.locator(".three-canvas").count() == 0
         assert page.locator(".waypoint-marker").count() == 0
         assert page.evaluate("localStorage.getItem('atlas-route-studio:view-state-v1')") is None
-        assert page.get_by_role("button", name="返回主页面").is_enabled()
+        assert topbar_action(page, name="返回主页面").is_enabled()
         assert page.locator(".session-guard").get_attribute(
             "data-recovery-available"
         ) == "true"
         page.screenshot(path="/tmp/atlas-project-recovery.png", full_page=True)
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         recovery_button = page.get_by_role("button", name="恢复上一次工程")
         assert recovery_button.is_visible()
@@ -457,7 +459,7 @@ def run():
         assert page.locator(".three-canvas").get_attribute("data-geometry-source") == "session-cache"
         assert page.locator(".waypoint-marker").count() == 2
         assert page.locator(".route-edge").count() == 1
-        assert page.get_by_role("button", name="返回主页面").is_enabled()
+        assert topbar_action(page, name="返回主页面").is_enabled()
         recovered_map_view = page.locator(".map2d-view")
         recovered_canvas = page.locator(".three-canvas")
         for key, expected in recovery_view2d.items():

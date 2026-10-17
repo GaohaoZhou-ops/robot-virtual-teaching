@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -33,7 +35,7 @@ def wait_for_joints(page, expected):
 
 
 def export_task(page, task_id):
-    page.get_by_role("button", name="打开示教数据管理页").click()
+    topbar_action(page, name="打开示教数据管理页").click()
     with page.expect_download() as download_info:
         start_project_download(page)
     project = read_exported_project(download_info.value)
@@ -81,7 +83,7 @@ def run():
         page.locator('[data-session-state="ready"]').wait_for()
         page.locator('input[type="file"][accept=".ply"]').set_input_files(str(ROOT / "tests/fixtures/rotation-map.ply"))
         page.locator(".loading-curtain").wait_for(state="hidden")
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         canvas = page.locator(".three-canvas")
         page.wait_for_function("document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'", timeout=180_000)
@@ -171,7 +173,7 @@ def run():
         assert export_task(page, task_id) == saved
 
         # Edit also stops looping playback and permits the existing IK controls.
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.get_by_role("button", name="选择示教任务 示教任务 01", exact=True).click()
         page.get_by_role("button", name="播放示教任务 示教任务 01", exact=True).click()
         dock = page.get_by_label("示教任务轨迹播放控制", exact=True)

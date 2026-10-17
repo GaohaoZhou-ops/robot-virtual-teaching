@@ -35,6 +35,8 @@ import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
+import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
+import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
 import {
   createUniformMeshIndex,
   MESH_RENDER_QUALITY_OPTIONS,
@@ -77,6 +79,7 @@ import {
   collectRobotCollisionProxies,
   createRobotCollisionStatus,
   disposeRobotCollisionProxies,
+  getRobotCollisionJointOptions,
   ROBOT_COLLISION_CHECK_INTERVAL_MS,
   ROBOT_COLLISION_CONTACT_MARGIN,
   ROBOT_COLLISION_SAFETY_DISTANCE,
@@ -384,6 +387,8 @@ const collisionStatusSignature = (status) => JSON.stringify({
   collisionLinks: status.collisionLinks,
   nearLinks: status.nearLinks,
   excludedLinks: status.excludedLinks,
+  ignoredJointNames: status.ignoredJointNames,
+  ignoredLinks: status.ignoredLinks,
   monitoredLinkCount: status.monitoredLinkCount,
   monitoredProxyCount: status.monitoredProxyCount,
   collisionModelProxyCount: status.collisionModelProxyCount,
@@ -1523,6 +1528,8 @@ export default function PointCloudViewer({
   viewportCanvasRef,
   cameraTeachingCommand,
   collisionProtectionEnabled = true,
+  ignoredCollisionJointNames = [],
+  onIgnoredCollisionJointNamesChange,
   onRobotLoadState,
   onRobotPoseChange,
   onRobotJointValuesChange,
@@ -1614,6 +1621,8 @@ export default function PointCloudViewer({
   const collisionMonitorGenerationRef = useRef(0);
   const collisionHighlightCleanupRef = useRef(null);
   const collisionCheckRequestRef = useRef(null);
+  const ignoredCollisionJointNamesRef = useRef([]);
+  ignoredCollisionJointNamesRef.current = normalizeIgnoredCollisionJoints(ignoredCollisionJointNames);
   const zividCameraFramesRef = useRef({ left: null, right: null });
   const lastZividCameraPoseReportRef = useRef(0);
   const lastZividCameraPoseSignatureRef = useRef('');
@@ -1643,6 +1652,10 @@ export default function PointCloudViewer({
     () => createRobotCollisionStatus(),
   );
   const [showDistanceWarnings, setShowDistanceWarnings] = useState(true);
+  const [distanceSettingsOpen, setDistanceSettingsOpen] = useState(false);
+  const [collisionJointSettingsOpen, setCollisionJointSettingsOpen] = useState(false);
+  const collisionJointOptions = useMemo(() => robotLoadState?.status === 'loaded'
+    ? getRobotCollisionJointOptions(loadedRobotRef.current) : [], [robotDescriptor, robotLoadState?.status]);
   const [visionCoverageStats, setVisionCoverageStats] = useState(
     EMPTY_VISION_COVERAGE_STATS,
   );
@@ -5781,6 +5794,7 @@ export default function PointCloudViewer({
     let deferredCheckTimer = null;
     let lastCheckSubmittedAt = Number.NEGATIVE_INFINITY;
     let observedRobot = null;
+    let observedIgnoredJoints = '';
     let proxyCollection = null;
     let lastPoseSignature = '';
     let lastPublishedSignature = '';
@@ -5810,6 +5824,8 @@ export default function PointCloudViewer({
       canvas.dataset.collisionLinks = (status.collisionLinks || []).join(',');
       canvas.dataset.collisionNearLinks = (status.nearLinks || []).join(',');
       canvas.dataset.collisionExcludedLinks = (status.excludedLinks || []).join(',');
+      canvas.dataset.collisionIgnoredJoints = (status.ignoredJointNames || []).join(',');
+      canvas.dataset.collisionIgnoredLinks = (status.ignoredLinks || []).join(',');
       canvas.dataset.collisionMonitoredLinkCount = String(status.monitoredLinkCount || 0);
       canvas.dataset.collisionMonitoredProxyCount = String(status.monitoredProxyCount || 0);
       canvas.dataset.collisionModelProxyCount = String(status.collisionModelProxyCount || 0);
@@ -5896,11 +5912,28 @@ export default function PointCloudViewer({
     const ensureRobotProxies = () => {
       const robot = loadedRobotRef.current;
       if (!robot) return false;
-      if (observedRobot === robot && proxyCollection) return proxyCollection.proxies.length > 0;
+      const ignoredJointNames = ignoredCollisionJointNamesRef.current;
+      const ignoredSignature = JSON.stringify(ignoredJointNames);
+      if (observedRobot === robot && proxyCollection && observedIgnoredJoints === ignoredSignature) {
+        return proxyCollection.proxies.length > 0;
+      }
       clearProxyCollection();
       observedRobot = robot;
-      proxyCollection = collectRobotCollisionProxies(robot);
+      observedIgnoredJoints = ignoredSignature;
+      proxyCollection = collectRobotCollisionProxies(robot, ignoredJointNames);
+      // Discard an in-flight response for the previous detection scope.
+      checkRevision += 1;
       lastPoseSignature = '';
+      publishStatus({
+        state: 'waiting', minimumDistance: null, collisionLinks: [], nearLinks: [],
+        ignoredJointNames, ignoredLinks: proxyCollection.ignoredLinks,
+        excludedLinks: proxyCollection.excludedLinks,
+        monitoredLinkCount: proxyCollection.monitoredLinks.length,
+        monitoredProxyCount: proxyCollection.proxies.length,
+        collisionModelProxyCount: proxyCollection.collisionModelProxyCount,
+        visualFallbackProxyCount: proxyCollection.visualFallbackProxyCount,
+        message: '正在更新检测范围', detail: '',
+      });
       const serialized = serializeRobotCollisionProxies(proxyCollection);
       const probe = selectRobotCollisionProbe(serialized.records);
       if (probe && canvas) {
@@ -5917,6 +5950,18 @@ export default function PointCloudViewer({
       canvas.dataset.collisionRequestCount = String(
         Number(canvas.dataset.collisionRequestCount || 0) + 1,
       );
+      if (!ensureRobotProxies()) {
+        const excluded = proxyCollection?.ignoredLinks.length > 0;
+        const failed = robotLoadStateRef.current?.status === 'error';
+        publishStatus({
+          state: excluded ? 'excluded' : failed ? 'error' : 'waiting',
+          minimumDistance: null, collisionLinks: [], nearLinks: [],
+          message: excluded ? '所有可检测部件已忽略' : failed ? '机器人检测体不可用' : '等待机器人检测体',
+          detail: excluded ? '可在距离警告设置中恢复关节检测' : failed ? '机器人模型加载失败，请重新选择模型' : '模型装配完成后将自动开始检测',
+          ...indexMetrics,
+        });
+        return;
+      }
       if (!workerReady || !worker) {
         collisionCheckPending = true;
         return;
@@ -5938,19 +5983,6 @@ export default function PointCloudViewer({
         return;
       }
       collisionCheckPending = false;
-      if (!ensureRobotProxies()) {
-        publishStatus({
-          state: robotLoadStateRef.current?.status === 'error' ? 'error' : 'waiting',
-          message: robotLoadStateRef.current?.status === 'error'
-            ? '机器人检测体不可用'
-            : '等待机器人检测体',
-          detail: robotLoadStateRef.current?.status === 'error'
-            ? '机器人模型加载失败，请重新选择模型'
-            : '模型装配完成后将自动开始检测',
-          ...indexMetrics,
-        });
-        return;
-      }
       robotLayerRef.current?.updateMatrixWorld(true);
       const serialized = serializeRobotCollisionProxies(proxyCollection);
       const probe = selectRobotCollisionProbe(serialized.records);
@@ -6056,7 +6088,10 @@ export default function PointCloudViewer({
           }
           if (message.type === 'result') {
             workerBusy = false;
-            if (Number(message.revision) !== checkRevision || !proxyCollection) return;
+            if (Number(message.revision) !== checkRevision || !proxyCollection) {
+              if (collisionCheckPending) window.setTimeout(requestCollisionCheck, 0);
+              return;
+            }
             checkCount += 1;
             const collisionLinks = Array.isArray(message.collisionLinks)
               ? message.collisionLinks
@@ -6083,12 +6118,12 @@ export default function PointCloudViewer({
                 ? '检测到环境干涉'
                 : state === 'near'
                   ? '进入 100 mm 安全边界'
-                  : '非底盘结构安全',
+                  : proxyCollection.ignoredLinks.length ? '检测范围内的部件安全' : '非底盘结构安全',
               detail: state === 'collision'
                 ? `红色部件：${collisionLinks.slice(0, 4).join(' / ')}${collisionLinks.length > 4 ? ` +${collisionLinks.length - 4}` : ''}`
                 : state === 'near'
                   ? `最近直线距离 ${Math.max(0, minimumDistance * 1000).toFixed(0)} mm · ${nearLinks.slice(0, 3).join(' / ')}`
-                  : '最近环境样本距离不小于 100 mm',
+                  : `最近环境样本距离不小于 100 mm${proxyCollection.ignoredLinks.length ? ` · 已忽略 ${proxyCollection.ignoredLinks.length} 个部件` : ''}`,
               ...indexMetrics,
             });
             if (collisionCheckPending) window.setTimeout(requestCollisionCheck, 0);
@@ -6160,7 +6195,7 @@ export default function PointCloudViewer({
 
   useEffect(() => {
     collisionCheckRequestRef.current?.();
-  }, [robotJointValues, robotPose]);
+  }, [robotJointValues, robotPose, ignoredCollisionJointNames]);
 
   useEffect(() => {
     if (!initialView || appliedInitialViewRef.current === initialView) return;
@@ -7387,10 +7422,12 @@ export default function PointCloudViewer({
         near: '距离过近',
         collision: '环境干涉',
         error: '检测异常',
+        excluded: '已全部忽略',
       }[collisionStatusState] || '保护开启'
     : '碰撞保护';
-  const collisionDistanceLabel = ['building', 'waiting', 'error'].includes(collisionStatusState)
-    ? { building: '检测中', waiting: '等待检测', error: '检测异常' }[collisionStatusState]
+  const collisionDistanceLabel = !collisionProtectionEnabled ? '检测关闭'
+    : ['building', 'waiting', 'error', 'excluded'].includes(collisionStatusState)
+    ? { building: '检测中', waiting: '等待检测', error: '检测异常', excluded: '已全部忽略' }[collisionStatusState]
     : collisionDistanceMillimeters !== null
       ? `${collisionDistanceMillimeters.toFixed(0)} mm`
       : collisionStatusState === 'safe'
@@ -7768,27 +7805,55 @@ export default function PointCloudViewer({
               </div>
             </ViewerMenu>
             {displaySettingsContainer && createPortal(<>
-              {collisionProtectionEnabled && (
-                <div
-                  className={`robot-collision-distance is-${collisionStatusState}`}
-                  role="status"
-                  aria-label="碰撞保护距离"
-                  aria-live="polite"
-                  aria-atomic="true"
-                  title={[robotCollisionStatus.message, robotCollisionStatus.detail].filter(Boolean).join(' · ')}
-                  data-collision-state={collisionStatusState}
-                  data-collision-distance={collisionDistanceMillimeters ?? ''}
-                >
-                  {collisionStatusState === 'safe'
+              <ViewerMenu
+                key={`distance-${resolutionMapKey}`}
+                label="距离警告"
+                triggerLabel="碰撞保护距离"
+                triggerClassName={`robot-collision-distance is-${collisionButtonState}`}
+                triggerContent={<>
+                  {collisionButtonState === 'safe'
                     ? <ShieldCheck size={13} aria-hidden="true" />
                     : <ShieldAlert size={13} aria-hidden="true" />}
-                  <span>{collisionDistanceLabel}</span>
+                  <span aria-live="polite" aria-atomic="true">{collisionDistanceLabel}</span>
+                </>}
+                triggerProps={{
+                  'data-collision-state': collisionButtonState,
+                  'data-collision-distance': collisionProtectionEnabled ? collisionDistanceMillimeters ?? '' : '',
+                }}
+                title={['距离警告设置', robotCollisionStatus.message, robotCollisionStatus.detail].filter(Boolean).join(' · ')}
+                icon={ShieldAlert}
+                isActive={isActive}
+                open={distanceSettingsOpen}
+                onOpenChange={setDistanceSettingsOpen}
+              >
+                <div className="robot-distance-settings__visibility">
+                  <span><Eye size={13} /> 显示警告</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    className="distance-warning-toggle"
+                    aria-label="显示距离警告"
+                    aria-checked={showDistanceWarnings}
+                    title="在 3D 视图右上角显示距离警告"
+                    onClick={() => setShowDistanceWarnings((current) => !current)}
+                  >
+                    {showDistanceWarnings ? <Eye size={12} /> : <EyeOff size={12} />}
+                    {showDistanceWarnings ? '显示' : '隐藏'}
+                  </button>
                 </div>
-              )}
+                <RobotCollisionJointSettings
+                  options={collisionJointOptions}
+                  ignoredJointNames={ignoredCollisionJointNames}
+                  onChange={onIgnoredCollisionJointNamesChange}
+                  expanded={collisionJointSettingsOpen}
+                  onExpandedChange={setCollisionJointSettingsOpen}
+                  ready={collisionControlReady}
+                />
+              </ViewerMenu>
               <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title="点云颜色、距离警告、显示密度与网格质量"
+              title="点云颜色、显示密度与网格质量"
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -7805,21 +7870,6 @@ export default function PointCloudViewer({
                   <i aria-hidden="true" />
                   <span>{colorModeMeta.label}</span>
                   <RotateCcw size={11} />
-                </button>
-              </div>
-              <div className="viewer-display-settings__warnings">
-                <span><ShieldAlert size={13} /> 距离警告</span>
-                <button
-                  type="button"
-                  role="switch"
-                  className="distance-warning-toggle"
-                  aria-label="显示距离警告"
-                  aria-checked={showDistanceWarnings}
-                  title="在 3D 视图右上角显示距离警告"
-                  onClick={() => setShowDistanceWarnings((current) => !current)}
-                >
-                  {showDistanceWarnings ? <Eye size={12} /> : <EyeOff size={12} />}
-                  {showDistanceWarnings ? '显示' : '隐藏'}
                 </button>
               </div>
               <div

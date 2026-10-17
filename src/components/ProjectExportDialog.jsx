@@ -65,7 +65,7 @@ export default function ProjectExportDialog({ filename, onSave, onClose }) {
             {!/\.zip$/i.test(name.trim()) && <span>.zip</span>}
           </div>
           {error && <p id="project-export-name-error" className="project-export-dialog__error" role="alert">{error}</p>}
-          <p id="project-export-location-note">当前浏览器不支持直接选择保存位置。文件将按浏览器的下载设置保存；如需选择文件夹，请开启“下载前询问保存位置”。</p>
+          <p id="project-export-location-note">当前浏览器不支持直接选择保存位置，文件将按浏览器的下载设置保存。下载后无法直接覆盖该文件，“保存工程”不可用，请继续使用“另存为工程”。</p>
         </div>
         <footer>
           <button type="button" onClick={onClose}>取消</button>

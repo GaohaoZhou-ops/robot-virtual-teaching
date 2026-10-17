@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import copy
 import json
 import time
@@ -25,7 +27,7 @@ def run():
             ready(page)
             page.locator('[data-independent-teaching-input]').set_input_files(str(ROOT / 'tests/fixtures/rotation-map.ply'))
             ready(page)
-            page.get_by_role('button', name='加载机器人', exact=True).click()
+            topbar_action(page, name='加载机器人', exact=True).click()
             page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70', exact=True).click()
             canvas = page.locator('.three-canvas')
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
@@ -152,7 +154,7 @@ def run():
             dock.get_by_role('button', name='暂停姿态计算', exact=True).click()
             expect(dock).to_have_attribute('data-compute-status', 'paused')
             # Switching to the data page preserves the worker and its controls.
-            page.get_by_role('button', name='打开示教数据管理页').click()
+            topbar_action(page, name='打开示教数据管理页').click()
             expect(dock).to_have_class('mobile-compute-dock is-paused is-floating')
             dock.get_by_role('button', name='取消姿态计算', exact=True).click()
             expect(dock).to_have_attribute('data-compute-status', 'cancelled')

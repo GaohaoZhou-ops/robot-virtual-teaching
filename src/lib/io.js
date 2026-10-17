@@ -1,5 +1,6 @@
 import { calculatePathDistances } from './pathMetrics.js';
 import { normalizeRobotJointLocks } from './robotJointLocks.js';
+import { normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
 import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
@@ -631,6 +632,7 @@ export function normalizeProject(payload) {
         lockedJoints: normalizeRobotJointLocks(
           rawRobot.lockedJoints ?? rawRobot.jointLocks ?? rawRobot.lockedJointNames,
         ),
+        collisionIgnoredJoints: normalizeIgnoredCollisionJoints(rawRobot.collisionIgnoredJoints),
         heightLocked: booleanOr(
           rawRobot.heightLocked ?? rawRobot.lockHeight ?? rawRobot.zLocked,
           false,
@@ -733,6 +735,7 @@ export function buildExport({
   robotPose,
   robotJointValues,
   lockedRobotJointNames = [],
+  ignoredRobotCollisionJointNames = [],
   robotHeightLocked = false,
   teachingTasks = [],
   jointPoses = [],
@@ -832,6 +835,7 @@ export function buildExport({
             }),
           ),
           lockedJoints: normalizeRobotJointLocks(lockedRobotJointNames),
+          collisionIgnoredJoints: normalizeIgnoredCollisionJoints(ignoredRobotCollisionJointNames),
           heightLocked: robotHeightLocked === true,
           origin: {
             position: {

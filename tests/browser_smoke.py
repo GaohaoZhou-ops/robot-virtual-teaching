@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -39,7 +41,7 @@ def run():
         assert page.locator(".viewport-panel").count() == 2
         assert page.locator(".inspector-panel").count() == 1
 
-        page.get_by_role("button", name="返回主页面", exact=True).click()
+        topbar_action(page, name="返回主页面", exact=True).click()
         page.get_by_role("radio", name="地图示教").click()
         with page.expect_file_chooser() as chooser_info:
             page.get_by_role("button", name="新建工程", exact=True).click()
@@ -279,7 +281,7 @@ def run():
         perception_switch.click()
         assert perception_switch.get_attribute("aria-checked") == "false"
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)

@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import math
 import os
@@ -65,7 +67,7 @@ def run():
         page.locator(".three-canvas").wait_for()
         page.locator(".loading-curtain").wait_for(state="hidden")
 
-        load_button = page.get_by_role("button", name="加载机器人", exact=True)
+        load_button = topbar_action(page, name="加载机器人", exact=True)
         assert load_button.is_visible()
         load_button.click()
         picker = page.get_by_role("dialog", name="robots 目录模型")
@@ -312,7 +314,7 @@ def run():
         assert any("zivid_2_m70_official.glb" in url for url in robot_requests)
         assert not any("/ZividTwo.stl" in url for url in robot_requests)
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)

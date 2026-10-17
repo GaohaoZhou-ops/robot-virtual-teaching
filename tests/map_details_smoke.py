@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -48,7 +50,7 @@ def run():
 
         page.goto(f"{BASE_URL.rstrip('/')}/workbench", wait_until="networkidle")
         page.locator('[data-session-state="ready"]').wait_for()
-        details_button = page.get_by_role("button", name="查看地图与工程配置")
+        details_button = topbar_action(page, name="查看地图与工程配置")
         assert details_button.is_disabled()
 
         page.locator('input[type="file"][accept=".ply"]').set_input_files(str(MAP_FIXTURE))
@@ -58,9 +60,8 @@ def run():
         heading_buttons = page.locator(".panel-3d .panel-heading > button")
         assert heading_buttons.count() == 1
         assert heading_buttons.nth(0).get_attribute("aria-label") == "折叠3D窗口"
-        navigation_buttons = page.locator(".topbar-actions > button")
-        assert navigation_buttons.nth(0).get_attribute("aria-label") == "返回主页面"
-        assert navigation_buttons.nth(1).get_attribute("aria-label") == "查看地图与工程配置"
+        navigation_buttons = page.get_by_role("dialog", name="工程菜单", exact=True).get_by_role("button")
+        assert navigation_buttons.nth(0).get_attribute("aria-label") == "查看地图与工程配置"
         page.screenshot(path="/tmp/atlas-map-details-trigger.png", full_page=True)
 
         details_button.click()
@@ -108,13 +109,13 @@ def run():
 
         page.keyboard.press("Escape")
         dialog.wait_for(state="detached")
-        assert details_button.evaluate("node => node === document.activeElement")
+        assert page.get_by_role("button", name="工程菜单", exact=True).evaluate("node => node === document.activeElement")
 
         page.reload(wait_until="networkidle")
         page.locator('[data-session-state="ready"]').wait_for()
         page.locator(".loading-curtain").wait_for(state="hidden")
         assert page.locator(".three-canvas").get_attribute("data-geometry-source") == "session-cache"
-        page.get_by_role("button", name="查看地图与工程配置").click()
+        topbar_action(page, name="查看地图与工程配置").click()
         restored_dialog = page.get_by_role("dialog", name="地图与工程配置")
         restored_dialog.wait_for()
         assert int(float(restored_dialog.get_attribute("data-map-byte-length"))) == MAP_FIXTURE.stat().st_size
@@ -149,7 +150,7 @@ def run():
         page.reload(wait_until="networkidle")
         page.locator('[data-session-state="ready"]').wait_for()
         page.locator(".loading-curtain").wait_for(state="hidden")
-        details_button.click()
+        topbar_action(page, name="查看地图与工程配置").click()
         dialog.wait_for()
         assert dialog.get_by_role("button", name="下载当前地图", exact=True).is_disabled()
         assert dialog.get_by_text("此工程未保留原始文件", exact=True).is_visible()

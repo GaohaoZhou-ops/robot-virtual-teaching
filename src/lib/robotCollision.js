@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
 
 export const ROBOT_COLLISION_SAFETY_DISTANCE = 0.1;
 export const ROBOT_COLLISION_CONTACT_MARGIN = 0.008;
@@ -20,6 +21,8 @@ export const createRobotCollisionStatus = (overrides = {}) => ({
   collisionLinks: [],
   nearLinks: [],
   excludedLinks: [],
+  ignoredJointNames: [],
+  ignoredLinks: [],
   monitoredLinkCount: 0,
   monitoredProxyCount: 0,
   collisionModelProxyCount: 0,
@@ -79,16 +82,11 @@ const warningMaterialForMesh = (mesh, material) => (
   Array.isArray(mesh.material) ? mesh.material.map(() => material) : material
 );
 
-export function collectRobotCollisionProxies(robot) {
-  const proxies = [];
+const collectRobotCollisionMeshes = (robot) => {
   const excludedLinks = new Set();
-  const monitoredLinks = new Set();
   const visualMeshes = new Map();
   const collisionMeshes = new Map();
-  const highlightEntries = [];
-  const redMaterial = createWarningMaterial(RED_WARNING_COLOR);
-  const yellowMaterial = createWarningMaterial(YELLOW_WARNING_COLOR);
-  let proxyIndex = 0;
+  const jointByLink = new Map();
 
   robot?.traverse((object) => {
     if (object.userData?.urdfType === 'link' && isExcludedRobotCollisionLink(object.name)) {
@@ -102,6 +100,10 @@ export function collectRobotCollisionProxies(robot) {
       excludedLinks.add(linkName);
       return;
     }
+    // Each joint owns its direct child link, not the entire downstream chain.
+    if (link?.parent?.userData?.urdfType === 'joint') {
+      jointByLink.set(linkName, { name: link.parent.name, type: link.parent.userData.jointType });
+    }
 
     const isCollisionGeometry = Boolean(object.userData?.robotCollisionGeometry)
       || hasUrdfAncestor(object, robot, 'collision');
@@ -114,9 +116,39 @@ export function collectRobotCollisionProxies(robot) {
     if (!visualMeshes.has(linkName)) visualMeshes.set(linkName, []);
     visualMeshes.get(linkName).push(object);
   });
+  return { excludedLinks, visualMeshes, collisionMeshes, jointByLink };
+};
+
+export function getRobotCollisionJointOptions(robot) {
+  const { visualMeshes, collisionMeshes, jointByLink } = collectRobotCollisionMeshes(robot);
+  const options = new Map();
+  new Set([...visualMeshes.keys(), ...collisionMeshes.keys()]).forEach((linkName) => {
+    const joint = jointByLink.get(linkName);
+    if (!joint?.name) return;
+    if (!options.has(joint.name)) options.set(joint.name, { ...joint, links: [] });
+    options.get(joint.name).links.push(linkName);
+  });
+  return [...options.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function collectRobotCollisionProxies(robot, ignoredJointNames = []) {
+  const { excludedLinks, visualMeshes, collisionMeshes, jointByLink } = collectRobotCollisionMeshes(robot);
+  const ignoredJoints = new Set(normalizeIgnoredCollisionJoints(ignoredJointNames));
+  const ignoredLinks = [];
+  const proxies = [];
+  const monitoredLinks = new Set();
+  const highlightEntries = [];
+  const redMaterial = createWarningMaterial(RED_WARNING_COLOR);
+  const yellowMaterial = createWarningMaterial(YELLOW_WARNING_COLOR);
+  let proxyIndex = 0;
 
   const linkNames = new Set([...visualMeshes.keys(), ...collisionMeshes.keys()]);
   linkNames.forEach((linkName) => {
+    if (ignoredJoints.has(jointByLink.get(linkName)?.name)) {
+      excludedLinks.add(linkName);
+      ignoredLinks.push(linkName);
+      return;
+    }
     const dedicatedCollisionMeshes = collisionMeshes.get(linkName) || [];
     const fallbackVisualMeshes = visualMeshes.get(linkName) || [];
     const detectionMeshes = dedicatedCollisionMeshes.length
@@ -161,6 +193,7 @@ export function collectRobotCollisionProxies(robot) {
     proxies,
     highlightEntries,
     excludedLinks: [...excludedLinks].sort(),
+    ignoredLinks: ignoredLinks.sort(),
     monitoredLinks: [...monitoredLinks].sort(),
     collisionModelProxyCount: proxies.filter(
       (proxy) => proxy.source === 'urdf-collision',
@@ -224,7 +257,7 @@ export function serializeRobotCollisionProxies(collection) {
   }) || [];
 
   const signature = records.map((record) => (
-    [...record.center, ...record.axes, ...record.halfSize]
+    `${record.linkName}:` + [...record.center, ...record.axes, ...record.halfSize]
       .map((value) => Number(value).toFixed(4))
       .join(',')
   )).join('|');
