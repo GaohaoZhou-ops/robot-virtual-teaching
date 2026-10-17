@@ -173,8 +173,10 @@ struct ContentView: View {
                     }
                 }.frame(height: min(CGFloat(discovery.servers.count) * 62, 124))
             }
-            Text(discovery.message).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("discovery-status")
+            if !discovery.message.isEmpty {
+                Text(discovery.message).font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("discovery-status")
+            }
         }
     }
     private func localProjectsPanel(minHeight: CGFloat) -> some View {
@@ -448,14 +450,10 @@ struct TeachingView: View {
                             }.buttonStyle(.bordered).accessibilityIdentifier("expand-teaching-panel")
                         }
                     }.font(.caption).padding(16).background(.black.opacity(0.75))
-                    if ARController.supported && !completed {
+                    if liveCamera && levelVisible {
                         HStack {
-                            VStack(alignment: .leading, spacing: 10) {
-                                if !ar.calibrated { groundAssistancePanel }
-                                if levelVisible {
-                                    SpatialLevelView(reading: ar.levelReading).allowsHitTesting(false)
-                                }
-                            }.frame(width: 232)
+                            SpatialLevelView(reading: ar.levelReading)
+                                .frame(width: 232).allowsHitTesting(false)
                             Spacer(minLength: 0)
                         }.padding(.horizontal, 16).padding(.top, 10)
                     }
@@ -479,14 +477,7 @@ struct TeachingView: View {
                                 .accessibilityElement(children: .contain).accessibilityIdentifier("floating-pose-controls")
                         }
                     }.padding(20)
-                }.frame(width: controlsWidth, height: viewport.size.height)
-                    .overlay {
-                        if liveCamera && (!ar.placed || ar.repositioning) {
-                            Text(ar.groundAssistance ? "扫描地面，在青色网格上放置物体" : "对准现场基准点，放置独立示教物体")
-                                .font(.callout).padding(10).background(.black.opacity(0.65), in: Capsule())
-                                .padding(.horizontal, 16).offset(y: 60).allowsHitTesting(false)
-                        }
-                    }.clipped()
+                }.frame(width: controlsWidth, height: viewport.size.height).clipped()
             // Keep sidebar controls alive while folding; only the overlay's
             // usable area changes, never the underlying scene/session.
             VStack(spacing: 0) {
@@ -518,6 +509,7 @@ struct TeachingView: View {
                             .font(.caption).foregroundStyle(.secondary)
                         Divider()
                     }
+                    if liveCamera && !ar.calibrated { groundAssistanceControl }
                     fieldOfViewControl
                     coverageControl
                     Divider()
@@ -604,7 +596,10 @@ struct TeachingView: View {
         .onReceive(session.$current) { project in
             if let project, project.id == projectID { coverage.update(model: geometry, samples: project.result.samples) }
         }
-        .onChange(of: session.displaySettings) { _, settings in renderer.update(geometry, settings: settings) }
+        .onChange(of: session.displaySettings) { _, settings in
+            guard !review, renderer.appliedSettings != settings else { return }
+            renderer.update(geometry, settings: settings)
+        }
         .onChange(of: canRecordPose) { _, available in
             if !available { nearbyPoseConfirmation = nil }
         }
@@ -615,7 +610,7 @@ struct TeachingView: View {
         }
         .sheet(isPresented: $displaySettingsOpen) { ModelDisplaySettingsView(geometry: geometry, renderer: renderer).environmentObject(session) }
         .fullScreenCover(isPresented: $review, onDismiss: { ar.refreshMarkers(session.current?.result.samples ?? []) }) {
-            PoseReviewView(rendered: renderer.geometry, coverage: coverage).environmentObject(session)
+            PoseReviewView(geometry: geometry, renderer: renderer, coverage: coverage).environmentObject(session)
         }
         .alert("当前 Pose 与上一个距离很近", isPresented: Binding(
             get: { nearbyPoseConfirmation != nil },
@@ -741,10 +736,11 @@ struct TeachingView: View {
             }
             if zividFieldOfViewEnabled {
                 Text("水平 56.6° · 垂直 35.6°").font(.caption).monospacedDigit().foregroundStyle(accent)
-                Text(fieldOfView == nil ? "正在获取相机视野…" : fieldOfView?.fullyVisible == false
-                     ? "iPad 相机视野不足，仅显示可见部分" : "阴影为视野外区域 · 标称视野参考")
-                    .font(.caption).foregroundStyle(fieldOfView?.fullyVisible == false ? .orange : .secondary)
-                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("zivid-fov-status")
+                if fieldOfView?.fullyVisible != true {
+                    Text(fieldOfView == nil ? "正在获取相机视野…" : "iPad 相机视野不足，仅显示可见部分")
+                        .font(.caption).foregroundStyle(fieldOfView?.fullyVisible == false ? .orange : .secondary)
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("zivid-fov-status")
+                }
             }
         }
     }
@@ -768,35 +764,31 @@ struct TeachingView: View {
                     Text("\(Int((coverage.opacity * 100).rounded()))%")
                         .font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
                 }
-                Text("M70 · 0.3–1.3 m · 绿色标记已示教表面")
-                    .font(.caption).foregroundStyle(.secondary)
             }
-            HStack(spacing: 6) {
-                if coverage.preparing { ProgressView().controlSize(.mini) }
-                Text(coverage.status).font(.caption)
-                    .foregroundStyle(coverage.error.isEmpty ? Color.secondary : .orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("teaching-coverage-status")
+            if coverage.preparing || !coverage.error.isEmpty {
+                HStack(spacing: 6) {
+                    if coverage.preparing {
+                        ProgressView().controlSize(.mini)
+                            .accessibilityIdentifier("teaching-coverage-progress")
+                    }
+                    Text(coverage.status).font(.caption)
+                        .foregroundStyle(coverage.error.isEmpty ? Color.secondary : .orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("teaching-coverage-status")
+                }
             }
         }
     }
-    private var groundAssistancePanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button { ar.groundAssistance.toggle() } label: {
-                    Label("地面辅助", systemImage: "square.3.layers.3d").font(.caption.weight(.semibold))
-                        .frame(minHeight: 44).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityHidden(true)
-                Spacer(minLength: 4)
-                Toggle("地面辅助", isOn: $ar.groundAssistance).labelsHidden().fixedSize()
-                    .tint(accent).accessibilityIdentifier("ground-assistance")
-            }
-            Text(ar.groundStatus).font(.caption).foregroundStyle(ar.groundTargetAvailable ? accent : .secondary)
-                .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("ground-status")
-            if ar.groundAssistance {
-                Text("仅水平地面 · 模型仍可自由倾斜").font(.caption2).foregroundStyle(.secondary)
-            }
-        }.padding(12).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+    private var groundAssistanceControl: some View {
+        HStack {
+            Button { ar.groundAssistance.toggle() } label: {
+                Label("地面辅助", systemImage: "square.3.layers.3d")
+                    .font(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityHidden(true)
+            Spacer(minLength: 4)
+            Toggle("地面辅助", isOn: $ar.groundAssistance).labelsHidden().fixedSize()
+                .tint(accent).accessibilityIdentifier("ground-assistance")
+        }
     }
     private var calibrationPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -807,18 +799,6 @@ struct TeachingView: View {
                 }.disabled(ar.repositioning)
                     .onChange(of: ar.referenceX) { _, _ in ar.updatePlacement() }
                     .onChange(of: ar.referenceY) { _, _ in ar.updatePlacement() }.onChange(of: ar.referenceZ) { _, _ in ar.updatePlacement() }
-                Button(ar.repositioning ? "放到准星位置" : ar.placed ? "重新放置物体" : "放置物体") {
-                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                    if ar.placed && !ar.repositioning { ar.beginRepositioning() }
-                    else { ar.placeObject() }
-                }.buttonStyle(.bordered)
-                    .disabled(!ar.placementActionEnabled)
-                    .accessibilityIdentifier("place-model")
-                if ar.repositioning {
-                    Button("取消重新放置") { ar.cancelRepositioning() }.buttonStyle(.bordered)
-                        .accessibilityIdentifier("cancel-model-repositioning")
-                    Text("物体暂时隐藏，点击画面选择新位置；取消可恢复原位置。").font(.caption).foregroundStyle(.secondary)
-                }
                 HStack { Text("方向"); Spacer(); Text("\(ar.yaw, specifier: "%.1f")°").monospacedDigit() }.font(.caption)
                 Slider(value: $ar.yaw, in: -180...180).disabled(ar.repositioning).onChange(of: ar.yaw) { _, _ in ar.updatePlacement() }
                 Button { withAnimation { tiltControlsOpen.toggle() } } label: {
@@ -834,6 +814,18 @@ struct TeachingView: View {
                         tiltControl("左右倾斜", angle: $ar.pitch, id: "model-pitch")
                         tiltControl("前后倾斜", angle: $ar.roll, id: "model-roll")
                     }.font(.caption).disabled(ar.repositioning)
+                }
+                Button(ar.repositioning ? "放到准星位置" : ar.placed ? "重新放置物体" : "放置物体") {
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    if ar.placed && !ar.repositioning { ar.beginRepositioning() }
+                    else { ar.placeObject() }
+                }.buttonStyle(.bordered)
+                    .disabled(!ar.placementActionEnabled)
+                    .accessibilityIdentifier("place-model")
+                if ar.repositioning {
+                    Button("取消重新放置") { ar.cancelRepositioning() }.buttonStyle(.bordered)
+                        .accessibilityIdentifier("cancel-model-repositioning")
+                    Text("物体暂时隐藏，点击画面选择新位置；取消可恢复原位置。").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -959,7 +951,8 @@ struct PoseReviewView: View {
     @State private var previewReset = 0
     @StateObject private var previewPreparation = PosePreviewPreparation()
     @FocusState private var poseNameFocused: Bool
-    let rendered: SCNGeometry?
+    let geometry: ModelGeometry
+    @ObservedObject var renderer: ModelRenderer
     let coverage: TeachingCoverageRenderer
     private var samples: [TeachingSample] { session.current?.result.samples ?? [] }
     private var selected: TeachingSample? { samples.first { $0.id == selectedID } ?? samples.first }
@@ -1086,28 +1079,37 @@ struct PoseReviewView: View {
     private var posePreview: some View {
         VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { previewModeButtons; Spacer(minLength: 0); previewActions }
+                HStack(spacing: 12) {
+                    previewModeButtons; Spacer(minLength: 0); previewQualityControl; previewActions
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 12) { previewModeButtons; Spacer(minLength: 0); previewActions }
+                    previewQualityControl
+                }
                 VStack(alignment: .trailing, spacing: 8) {
                     HStack { previewModeButtons; Spacer(minLength: 0) }
+                    HStack { previewQualityControl; Spacer(minLength: 0) }
                     previewActions
                 }
             }.padding(12)
+            if !renderer.error.isEmpty {
+                Text(renderer.error).font(.caption).foregroundStyle(.orange)
+                    .padding(.horizontal, 12).padding(.bottom, 8)
+            }
             Divider()
             if let selected {
                 let aspect = selected.previewAspect ?? (4.0 / 3.0)
                 let ready = previewPreparation.sampleID == selected.id
-                PosePreviewView(rendered: rendered, overview: previewPreparation.overview,
+                PosePreviewView(rendered: renderer.geometry, overview: previewPreparation.overview,
                                 footprint: ready ? previewPreparation.footprint : nil,
                                 status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
                                 sample: selected, mode: previewMode, resetRevision: previewReset)
                     .aspectRatio(CGFloat(aspect.isFinite && aspect > 0 ? aspect : 4.0 / 3.0), contentMode: .fit)
+                    .accessibilityElement(children: .contain)
                     .accessibilityLabel("\(selected.name) 的物体视角")
                     .accessibilityValue(previewMode == .interactive ? "3D 交互视图" : "2D 记录视角图像")
                     .accessibilityIdentifier("pose-review-preview")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Text(previewMode == .interactive ? "当前 Pose 点云 · 单指旋转 · 双指平移 · 捏合缩放" : "记录视角图像 · 单指平移 · 捏合缩放")
-                    .font(.caption).foregroundStyle(.secondary).padding(10)
-                    .accessibilityIdentifier("pose-preview-hint")
             } else { ContentUnavailableView("还没有 Pose", systemImage: "viewfinder") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black.opacity(0.25))
@@ -1126,6 +1128,63 @@ struct PoseReviewView: View {
                     .accessibilityIdentifier("pose-preview-mode-\(mode.rawValue)")
             }
         }.fixedSize(horizontal: true, vertical: false).disabled(selected == nil)
+    }
+
+    private var qualityOptions: [ModelDisplaySettings] {
+        let current = session.displaySettings
+        let candidates: [ModelDisplaySettings]
+        if geometry.usesMesh(current) {
+            candidates = MeshQuality.allCases.map { quality in
+                var settings = current; settings.meshQuality = quality; return settings
+            }
+        } else {
+            candidates = PointDensity.allCases.map { density in
+                var settings = current; settings.pointDensity = density; return settings
+            }
+        }
+        // Automatic and lightweight budgets can fall between percentage presets.
+        // Order by actual draw count, merging equivalent stops for small models.
+        var byCount: [Int: ModelDisplaySettings] = [:]
+        for settings in [current] + candidates where byCount[geometry.renderedCount(settings)] == nil {
+            byCount[geometry.renderedCount(settings)] = settings
+        }
+        return byCount.sorted { $0.key < $1.key }.map(\.value)
+    }
+
+    private var previewQualityControl: some View {
+        let options = qualityOptions
+        let count = geometry.renderedCount(session.displaySettings)
+        let total = geometry.usesMesh(session.displaySettings) ? geometry.indices / 3 : geometry.vertices
+        let percentage = (Double(count) / Double(max(total, 1))).formatted(.percent.precision(.fractionLength(0...1)))
+        let selection = Binding<Double>(
+            get: { Double(options.firstIndex { geometry.renderedCount($0) == count } ?? 0) },
+            set: { value in
+                let index = min(max(Int(value.rounded()), 0), options.count - 1)
+                let settings = options[index]
+                guard settings != session.displaySettings else { return }
+                session.setDisplaySettings(settings)
+                // The covered teaching page may defer its onChange until return.
+                renderer.update(geometry, settings: settings, debounce: true)
+            })
+        return HStack(spacing: 6) {
+            Text("质量").font(.caption).foregroundStyle(.secondary)
+            Slider(value: selection, in: 0...Double(max(options.count - 1, 1)), step: 1)
+                .frame(width: 100).tint(accent)
+                .disabled(selected == nil || options.count < 2)
+                .accessibilityLabel("点云 / 模型显示质量")
+                .accessibilityValue(percentage)
+                .accessibilityHint("向右提高细节，向左提升流畅度")
+                .accessibilityIdentifier("pose-preview-quality")
+            Text(percentage).font(.caption.monospacedDigit()).foregroundStyle(accent)
+                .frame(width: 46, alignment: .trailing)
+            ZStack {
+                if renderer.preparing {
+                    ProgressView().controlSize(.mini)
+                        .accessibilityLabel("正在更新显示质量")
+                        .accessibilityIdentifier("pose-preview-quality-progress")
+                }
+            }.frame(width: 14, height: 14)
+        }.fixedSize(horizontal: true, vertical: false)
     }
 
     private var previewActions: some View {
@@ -1182,8 +1241,10 @@ struct PoseReviewView: View {
                         }.accessibilityIdentifier("delete-review-pose")
                     }.buttonStyle(.bordered)
                 }
-                Text(completed ? "本次示教已完成，Pose 已锁定。" : "保存后返回示教，即可记录下一个 Pose。")
-                    .font(.caption).foregroundStyle(.secondary)
+                if completed {
+                    Text("本次示教已完成，Pose 已锁定。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if !session.error.isEmpty { Text(session.error).font(.caption).foregroundStyle(.orange) }
             }.frame(maxWidth: .infinity, alignment: .leading)
         }

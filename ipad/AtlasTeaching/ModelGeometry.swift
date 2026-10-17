@@ -208,11 +208,14 @@ final class ModelRenderer: ObservableObject {
     @Published private(set) var error = ""
     private var task: Task<Void, Never>?
 
-    func update(_ model: ModelGeometry, settings: ModelDisplaySettings) {
+    func update(_ model: ModelGeometry, settings: ModelDisplaySettings, debounce: Bool = false) {
         task?.cancel(); preparing = true; error = ""
         task = Task {
-            let build = Task.detached(priority: .userInitiated) { try model.makeGeometry(settings: settings) }
             do {
+                // Coalesce slider movement before decoding another GPU buffer.
+                if debounce { try await Task.sleep(nanoseconds: 180_000_000) }
+                try Task.checkCancellation()
+                let build = Task.detached(priority: .userInitiated) { try model.makeGeometry(settings: settings) }
                 let result = try await withTaskCancellationHandler(operation: { try await build.value }, onCancel: { build.cancel() })
                 guard !Task.isCancelled else { return }
                 geometry = result; appliedSettings = settings; preparing = false

@@ -173,7 +173,7 @@ import CryptoKit
 
         let renderer = ModelRenderer()
         renderer.update(model, settings: ModelDisplaySettings(meshQuality: .full))
-        renderer.update(model, settings: denseSettings)
+        renderer.update(model, settings: denseSettings, debounce: true)
         for _ in 0..<300 {
             if !renderer.preparing { break }
             try await Task.sleep(nanoseconds: 20_000_000)

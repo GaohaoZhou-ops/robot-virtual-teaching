@@ -52,6 +52,14 @@ struct PosePreviewView: UIViewRepresentable {
     static func dismantleUIView(_ view: PosePreviewSurface, coordinator: ()) { view.stop() }
 }
 
+private final class PoseOverviewContainer: UIView {
+    var onActivate: (() -> Void)?
+    override func accessibilityActivate() -> Bool {
+        guard let onActivate else { return false }
+        onActivate(); return true
+    }
+}
+
 /// The recorded camera is independent of the camera used for inspection. Neither
 /// gestures nor image rendering can change a saved sample or the live AR scene.
 final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollViewDelegate {
@@ -63,8 +71,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     let overviewView = SCNView()
     let overviewCamera = SCNNode()
     let overviewObject = SCNNode()
-    private let overviewContainer = UIView()
-    private let overviewLabel = UILabel()
+    let overviewCollapseButton = UIButton(type: .system)
+    private let overviewContainer = PoseOverviewContainer()
+    private let overviewDoubleTap = UITapGestureRecognizer()
     private let statusLabel = UILabel()
     private let recordedScene = SCNScene()
     private let recordedObject = SCNNode()
@@ -72,7 +81,11 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     private weak var sourceGeometry: SCNGeometry?
     private weak var sourceOverview: SCNGeometry?
     private var footprintFrames: MTLBuffer?
+    private var overviewFootprint: TeachingCoverageSnapshot?
     private var controller = SCNCameraController()
+    private var overviewController = SCNCameraController()
+    private var overviewRadius: Float = 1
+    private(set) var overviewExpanded = false
     private var sampleID: String?
     private var recordedTransform: [Float] = []
     private var recordedProjection: [Float]?
@@ -124,17 +137,46 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewContainer.layer.cornerRadius = 12; overviewContainer.clipsToBounds = true
         overviewContainer.layer.borderWidth = 1
         overviewContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
-        overviewContainer.isUserInteractionEnabled = false
-        overviewLabel.text = "全局 · 绿色为当前 Pose"
-        overviewLabel.textColor = UIColor(red: 0.4, green: 0.95, blue: 0.73, alpha: 1)
-        overviewLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        overviewLabel.textAlignment = .center
-        overviewContainer.addSubview(overviewView); overviewContainer.addSubview(overviewLabel)
+        overviewView.isUserInteractionEnabled = false
+        overviewView.accessibilityIdentifier = "pose-global-overview"
+        overviewView.accessibilityLabel = "全局点云，绿色为当前 Pose"
+        overviewView.accessibilityHint = "单指旋转，双指平移，捏合缩放"
+        overviewCollapseButton.setImage(UIImage(systemName: "arrow.down.right.and.arrow.up.left",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
+        overviewCollapseButton.tintColor = .white.withAlphaComponent(0.85)
+        overviewCollapseButton.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        overviewCollapseButton.layer.cornerRadius = 12
+        overviewCollapseButton.layer.borderWidth = 1
+        overviewCollapseButton.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
+        overviewCollapseButton.accessibilityLabel = "收起全局视图"
+        overviewCollapseButton.accessibilityIdentifier = "collapse-pose-overview"
+        overviewCollapseButton.isHidden = true
+        overviewCollapseButton.addTarget(self, action: #selector(collapseOverview), for: .touchUpInside)
+        overviewContainer.addSubview(overviewView)
+        overviewContainer.addSubview(overviewCollapseButton)
+        overviewContainer.isAccessibilityElement = true
+        overviewContainer.accessibilityTraits = .button
+        overviewContainer.accessibilityIdentifier = "pose-global-thumbnail"
+        overviewContainer.accessibilityLabel = "全局缩略图，绿色为当前 Pose"
+        overviewContainer.accessibilityHint = "双击放大全局视图"
+        overviewContainer.onActivate = { [weak self] in self?.setOverviewExpanded(true) }
+        overviewDoubleTap.numberOfTapsRequired = 2
+        overviewDoubleTap.addTarget(self, action: #selector(expandOverview))
+        overviewContainer.addGestureRecognizer(overviewDoubleTap)
+        let overviewOrbit = UIPanGestureRecognizer(target: self, action: #selector(orbitOverview(_:)))
+        overviewOrbit.maximumNumberOfTouches = 1
+        let overviewPan = UIPanGestureRecognizer(target: self, action: #selector(panOverview(_:)))
+        overviewPan.minimumNumberOfTouches = 2; overviewPan.maximumNumberOfTouches = 2
+        let overviewPinch = UIPinchGestureRecognizer(target: self, action: #selector(pinchOverview(_:)))
+        overviewPan.delegate = self; overviewPinch.delegate = self
+        overviewView.addGestureRecognizer(overviewOrbit)
+        overviewView.addGestureRecognizer(overviewPan); overviewView.addGestureRecognizer(overviewPinch)
         addSubview(overviewContainer)
         statusLabel.textColor = .secondaryLabel; statusLabel.numberOfLines = 0
         statusLabel.font = .preferredFont(forTextStyle: .subheadline)
         statusLabel.textAlignment = .center
         addSubview(statusLabel)
+        bringSubviewToFront(overviewContainer)
 
         // SceneKit's default pinch changes fieldOfView, which is ignored by a
         // saved custom projection. Dolly instead, preserving its exact intrinsics.
@@ -145,7 +187,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinch(_:)))
         pan.delegate = self; pinch.delegate = self
         sceneView.addGestureRecognizer(orbit); sceneView.addGestureRecognizer(pan); sceneView.addGestureRecognizer(pinch)
-        isAccessibilityElement = true
+        isAccessibilityElement = false
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -171,6 +213,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let poseChanged = sampleID != sample.id || recordedTransform != transform.elements || recordedProjection != projection
         let geometryChanged = sourceGeometry !== rendered
         let footprintChanged = footprintFrames !== footprint?.frames
+        overviewFootprint = footprint
         if geometryChanged {
             sourceGeometry = rendered; recordedObject.geometry = rendered; snapshotDirty = true
         }
@@ -188,14 +231,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
                 return local
             }
         }
-        if sourceOverview !== overview || footprintChanged {
+        if sourceOverview !== overview || footprintChanged || (overviewExpanded && geometryChanged) {
             sourceOverview = overview
-            overviewObject.geometry = overview.map(Self.copyForInspection)
-            if let footprint, footprint.frameCount > 0 {
-                for material in overviewObject.geometry?.materials ?? [] {
-                    TeachingCoverageRenderer.apply(footprint, opacity: 0.65, to: material)
-                }
-            }
+            updateOverviewGeometry()
         }
         if poseChanged {
             sampleID = sample.id; recordedTransform = transform.elements; recordedProjection = projection
@@ -219,8 +257,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             imageScrollView.setContentOffset(imageScrollView.contentOffset, animated: false)
         }
         self.mode = mode
-        sceneView.isUserInteractionEnabled = mode == .interactive
-        sceneView.isHidden = mode == .image
+        if mode == .image || overview == nil { setOverviewExpanded(false) }
+        sceneView.isUserInteractionEnabled = mode == .interactive && !overviewExpanded
+        sceneView.isHidden = mode == .image || overviewExpanded
         imageScrollView.isHidden = mode == .interactive
         imageScrollView.isUserInteractionEnabled = mode == .image
         overviewContainer.isHidden = mode == .image || overview == nil
@@ -257,10 +296,15 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         sceneView.frame = bounds
         layoutImageViewport()
         let width = min(220, max(136, bounds.width * 0.28), max(0, bounds.width - 24))
-        let height = min(width * 0.75 + 28, max(0, bounds.height * 0.42))
-        overviewContainer.frame = CGRect(x: bounds.width - width - 12, y: bounds.height - height - 12, width: width, height: height)
-        overviewLabel.frame = CGRect(x: 4, y: 4, width: width - 8, height: 24)
-        overviewView.frame = CGRect(x: 1, y: 28, width: width - 2, height: max(0, height - 29))
+        let height = min(width * 0.75, max(0, bounds.height * 0.42))
+        if overviewExpanded {
+            overviewContainer.frame = bounds
+            overviewView.frame = overviewContainer.bounds
+            overviewCollapseButton.frame = CGRect(x: 12, y: 12, width: 44, height: 44)
+        } else {
+            overviewContainer.frame = CGRect(x: bounds.width - width - 12, y: bounds.height - height - 12, width: width, height: height)
+            overviewView.frame = overviewContainer.bounds.insetBy(dx: 1, dy: 1)
+        }
         statusLabel.frame = bounds.insetBy(dx: 24, dy: 24)
         syncOverviewCamera()
         renderRecordedImageIfNeeded()
@@ -325,7 +369,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         controller.worldUp = SCNVector3(0, 0, 1)
         controller.automaticTarget = false; controller.inertiaEnabled = false
         updateOrbitTarget()
-        syncOverviewCamera()
+        if overviewExpanded { fitOverviewCamera() } else { syncOverviewCamera() }
         sceneView.setNeedsDisplay()
     }
 
@@ -344,18 +388,109 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     }
 
     func syncOverviewCamera() {
+        guard !overviewExpanded else { return }
+        fitOverviewCamera()
+    }
+
+    private func fitOverviewCamera() {
         guard let geometry = overviewObject.geometry else { return }
         let (minimum, maximum) = geometry.boundingBox
         let lower = SIMD3<Float>(minimum.x, minimum.y, minimum.z)
         let upper = SIMD3<Float>(maximum.x, maximum.y, maximum.z)
         let center = (lower + upper) / 2
         let radius = max(simd_length(upper - lower) / 2, 0.05)
+        overviewRadius = radius
         overviewCamera.simdOrientation = camera.simdWorldOrientation
         overviewCamera.simdPosition = center - camera.simdWorldFront * (radius * 3)
         let aspect = Float(overviewView.bounds.width / max(overviewView.bounds.height, 1))
         overviewCamera.camera?.orthographicScale = Double(radius * 1.15 / max(min(aspect, 1), 0.1))
         overviewCamera.camera?.zNear = Double(max(radius * 0.01, 0.001))
         overviewCamera.camera?.zFar = Double(radius * 6)
+        if overviewExpanded {
+            overviewController.stopInertia()
+            overviewController = SCNCameraController()
+            overviewController.pointOfView = overviewCamera
+            overviewController.interactionMode = .orbitArcball
+            overviewController.worldUp = SCNVector3(0, 0, 1)
+            overviewController.automaticTarget = false; overviewController.inertiaEnabled = false
+            overviewController.target = SCNVector3(center.x, center.y, center.z)
+        }
+        overviewView.setNeedsDisplay()
+    }
+
+    private func updateOverviewGeometry() {
+        let geometry = overviewExpanded ? (sourceGeometry ?? sourceOverview) : sourceOverview
+        overviewObject.geometry = geometry.map(Self.copyForInspection)
+        if let footprint = overviewFootprint, footprint.frameCount > 0 {
+            for material in overviewObject.geometry?.materials ?? [] {
+                TeachingCoverageRenderer.apply(footprint, opacity: 0.65, to: material)
+            }
+        }
+    }
+
+    @objc private func expandOverview() { setOverviewExpanded(true) }
+    @objc private func collapseOverview() { setOverviewExpanded(false) }
+
+    func setOverviewExpanded(_ expanded: Bool) {
+        guard expanded != overviewExpanded else { return }
+        guard !expanded || (mode == .interactive && overviewObject.geometry != nil) else { return }
+        controller.stopInertia(); overviewController.stopInertia()
+        overviewExpanded = expanded
+        updateOverviewGeometry()
+        overviewDoubleTap.isEnabled = !expanded
+        overviewView.isUserInteractionEnabled = expanded
+        overviewView.isAccessibilityElement = expanded
+        overviewCollapseButton.isHidden = !expanded
+        overviewContainer.isAccessibilityElement = !expanded
+        overviewContainer.accessibilityIdentifier = expanded ? "pose-global-overview-container" : "pose-global-thumbnail"
+        sceneView.isUserInteractionEnabled = mode == .interactive && !expanded
+        sceneView.isHidden = mode == .image || expanded
+        setNeedsLayout(); layoutIfNeeded()
+        fitOverviewCamera()
+        if mode == .interactive {
+            UIAccessibility.post(notification: .layoutChanged, argument: expanded ? overviewCollapseButton : overviewContainer)
+        }
+    }
+
+    @objc private func orbitOverview(_ gesture: UIPanGestureRecognizer) {
+        guard overviewExpanded else { return }
+        let location = gesture.location(in: overviewView)
+        switch gesture.state {
+        case .began: overviewController.beginInteraction(location, withViewport: overviewView.bounds.size)
+        case .changed: overviewController.continueInteraction(location, withViewport: overviewView.bounds.size, sensitivity: 1)
+        case .ended, .cancelled, .failed:
+            overviewController.endInteraction(location, withViewport: overviewView.bounds.size, velocity: .zero)
+        default: break
+        }
+        overviewView.setNeedsDisplay()
+    }
+
+    @objc private func panOverview(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.state == .changed else { return }
+        translateOverview(by: gesture.translation(in: overviewView))
+        gesture.setTranslation(.zero, in: overviewView)
+    }
+
+    func translateOverview(by translation: CGPoint) {
+        guard overviewExpanded, overviewView.bounds.height > 0 else { return }
+        let units = Float(2 * (overviewCamera.camera?.orthographicScale ?? 1) / Double(overviewView.bounds.height))
+        let delta = overviewCamera.simdWorldRight * (-Float(translation.x) * units)
+            + overviewCamera.simdWorldUp * (Float(translation.y) * units)
+        overviewCamera.simdPosition += delta
+        let target = overviewController.target
+        let shifted = SIMD3<Float>(target.x, target.y, target.z) + delta
+        overviewController.target = SCNVector3(shifted.x, shifted.y, shifted.z)
+        overviewView.setNeedsDisplay()
+    }
+
+    @objc private func pinchOverview(_ gesture: UIPinchGestureRecognizer) {
+        guard gesture.state == .changed else { return }
+        zoomOverview(by: Double(gesture.scale)); gesture.scale = 1
+    }
+
+    func zoomOverview(by scale: Double) {
+        guard overviewExpanded, scale.isFinite, scale > 0, let lens = overviewCamera.camera else { return }
+        lens.orthographicScale = min(max(lens.orthographicScale / scale, Double(overviewRadius) * 0.015), Double(overviewRadius) * 20)
         overviewView.setNeedsDisplay()
     }
 
@@ -375,7 +510,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     }
 
     @objc private func orbit(_ gesture: UIPanGestureRecognizer) {
-        guard mode == .interactive else { return }
+        guard mode == .interactive, !overviewExpanded else { return }
         let location = gesture.location(in: sceneView)
         switch gesture.state {
         case .began: controller.beginInteraction(location, withViewport: bounds.size)
@@ -395,7 +530,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     }
 
     func translate(by translation: CGPoint) {
-        guard mode == .interactive, bounds.height > 0 else { return }
+        guard mode == .interactive, !overviewExpanded, bounds.height > 0 else { return }
         let target = SIMD3<Float>(controller.target.x, controller.target.y, controller.target.z)
         let distance = max(simd_distance(camera.simdPosition, target), 0.01)
         let projection = camera.camera.map { simd_float4x4($0.projectionTransform) } ?? matrix_identity_float4x4
@@ -414,7 +549,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     }
 
     func zoom(by scale: Float) {
-        guard mode == .interactive, scale.isFinite, scale > 0 else { return }
+        guard mode == .interactive, !overviewExpanded, scale.isFinite, scale > 0 else { return }
         let target = SIMD3<Float>(controller.target.x, controller.target.y, controller.target.z)
         let offset = camera.simdPosition - target, distance = simd_length(offset)
         guard distance > 0.0001 else { return }
@@ -426,7 +561,8 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     }
 
     func stop() {
-        controller.stopInertia(); sceneView.isPlaying = false; overviewView.isPlaying = false
+        controller.stopInertia(); overviewController.stopInertia()
+        sceneView.isPlaying = false; overviewView.isPlaying = false
         imageScrollView.setContentOffset(imageScrollView.contentOffset, animated: false)
     }
 }

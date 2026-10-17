@@ -63,7 +63,7 @@ final class LANServiceDiscovery: ObservableObject {
             guard let self, self.generation == generation else { return }
             self.stop()
             self.message = self.servers.isEmpty
-                ? "未找到服务。请确认电脑服务已启动、两台设备连接同一局域网；也可手动填写地址。"
+                ? ""
                 : "找到 \(self.servers.count) 个服务，点选后输入电脑上的配对码。"
         }
     }

@@ -652,7 +652,7 @@ final class AtlasTeachingUITests: XCTestCase {
     }
 
     func testPoseImageZoomPanRestoreAndResize() throws {
-        let geometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
+        var geometry: SCNGeometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
         var sample = TeachingSample(segmentId: "image-detail", kind: "keyframe",
             cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 3)),
                 quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
@@ -672,6 +672,11 @@ final class AtlasTeachingUITests: XCTestCase {
         let offset = scroll.contentOffset
         XCTAssertEqual(scroll.zoomScale, 2.5, accuracy: 0.001)
         XCTAssertGreaterThan(offset.x, 0); XCTAssertGreaterThan(offset.y, 0)
+        geometry = geometry.copy() as! SCNGeometry
+        update(.image)
+        XCTAssertEqual(scroll.zoomScale, 2.5, accuracy: 0.001)
+        XCTAssertEqual(scroll.contentOffset, offset, "replacing the display geometry retains the inspected image region")
+        XCTAssertEqual(view.camera.simdTransform.elements, inspected, "display quality changes preserve the 3D camera")
         update(.interactive); XCTAssertEqual(view.camera.simdTransform.elements, inspected)
         update(.image)
         XCTAssertEqual(scroll.zoomScale, 2.5, accuracy: 0.001)
@@ -750,6 +755,54 @@ final class AtlasTeachingUITests: XCTestCase {
         view.stop()
     }
 
+    func testExpandedOverviewKeepsLocalCameraAndResumesSynchronization() throws {
+        let geometry = SCNBox(width: 4, height: 3, length: 1, chamferRadius: 0)
+        geometry.widthSegmentCount = 8; geometry.heightSegmentCount = 6
+        let thumbnail = SCNBox(width: 4, height: 3, length: 1, chamferRadius: 0)
+        let sample = TeachingSample(segmentId: "expanded-overview", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 5)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        view.update(rendered: geometry, overview: thumbnail, sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded(); view.zoom(by: 1.5); view.translate(by: CGPoint(x: 20, y: 15))
+        let localTransform = view.camera.simdTransform.elements
+        let smallFrame = view.overviewView.frame
+        let thumbnailCount = thumbnail.elements[0].primitiveCount
+        view.setOverviewExpanded(true)
+        XCTAssertTrue(view.overviewExpanded); XCTAssertFalse(view.overviewCollapseButton.isHidden)
+        XCTAssertEqual(view.overviewView.bounds.size, view.bounds.size)
+        XCTAssertEqual(view.overviewObject.geometry?.elements[0].primitiveCount, geometry.elements[0].primitiveCount,
+                       "the large view uses the selected display quality rather than the small thumbnail budget")
+        let fittedScale = view.overviewCamera.camera!.orthographicScale
+        view.zoomOverview(by: 2); view.translateOverview(by: CGPoint(x: 40, y: 30))
+        view.overviewCamera.simdOrientation = simd_quatf(angle: 0.7, axis: SIMD3(0, 0, 1))
+        let inspected = view.overviewCamera.simdTransform.elements
+        view.syncOverviewCamera(); view.setNeedsLayout(); view.layoutIfNeeded()
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, inspected)
+        XCTAssertEqual(view.overviewCamera.camera!.orthographicScale, fittedScale / 2, accuracy: 0.001)
+        view.zoom(by: 2); view.translate(by: CGPoint(x: 10, y: 10))
+        XCTAssertEqual(view.camera.simdTransform.elements, localTransform, "expanded inspection does not move the local Pose camera")
+        let replacement = geometry.copy() as! SCNGeometry
+        view.update(rendered: replacement, overview: thumbnail, sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, inspected, "quality updates preserve the global inspection camera")
+        view.frame.size = CGSize(width: 600, height: 450); view.layoutIfNeeded()
+        XCTAssertEqual(view.overviewView.bounds.size, view.bounds.size)
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, inspected)
+        view.setOverviewExpanded(false)
+        XCTAssertFalse(view.overviewExpanded); XCTAssertTrue(view.overviewCollapseButton.isHidden)
+        XCTAssertLessThan(view.overviewView.frame.width, smallFrame.width + 1)
+        XCTAssertEqual(view.overviewObject.geometry?.elements[0].primitiveCount, thumbnailCount)
+        XCTAssertEqual(view.camera.simdTransform.elements, localTransform)
+        XCTAssertLessThan(simd_length(view.overviewCamera.simdWorldFront - view.camera.simdWorldFront), 0.0001)
+        view.setOverviewExpanded(true)
+        view.update(rendered: replacement, overview: thumbnail, sample: sample, mode: .image, resetRevision: 0)
+        XCTAssertFalse(view.overviewExpanded); XCTAssertTrue(view.overviewCollapseButton.isHidden)
+        view.setOverviewExpanded(true)
+        XCTAssertFalse(view.overviewExpanded, "2D mode cannot leave an interactive global overlay on the image")
+        view.stop()
+    }
+
     func testPosePreviewInteractionAndImageSwitching() throws {
         continueAfterFailure = false
         guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_PREVIEW_DISPOSABLE_FIXTURE_ID"],
@@ -772,6 +825,59 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(close.frame.midY, reset.frame.midY, accuracy: 2)
         XCTAssertTrue(reset.isEnabled)
         XCTAssertFalse(app.buttons["delete-review-pose"].exists, "inspection remains available for locked projects")
+        let quality = app.sliders["pose-preview-quality"]
+        XCTAssertTrue(quality.isHittable); XCTAssertTrue(quality.isEnabled)
+        let initialQuality = quality.value as? String
+        let lowQuality = preview.screenshot().pngRepresentation
+        quality.adjust(toNormalizedSliderPosition: 0.65)
+        XCTAssertNotEqual(quality.value as? String, initialQuality)
+        func waitForQualityUpdate() {
+            let progress = app.descendants(matching: .any)["pose-preview-quality-progress"].firstMatch
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: progress)], timeout: 20), .completed)
+        }
+        waitForQualityUpdate()
+        XCTAssertNotEqual(preview.screenshot().pngRepresentation, lowQuality, "the quality slider changes the rendered 3D density")
+        let quality3D = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        quality3D.name = "Pose quality slider 3D"; quality3D.lifetime = .keepAlways; add(quality3D)
+        let thumbnail = app.descendants(matching: .any)["pose-global-thumbnail"].firstMatch
+        let overview = app.descendants(matching: .any)["pose-global-overview"].firstMatch
+        let collapse = app.buttons["collapse-pose-overview"]
+        XCTAssertTrue(thumbnail.isHittable)
+        let thumbnailWidth = thumbnail.frame.width
+        func comparisonPixels(_ screenshot: XCUIScreenshot) throws -> [UInt8] {
+            let image = try XCTUnwrap(screenshot.image.cgImage)
+            let width = 512, height = max(1, 512 * image.height / image.width)
+            let context = try XCTUnwrap(CGContext(data: nil, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return Array(UnsafeBufferPointer(start: try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self), count: width * height * 4))
+        }
+        let beforeOverview = try comparisonPixels(preview.screenshot())
+        thumbnail.doubleTap()
+        XCTAssertTrue(collapse.waitForExistence(timeout: 5)); XCTAssertTrue(collapse.isHittable)
+        XCTAssertGreaterThan(overview.frame.width, thumbnailWidth * 2)
+        XCTAssertLessThan(collapse.frame.midX, overview.frame.midX)
+        XCTAssertLessThan(collapse.frame.midY, overview.frame.midY)
+        let fittedOverview = overview.screenshot().pngRepresentation
+        overview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: overview.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)))
+        let rotatedOverview = overview.screenshot().pngRepresentation
+        XCTAssertNotEqual(rotatedOverview, fittedOverview, "the expanded global view rotates independently")
+        overview.pinch(withScale: 1.6, velocity: 1)
+        XCTAssertNotEqual(overview.screenshot().pngRepresentation, rotatedOverview, "the expanded global view supports pinch zoom")
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Expanded interactive global overview"; expanded.lifetime = .keepAlways; add(expanded)
+        collapse.tap()
+        XCTAssertTrue(thumbnail.isHittable)
+        let afterOverview = try comparisonPixels(preview.screenshot())
+        XCTAssertEqual(afterOverview.count, beforeOverview.count)
+        // Recreating the thumbnail can change subpixel antialiasing. Compare
+        // rendered pixels with a small tolerance instead of compressed PNG bytes.
+        let pixelError = zip(beforeOverview, afterOverview).reduce(0.0) { $0 + Double(abs(Int($1.0) - Int($1.1))) }
+            / Double(beforeOverview.count)
+        XCTAssertLessThan(pixelError, 0.05, "collapsing returns to the unchanged local Pose view")
         let original = preview.screenshot().pngRepresentation
         preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: preview.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)))
@@ -782,6 +888,10 @@ final class AtlasTeachingUITests: XCTestCase {
         image.tap()
         XCTAssertEqual(preview.value as? String, "2D 记录视角图像"); XCTAssertTrue(reset.isEnabled)
         XCTAssertTrue(reset.label.contains("恢复完整画幅"))
+        let denseImage = preview.screenshot().pngRepresentation
+        quality.adjust(toNormalizedSliderPosition: 0)
+        waitForQualityUpdate()
+        XCTAssertNotEqual(preview.screenshot().pngRepresentation, denseImage, "2D snapshots also update with display quality")
         let fullImage = preview.screenshot().pngRepresentation
         let initial2D = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         initial2D.name = "Pose 2D before pinch"; initial2D.lifetime = .keepAlways; add(initial2D)
@@ -803,6 +913,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCUIDevice.shared.orientation = orientation
             XCTAssertTrue(image.isHittable); XCTAssertTrue(interactive.isHittable)
             XCTAssertTrue(close.isHittable)
+            XCTAssertTrue(quality.isHittable)
             XCTAssertGreaterThanOrEqual(close.frame.minX, reset.frame.maxX)
             XCTAssertEqual(close.frame.midY, reset.frame.midY, accuracy: 2)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -1386,11 +1497,13 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
         XCTAssertEqual(toggle.value as? String, "1")
         let status = app.staticTexts["teaching-coverage-status"]
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            status.label.contains("表面覆盖已更新") || status.label.contains("未命中模型") || status.label.contains("记录 Pose 后")
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 60), .completed, status.label)
-        let initialStatus = status.label
+        func waitForCoverage() {
+            let progress = app.descendants(matching: .any)["teaching-coverage-progress"].firstMatch
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: progress)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 60), .completed)
+            XCTAssertFalse(status.exists, "finished coverage leaves the controls without a status caption")
+        }
+        waitForCoverage()
         XCTAssertFalse(app.buttons["capture-pose"].isEnabled, "displaying old footprints cannot calibrate or capture")
         let intensity = app.sliders["teaching-coverage-opacity"]
         intensity.adjust(toNormalizedSliderPosition: 1)
@@ -1404,15 +1517,14 @@ final class AtlasTeachingUITests: XCTestCase {
         snapshot("Surface coverage on the actual local model")
         app.buttons["close-display-settings"].tap()
         toggle.tap()
-        XCTAssertEqual(status.label, "已隐藏")
+        XCTAssertFalse(status.exists)
         XCTAssertFalse(intensity.exists)
         app.buttons["display-settings"].tap()
         XCTAssertTrue(app.buttons["close-display-settings"].waitForExistence(timeout: 10))
         snapshot("Original local model with coverage hidden")
         app.buttons["close-display-settings"].tap()
         toggle.tap()
-        let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", initialStatus), object: status)
-        XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 30), .completed)
+        waitForCoverage()
         intensity.adjust(toNormalizedSliderPosition: 0.364)
         app.buttons["collapse-teaching-panel"].tap()
         XCTAssertTrue(app.buttons["expand-teaching-panel"].waitForExistence(timeout: 5))
@@ -1421,10 +1533,10 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertFalse(app.buttons["capture-pose"].isEnabled)
         app.buttons["expand-teaching-panel"].tap()
         XCTAssertEqual(toggle.value as? String, "1")
-        XCTAssertEqual(status.label, initialStatus)
+        waitForCoverage()
         XCUIDevice.shared.press(.home); app.activate()
         XCTAssertTrue(toggle.waitForExistence(timeout: 15))
-        XCTAssertEqual(status.label, initialStatus, "camera restart retains model-relative coverage")
+        waitForCoverage()
         app.buttons["本地项目"].tap()
         XCTAssertTrue(project.waitForExistence(timeout: 10))
     }
@@ -1907,7 +2019,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertTrue(app.windows.firstMatch.frame.contains(aperture.frame))
             XCTAssertTrue(app.windows.firstMatch.frame.contains(toggle.frame))
             let status = app.staticTexts["zivid-fov-status"]
-            XCTAssertTrue(status.label.contains("标称视野参考"))
+            XCTAssertFalse(status.exists)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = "M70 field of view \(orientation.rawValue)"; screenshot.lifetime = .keepAlways; add(screenshot)
         }
@@ -1936,14 +2048,12 @@ final class AtlasTeachingUITests: XCTestCase {
         let project = app.buttons["local-project-\(fixtureID)"]
         XCTAssertTrue(project.waitForExistence(timeout: 15))
         project.tap()
-        let aid = app.switches["ground-assistance"], status = app.staticTexts["ground-status"]
+        let aid = app.switches["ground-assistance"], fieldOfView = app.switches["zivid-fov-toggle"]
         guard aid.waitForExistence(timeout: 60) else { throw XCTSkip("Requires an unfinished project on a LiDAR iPad") }
         XCTAssertEqual(aid.value as? String, "1")
-        XCTAssertTrue(status.exists)
         XCTAssertFalse(app.buttons["capture-pose"].isEnabled, "floor detection never calibrates or records automatically")
         aid.tap()
         XCTAssertEqual(aid.value as? String, "0")
-        XCTAssertTrue(status.label.contains("已关闭"))
         aid.tap()
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
@@ -1953,7 +2063,8 @@ final class AtlasTeachingUITests: XCTestCase {
             }, object: nil)
             XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 10), .completed)
             XCTAssertTrue(app.windows.firstMatch.frame.contains(aid.frame))
-            XCTAssertTrue(app.windows.firstMatch.frame.contains(status.frame))
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(fieldOfView.frame))
+            XCTAssertLessThanOrEqual(aid.frame.maxY, fieldOfView.frame.minY)
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = orientation.isLandscape ? "Ground assistance landscape" : "Ground assistance portrait"
             screenshot.lifetime = .keepAlways; add(screenshot)
@@ -1962,7 +2073,6 @@ final class AtlasTeachingUITests: XCTestCase {
         let place = app.buttons["place-model"]
         let groundReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: place)
         if XCTWaiter.wait(for: [groundReady], timeout: 20) == .completed {
-            XCTAssertTrue(status.label.contains("准星已对准地面"))
             app.buttons["model-tilt-controls"].tap()
             app.sliders["model-pitch"].adjust(toNormalizedSliderPosition: 0.58)
             let tilt = app.staticTexts["model-pitch-value"].label
