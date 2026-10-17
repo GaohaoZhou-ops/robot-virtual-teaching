@@ -378,6 +378,7 @@ struct TeachingView: View {
     @State private var sidebarCollapsed = false
     @State private var nearbyPoseConfirmation: NearbyPoseConfirmation?
     @State private var loadedProjectID: String?
+    @ScaledMetric(relativeTo: .body) private var teachingActionLabelHeight: CGFloat = 34
     let projectID: String
     let geometry: ModelGeometry
     private var completed: Bool { session.current?.result.completedAt != nil }
@@ -505,8 +506,6 @@ struct TeachingView: View {
                             Label("继续示教", systemImage: "camera.fill").frame(maxWidth: .infinity).padding(10)
                         }.buttonStyle(.bordered).disabled(session.busy || !ARController.supported)
                             .accessibilityIdentifier("continue-teaching")
-                        Text("保留已有 \(count) 个 Pose，创建补录草稿；原完成结果仍可查看和同步。")
-                            .font(.caption).foregroundStyle(.secondary)
                         Divider()
                     }
                     if liveCamera && !ar.calibrated { groundAssistanceControl }
@@ -517,7 +516,9 @@ struct TeachingView: View {
                         calibrationPanel
                         if !sidebarCollapsed && !ar.adjustingPlacement { recordPoseButton }
                     }
-                    Button { review = true } label: { Label("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle").frame(maxWidth: .infinity).padding(7) }
+                    Button { review = true } label: {
+                        teachingActionLabel("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle")
+                    }
                         .buttonStyle(.bordered).disabled(count == 0)
                         .accessibilityIdentifier("review-poses")
                     if !completed {
@@ -536,12 +537,6 @@ struct TeachingView: View {
                                     scannedResultCode = qr; scanningResult = false
                                 }
                             }
-                        Text("扫描电脑「iPad / Vision Pro」窗口中的二维码，无需输入地址。两端需连接同一局域网并打开相同物体。")
-                            .font(.caption).foregroundStyle(.secondary)
-                        if session.current?.requiresResultPairing == true {
-                            Text("这是补录结果，请先在电脑点击「新建传输」再扫码同步。也可通过 AirDrop 导入。")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
                         Button { Task { await shareResult() } } label: {
                             Label("AirDrop / 导出结果", systemImage: "square.and.arrow.up")
                                 .frame(maxWidth: .infinity).padding(10)
@@ -554,8 +549,6 @@ struct TeachingView: View {
                                     resultShare = nil
                                 }.presentationCompactAdaptation(.sheet)
                             }
-                        Text("选择 AirDrop 发送到 Mac，再在电脑导入结果文件。也可用 Type-C 连接，在 Finder → iPad → 文件 → Atlas 示教中拷贝 Teaching Exports。")
-                            .font(.caption).foregroundStyle(.secondary)
                         Divider()
                         LANAddressFields(address: $session.serverConnection).disabled(session.busy)
                         Button { Task { await session.finish(sync: true) } } label: { Label("局域网同步到电脑", systemImage: "wifi").frame(maxWidth: .infinity).padding(10) }
@@ -627,12 +620,17 @@ struct TeachingView: View {
             Text(confirmation.message)
         }
     }
+    private func teachingActionLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage).font(.body)
+            .frame(maxWidth: .infinity).frame(height: teachingActionLabelHeight)
+            .padding(.horizontal, 7)
+    }
     private var finishTeachingButton: some View {
         Button {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             finishing = true
         } label: {
-            Label("完成示教", systemImage: "checkmark.circle").frame(maxWidth: .infinity).padding(7)
+            teachingActionLabel("完成示教", systemImage: "checkmark.circle")
         }
         .buttonStyle(.bordered).disabled(count == 0 || session.busy || ar.adjustingPlacement)
         .accessibilityIdentifier("finish-teaching")
@@ -815,10 +813,13 @@ struct TeachingView: View {
                         tiltControl("前后倾斜", angle: $ar.roll, id: "model-roll")
                     }.font(.caption).disabled(ar.repositioning)
                 }
-                Button(ar.repositioning ? "放到准星位置" : ar.placed ? "重新放置物体" : "放置物体") {
+                Button {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                     if ar.placed && !ar.repositioning { ar.beginRepositioning() }
                     else { ar.placeObject() }
+                } label: {
+                    teachingActionLabel(ar.repositioning ? "放到准星位置" : ar.placed ? "重新放置物体" : "放置物体",
+                                        systemImage: "scope")
                 }.buttonStyle(.bordered)
                     .disabled(!ar.placementActionEnabled)
                     .accessibilityIdentifier("place-model")
@@ -900,12 +901,10 @@ struct ModelDisplaySettingsView: View {
                         .font(.system(.callout, design: .monospaced)).foregroundStyle(accent)
                         .accessibilityIdentifier("model-render-summary")
                     if !renderer.error.isEmpty { Text(renderer.error).foregroundStyle(.orange) }
-                    Text(geometry.indices == 0
-                         ? "此项目只有点云。若电脑源模型包含 Mesh，请新建传输以接收网格。"
-                         : "轻量 Mesh 用点状轮廓辅助辨认；查看完整连续表面请选择「全量」。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("每次打开先以轻量显示：最多 5 万点或 4 万面。需要更多细节时，可手动提高质量；下次打开仍从轻量开始，保留上次的显示模式。调整保留物体的实际尺寸、校准和已有 Pose。")
-                        .font(.callout).foregroundStyle(.secondary)
+                    if geometry.indices == 0 {
+                        Text("此项目只有点云。若电脑源模型包含 Mesh，请新建传输以接收网格。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }.padding(24)
             }
             .background(Color(red: 0.025, green: 0.05, blue: 0.065))
