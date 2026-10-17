@@ -44,4 +44,8 @@
 .ipad-qr [role="status"]:not(:empty) { margin-top: 12px; color: var(--amber); }
 .ipad-qr__manual { display: flex; align-items: center; gap: 18px; padding-top: 10px; margin-top: 12px; border-top: 1px solid var(--line); }
 .ipad-qr__manual strong { display: block; font: 30px Menlo, monospace; color: var(--cyan); letter-spacing: 4px; margin: 5px 0 9px; }
+.vision-pairing-mark { width: 248px; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; border: 1px solid #59dbe833; border-radius: 8px; background: #59dbe808; color: var(--cyan); }
+.vision-pairing-mark span { font: 10px Menlo, monospace; letter-spacing: 3px; }
+.vision-pairing-steps { margin: 14px 0; padding-left: 20px; font-size: 12px; line-height: 1.9; color: var(--muted); }
+.vision-pairing-steps li + li { margin-top: 8px; }
 @media (max-width: 650px) { .ipad-qr { grid-template-columns: 1fr; justify-items: center; gap: 16px; }.ipad-qr__instructions { width: 100%; } }

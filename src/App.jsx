@@ -12,6 +12,7 @@ import {
   FileSearch,
   FolderOpen,
   GitBranch,
+  Glasses,
   House,
   Layers2,
   Map as MapIcon,
@@ -48,7 +49,7 @@ import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.js
 import { buildMobileSolvedTask, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
-import { mobileDeviceLabel } from './lib/ipadProtocol.js';
+import { mobileDeviceKey, mobileDeviceLabel } from './lib/ipadProtocol.js';
 import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
 import { inspectConnectivity } from './lib/graph.js';
 import {
@@ -581,12 +582,15 @@ export default function App() {
   const activeCollapsedPanel = isIndependentTeachingSpace ? null : collapsedPanel;
   const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
   const activeTeachingTask = teachingTasks.find((task) => task.id === activeTeachingTaskId);
-  const teachingSource = activeTeachingTask?.mobileCapture ? 'mobile' : 'desktop';
+  const teachingDevice = activeTeachingTask?.mobileCapture ? mobileDeviceKey(activeTeachingTask.mobileCapture) : 'desktop';
+  const teachingSource = teachingDevice === 'desktop' ? 'desktop' : 'mobile';
   const desktopTeachingTasks = useMemo(() => teachingTasks.filter((task) => !task.mobileCapture), [teachingTasks]);
   const mobileTeachingTasks = useMemo(() => teachingTasks.filter((task) => task.mobileCapture), [teachingTasks]);
-  const workbenchTeachingTasks = teachingSource === 'mobile' ? mobileTeachingTasks : desktopTeachingTasks;
-  const mobileTeachingLabels = new Set(mobileTeachingTasks.map((task) => mobileDeviceLabel(task.mobileCapture)));
-  const mobileTeachingLabel = mobileTeachingLabels.size === 1 ? [...mobileTeachingLabels][0] : '设备';
+  const mobileTasksByDevice = useMemo(() => ({
+    ipad: mobileTeachingTasks.filter((task) => mobileDeviceKey(task.mobileCapture) === 'ipad'),
+    vision: mobileTeachingTasks.filter((task) => mobileDeviceKey(task.mobileCapture) === 'vision'),
+  }), [mobileTeachingTasks]);
+  const workbenchTeachingTasks = teachingDevice === 'desktop' ? desktopTeachingTasks : mobileTasksByDevice[teachingDevice];
   const waypoints = useMemo(() => buildTeachingWaypoints(storedWaypoints, teachingTasks, {
     mapData,
     coordinateFrame,
@@ -647,11 +651,11 @@ export default function App() {
 
   useEffect(() => {
     if (!mapData?.mapId || !activeTeachingTask) return;
-    teachingSourceSelectionsRef.current.set(`${teachingSpaceMode}:${mapData.mapId}:${teachingSource}`, {
+    teachingSourceSelectionsRef.current.set(`${teachingSpaceMode}:${mapData.mapId}:${teachingDevice}`, {
       taskId: activeTeachingTask.id,
       parkingPointId: activeTeachingParkingPointId,
     });
-  }, [mapData?.mapId, teachingSpaceMode, teachingSource, activeTeachingTask, activeTeachingParkingPointId]);
+  }, [mapData?.mapId, teachingSpaceMode, teachingDevice, activeTeachingTask, activeTeachingParkingPointId]);
 
   useEffect(() => {
     // Follow task/parking selection, without overriding later manual navigation
@@ -4684,8 +4688,9 @@ export default function App() {
   };
 
   const switchTeachingSource = (source) => {
-    if (source === teachingSource || teachingCaptureState.status === 'capturing') return;
-    const tasks = source === 'mobile' ? mobileTeachingTasks : desktopTeachingTasks;
+    if (source === teachingDevice || teachingCaptureState.status === 'capturing') return;
+    const tasks = source === 'desktop' ? desktopTeachingTasks : mobileTasksByDevice[source];
+    if (!tasks) return;
     const saved = teachingSourceSelectionsRef.current.get(`${teachingSpaceMode}:${mapData?.mapId}:${source}`);
     const task = tasks.find((item) => item.id === saved?.taskId) || tasks[0];
     stopTeachingTaskPlayback(false);
@@ -5099,11 +5104,11 @@ export default function App() {
                 </section>
                 {isIndependentTeachingSpace && <section className="workbench-menu-section">
                   <p>移动示教设备</p>
-                  <IPadTeachingMenu menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingSource}
-                    desktopCount={desktopTeachingTasks.length} mobileCount={mobileTeachingTasks.length} mobileLabel={mobileTeachingLabel}
+                  {['ipad', 'vision'].map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
+                    desktopCount={desktopTeachingTasks.length} deviceCount={mobileTasksByDevice[device].length}
                     disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
                     isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
-                    onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />
+                    onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />)}
                 </section>}
               </>,
             },
@@ -5198,12 +5203,12 @@ export default function App() {
                     onClick={() => switchTeachingSource('desktop')}>
                     <Bot size={13} />{isIndependentTeachingSpace ? '独立示教' : '电脑示教'}
                   </button>
-                  <button type="button" aria-pressed={teachingSource === 'mobile'}
-                    aria-label={`查看 ${mobileTeachingLabel} 示教`}
+                  {['ipad', 'vision'].filter((device) => mobileTasksByDevice[device].length).map((device) => <button key={device} type="button" aria-pressed={teachingDevice === device}
+                    aria-label={`查看 ${device === 'vision' ? 'Vision Pro' : 'iPad'} 示教`}
                     disabled={loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-                    onClick={() => switchTeachingSource('mobile')}>
-                    <Tablet size={13} />{mobileTeachingLabel} 示教
-                  </button>
+                    onClick={() => switchTeachingSource(device)}>
+                    {device === 'vision' ? <Glasses size={13} /> : <Tablet size={13} />}{device === 'vision' ? 'Vision Pro' : 'iPad'} 示教
+                  </button>)}
                 </div>
               </div>
             )}
@@ -5628,7 +5633,7 @@ export default function App() {
       ready={mobileTeachingSolverReady && robotLoadState.status === 'loaded' && sessionState.status === 'ready'}
       onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
       onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} />}
-    {ipadTeachingOpen && <IPadTeachingDialog mapData={mapData} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
+    {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog
       state={teachingTransferDialog}

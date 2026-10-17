@@ -1,5 +1,9 @@
 .ipad-teaching-menu { display: flex; flex-shrink: 0; }
 .ipad-teaching-action[aria-expanded="true"] { color: var(--cyan); border-color: #59dbe877; }
+.ipad-teaching-action > span { display: grid; gap: 4px; }
+.ipad-teaching-action > span > strong { font: inherit; }
+.ipad-teaching-action > span > small { color: var(--muted); font-size: 10px; }
+.ipad-nav-title { display: flex; align-items: center; gap: 10px; margin: 0 5px 4px; padding: 10px 5px; border-bottom: 1px solid var(--line); color: var(--cyan); font-size: 11px; }
 .ipad-nav-menu, .ipad-nav-submenu { position: fixed; z-index: 390; padding: 5px; border: 1px solid #59dbe84d; background: #071114fc; box-shadow: 0 18px 48px #0009; backdrop-filter: blur(16px); outline: none; }
 .ipad-nav-menu { width: min(232px, calc(100vw - 16px)); }
 .ipad-nav-submenu { position: absolute; width: min(310px, calc(100vw - 16px)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #294247 transparent; }
