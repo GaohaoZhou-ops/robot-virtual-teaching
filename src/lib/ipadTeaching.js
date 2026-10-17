@@ -67,12 +67,23 @@ export function rememberIPadTicket(ticket) {
   localStorage.setItem(ticketKey, JSON.stringify([ticket, ...tickets.filter((item) => item.id !== ticket.id)]));
 }
 
+export class IPadModelMismatchError extends Error {
+  constructor(mapData, manifest, deviceLabel, message) {
+    super(message || `当前独立示教地图与 ${deviceLabel} 的模型内容不一致，已停止接收。`);
+    this.name = 'IPadModelMismatchError';
+    this.currentModelName = mapData?.name || '未加载地图';
+    this.incomingModelName = manifest?.name || '未知地图';
+    this.deviceLabel = deviceLabel;
+  }
+}
+
 export async function ipadResultTask(result, ticket, mapData) {
   validateIPadResult(result, ticket.manifest, ticket.id);
-  // Compare actual geometry with the transferred model, never names, IDs or teaching poses.
+  // Recompute on every receipt, including duplicate imports. Never trust names,
+  // cached IDs or source hashes: the current geometry may have changed since pairing.
   const { manifest } = await packIPadModel(mapData);
   if (manifest.modelHash !== ticket.manifest.modelHash || manifest.byteLength !== ticket.manifest.byteLength) {
-    throw new Error('当前独立示教物体与采集设备的模型内容不一致，即使文件同名也无法接收；请打开配对时的模型');
+    throw new IPadModelMismatchError(mapData, ticket.manifest, mobileDeviceLabel(result));
   }
   return { id: `ipad-${result.id}`, name: `${mobileDeviceLabel(result)} 示教 · ${ticket.manifest.name}`,
     createdAt: result.createdAt, updatedAt: result.completedAt, coordinateFrame: 'virtual_origin',

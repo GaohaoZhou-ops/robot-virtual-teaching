@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, FileUp, QrCode, RefreshCw, Tablet, Wifi, X } from 'lucide-react';
-import { ipadRequest, packIPadModel, readIPadTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
+import { ArrowDownToLine, FileUp, QrCode, RefreshCw, ShieldAlert, Tablet, Wifi, X } from 'lucide-react';
+import { IPadModelMismatchError, ipadRequest, packIPadModel, readIPadTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
 import { readIPadResultFile } from '../lib/ipadResultFile.js';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
 import './IPadTeaching.css';
@@ -14,18 +14,31 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [modelMismatch, setModelMismatch] = useState(null);
   const [fileReceipt, setFileReceipt] = useState('');
   const [copied, setCopied] = useState(false);
   const [preparationPending, setPreparationPending] = useState(false);
   const canShowQR = ['ready', 'paired'].includes(ticket?.status);
   const legacyCode = canShowQR && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
   const dialog = useRef(null), operation = useRef(false), initialized = useRef(false);
+  const mismatchConfirm = useRef(null), operationFocus = useRef(null);
   const resultInput = useRef(null);
   const update = (next) => { rememberIPadTicket(next); setTicket(next); setTickets(readIPadTickets()); setCopied(false); };
   useEffect(() => {
     const focus = document.activeElement; dialog.current?.focus();
     return () => focus?.focus?.();
   }, []);
+  useEffect(() => {
+    if (modelMismatch) mismatchConfirm.current?.focus();
+  }, [modelMismatch]);
+  const dismissMismatch = () => {
+    setModelMismatch(null);
+    requestAnimationFrame(() => {
+      const focus = operationFocus.current;
+      if (focus?.isConnected && !focus.disabled && dialog.current?.contains(focus)) focus.focus();
+      else dialog.current?.focus();
+    });
+  };
   useEffect(() => {
     if (!['ready', 'paired'].includes(ticket?.status)) return;
     const controller = new AbortController();
@@ -42,9 +55,13 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
     return () => { controller.abort(); clearInterval(timer); };
   }, [ticket]);
   const perform = async (message, run) => {
-    if (operation.current) return;
+    if (operation.current || modelMismatch) return;
+    operationFocus.current = document.activeElement;
     operation.current = true; setBusy(message); setError('');
-    try { await run(); } catch (e) { setError(e.message); }
+    try { await run(); } catch (e) {
+      setError(e.message);
+      if (e instanceof IPadModelMismatchError) setModelMismatch(e);
+    }
     finally { operation.current = false; setBusy(''); }
   };
   const prepare = (newTransfer = false) => perform('正在准备配对二维码…', async () => {
@@ -87,7 +104,8 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
     const next = await ipadRequest(`/sessions/${ticket.id}`, { token: ticket.ownerToken });
     update({ ...ticket, ...next });
   });
-  const receive = () => perform('保存设备示教结果…', async () => {
+  const receive = () => perform('正在校验地图并接收示教结果…', async () => {
+    setFileReceipt('');
     const result = await ipadRequest(`/sessions/${ticket.id}/result`, { token: ticket.ownerToken });
     await onImport(result, ticket);
     const next = await ipadRequest(`/sessions/${ticket.id}/imported`, { method: 'POST', token: ticket.ownerToken });
@@ -107,6 +125,12 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
     });
   };
   const keyDown = (event) => {
+    if (modelMismatch) {
+      event.stopPropagation();
+      if (event.key === 'Escape') { event.preventDefault(); dismissMismatch(); }
+      if (event.key === 'Tab') { event.preventDefault(); mismatchConfirm.current?.focus(); }
+      return;
+    }
     if (event.key === 'Escape' && !operation.current) { event.stopPropagation(); onClose(); }
     if (event.key !== 'Tab') return;
     const elements = [...dialog.current.querySelectorAll('button:not(:disabled), select:not(:disabled), input:not([hidden]):not(:disabled)')];
@@ -116,7 +140,7 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   };
   return <div className="ipad-modal" onKeyDown={keyDown}>
-    <section className="ipad-dialog" role="dialog" aria-modal="true" aria-labelledby="ipad-title" ref={dialog} tabIndex={-1}>
+    <section className="ipad-dialog" role="dialog" aria-modal={modelMismatch ? undefined : true} aria-labelledby="ipad-title" ref={dialog} tabIndex={-1} inert={modelMismatch ? '' : undefined}>
       <header><span className="ipad-mark"><Tablet size={25} /></span><div><small>ATLAS / ON DEVICE</small><h2 id="ipad-title">移动到 iPad 或 Vision Pro 上运行</h2></div><button aria-label="关闭设备示教窗口" disabled={!!busy} onClick={onClose}><X size={18} /></button></header>
       <div className="ipad-dialog__body">
         <div className="ipad-model"><span>独立示教物体</span><strong>{mapData.name}</strong></div>
@@ -168,5 +192,21 @@ export default function IPadTeachingDialog({ mapData, onClose, onImport }) {
         {ticket && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare(true)}><Tablet size={15}/>新建传输</button>}
       </div></footer>
     </section>
+    {modelMismatch && <div className="ipad-model-mismatch-backdrop">
+      <section className="ipad-dialog ipad-model-mismatch-dialog" role="alertdialog" aria-modal="true"
+        aria-labelledby="ipad-model-mismatch-title" aria-describedby="ipad-model-mismatch-message ipad-model-mismatch-hint">
+        <header><span className="ipad-mark"><ShieldAlert size={25} aria-hidden="true" /></span>
+          <h2 id="ipad-model-mismatch-title">独立示教地图不一致</h2></header>
+        <div className="ipad-dialog__body">
+          <p id="ipad-model-mismatch-message">{modelMismatch.message}</p>
+          <dl className="ipad-model-comparison">
+            <div><dt>Mac 当前地图</dt><dd>{modelMismatch.currentModelName}</dd></div>
+            <div><dt>{modelMismatch.deviceLabel} 示教地图</dt><dd>{modelMismatch.incomingModelName}</dd></div>
+          </dl>
+          <p id="ipad-model-mismatch-hint">请在 Mac 打开对应地图后重试。两端已有的示教数据均保留。</p>
+        </div>
+        <footer><button className="ipad-primary" ref={mismatchConfirm} onClick={dismissMismatch}>知道了</button></footer>
+      </section>
+    </div>}
   </div>;
 }
