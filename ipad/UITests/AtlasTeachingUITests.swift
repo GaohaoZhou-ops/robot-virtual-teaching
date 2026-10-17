@@ -803,6 +803,151 @@ final class AtlasTeachingUITests: XCTestCase {
         view.stop()
     }
 
+    func testCameraProjectionMatchesSavedLensAndSurfaceDepth() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        var transform = simd_float4x4(simd_quatf(angle: 0.8, axis: simd_normalize(SIMD3<Float>(1, 2, 3))))
+        transform.columns.3 = SIMD4(2, -1, 3, 1)
+        let lens = simd_float4x4(columns: (
+            SIMD4(1.2, 0, 0, 0), SIMD4(0, 1.8, 0, 0), SIMD4(0.15, -0.1, -1.00002, -1), SIMD4(0, 0, -0.0200002, 0)))
+        var sample = TeachingSample(segmentId: "projection", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(.zero), quaternion: Rotation4(simd_quatf(angle: 0, axis: SIMD3(0, 1, 0)))),
+            previewCameraTransform: transform.elements, previewProjection: lens.elements, previewAspect: 4 / 3)
+        let recorded = try TeachingCoverageFrustum.recordedView(sample)
+        var frame = recorded.cameraFromModel
+        let frames = try XCTUnwrap(device.makeBuffer(bytes: &frame, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
+        var values = [Float](repeating: 2, count: recorded.frustum.columns * recorded.frustum.rows)
+        values[0] = 3; values[1] = .nan; values[2] = 0; values[3] = 1001
+        let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
+        let snapshot = TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1, frustum: recorded.frustum)
+        let projection = try XCTUnwrap(PoseCameraProjection(sample: sample, footprint: snapshot))
+        XCTAssertEqual(projection.surfaceDepth, 3, "empty, invalid and out-of-range depth cells cannot stretch the cone")
+        let expectedTransform = transform * TeachingCoordinates.opticalToARCamera
+        for (actual, expected) in zip(projection.modelFromCamera.elements, expectedTransform.elements) {
+            XCTAssertEqual(actual, expected, accuracy: 0.00001)
+        }
+        let expectedCorners = [SIMD2<Float>(-1, 1), SIMD2(1, 1), SIMD2(1, -1), SIMD2(-1, -1)]
+        XCTAssertEqual(projection.corners.count, 4)
+        for (corner, expected) in zip(projection.corners, expectedCorners) {
+            let world = projection.modelFromCamera * SIMD4(corner, 1)
+            let clip = lens * transform.inverse * world
+            XCTAssertEqual(clip.x / clip.w, expected.x, accuracy: 0.00001)
+            XCTAssertEqual(clip.y / clip.w, expected.y, accuracy: 0.00001,
+                           "the global cone must map to the actual saved image corners, including roll and principal-point offsets")
+        }
+        sample.previewCameraTransform![12] += 1
+        XCTAssertNil(PoseCameraProjection(sample: sample, footprint: snapshot)?.surfaceDepth,
+                     "a stale depth map cannot draw a cone from a different camera")
+        sample.previewCameraTransform = nil; sample.previewProjection = nil
+        sample.cameraPose = CameraPose(position: Point3(SIMD3(1, 2, 3)),
+            quaternion: Rotation4(simd_quatf(angle: 0.6, axis: SIMD3(0, 1, 0))))
+        let legacy = try XCTUnwrap(PoseCameraProjection(sample: sample, footprint: nil))
+        XCTAssertLessThan(simd_length(legacy.modelFromCamera.translation - SIMD3(1, 2, 3)), 0.00001)
+        XCTAssertEqual(legacy.frustum.tangents.y, Float(tan(Double.pi / 6)), accuracy: 0.00001)
+        XCTAssertTrue(legacy.corners.isEmpty, "without visible surface depths, show only the camera and axes")
+        sample.cameraPose.position.x = .nan
+        XCTAssertNil(PoseCameraProjection(sample: sample, footprint: nil))
+    }
+
+    func testCameraProjectionTogglePreservesCamerasAndFollowsPose() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let geometry = SCNBox(width: 1, height: 0.8, length: 0.2, chamferRadius: 0)
+        geometry.firstMaterial?.diffuse.contents = UIColor.lightGray
+        geometry.firstMaterial?.lightingModel = .constant
+        var sample = TeachingSample(segmentId: "projection-state", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 2)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        func snapshot() throws -> TeachingCoverageSnapshot {
+            let recorded = try TeachingCoverageFrustum.recordedView(sample)
+            var frame = recorded.cameraFromModel
+            let frames = try XCTUnwrap(device.makeBuffer(bytes: &frame, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
+            let values = [Float](repeating: 2, count: recorded.frustum.columns * recorded.frustum.rows)
+            let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
+            return TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1, frustum: recorded.frustum)
+        }
+        let footprint = try snapshot()
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        view.update(rendered: geometry, overview: geometry, footprint: footprint, sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded(); view.setOverviewExpanded(true)
+        XCTAssertTrue(view.overviewPose.isHidden); XCTAssertFalse(view.cameraPoseSwitch.isOn)
+        let local = view.camera.simdTransform.elements
+        let orientation = simd_quatf(angle: 0.65, axis: SIMD3(0, 1, 0))
+        view.overviewCamera.simdOrientation = orientation
+        let overviewLens = try XCTUnwrap(view.overviewCamera.camera)
+        let originalOverview = view.overviewCamera.simdTransform.elements
+        let originalScale = overviewLens.orthographicScale
+        view.setCameraPoseVisible(true)
+        XCTAssertFalse(view.overviewPose.isHidden); XCTAssertTrue(view.cameraPoseSwitch.isOn)
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, originalOverview, "showing an off-model camera must preserve the cloud's framing")
+        XCTAssertEqual(overviewLens.orthographicScale, originalScale, "camera overlays must not shrink the point cloud")
+        let cameraNode = try XCTUnwrap(view.overviewPose.childNodes.first)
+        XCTAssertLessThan(simd_length(cameraNode.simdWorldPosition - sample.cameraPose.position.simd), 0.00001)
+        XCTAssertNotNil(cameraNode.childNode(withName: "camera-projection", recursively: false))
+        let renderer = SCNRenderer(device: device, options: nil)
+        renderer.scene = view.overviewView.scene; renderer.pointOfView = view.overviewCamera
+        let shot = XCTAttachment(image: renderer.snapshot(atTime: 0, with: CGSize(width: 800, height: 600), antialiasingMode: .multisampling4X))
+        shot.name = "Camera projection without reframing the model"; shot.lifetime = .keepAlways; add(shot)
+        view.zoomOverview(by: 1.3); view.translateOverview(by: CGPoint(x: 25, y: 15))
+        let inspected = view.overviewCamera.simdTransform.elements
+        let inspectedScale = overviewLens.orthographicScale
+        for _ in 0..<3 {
+            view.setCameraPoseVisible(false)
+            XCTAssertEqual(view.overviewCamera.simdTransform.elements, inspected)
+            XCTAssertEqual(overviewLens.orthographicScale, inspectedScale)
+            view.setCameraPoseVisible(true)
+            XCTAssertEqual(view.overviewCamera.simdTransform.elements, inspected)
+            XCTAssertEqual(overviewLens.orthographicScale, inspectedScale, "repeated toggles retain the user's zoom and pan")
+        }
+        view.update(rendered: geometry.copy() as? SCNGeometry, overview: geometry, footprint: footprint,
+                    sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, inspected, "quality changes cannot reset global inspection")
+        XCTAssertEqual(overviewLens.orthographicScale, inspectedScale)
+        XCTAssertEqual(view.camera.simdTransform.elements, local)
+        view.setOverviewExpanded(false)
+        XCTAssertFalse(view.overviewPose.isHidden, "the thumbnail keeps the camera overlay enabled")
+        XCTAssertTrue(try XCTUnwrap(view.cameraPoseSwitch.superview).isHidden)
+        XCTAssertLessThan(simd_length(view.overviewCamera.simdWorldFront - view.camera.simdWorldFront), 0.00001)
+        let thumbnailCamera = view.overviewCamera.simdTransform.elements
+        let thumbnailScale = overviewLens.orthographicScale
+        view.setCameraPoseVisible(false); view.syncOverviewCamera()
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, thumbnailCamera)
+        XCTAssertEqual(overviewLens.orthographicScale, thumbnailScale)
+        view.setCameraPoseVisible(true); view.syncOverviewCamera()
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, thumbnailCamera)
+        XCTAssertEqual(overviewLens.orthographicScale, thumbnailScale, "thumbnail fitting also uses only model bounds")
+        view.update(rendered: geometry, overview: geometry, footprint: footprint, sample: sample, mode: .image, resetRevision: 0)
+        view.layoutIfNeeded()
+        let recordedImage = try XCTUnwrap(view.imageView.image?.pngData())
+        view.setCameraPoseVisible(false); view.setCameraPoseVisible(true)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.imageView.image?.pngData(), recordedImage, "camera overlays never appear in the saved 2D image")
+        sample.id = UUID().uuidString; sample.cameraPose.position.x = 0.5
+        view.update(rendered: geometry, overview: geometry, sample: sample, mode: .interactive, resetRevision: 0)
+        let next = try XCTUnwrap(view.overviewPose.childNodes.first)
+        XCTAssertEqual(next.simdWorldPosition.x, 0.5, accuracy: 0.00001)
+        XCTAssertNil(next.childNode(withName: "camera-projection", recursively: false), "old rays disappear immediately when changing Pose")
+        view.layoutIfNeeded(); view.setOverviewExpanded(true)
+        view.zoomOverview(by: 1.2); view.translateOverview(by: CGPoint(x: -20, y: 10))
+        let awaitingProjection = view.overviewCamera.simdTransform.elements
+        let awaitingProjectionScale = overviewLens.orthographicScale
+        view.update(rendered: geometry, overview: geometry, footprint: try snapshot(), sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded()
+        XCTAssertNotNil(view.overviewPose.childNode(withName: "camera-projection", recursively: true))
+        XCTAssertTrue(view.showsCameraPose)
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, awaitingProjection, "delayed projection data must preserve the current view")
+        XCTAssertEqual(overviewLens.orthographicScale, awaitingProjectionScale)
+        view.setCameraPoseVisible(false); XCTAssertTrue(view.overviewPose.isHidden)
+        let recreated = PosePreviewSurface()
+        recreated.update(rendered: geometry, overview: geometry, footprint: try snapshot(), sample: sample, mode: .interactive, resetRevision: 0)
+        recreated.setCameraPoseVisible(true); recreated.setOverviewExpanded(true)
+        recreated.frame = view.frame; recreated.layoutIfNeeded()
+        XCTAssertTrue(recreated.overviewExpanded); XCTAssertTrue(recreated.cameraPoseSwitch.isOn)
+        XCTAssertEqual(try XCTUnwrap(recreated.overviewCamera.camera).orthographicScale, originalScale, accuracy: 0.000001,
+                       "restoring an expanded view before layout must fit only the model in its final viewport")
+        recreated.stop()
+        view.stop()
+    }
+
     func testPosePreviewInteractionAndImageSwitching() throws {
         continueAfterFailure = false
         guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_PREVIEW_DISPOSABLE_FIXTURE_ID"],
@@ -860,6 +1005,14 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertGreaterThan(overview.frame.width, thumbnailWidth * 2)
         XCTAssertLessThan(collapse.frame.midX, overview.frame.midX)
         XCTAssertLessThan(collapse.frame.midY, overview.frame.midY)
+        let poseSwitch = app.switches["pose-camera-projection-toggle"]
+        XCTAssertTrue(poseSwitch.isHittable); XCTAssertEqual(poseSwitch.value as? String, "0")
+        let beforeProjection = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        beforeProjection.name = "Global overview before camera overlay"; beforeProjection.lifetime = .keepAlways; add(beforeProjection)
+        poseSwitch.tap(); XCTAssertEqual(poseSwitch.value as? String, "1")
+        XCTAssertEqual(overview.value as? String, "相机姿态与投影已显示")
+        let afterProjection = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        afterProjection.name = "Global overview with camera overlay"; afterProjection.lifetime = .keepAlways; add(afterProjection)
         let fittedOverview = overview.screenshot().pngRepresentation
         overview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             .press(forDuration: 0.1, thenDragTo: overview.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.6)))
@@ -869,6 +1022,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertNotEqual(overview.screenshot().pngRepresentation, rotatedOverview, "the expanded global view supports pinch zoom")
         let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         expanded.name = "Expanded interactive global overview"; expanded.lifetime = .keepAlways; add(expanded)
+        poseSwitch.tap(); XCTAssertEqual(poseSwitch.value as? String, "0")
         collapse.tap()
         XCTAssertTrue(thumbnail.isHittable)
         let afterOverview = try comparisonPixels(preview.screenshot())
@@ -931,6 +1085,17 @@ final class AtlasTeachingUITests: XCTestCase {
         interactive.tap(); XCTAssertTrue(reset.isEnabled)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "Interactive Pose point cloud"; screenshot.lifetime = .keepAlways; add(screenshot)
+        thumbnail.doubleTap(); XCTAssertTrue(poseSwitch.waitForExistence(timeout: 5)); poseSwitch.tap()
+        rows.element(boundBy: 0).tap()
+        XCTAssertEqual(poseSwitch.value as? String, "1", "switching Pose keeps its camera visible")
+        for orientation: UIDeviceOrientation in [.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(poseSwitch.isHittable); XCTAssertTrue(collapse.isHittable)
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Pose camera projection \(orientation.isLandscape ? "landscape" : "portrait")"
+            shot.lifetime = .keepAlways; add(shot)
+        }
+        collapse.tap(); XCTAssertEqual(thumbnail.value as? String, "相机姿态与投影已显示")
         app.buttons["close-pose-review"].tap()
         XCTAssertTrue(review.waitForExistence(timeout: 10))
         app.buttons["本地项目"].tap()
