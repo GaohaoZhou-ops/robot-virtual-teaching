@@ -1026,6 +1026,18 @@ Zivid 视图根据机器人光学坐标投影当前地图，用于虚拟示教�
 
 需要 macOS、Xcode，以及 **配备 LiDAR 的 iPad Pro**（iPadOS 17 或以上）。运行时检测 iPad、ARKit scene depth 与 mesh 能力；没有 LiDAR 的旧款 iPad Pro 和模拟器可查看已有数据，但不能空间示教。
 
+在 Mac 上调试界面时，可在 Finder 中双击 [`scripts/start_ipad_simulator.command`](scripts/start_ipad_simulator.command)，或运行下面的命令。需预先安装完整 Xcode、iOS Simulator 运行时及 Python 3，并在 Xcode 的 Devices and Simulators 中添加 iPad Pro 设备。
+
+```bash
+./scripts/start_ipad_simulator.command
+# 修改代码后重新编译、安装并重启应用
+./scripts/start_ipad_simulator.command --rebuild
+```
+
+脚本只选择 iPad Pro，优先复用已启动的设备，否则选择已安装的最高系统版本；首次未安装「Atlas 示教」时自动编译安装。重复启动会复用现有应用进程，并发启动共用进程锁，失败或退出后自动释放。iPad Pro 与 Vision Pro 各自保持单例；已有多个 iPad Pro 运行时，脚本会提示先关闭多余设备。
+
+终端入口 `./scripts/run-ipad-simulator.sh` 支持相同参数；两个入口均可从任意工作目录启动。可通过 `IPAD_SIMULATOR_ID=<UDID>` 指定 iPad Pro（切换前先关闭当前设备），通过 `IPAD_ARTIFACTS=<目录>` 指定产物与日志位置，默认 `ipad/test-artifacts/simulator-dev/`，相对路径以仓库根目录为基准。启动脚本回归：`node tests/ipad_simulator_launcher_smoke.mjs`，使用模拟 Apple 命令验证，不启动真实模拟器。
+
 ```bash
 # 无需连接设备或签名，先检查真机目标编译
 ./scripts/build_ipad.sh
@@ -1058,6 +1070,8 @@ open ipad/AtlasTeaching.xcodeproj
 原生 visionOS 应用支持将独立示教物体以 **1:1** 比例放入空间，校准后逐个记录**头显参考 Pose**，支持离线保存并同步回电脑。
 
 工程入口、操作流程、编译验证与真机接入步骤见 [Vision Pro 开发与联调文档](vision/README.md)。目前已完成编译和模拟器预检，待接入设备进行真机联调。
+
+在 Mac 上调试时，可在 Finder 中双击 [`scripts/start_vision_simulator.command`](scripts/start_vision_simulator.command)，一键启动 Vision Pro 模拟器与「Atlas 空间示教」。脚本以单例模式运行：重复启动会复用当前设备和应用，并发启动不会重复执行。首次未安装应用时自动编译安装；修改代码后运行 `./scripts/start_vision_simulator.command --rebuild` 更新应用。需预先安装 Xcode 和 visionOS Simulator。
 
 <a id="工作会话自动保护"></a>
 
