@@ -947,6 +947,8 @@ struct PoseReviewView: View {
     @State private var deletionIDs: Set<String> = []
     @State private var previewMode: PosePreviewMode = .interactive
     @State private var previewReset = 0
+    @State private var showsPoseCamera = false
+    @State private var overviewExpanded = false
     @State private var poseEditorHeight: CGFloat = 0
     @StateObject private var previewPreparation = PosePreviewPreparation()
     @FocusState private var poseNameFocused: Bool
@@ -994,11 +996,14 @@ struct PoseReviewView: View {
             .onChange(of: samples.map(\.id)) { _, ids in
                 deletionIDs.formIntersection(ids)
                 if ids.isEmpty {
-                    endDeletionSelection(); selectedID = nil; poseName = ""
+                    endDeletionSelection(); selectedID = nil; poseName = ""; overviewExpanded = false
                 }
             }
             .onChange(of: completed) { _, locked in
                 if locked { endDeletionSelection() }
+            }
+            .onChange(of: previewMode) { _, mode in
+                if mode == .image { overviewExpanded = false }
             }
             .task(id: selected?.id) {
                 if let selected, let model = session.geometry {
@@ -1097,16 +1102,23 @@ struct PoseReviewView: View {
             if let selected {
                 let aspect = selected.previewAspect ?? (4.0 / 3.0)
                 let ready = previewPreparation.sampleID == selected.id
-                PosePreviewView(rendered: renderer.geometry, overview: previewPreparation.overview,
-                                footprint: ready ? previewPreparation.footprint : nil,
-                                status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
-                                sample: selected, mode: previewMode, resetRevision: previewReset)
-                    .aspectRatio(CGFloat(aspect.isFinite && aspect > 0 ? aspect : 4.0 / 3.0), contentMode: .fit)
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel("\(selected.name) 的物体视角")
-                    .accessibilityValue(previewMode == .interactive ? "3D 交互视图" : "2D 记录视角图像")
-                    .accessibilityIdentifier("pose-review-preview")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                GeometryReader { area in
+                    let recordedAspect = CGFloat(aspect.isFinite && aspect > 0 ? aspect : 4.0 / 3.0)
+                    let expanded = overviewExpanded && previewMode == .interactive
+                    let width = expanded ? area.size.width : min(area.size.width, area.size.height * recordedAspect)
+                    let height = expanded ? area.size.height : width / recordedAspect
+                    PosePreviewView(rendered: renderer.geometry, overview: previewPreparation.overview,
+                                    footprint: ready ? previewPreparation.footprint : nil,
+                                    status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
+                                    sample: selected, mode: previewMode, resetRevision: previewReset,
+                                    showsCameraPose: $showsPoseCamera, overviewExpanded: $overviewExpanded)
+                        .frame(width: width, height: height)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("\(selected.name) 的物体视角")
+                        .accessibilityValue(previewMode == .interactive ? "3D 交互视图" : "2D 记录视角图像")
+                        .accessibilityIdentifier("pose-review-preview")
+                        .frame(width: area.size.width, height: area.size.height)
+                }
             } else { ContentUnavailableView("还没有 Pose", systemImage: "viewfinder") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black.opacity(0.25))

@@ -275,6 +275,10 @@ playwright/.auth/
 /atlas-file-picker-*/
 /atlas-portable-test-*/
 /atlas-server-result-*/
+# tests/ipad_result_file_smoke.mjs creates these import/result stores under TMPDIR.
+/atlas-result-file-*/
+/tests/atlas-result-file-*/
+/ipad/atlas-result-file-*/
 # Download copied by tests/parking_merge_server_smoke.py.
 /atlas-parking-merge-server-job.zip
 

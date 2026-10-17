@@ -43,11 +43,17 @@ struct PosePreviewView: UIViewRepresentable {
     let sample: TeachingSample
     let mode: PosePreviewMode
     let resetRevision: Int
+    @Binding var showsCameraPose: Bool
+    @Binding var overviewExpanded: Bool
 
     func makeUIView(context: Context) -> PosePreviewSurface { PosePreviewSurface() }
     func updateUIView(_ view: PosePreviewSurface, context: Context) {
+        view.onCameraPoseVisibilityChange = { showsCameraPose = $0 }
+        view.onOverviewExpansionChange = { overviewExpanded = $0 }
         view.update(rendered: rendered, overview: overview, footprint: footprint, status: status,
                     sample: sample, mode: mode, resetRevision: resetRevision)
+        view.setCameraPoseVisible(showsCameraPose)
+        view.setOverviewExpanded(overviewExpanded && mode == .interactive)
     }
     static func dismantleUIView(_ view: PosePreviewSurface, coordinator: ()) { view.stop() }
 }
@@ -57,6 +63,107 @@ private final class PoseOverviewContainer: UIView {
     override func accessibilityActivate() -> Bool {
         guard let onActivate else { return false }
         onActivate(); return true
+    }
+}
+
+/// Uses the same optical frame and off-axis lens as the selected surface mask.
+/// The cone ends at the furthest visible surface, not at the preview's 1 km far plane.
+struct PoseCameraProjection {
+    let modelFromCamera: simd_float4x4
+    let frustum: TeachingCoverageFrustum
+    let surfaceDepth: Float?
+
+    init?(sample: TeachingSample, footprint: TeachingCoverageSnapshot?) {
+        guard let recorded = try? TeachingCoverageFrustum.recordedView(sample) else { return nil }
+        let transform = recorded.cameraFromModel.inverse
+        guard transform.elements.allSatisfy(\.isFinite) else { return nil }
+        modelFromCamera = transform; frustum = recorded.frustum
+        var furthest: Float?
+        if let footprint, footprint.frameCount == 1, let frames = footprint.frames, let depths = footprint.depths,
+           frames.length >= MemoryLayout<simd_float4x4>.stride,
+           depths.length >= footprint.frustum.columns * footprint.frustum.rows * MemoryLayout<Float>.stride {
+            let frame = frames.contents().load(as: simd_float4x4.self)
+            // A late footprint for another selection must never project from this camera.
+            if zip(frame.elements, recorded.cameraFromModel.elements).allSatisfy({ abs($0 - $1) < 0.0001 }) {
+                let count = footprint.frustum.columns * footprint.frustum.rows
+                let values = depths.contents().bindMemory(to: Float.self, capacity: count)
+                for index in 0..<count {
+                    let depth = values[index]
+                    if depth.isFinite && depth >= frustum.near && depth <= frustum.far {
+                        furthest = max(furthest ?? depth, depth)
+                    }
+                }
+            }
+        }
+        surfaceDepth = furthest
+    }
+
+    var corners: [SIMD3<Float>] {
+        guard let depth = surfaceDepth else { return [] }
+        return [SIMD2<Float>(-1, -1), SIMD2(1, -1), SIMD2(1, 1), SIMD2(-1, 1)].map {
+            SIMD3(($0.x - frustum.offset.x) * depth * frustum.tangents.x,
+                  ($0.y - frustum.offset.y) * depth * frustum.tangents.y, depth)
+        }
+    }
+
+    func makeNode(modelRadius: Float) -> SCNNode {
+        let node = SCNNode(); node.simdTransform = modelFromCamera
+        let size = max(modelRadius, (surfaceDepth ?? 0) * 0.5, 0.3) * 0.045
+        let amber = UIColor(red: 1, green: 0.72, blue: 0.25, alpha: 1)
+        func material(_ color: UIColor, opacity: CGFloat = 1) -> SCNMaterial {
+            let material = SCNMaterial(); material.lightingModel = .constant
+            material.diffuse.contents = color; material.isDoubleSided = true
+            material.transparency = opacity; material.writesToDepthBuffer = opacity == 1
+            return material
+        }
+        func add(_ geometry: SCNGeometry, at position: SIMD3<Float>, color: UIColor) -> SCNNode {
+            geometry.materials = [material(color)]
+            let child = SCNNode(geometry: geometry); child.simdPosition = position
+            node.addChildNode(child); return child
+        }
+        func line(_ start: SIMD3<Float>, _ end: SIMD3<Float>, radius: Float, color: UIColor, opacity: CGFloat = 1) {
+            let delta = end - start, length = simd_length(delta)
+            guard length > 0.000001 else { return }
+            let cylinder = SCNCylinder(radius: CGFloat(radius), height: CGFloat(length))
+            cylinder.radialSegmentCount = 6; cylinder.materials = [material(color, opacity: opacity)]
+            let edge = SCNNode(geometry: cylinder)
+            edge.simdPosition = (start + end) / 2
+            edge.simdOrientation = simd_quatf(from: SIMD3(0, 1, 0), to: delta / length)
+            node.addChildNode(edge)
+        }
+        let body = SCNBox(width: CGFloat(size * 1.4), height: CGFloat(size), length: CGFloat(size * 0.7), chamferRadius: CGFloat(size * 0.12))
+        add(body, at: SIMD3(0, 0, -size * 0.55), color: amber).name = "camera-body"
+        let lens = SCNCylinder(radius: CGFloat(size * 0.32), height: CGFloat(size * 0.4))
+        lens.radialSegmentCount = 16
+        add(lens, at: SIMD3(0, 0, -size * 0.08), color: .white)
+            .simdOrientation = simd_quatf(angle: .pi / 2, axis: SIMD3(1, 0, 0))
+        // An asymmetric top and RGB optical axes make camera roll visible too.
+        let top = SCNBox(width: CGFloat(size * 0.6), height: CGFloat(size * 0.25), length: CGFloat(size * 0.4), chamferRadius: 0)
+        _ = add(top, at: SIMD3(0, -size * 0.6, -size * 0.55), color: amber)
+        for (direction, color) in [(SIMD3<Float>(1, 0, 0), UIColor.systemRed),
+                                    (SIMD3<Float>(0, 1, 0), UIColor.systemGreen),
+                                    (SIMD3<Float>(0, 0, 1), UIColor.systemBlue)] {
+            line(.zero, direction * size * 1.9, radius: size * 0.045, color: color)
+            let arrow = SCNCone(topRadius: 0, bottomRadius: CGFloat(size * 0.12), height: CGFloat(size * 0.35))
+            arrow.radialSegmentCount = 8
+            add(arrow, at: direction * size * 2, color: color)
+                .simdOrientation = simd_quatf(from: SIMD3(0, 1, 0), to: direction)
+        }
+        let corners = corners
+        if corners.count == 4 {
+            for index in 0..<4 {
+                line(.zero, corners[index], radius: size * 0.022, color: amber, opacity: 0.8)
+                line(corners[index], corners[(index + 1) % 4], radius: size * 0.022, color: amber, opacity: 0.8)
+            }
+            let vertices = ([SIMD3<Float>.zero] + corners).map { SCNVector3($0.x, $0.y, $0.z) }
+            let faces = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices)], elements: [
+                SCNGeometryElement(indices: [Int32(0), 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1], primitiveType: .triangles)
+            ])
+            faces.materials = [material(amber, opacity: 0.045)]
+            let cone = SCNNode(geometry: faces); cone.name = "camera-projection"
+            cone.renderingOrder = 1; node.addChildNode(cone)
+        }
+        return node
     }
 }
 
@@ -71,7 +178,10 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     let overviewView = SCNView()
     let overviewCamera = SCNNode()
     let overviewObject = SCNNode()
+    let overviewPose = SCNNode()
+    let cameraPoseSwitch = UISwitch()
     let overviewCollapseButton = UIButton(type: .system)
+    private let cameraPoseControl = UIStackView()
     private let overviewContainer = PoseOverviewContainer()
     private let overviewDoubleTap = UITapGestureRecognizer()
     private let statusLabel = UILabel()
@@ -85,7 +195,11 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     private var controller = SCNCameraController()
     private var overviewController = SCNCameraController()
     private var overviewRadius: Float = 1
+    private var pendingOverviewFit = false
     private(set) var overviewExpanded = false
+    private(set) var showsCameraPose = false
+    var onCameraPoseVisibilityChange: ((Bool) -> Void)?
+    var onOverviewExpansionChange: ((Bool) -> Void)?
     private var sampleID: String?
     private var recordedTransform: [Float] = []
     private var recordedProjection: [Float]?
@@ -126,6 +240,8 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let overviewScene = SCNScene()
         overviewScene.rootNode.addChildNode(overviewObject)
         overviewScene.rootNode.addChildNode(overviewCamera)
+        overviewScene.rootNode.addChildNode(overviewPose)
+        overviewPose.name = "selected-pose-camera"; overviewPose.isHidden = true
         overviewCamera.camera = SCNCamera()
         overviewCamera.camera?.usesOrthographicProjection = true
         overviewCamera.camera?.projectionDirection = .vertical
@@ -154,12 +270,30 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewCollapseButton.addTarget(self, action: #selector(collapseOverview), for: .touchUpInside)
         overviewContainer.addSubview(overviewView)
         overviewContainer.addSubview(overviewCollapseButton)
+        let cameraPoseLabel = UILabel()
+        cameraPoseLabel.text = "相机姿态与投影"; cameraPoseLabel.textColor = .white.withAlphaComponent(0.9)
+        cameraPoseLabel.font = .preferredFont(forTextStyle: .subheadline)
+        cameraPoseLabel.adjustsFontForContentSizeCategory = true
+        cameraPoseSwitch.onTintColor = UIColor(red: 0.2, green: 0.8, blue: 0.85, alpha: 1)
+        cameraPoseSwitch.accessibilityLabel = "相机姿态与投影"
+        cameraPoseSwitch.accessibilityIdentifier = "pose-camera-projection-toggle"
+        cameraPoseSwitch.addTarget(self, action: #selector(cameraPoseToggled), for: .valueChanged)
+        cameraPoseControl.axis = .horizontal; cameraPoseControl.alignment = .center; cameraPoseControl.spacing = 8
+        cameraPoseControl.addArrangedSubview(cameraPoseLabel); cameraPoseControl.addArrangedSubview(cameraPoseSwitch)
+        cameraPoseControl.isLayoutMarginsRelativeArrangement = true
+        cameraPoseControl.layoutMargins = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+        cameraPoseControl.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        cameraPoseControl.layer.cornerRadius = 12
+        cameraPoseControl.layer.borderWidth = 1
+        cameraPoseControl.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
+        cameraPoseControl.isHidden = true
+        overviewContainer.addSubview(cameraPoseControl)
         overviewContainer.isAccessibilityElement = true
         overviewContainer.accessibilityTraits = .button
         overviewContainer.accessibilityIdentifier = "pose-global-thumbnail"
         overviewContainer.accessibilityLabel = "全局缩略图，绿色为当前 Pose"
         overviewContainer.accessibilityHint = "双击放大全局视图"
-        overviewContainer.onActivate = { [weak self] in self?.setOverviewExpanded(true) }
+        overviewContainer.onActivate = { [weak self] in self?.expandOverview() }
         overviewDoubleTap.numberOfTapsRequired = 2
         overviewDoubleTap.addTarget(self, action: #selector(expandOverview))
         overviewContainer.addGestureRecognizer(overviewDoubleTap)
@@ -212,6 +346,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         }
         let poseChanged = sampleID != sample.id || recordedTransform != transform.elements || recordedProjection != projection
         let geometryChanged = sourceGeometry !== rendered
+        let overviewChanged = sourceOverview !== overview
         let footprintChanged = footprintFrames !== footprint?.frames
         overviewFootprint = footprint
         if geometryChanged {
@@ -244,6 +379,17 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             if let projection { lens.projectionTransform = SCNMatrix4(simd_float4x4(elements: projection)) }
             recordedCamera.camera = lens
             snapshotDirty = true
+        }
+        if poseChanged || footprintChanged || overviewChanged {
+            overviewPose.childNodes.forEach { $0.removeFromParentNode() }
+            let projection = PoseCameraProjection(sample: sample, footprint: footprint)
+            if let projection {
+                let bounds = (overview ?? rendered)?.boundingBox
+                let radius = bounds.map { simd_length(SIMD3<Float>($0.max.x - $0.min.x, $0.max.y - $0.min.y, $0.max.z - $0.min.z)) / 2 } ?? 1
+                overviewPose.addChildNode(projection.makeNode(modelRadius: radius))
+            }
+            cameraPoseSwitch.isEnabled = projection != nil
+            overviewPose.isHidden = !showsCameraPose || projection == nil
         }
         if poseChanged {
             restoreRecordedView(); restoreImageView(); imageDetailScale = 1
@@ -301,12 +447,16 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             overviewContainer.frame = bounds
             overviewView.frame = overviewContainer.bounds
             overviewCollapseButton.frame = CGRect(x: 12, y: 12, width: 44, height: 44)
+            let controlSize = cameraPoseControl.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+            cameraPoseControl.frame = CGRect(x: max(68, bounds.width - controlSize.width - 12), y: 12,
+                width: min(controlSize.width, max(0, bounds.width - 80)), height: max(44, controlSize.height))
         } else {
             overviewContainer.frame = CGRect(x: bounds.width - width - 12, y: bounds.height - height - 12, width: width, height: height)
             overviewView.frame = overviewContainer.bounds.insetBy(dx: 1, dy: 1)
         }
         statusLabel.frame = bounds.insetBy(dx: 24, dy: 24)
-        syncOverviewCamera()
+        if pendingOverviewFit { fitOverviewCamera() }
+        else { syncOverviewCamera() }
         renderRecordedImageIfNeeded()
     }
 
@@ -394,6 +544,12 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
 
     private func fitOverviewCamera() {
         guard let geometry = overviewObject.geometry else { return }
+        guard overviewView.bounds.width > 0, overviewView.bounds.height > 0 else {
+            pendingOverviewFit = true; return
+        }
+        pendingOverviewFit = false
+        // Frame the model alone: camera markers and delayed projection rays
+        // must never change the point cloud's displayed size or orbit center.
         let (minimum, maximum) = geometry.boundingBox
         let lower = SIMD3<Float>(minimum.x, minimum.y, minimum.z)
         let upper = SIMD3<Float>(maximum.x, maximum.y, maximum.z)
@@ -401,7 +557,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let radius = max(simd_length(upper - lower) / 2, 0.05)
         overviewRadius = radius
         overviewCamera.simdOrientation = camera.simdWorldOrientation
-        overviewCamera.simdPosition = center - camera.simdWorldFront * (radius * 3)
+        overviewCamera.simdPosition = center - overviewCamera.simdWorldFront * (radius * 3)
         let aspect = Float(overviewView.bounds.width / max(overviewView.bounds.height, 1))
         overviewCamera.camera?.orthographicScale = Double(radius * 1.15 / max(min(aspect, 1), 0.1))
         overviewCamera.camera?.zNear = Double(max(radius * 0.01, 0.001))
@@ -428,8 +584,24 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         }
     }
 
-    @objc private func expandOverview() { setOverviewExpanded(true) }
-    @objc private func collapseOverview() { setOverviewExpanded(false) }
+    @objc private func expandOverview() {
+        setOverviewExpanded(true); onOverviewExpansionChange?(overviewExpanded)
+    }
+    @objc private func collapseOverview() {
+        setOverviewExpanded(false); onOverviewExpansionChange?(overviewExpanded)
+    }
+    @objc private func cameraPoseToggled() {
+        setCameraPoseVisible(cameraPoseSwitch.isOn); onCameraPoseVisibilityChange?(showsCameraPose)
+    }
+
+    func setCameraPoseVisible(_ visible: Bool) {
+        guard visible != showsCameraPose else { return }
+        showsCameraPose = visible; cameraPoseSwitch.setOn(visible, animated: false)
+        overviewPose.isHidden = !visible || overviewPose.childNodes.isEmpty
+        overviewView.accessibilityValue = visible ? "相机姿态与投影已显示" : "相机姿态与投影已隐藏"
+        overviewContainer.accessibilityValue = overviewView.accessibilityValue
+        overviewView.setNeedsDisplay()
+    }
 
     func setOverviewExpanded(_ expanded: Bool) {
         guard expanded != overviewExpanded else { return }
@@ -441,6 +613,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewView.isUserInteractionEnabled = expanded
         overviewView.isAccessibilityElement = expanded
         overviewCollapseButton.isHidden = !expanded
+        cameraPoseControl.isHidden = !expanded
         overviewContainer.isAccessibilityElement = !expanded
         overviewContainer.accessibilityIdentifier = expanded ? "pose-global-overview-container" : "pose-global-thumbnail"
         sceneView.isUserInteractionEnabled = mode == .interactive && !expanded
@@ -452,9 +625,16 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         }
     }
 
+    private func orbitLocation(_ gesture: UIPanGestureRecognizer, in view: UIView) -> CGPoint {
+        let location = gesture.location(in: view)
+        // Reverse vertical tumbling while retaining the horizontal drag direction
+        // in both the local preview and the expanded global view.
+        return CGPoint(x: location.x, y: view.bounds.height - location.y)
+    }
+
     @objc private func orbitOverview(_ gesture: UIPanGestureRecognizer) {
         guard overviewExpanded else { return }
-        let location = gesture.location(in: overviewView)
+        let location = orbitLocation(gesture, in: overviewView)
         switch gesture.state {
         case .began: overviewController.beginInteraction(location, withViewport: overviewView.bounds.size)
         case .changed: overviewController.continueInteraction(location, withViewport: overviewView.bounds.size, sensitivity: 1)
@@ -511,7 +691,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
 
     @objc private func orbit(_ gesture: UIPanGestureRecognizer) {
         guard mode == .interactive, !overviewExpanded else { return }
-        let location = gesture.location(in: sceneView)
+        let location = orbitLocation(gesture, in: sceneView)
         switch gesture.state {
         case .began: controller.beginInteraction(location, withViewport: bounds.size)
         case .changed: controller.continueInteraction(location, withViewport: bounds.size, sensitivity: 1)
