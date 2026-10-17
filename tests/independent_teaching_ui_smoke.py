@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -54,7 +56,7 @@ def assert_independent_ui(page, expected_geometry_source):
     assert shell.get_attribute("data-teaching-space-mode") == "independent"
     assert shell.get_attribute("data-coordinate-frame") == "virtual_origin"
     assert "VIRTUAL SPACE" in page.locator(".map-identity").inner_text()
-    assert page.get_by_role("button", name="切换到地图示教").inner_text() == "地图示教"
+    assert topbar_action(page, name="切换到地图示教").inner_text() == "地图示教"
     assert "独立示教空间" in page.locator(".panel-3d .panel-heading__title").inner_text()
     workspace = page.locator(".visual-workspace")
     assert workspace.get_attribute("data-workspace-layout") == "spatial-only"
@@ -127,7 +129,7 @@ def run():
             "data-coordinate-frame"
         ) == "map"
         assert page.locator(".three-canvas").get_attribute("data-reference-plane") == "map-reference-plane"
-        assert page.get_by_role("button", name="切换到独立示教").inner_text() == "独立示教"
+        assert topbar_action(page, name="切换到独立示教").inner_text() == "独立示教"
         assert page.locator(".visual-workspace").get_attribute(
             "data-workspace-layout"
         ) == "spatial-and-map"

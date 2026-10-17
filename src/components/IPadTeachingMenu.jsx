@@ -8,7 +8,7 @@ const transferStatus = { preparing: '准备模型', ready: '等待配对', paire
 const savedTickets = () => readIPadTickets().filter((item) => item?.id && item.manifest)
   .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-export default function IPadTeachingMenu({ mapData, source, desktopCount, mobileCount, mobileLabel, disabled, onSourceChange, onOpenSync, isActive = true }) {
+export default function IPadTeachingMenu({ mapData, source, desktopCount, mobileCount, mobileLabel, disabled, onSourceChange, onOpenSync, isActive = true, menuAnchorRef }) {
   const menuId = useId();
   const triggerRef = useRef(null), menuRef = useRef(null), submenuRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -24,7 +24,7 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
 
   const close = (focus = false) => {
     setOpen(false); setSection(null);
-    if (focus) triggerRef.current?.focus();
+    if (focus) (menuAnchorRef?.current || triggerRef.current)?.focus();
   };
   const run = (action) => { close(true); action(); };
   const sync = (action, ticketId = currentTicket?.id) => run(() => onOpenSync({ action, ticketId }));
@@ -72,7 +72,7 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
   useLayoutEffect(() => {
     if (!open) return undefined;
     const update = () => {
-      const trigger = triggerRef.current?.getBoundingClientRect(), menu = menuRef.current;
+      const trigger = (menuAnchorRef?.current || triggerRef.current)?.getBoundingClientRect(), menu = menuRef.current;
       if (!trigger || !menu) return;
       const padding = 8, gap = 4;
       const left = Math.max(padding, Math.min(trigger.right - menu.offsetWidth, innerWidth - menu.offsetWidth - padding));
@@ -92,7 +92,7 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
     return () => { observer.disconnect(); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); };
-  }, [open, section]);
+  }, [open, section, menuAnchorRef]);
 
   const focusChild = (id) => {
     setSection(id);
@@ -126,7 +126,7 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
     <button type="button" className="action-button ipad-teaching-action" ref={triggerRef}
       aria-label="iPad / Vision Pro" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
       disabled={disabled} onClick={() => { if (open) close(); else setOpen(true); }}
-      onKeyDown={(event) => { if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); } }}>
+      onKeyDown={(event) => { if (event.key === 'ArrowDown' && !menuAnchorRef) { event.preventDefault(); setOpen(true); } }}>
       <Tablet size={15}/><span>iPad / Vision Pro</span><ChevronDown size={12}/>
     </button>
     {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label="iPad / Vision Pro" tabIndex={-1} style={position} onKeyDown={keyDown}>

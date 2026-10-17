@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -34,7 +36,7 @@ def run():
         page.locator(".loading-curtain").wait_for(state="hidden")
         page.locator('input[type="file"][accept*=".json"]').set_input_files(str(FIXTURE))
         page.get_by_text("工程配置已加载", exact=False).wait_for()
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for(timeout=15_000)
 
         assert page.get_by_text("归档上下文", exact=True).count() == 0

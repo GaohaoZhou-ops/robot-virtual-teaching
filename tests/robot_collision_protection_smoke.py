@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 
 from playwright.sync_api import expect, sync_playwright
@@ -89,8 +91,8 @@ def run():
         # The default can still be disabled while waiting for a robot.
         toggle.click()
         expect(viewer_tool(page, name="开启碰撞保护")).to_be_disabled()
-        expect(page.get_by_label("碰撞保护距离", exact=True)).to_have_count(0)
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        expect(page.get_by_label("碰撞保护距离", exact=True)).to_have_text("检测关闭")
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         wait_for_robot(page)
         page.get_by_role("tab", name="相机", exact=True).click()
@@ -143,7 +145,7 @@ def run():
         assert canvas.get_attribute("data-collision-worker") == "inactive"
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         expect(page.get_by_label("机器人距离警告", exact=True)).to_have_count(0)
-        expect(distance_readout).to_have_count(0)
+        expect(distance_readout).to_have_text("检测关闭")
         viewer_tool(page, name="开启碰撞保护").click()
         expect(canvas).to_have_attribute("data-collision-state", "safe")
         viewer_tool(page, name="关闭碰撞保护").click()
@@ -227,7 +229,7 @@ def run():
                 assert "距离低于 10 cm 安全阈值" in warning.inner_text()
                 assert page.locator(".zivid-camera-collision-alert").count() == 0
                 page.screenshot(path="/tmp/atlas-distance-warning-near.png", full_page=True)
-                page.get_by_role("button", name="显示设置", exact=True).click()
+                page.get_by_role("button", name="碰撞保护距离", exact=True).click()
                 warning_switch = page.get_by_role("switch", name="显示距离警告", exact=True)
                 expect(warning_switch).to_be_checked()
                 warning_switch.click()
@@ -238,7 +240,7 @@ def run():
                 expect(canvas).to_have_attribute("data-collision-highlight-color", "#ffc84a")
                 warning_switch.click()
                 expect(warning).to_be_visible()
-                page.get_by_role("button", name="关闭显示设置", exact=True).click()
+                page.get_by_role("button", name="关闭距离警告", exact=True).click()
                 canvas.focus()
             if observed_near and state == "safe":
                 observed_safe_after_near = True

@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 import uuid
@@ -63,7 +65,7 @@ with sync_playwright() as playwright:
         expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已保存到当前工程')
         page.screenshot(path='/tmp/atlas-ipad-file-import.png', full_page=True)
         page.get_by_role('button', name='关闭设备示教窗口').click()
-        page.get_by_role('button', name='打开示教数据管理页').click()
+        topbar_action(page, name='打开示教数据管理页').click()
         expect(page.get_by_role('region', name='iPad 示教结果')).to_contain_text('1 个 Pose')
         assert page.locator('.teaching-data-page').get_attribute('data-teaching-task-count') == '1'
         with page.expect_download() as download:
@@ -96,7 +98,7 @@ with sync_playwright() as playwright:
         expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已接收 1 个 Pose')
         expect(dialog.get_by_role('alert')).not_to_be_visible()
         page.get_by_role('button', name='关闭设备示教窗口').click()
-        page.get_by_role('button', name='打开示教数据管理页').click()
+        topbar_action(page, name='打开示教数据管理页').click()
         expect(page.locator('.teaching-data-page')).to_have_attribute('data-teaching-task-count', '2')
         page.reload(wait_until='networkidle')
         ready(page)

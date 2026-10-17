@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -55,7 +57,7 @@ def run():
         page.goto(f"{BASE_URL.rstrip('/')}/workbench")
         page.wait_for_load_state("networkidle")
         wait_for_session(page)
-        page.get_by_role("button", name="返回主页面", exact=True).click()
+        topbar_action(page, name="返回主页面", exact=True).click()
         page.get_by_role("radio", name="地图示教").click()
         with page.expect_file_chooser() as chooser_info:
             page.get_by_role("button", name="新建工程", exact=True).click()

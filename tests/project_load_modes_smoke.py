@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import base64
 import os
 import subprocess
@@ -63,7 +65,7 @@ def wait_ready(page):
 
 def home(page, mode):
     if page.url.rstrip("/") != BASE_URL:
-        page.get_by_role("button", name="返回主页面", exact=True).click()
+        topbar_action(page, name="返回主页面", exact=True).click()
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.get_by_role("radio", name=LABELS[mode]).click()
 

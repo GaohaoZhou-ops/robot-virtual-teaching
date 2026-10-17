@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -46,7 +48,7 @@ def run():
             str(ROOT / "tests/fixtures/rotation-map.ply")
         )
         page.locator(".loading-curtain").wait_for(state="hidden")
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'",
@@ -128,7 +130,7 @@ def run():
         ) > 0.001
         print("stage=ik-lock-held", flush=True)
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         with page.expect_download() as download_info:
             start_project_download(page)

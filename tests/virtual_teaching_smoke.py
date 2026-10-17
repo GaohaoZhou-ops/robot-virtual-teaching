@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -49,7 +51,7 @@ def run():
         page.locator(".loading-curtain").wait_for(state="hidden")
         assert new_task.is_disabled()
 
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         canvas = page.locator(".three-canvas")
         page.wait_for_function(
@@ -124,11 +126,11 @@ def run():
         assert page.get_by_role("button", name="记录当前机械臂姿态", exact=True).is_visible()
         assert page.get_by_text("当前已归档姿态", exact=True).count() == 0
         assert page.locator(".teaching-data-handoff").count() == 0
-        assert page.get_by_role("button", name="打开示教数据管理页").is_visible()
+        assert topbar_action(page, name="打开示教数据管理页").is_visible()
         assert page.locator(".teaching-point-row").count() == 0
         page.screenshot(path="/tmp/atlas-virtual-teaching-capture.png", full_page=True)
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         assert page.url.endswith("/teaching-data")
         data_panel = page.locator('section[aria-label="示教数据管理"]')
@@ -234,7 +236,7 @@ def run():
         assert second_parking_node.get_attribute("aria-current") == "true"
         assert teaching_panel.get_attribute("data-parking-point-count") == "2"
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         page.wait_for_function("document.querySelectorAll('.teaching-tree-node--parking').length === 2")
         assert page.locator(".teaching-point-row").count() == 1

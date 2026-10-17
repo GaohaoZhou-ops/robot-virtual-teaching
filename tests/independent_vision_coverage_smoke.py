@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from io import BytesIO
 from pathlib import Path
@@ -121,7 +123,7 @@ def run():
 
         canvas = page.locator(".three-canvas")
         assert canvas.get_attribute("data-vision-coverage-state") == "empty"
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role(
             "option", name="加载机器人 botx_abx_zivid_m70"
         ).click()
@@ -433,7 +435,7 @@ def run():
 
         # Playback immediately restores the first recording and its projection,
         # then reveals later captures as their poses are reached.
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         page.get_by_role(
             "button", name="选择示教任务 独立示教覆盖检查"

@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -144,7 +146,7 @@ def run():
         expect(dialog).to_have_count(0)
         expect(canvas).to_have_attribute("data-end-effector-control-state", "active")
         assert_restored(canvas, adjusted)
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.keyboard.press("Escape")
         expect(canvas).to_have_attribute("data-end-effector-control-state", "active")
         assert_restored(canvas, adjusted)
@@ -152,7 +154,7 @@ def run():
         cancel(page, canvas, original)
 
         # Export and reload must also see the restored pose, not only the renderer.
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         with page.expect_download() as download_info:
             start_project_download(page)
         project = read_exported_project(download_info.value)

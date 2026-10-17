@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 from archive_helpers import start_project_download
 
 import json
@@ -70,9 +72,9 @@ def run():
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 load_project(page, mode, directory / f'{mode}.zip')
                 # Inspect the rendered controls before exercising the new entry points.
-                print(f'{mode}_workbench_buttons=', page.get_by_role('button', name='导出工程', exact=True).all_text_contents())
-                assert page.get_by_role('button', name='导出工程', exact=True).is_enabled()
-                page.get_by_role('button', name='导出工程', exact=True).scroll_into_view_if_needed()
+                print(f'{mode}_workbench_buttons=', topbar_action(page, name='另存为工程', exact=True).all_text_contents())
+                assert topbar_action(page, name='另存为工程', exact=True).is_enabled()
+                topbar_action(page, name='另存为工程', exact=True).scroll_into_view_if_needed()
                 page.screenshot(path=f'/tmp/atlas-export-{mode}-workbench.png', full_page=True)
                 with page.expect_download() as download:
                     start_project_download(page)
@@ -88,7 +90,7 @@ def run():
                     assert project['workspace']['teachingSpaceMode'] == mode
                     assert project['virtualTeaching']['tasks'][0]['id'] == f'{mode}-task'
 
-                page.get_by_role('button', name='打开示教数据管理页').click()
+                topbar_action(page, name='打开示教数据管理页').click()
                 data_page = page.locator('[data-app-page="teaching-data"]')
                 data_page.wait_for()
                 tree = data_page.locator('.teaching-archive-tree')
@@ -133,7 +135,7 @@ def run():
                 restored.get_by_text('这是轻量示教数据文件', exact=False).wait_for()
                 wait_ready(restored)
                 assert restored.locator('.map-identity strong').inner_text() == f'{mode}-transfer.ply'
-                restored.get_by_role('button', name='打开示教数据管理页').click()
+                topbar_action(restored, name='打开示教数据管理页').click()
                 assert restored.locator('.teaching-archive-tree').get_attribute('data-teaching-task-count') == '1'
                 other.close()
                 context.close()

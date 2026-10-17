@@ -19,7 +19,7 @@ const statusLabel = {
   error: '加载失败',
 };
 
-export default function RobotPicker({ selectedRobot, loadState, onSelect, showRobot = true, onShowRobotChange, visibilityDisabled = false }) {
+export default function RobotPicker({ selectedRobot, loadState, onSelect, showRobot = true, onShowRobotChange, visibilityDisabled = false, menuAnchorRef, menuLabel, isActive = true }) {
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -49,6 +49,10 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
   };
 
   useEffect(() => {
+    if (!isActive) setOpen(false);
+  }, [isActive]);
+
+  useEffect(() => {
     if (!open || catalogState !== 'idle') return undefined;
     return refreshCatalog();
   }, [open]);
@@ -62,7 +66,10 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
       ) setOpen(false);
     };
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') {
+        setOpen(false);
+        menuAnchorRef?.current?.focus();
+      }
     };
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
@@ -76,7 +83,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
     if (!open) return undefined;
 
     const updateMenuPosition = () => {
-      const trigger = rootRef.current?.getBoundingClientRect();
+      const trigger = (menuAnchorRef?.current || rootRef.current)?.getBoundingClientRect();
       if (!trigger) return;
       const menuWidth = menuRef.current?.offsetWidth || 342;
       const viewportPadding = 8;
@@ -87,6 +94,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
       setMenuPosition({
         left: Math.max(viewportPadding, left),
         top: trigger.bottom + 8,
+        maxHeight: Math.max(0, window.innerHeight - trigger.bottom - 16),
       });
     };
 
@@ -97,7 +105,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
       window.removeEventListener('resize', updateMenuPosition);
       window.removeEventListener('scroll', updateMenuPosition, true);
     };
-  }, [open]);
+  }, [open, menuAnchorRef]);
 
   const currentStatus = loadState?.status || (selectedRobot ? 'pending' : 'idle');
   const StatusIcon = currentStatus === 'loading'
@@ -123,12 +131,14 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
         onClick={() => setOpen((current) => !current)}
       >
         <StatusIcon className={currentStatus === 'loading' ? 'is-spinning' : ''} size={15} />
-        <span>{selectedRobot ? selectedRobot.name : '加载机器人'}</span>
+        <span>{menuLabel || (selectedRobot ? selectedRobot.name : '加载机器人')}
+          {menuLabel && selectedRobot && <small>{selectedRobot.name}</small>}
+        </span>
         <i>{statusLabel[currentStatus] || statusLabel.idle}</i>
         <ChevronDown size={12} />
       </button>
 
-      {open && createPortal(
+      {open && isActive && createPortal(
         <div
           className="robot-picker__menu"
           ref={menuRef}
@@ -188,6 +198,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
                   onClick={() => {
                     onSelect(robot);
                     setOpen(false);
+                    menuAnchorRef?.current?.focus();
                   }}
                 >
                   <span className="robot-picker__model-icon"><Bot size={16} /></span>

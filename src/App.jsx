@@ -42,6 +42,7 @@ import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
 import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
+import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
 import { buildMobileSolvedTask, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
@@ -70,6 +71,7 @@ import {
   teachingCoordinateFrame,
 } from './lib/io.js';
 import { buildTeachingDataExport } from './lib/teachingData.js';
+import { normalizeIgnoredCollisionJoints } from './lib/robotCollisionSettings.js';
 import {
   normalizeRobotDescriptor,
   normalizeRobotJointValues,
@@ -110,6 +112,12 @@ import {
   loadProjectDirectoryBinding,
   saveProjectDirectoryBinding,
 } from './lib/projectDirectoryStore.js';
+import {
+  clearProjectSaveTarget,
+  ensureProjectWritePermission,
+  loadProjectSaveTarget,
+  rememberProjectSaveTarget,
+} from './lib/projectSaveTarget.js';
 
 const initialValidation = { status: 'idle', unreachableCount: 0, checkedAt: null };
 const pointColorModes = new Set(['height', 'source', 'white']);
@@ -436,6 +444,7 @@ export default function App() {
   const pathInputRef = useRef(null);
   const projectDirectoryInputRef = useRef(null);
   const mapDetailsButtonRef = useRef(null);
+  const devicesMenuButtonRef = useRef(null);
   const toastTimerRef = useRef(null);
   const view2dRef = useRef(null);
   const view3dRef = useRef(null);
@@ -457,6 +466,7 @@ export default function App() {
   const mobileTeachingRunRef = useRef(null);
   const teachingCaptureBusyRef = useRef(false);
   const projectExportBusyRef = useRef(false);
+  const projectSaveTargetRevisionRef = useRef(0);
   const [abxExportSnapshot, setAbxExportSnapshot] = useState(null);
   const projectDirectoryRef = useRef(null);
   const projectDirectoryWriteChainRef = useRef(Promise.resolve());
@@ -507,6 +517,7 @@ export default function App() {
   const [robotPose, setRobotPose] = useState(() => normalizeRobotPose(null));
   const [robotJointValues, setRobotJointValues] = useState({});
   const [lockedRobotJointNames, setLockedRobotJointNames] = useState([]);
+  const [ignoredRobotCollisionJointNames, setIgnoredRobotCollisionJointNames] = useState([]);
   const [robotControlEnabled, setRobotControlEnabled] = useState(false);
   const [robotHeightLocked, setRobotHeightLocked] = useState(false);
   const [robotCollisionProtectionEnabled, setRobotCollisionProtectionEnabled] = useState(true);
@@ -535,6 +546,9 @@ export default function App() {
     byteLength: 0,
   });
   const [projectExportDialog, setProjectExportDialog] = useState(null);
+  const [projectSaveTarget, setProjectSaveTarget] = useState(null);
+  const activeProjectSaveTarget = projectSaveTarget?.mapId === mapData?.mapId
+    && projectSaveTarget?.teachingSpaceMode === teachingSpaceMode ? projectSaveTarget : null;
   const [projectDirectoryState, setProjectDirectoryState] = useState({
     status: 'detached',
     name: '',
@@ -605,6 +619,7 @@ export default function App() {
     robotPose,
     robotJointValues,
     lockedRobotJointNames,
+    ignoredRobotCollisionJointNames,
     robotHeightLocked,
     teachingTasks,
     activeTeachingTaskId,
@@ -765,6 +780,18 @@ export default function App() {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3200);
   }, []);
 
+  useEffect(() => {
+    const revision = ++projectSaveTargetRevisionRef.current;
+    setProjectSaveTarget(null);
+    if (!mapData?.mapId) return undefined;
+    loadProjectSaveTarget(mapData.mapId, teachingSpaceMode)
+      .then((target) => {
+        if (revision === projectSaveTargetRevisionRef.current) setProjectSaveTarget(target);
+      })
+      .catch(() => { /* Saving remains available through Save As if storage is blocked. */ });
+    return () => { projectSaveTargetRevisionRef.current += 1; };
+  }, [mapData?.mapId, teachingSpaceMode]);
+
   const reportSessionFailure = useCallback(
     (error) => {
       console.warn('工作会话自动保护失败', error);
@@ -772,7 +799,7 @@ export default function App() {
       setSessionState({ status: 'error', restored: false });
       if (!sessionFailureNotifiedRef.current) {
         sessionFailureNotifiedRef.current = true;
-        notify('自动保护暂不可用，请使用顶部“导出工程”保存备份', 'warning');
+        notify('自动保护暂不可用，请使用“工程 → 另存为工程”保存备份', 'warning');
       }
     },
     [notify],
@@ -829,6 +856,7 @@ export default function App() {
           robotPose: current.robotPose,
           robotJointValues: current.robotJointValues,
           lockedRobotJointNames: current.lockedRobotJointNames,
+          ignoredRobotCollisionJointNames: current.ignoredRobotCollisionJointNames,
           robotHeightLocked: current.robotHeightLocked,
           teachingTasks: current.teachingTasks,
           jointPoses: current.jointPoses,
@@ -865,6 +893,7 @@ export default function App() {
               origin: current.robotPose,
               joints: current.robotJointValues,
               lockedJoints: current.lockedRobotJointNames,
+              collisionIgnoredJoints: current.ignoredRobotCollisionJointNames,
               heightLocked: current.robotHeightLocked,
             }
           : null,
@@ -1030,6 +1059,7 @@ export default function App() {
         setRobotPose(normalizeRobotPose(null));
         setRobotJointValues({});
         setLockedRobotJointNames([]);
+        setIgnoredRobotCollisionJointNames([]);
         setRobotControlEnabled(false);
         setRobotHeightLocked(false);
         setRobotCollisionProtectionEnabled(true);
@@ -1277,6 +1307,9 @@ export default function App() {
               ?? snapshot?.ui?.selectedRobot?.heightLocked
             )
           ));
+          setIgnoredRobotCollisionJointNames(restoredRobot
+            ? normalizeIgnoredCollisionJoints(project?.robot?.collisionIgnoredJoints
+              ?? snapshot?.ui?.selectedRobot?.collisionIgnoredJoints) : []);
           setRobotControlEnabled(false);
           setRobotLoadState({ status: restoredRobot ? 'pending' : 'idle' });
           restored = restored || Boolean(restoredRobot);
@@ -1489,6 +1522,7 @@ export default function App() {
           setRobotPose(normalizeRobotPose(null));
           setRobotJointValues({});
           setLockedRobotJointNames([]);
+          setIgnoredRobotCollisionJointNames([]);
           setRobotControlEnabled(false);
           setRobotHeightLocked(false);
           setTeachingTasks([]);
@@ -1616,6 +1650,7 @@ export default function App() {
     robotPose,
     robotJointValues,
     lockedRobotJointNames,
+    ignoredRobotCollisionJointNames,
     robotHeightLocked,
     teachingTasks,
     teachingSpaceMode,
@@ -1907,6 +1942,8 @@ export default function App() {
       const importedLockedJoints = importedRobot
         ? normalizeRobotJointLocks(project.robot?.lockedJoints)
         : [];
+      const importedIgnoredCollisionJoints = importedRobot
+        ? normalizeIgnoredCollisionJoints(project.robot?.collisionIgnoredJoints) : [];
       const importedRobotHeightLocked = Boolean(
         importedRobot && project.robot?.heightLocked,
       );
@@ -1924,6 +1961,7 @@ export default function App() {
       setRobotPose(importedRobotPose);
       setRobotJointValues(importedRobotJoints);
       setLockedRobotJointNames(importedLockedJoints);
+      setIgnoredRobotCollisionJointNames(importedIgnoredCollisionJoints);
       setRobotHeightLocked(importedRobotHeightLocked);
       setRobotLoadState({ status: importedRobot ? 'pending' : 'idle' });
       let effectiveMap = importedTeachingSpaceMode === teachingSpaceMode ? mapData : null;
@@ -2086,6 +2124,7 @@ export default function App() {
             robotPose: importedRobotPose,
             robotJointValues: importedRobotJoints,
             lockedRobotJointNames: importedLockedJoints,
+            ignoredRobotCollisionJointNames: importedIgnoredCollisionJoints,
             robotHeightLocked: importedRobotHeightLocked,
             teachingTasks: project.teachingTasks,
             jointPoses: project.jointPoses,
@@ -2118,6 +2157,7 @@ export default function App() {
                   origin: importedRobotPose,
                   joints: importedRobotJoints,
                   lockedJoints: importedLockedJoints,
+                  collisionIgnoredJoints: importedIgnoredCollisionJoints,
                   heightLocked: importedRobotHeightLocked,
                 }
               : null,
@@ -2170,6 +2210,13 @@ export default function App() {
           savedAt: null,
           writable: false,
         });
+      }
+      // Importing another configuration can reuse the same geometry, but must not
+      // retain permission to overwrite the previously opened project's ZIP.
+      projectSaveTargetRevisionRef.current += 1;
+      setProjectSaveTarget(null);
+      if (effectiveMap?.mapId) {
+        await clearProjectSaveTarget(effectiveMap.mapId, importedTeachingSpaceMode).catch(() => undefined);
       }
       setLoadState({ loading: false, progress: 1, phase: '' });
       const sourceLabel = importedFile.source === 'directory'
@@ -3506,6 +3553,7 @@ export default function App() {
     robotPose,
     robotJointValues,
     lockedRobotJointNames,
+    ignoredRobotCollisionJointNames,
     robotHeightLocked,
     teachingTasks,
     jointPoses,
@@ -3538,12 +3586,13 @@ export default function App() {
     }
   };
 
-  const exportProject = async (downloadName) => {
+  const exportProject = async (downloadName, overwrite = false) => {
     if (!mapData?.geometry) {
       notify('请先加载完整地图；仅有配置元数据时无法生成便携工程包', 'error');
       return;
     }
     if (projectExportBusyRef.current) return;
+    if (overwrite && !activeProjectSaveTarget?.handle) return;
     const invalid = edges.find(
       (edge) =>
         edge.limits.minSpeed > edge.limits.maxSpeed ||
@@ -3551,21 +3600,26 @@ export default function App() {
     );
     if (invalid) {
       selectEdge(invalid.id);
-      notify('存在无效的路径约束，请修正后再导出', 'error');
+      notify('存在无效的路径约束，请修正后再保存', 'error');
       return;
     }
     projectExportBusyRef.current = true;
+    setToast(null);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = typeof downloadName === 'string'
       ? downloadName : `atlas-project-${teachingSpaceMode}-${stamp}.zip`;
-    let fileHandle = null;
+    const operation = overwrite ? 'save' : 'saveAs';
+    let fileHandle = overwrite ? activeProjectSaveTarget.handle : null;
     try {
-      if (typeof downloadName !== 'string') {
+      if (overwrite) {
+        setProjectExportState({ status: 'selecting', operation, byteLength: 0, phase: '确认文件写入权限' });
+        await ensureProjectWritePermission(fileHandle);
+      } else if (typeof downloadName !== 'string') {
         if (typeof window.showSaveFilePicker !== 'function') {
           setProjectExportDialog({ filename });
           return;
         }
-        setProjectExportState({ status: 'selecting', byteLength: 0, phase: '选择保存位置' });
+        setProjectExportState({ status: 'selecting', operation, byteLength: 0, phase: '选择保存位置' });
         try {
           // Invoke directly from the click, before imports or packing consume user activation.
           fileHandle = await window.showSaveFilePicker({
@@ -3589,7 +3643,7 @@ export default function App() {
       }
       setProjectExportDialog(null);
       setProjectExportState({
-        status: 'packing', byteLength: 0, phase: '冻结地图资源', detail: mapData.name, progress: 0,
+        status: 'packing', operation, byteLength: 0, phase: '冻结地图资源', detail: mapData.name, progress: 0,
       });
       notify('正在打包地图、机器人、配置与示教视觉资源…', 'info');
       const payload = currentExportPayload();
@@ -3621,6 +3675,7 @@ export default function App() {
           existingRobotPackage: reusableRobotPackage,
           onProgress: ({ phase, detail, progress }) => setProjectExportState({
             status: 'packing',
+            operation,
             byteLength: 0,
             phase,
             detail,
@@ -3628,6 +3683,21 @@ export default function App() {
           }),
         },
       );
+      let targetRemembered = true;
+      if (!overwrite) {
+        const target = fileHandle ? { mapId: mapData.mapId, teachingSpaceMode, handle: fileHandle } : null;
+        const current = latestWorkspaceRef.current;
+        if (current.mapData?.mapId === mapData.mapId && current.teachingSpaceMode === teachingSpaceMode) {
+          projectSaveTargetRevisionRef.current += 1;
+          setProjectSaveTarget(target);
+        }
+        try {
+          if (target) await rememberProjectSaveTarget(target);
+          else await clearProjectSaveTarget(mapData.mapId, teachingSpaceMode);
+        } catch {
+          targetRemembered = false;
+        }
+      }
       setProjectExportState({
         status: 'ready',
         byteLength: archive.byteLength,
@@ -3636,12 +3706,13 @@ export default function App() {
       const sizeMb = archive.byteLength / (1024 * 1024);
       const sizeLabel = sizeMb >= 0.1 ? `${sizeMb.toFixed(1)} MB` : `${Math.max(1, Math.round(archive.byteLength / 1024))} KB`;
       notify(
-        fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}` : `工程下载已开始 · ${filename} · ${sizeLabel}`,
-        'success',
+        fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}${targetRemembered ? '' : ' · 无法记住保存位置，刷新后请重新另存为'}`
+          : `工程下载已开始 · ${filename} · ${sizeLabel}`,
+        targetRemembered ? 'success' : 'warning',
       );
     } catch (error) {
       setProjectExportState({ status: 'error', byteLength: 0 });
-      notify(`工程导出失败：${error.message}`, 'error');
+      notify(`工程保存失败：${error.message}`, 'error');
     } finally {
       projectExportBusyRef.current = false;
     }
@@ -3668,6 +3739,7 @@ export default function App() {
       setRobotPose(normalizeRobotPose(null));
       setRobotJointValues({});
       setLockedRobotJointNames([]);
+      setIgnoredRobotCollisionJointNames([]);
       setRobotControlEnabled(false);
       setRobotHeightLocked(false);
       setRobotCollisionProtectionEnabled(true);
@@ -4891,10 +4963,21 @@ export default function App() {
           </div>
         </div>
 
+        <button
+          type="button"
+          className="workbench-menu-trigger home-page-action"
+          aria-label="返回主页面"
+          title="返回模式与工程入口；当前工作现场不会被清空"
+          onClick={() => navigateAppPage(APP_PAGE_HOME)}
+          disabled={loadState.loading}
+        >
+          <House size={15} /> <span>主页面</span>
+        </button>
+
         <div className="map-identity" data-space-mode={teachingSpaceMode}>
           <span className={`map-state-dot ${mapData?.geometry ? 'online' : ''}`} />
           <div>
-            <small>{isIndependentTeachingSpace ? 'VIRTUAL SPACE / ORIGIN 0' : 'ACTIVE MAP'}</small>
+            <small>{isIndependentTeachingSpace ? '独立示教 · ORIGIN 0' : '地图示教 · MAP'}</small>
             <strong>{mapData?.name || (isIndependentTeachingSpace ? 'NO SPACE LOADED' : 'NO MAP LOADED')}</strong>
           </div>
           {mapData?.pointCount > 0 && (
@@ -4905,98 +4988,133 @@ export default function App() {
           )}
         </div>
 
-        <div className="topbar-actions">
-          <button
-            type="button"
-            className="action-button subtle home-page-action"
-            aria-label="返回主页面"
-            title="返回模式与工程入口；当前工作现场不会被清空"
-            onClick={() => navigateAppPage(APP_PAGE_HOME)}
-            disabled={loadState.loading}
-          >
-            <House size={15} /> <span>主页面</span>
-          </button>
-          <button
-            type="button"
-            className="action-button"
-            ref={mapDetailsButtonRef}
-            aria-label="查看地图与工程配置"
-            disabled={!mapData?.bounds}
-            onClick={() => setMapDetailsOpen(true)}
-            title={mapData?.bounds ? '查看地图文件、空间范围与工程配置' : '请先加载地图'}
-          >
-            <FileSearch size={15} />
-            <span>地图与工程配置</span>
-          </button>
-          <ProjectExportButton
-            mapData={mapData}
-            exportState={projectExportState}
-            disabled={loadState.loading || teachingCaptureState.status === 'capturing'}
-            onExport={exportProject}
-          />
-          <button
-            type="button"
-            className={`action-button teaching-mode-action ${isIndependentTeachingSpace ? '' : 'independent-teaching-action'}`}
-            aria-label={`切换到${teachingModeLabel(alternateTeachingMode)}`}
-            data-teaching-mode-target={alternateTeachingMode}
-            title={`切换到${teachingModeLabel(alternateTeachingMode)}；尚未打开工程时返回主页面`}
-            onClick={() => continueWorkspace(alternateTeachingMode)}
-            disabled={loadState.loading || sessionState.status !== 'ready'}
-          >
-            {isIndependentTeachingSpace ? <MapIcon size={15} /> : <ScanLine size={15} />}
-            <span>{teachingModeLabel(alternateTeachingMode)}</span>
-          </button>
-          <RobotPicker
-            selectedRobot={selectedRobot}
-            loadState={robotLoadState}
-            onSelect={handleSelectRobot}
-            showRobot={showRobotModel}
-            visibilityDisabled={teachingCaptureState.status === 'capturing'}
-            onShowRobotChange={(visible) => {
-              if (!visible) setRobotControlEnabled(false);
-              setShowRobotModel(visible);
-            }}
-          />
-          {isIndependentTeachingSpace && <IPadTeachingMenu mapData={mapData} source={teachingSource}
-            desktopCount={desktopTeachingTasks.length} mobileCount={mobileTeachingTasks.length} mobileLabel={mobileTeachingLabel}
-            disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
-            onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />}
-          <SpaceMouseControl
-            inputRef={spaceMouseInputRef}
-            onNotify={notify}
-            isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
-          />
-          <button
-            type="button"
-            className="action-button teaching-transfer-action"
-            aria-label="打开示教转换"
-            title={isIndependentTeachingSpace ? '整体放入地图或回写精调结果' : '提取地图局部到独立示教'}
-            disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-            onClick={openTeachingTransfer}
-          >
-            <ArrowLeftRight size={15} /><span>示教转换</span>
-          </button>
-          <button
-            type="button"
-            className="action-button teaching-data-page-link"
-            aria-label="打开示教数据管理页"
-            onClick={() => navigateAppPage(APP_PAGE_TEACHING_DATA)}
-            disabled={teachingCaptureState.status === 'capturing'}
-            title={teachingCaptureState.status === 'capturing'
-              ? '请等待当前机器人姿态与相机快照完成记录'
-              : '在独立页面中管理示教任务、点位与视觉快照'}
-          >
-            <Database size={15} />
-            <span>示教数据</span>
-            <b>{teachingTasks.length}</b>
-          </button>
+        <WorkbenchToolbar
+          isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+          sections={[
+            {
+              id: 'project', label: '工程', icon: FolderOpen, triggerRef: mapDetailsButtonRef,
+              busy: ['packing', 'selecting'].includes(projectExportState.status),
+              content: <>
+                <section className="workbench-menu-section">
+                  <p>当前工程</p>
+                  <button
+                    type="button"
+                    className="action-button"
+                    aria-label="查看地图与工程配置"
+                    disabled={!mapData?.bounds}
+                    onClick={() => setMapDetailsOpen(true)}
+                    title={mapData?.bounds ? '查看地图文件、空间范围与工程配置' : '请先加载地图'}
+                  >
+                    <FileSearch size={15} />
+                    <span>地图与工程配置</span>
+                  </button>
+                  <ProjectExportButton
+                    label="另存为工程"
+                    mapData={mapData}
+                    exportState={projectExportState}
+                    disabled={loadState.loading || teachingCaptureState.status === 'capturing'}
+                    onExport={exportProject}
+                  />
+                  <ProjectExportButton
+                    overwrite
+                    mapData={mapData}
+                    exportState={projectExportState}
+                    saveTarget={activeProjectSaveTarget?.handle}
+                    disabled={loadState.loading || teachingCaptureState.status === 'capturing'}
+                    onExport={() => exportProject(undefined, true)}
+                  />
+                </section>
+              </>,
+            },
+            {
+              id: 'teaching', label: '示教', icon: Route,
+              content: <>
+                <section className="workbench-menu-section">
+                  <p>当前：{teachingModeLabel(teachingSpaceMode)}</p>
+                  <button
+                    type="button"
+                    className={`action-button teaching-mode-action ${isIndependentTeachingSpace ? '' : 'independent-teaching-action'}`}
+                    aria-label={`切换到${teachingModeLabel(alternateTeachingMode)}`}
+                    data-teaching-mode-target={alternateTeachingMode}
+                    title={`切换到${teachingModeLabel(alternateTeachingMode)}；尚未打开工程时返回主页面`}
+                    onClick={() => continueWorkspace(alternateTeachingMode)}
+                    disabled={loadState.loading || sessionState.status !== 'ready'}
+                  >
+                    {isIndependentTeachingSpace ? <MapIcon size={15} /> : <ScanLine size={15} />}
+                    <span>{teachingModeLabel(alternateTeachingMode)}</span>
+                  </button>
+                </section>
+                <section className="workbench-menu-section">
+                  <p>数据与转换</p>
+                  <button
+                    type="button"
+                    className="action-button teaching-data-page-link"
+                    aria-label="打开示教数据管理页"
+                    onClick={() => navigateAppPage(APP_PAGE_TEACHING_DATA)}
+                    disabled={teachingCaptureState.status === 'capturing'}
+                    title={teachingCaptureState.status === 'capturing'
+                      ? '请等待当前机器人姿态与相机快照完成记录'
+                      : '管理示教任务、点位与视觉快照'}
+                  >
+                    <Database size={15} /><span>示教数据</span><b>{teachingTasks.length}</b>
+                  </button>
+                  <button
+                    type="button"
+                    className="action-button teaching-transfer-action"
+                    aria-label="打开示教转换"
+                    title={isIndependentTeachingSpace ? '整体放入地图或回写精调结果' : '提取地图局部到独立示教'}
+                    disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
+                    onClick={openTeachingTransfer}
+                  >
+                    <ArrowLeftRight size={15} /><span>示教转换</span>
+                  </button>
+                </section>
+              </>,
+            },
+            {
+              id: 'devices', label: '设备', icon: Bot, triggerRef: devicesMenuButtonRef,
+              content: <>
+                <section className="workbench-menu-section">
+                  <p>机器人与控制器</p>
+                  <RobotPicker
+                    menuAnchorRef={devicesMenuButtonRef}
+                    menuLabel="机器人模型"
+                    isActive={appPage === APP_PAGE_WORKBENCH}
+                    selectedRobot={selectedRobot}
+                    loadState={robotLoadState}
+                    onSelect={handleSelectRobot}
+                    showRobot={showRobotModel}
+                    visibilityDisabled={teachingCaptureState.status === 'capturing'}
+                    onShowRobotChange={(visible) => {
+                      if (!visible) setRobotControlEnabled(false);
+                      setShowRobotModel(visible);
+                    }}
+                  />
+                  <SpaceMouseControl
+                    menuAnchorRef={devicesMenuButtonRef}
+                    inputRef={spaceMouseInputRef}
+                    onNotify={notify}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                  />
+                </section>
+                {isIndependentTeachingSpace && <section className="workbench-menu-section">
+                  <p>移动示教设备</p>
+                  <IPadTeachingMenu menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingSource}
+                    desktopCount={desktopTeachingTasks.length} mobileCount={mobileTeachingTasks.length} mobileLabel={mobileTeachingLabel}
+                    disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />
+                </section>}
+              </>,
+            },
+          ]}
+        >
           <div className="service-pill" title="局域网服务默认端口">
             <Server size={13} />
             <span>LAN</span>
             <strong>:21990</strong>
           </div>
-        </div>
+        </WorkbenchToolbar>
       </header>
 
       <main
@@ -5132,6 +5250,8 @@ export default function App() {
                 viewportCanvasRef={main3DCanvasRef}
                 cameraTeachingCommand={cameraTeachingCommand}
                 collisionProtectionEnabled={robotCollisionProtectionEnabled}
+                ignoredCollisionJointNames={ignoredRobotCollisionJointNames}
+                onIgnoredCollisionJointNamesChange={setIgnoredRobotCollisionJointNames}
                 onRobotLoadState={handleRobotLoadState}
                 onRobotPoseChange={handleRobotPoseChange}
                 onRobotJointValuesChange={handleRobotJointValuesChange}
@@ -5328,7 +5448,7 @@ export default function App() {
           data-recovery-available={lastProjectRecovery?.available ? 'true' : 'false'}
           title={
             sessionState.status === 'error'
-              ? '自动保护不可用，请使用顶部“导出工程”保存备份'
+              ? '自动保护不可用，请使用“工程 → 另存为工程”保存备份'
               : '刷新页面自动恢复当前工作现场；服务或计算机重启后可前往示教数据页恢复工程'
           }
         >

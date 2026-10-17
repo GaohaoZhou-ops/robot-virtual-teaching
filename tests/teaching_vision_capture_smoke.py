@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import base64
 import json
 import os
@@ -71,7 +73,7 @@ def run():
             str(ROOT / "tests/fixtures/hybrid-camera-surface-map.ply")
         )
         page.locator(".loading-curtain").wait_for(state="hidden")
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'",
@@ -131,7 +133,7 @@ def run():
         assert camera_panel.locator(".zivid-camera-canvas").get_attribute("data-digital-zoom") == zoom
         teaching_tab.click()
 
-        page.get_by_role("button", name="查看地图与工程配置").click()
+        topbar_action(page, name="查看地图与工程配置").click()
         project_dialog = page.get_by_role("dialog", name="地图与工程配置")
         assert project_dialog.locator(".robot-config-row").inner_text().endswith("已加载")
         assert project_dialog.locator(".robot-pose-row").is_visible()
@@ -143,7 +145,7 @@ def run():
         project_dialog.screenshot(path="/tmp/atlas-map-project-with-robot.png")
         project_dialog.get_by_role("button", name="关闭", exact=True).click()
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         assert page.url.endswith("/teaching-data")
         assert page.locator('section[aria-label="示教数据管理"]').is_visible()
@@ -224,7 +226,7 @@ def run():
              "buffer": archive["path"].read_bytes()}
         )
         page.get_by_text("ZIP 工程包已加载", exact=False).wait_for()
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         page.get_by_role("button", name="查看机械臂姿态 A01").click()
         imported_vision = page.get_by_label("机械臂姿态双目视觉快照", exact=True)

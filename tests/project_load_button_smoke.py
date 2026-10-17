@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import base64
 import json
 import os
@@ -14,7 +16,7 @@ CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
 
 
 def return_home(page):
-    page.get_by_role("button", name="返回主页面", exact=True).click()
+    topbar_action(page, name="返回主页面", exact=True).click()
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
 
 

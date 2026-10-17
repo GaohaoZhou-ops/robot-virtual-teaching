@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 import re
@@ -15,7 +17,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
 
 
 def export_project(page):
-    page.get_by_role("button", name="打开示教数据管理页", exact=True).click()
+    topbar_action(page, name="打开示教数据管理页", exact=True).click()
     with page.expect_download() as info:
         start_project_download(page)
     project = read_exported_project(info.value)
@@ -37,7 +39,7 @@ def run():
         page.locator('[data-session-state="ready"]').wait_for()
         page.locator('input[type="file"][accept=".ply"]').set_input_files(str(ROOT / "tests/fixtures/rotation-map.ply"))
         page.locator(".loading-curtain").wait_for(state="hidden")
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         canvas = page.locator(".three-canvas")
         expect(canvas).to_have_attribute("data-robot-model-state", "loaded", timeout=180_000)
@@ -129,7 +131,7 @@ def run():
         expect(map_view).to_have_attribute("data-path-count", "1")
 
         # Renaming through the teaching archive updates the navigation copy too.
-        page.get_by_role("button", name="打开示教数据管理页", exact=True).click()
+        topbar_action(page, name="打开示教数据管理页", exact=True).click()
         page.get_by_role("button", name="选择停车点 联动停车点", exact=True).click()
         name = page.get_by_role("textbox", name="停车点名称", exact=True)
         name.fill("示教同步名称")

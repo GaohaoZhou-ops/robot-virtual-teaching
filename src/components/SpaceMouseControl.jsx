@@ -204,7 +204,7 @@ const summarizeCoupledCapture = (samples, metadata = {}) => {
   };
 };
 
-export default function SpaceMouseControl({ inputRef, onNotify, isActive = true }) {
+export default function SpaceMouseControl({ inputRef, onNotify, isActive = true, menuAnchorRef }) {
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const menuId = useId();
@@ -1129,7 +1129,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true 
   useLayoutEffect(() => {
     if (!open || !isActive) return undefined;
     const updateMenuPosition = () => {
-      const trigger = rootRef.current?.getBoundingClientRect();
+      const trigger = (menuAnchorRef?.current || rootRef.current)?.getBoundingClientRect();
       const menu = menuRef.current;
       if (!trigger || !menu) return;
       const padding = 8;
@@ -1145,7 +1145,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true 
     };
     updateMenuPosition();
     const observer = new ResizeObserver(updateMenuPosition);
-    observer.observe(rootRef.current);
+    observer.observe(menuAnchorRef?.current || rootRef.current);
     observer.observe(menuRef.current);
     window.addEventListener('resize', updateMenuPosition);
     window.addEventListener('scroll', updateMenuPosition, true);
@@ -1154,7 +1154,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true 
       window.removeEventListener('resize', updateMenuPosition);
       window.removeEventListener('scroll', updateMenuPosition, true);
     };
-  }, [open, isActive]);
+  }, [open, isActive, menuAnchorRef]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -1168,7 +1168,10 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true 
       }
     };
     const onKeyDown = (event) => {
-      if (event.key === 'Escape' && !calibrationRef.current.open) setOpen(false);
+      if (event.key === 'Escape' && !calibrationRef.current.open) {
+        setOpen(false);
+        menuAnchorRef?.current?.focus();
+      }
     };
     document.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('keydown', onKeyDown);
@@ -1380,7 +1383,10 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true 
               <strong>{connected ? 'SpaceMouse Wireless BT' : '3D 鼠标检测'}</strong>
               <span>{connected && !controlEnabled ? '已连接 · 控制暂停' : statusCopy[status]}</span>
             </div>
-            <button type="button" aria-label="关闭3D鼠标面板" onClick={() => setOpen(false)}>
+            <button type="button" aria-label="关闭3D鼠标面板" onClick={() => {
+              setOpen(false);
+              menuAnchorRef?.current?.focus();
+            }}>
               <X size={13} />
             </button>
           </div>

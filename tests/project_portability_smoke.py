@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 from archive_helpers import start_project_download
 
 import hashlib
@@ -126,7 +128,7 @@ def run():
             assert page.locator(".map-identity strong").inner_text() == "portable-test.ply"
             assert not portable_requests
 
-            page.get_by_role("button", name="打开示教数据管理页").click()
+            topbar_action(page, name="打开示教数据管理页").click()
             page.locator('[data-app-page="teaching-data"]').wait_for()
             archive_tree = page.locator(".teaching-archive-tree")
             assert archive_tree.get_attribute("data-teaching-task-count") == "1"

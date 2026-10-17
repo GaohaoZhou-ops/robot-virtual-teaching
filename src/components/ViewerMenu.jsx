@@ -6,6 +6,9 @@ export default function ViewerMenu({
   children,
   label,
   triggerLabel = label,
+  triggerClassName = '',
+  triggerContent,
+  triggerProps,
   title,
   icon: Icon,
   align = 'end',
@@ -103,9 +106,10 @@ export default function ViewerMenu({
       }}
     >
       <button
+        {...triggerProps}
         ref={triggerRef}
         type="button"
-        className={`viewer-menu__trigger ${open ? 'is-open' : ''}`}
+        className={`viewer-menu__trigger ${triggerClassName} ${open ? 'is-open' : ''}`}
         aria-label={triggerLabel}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -120,8 +124,7 @@ export default function ViewerMenu({
         }}
         title={title}
       >
-        <Icon size={13} />
-        <span>{label}</span>
+        {triggerContent ?? <><Icon size={13} /><span>{label}</span></>}
         <ChevronDown size={11} />
       </button>
       {open && createPortal(

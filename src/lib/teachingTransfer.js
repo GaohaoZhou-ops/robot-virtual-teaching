@@ -200,6 +200,7 @@ function snapshotResult(project, map, mode, transfer, suspended = true) {
     heightRange: project.slice || [map.bounds.min.z, map.bounds.max.z],
     robotPose: project.robot?.origin, robotJointValues: project.robot?.joints,
     lockedRobotJointNames: project.robot?.lockedJoints, robotHeightLocked: project.robot?.heightLocked,
+    ignoredRobotCollisionJointNames: project.robot?.collisionIgnoredJoints,
     ...project.workspace, teachingSpaceMode: mode,
     meshRenderQuality: project.rendering?.meshQuality || 'auto',
     transfer, directoryAutosaveSuspended: suspended,

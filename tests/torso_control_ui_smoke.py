@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import math
 import os
 from pathlib import Path
@@ -201,7 +203,7 @@ def run():
         page.screenshot(path="/tmp/atlas-torso-control-compact.png", full_page=True)
         saved = state(canvas)
         page.get_by_role("button", name="完成调整", exact=True).click()
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         with page.expect_download() as download_info:
             start_project_download(page)
         project = read_exported_project(download_info.value)

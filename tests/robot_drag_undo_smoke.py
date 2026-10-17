@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import math
 import os
 from pathlib import Path
@@ -179,7 +181,7 @@ def run():
         page.keyboard.press('Control+Shift+z')
         assert_restored(canvas, current, target=True)
 
-        page.get_by_role('button', name='打开示教数据管理页').click()
+        topbar_action(page, name='打开示教数据管理页').click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         page.keyboard.press('Control+z')
         assert_restored(canvas, current)
@@ -218,7 +220,7 @@ def run():
         # Export and reload verify the parent state was restored, not just WebGL.
         drag(page, canvas, dx=5, dy=-4)
         undo(page, canvas, numeric, target=True)
-        page.get_by_role('button', name='打开示教数据管理页').click()
+        topbar_action(page, name='打开示教数据管理页').click()
         with page.expect_download() as info:
             start_project_download(page)
         project = read_exported_project(info.value)

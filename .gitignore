@@ -278,8 +278,15 @@ playwright/.auth/
 # Export separation and Save As tests when TMPDIR is inside the repository.
 /atlas-export-separation-*/
 /atlas-save-picker-*/
+/atlas-save-target-*/
 /tests/atlas-export-separation-*/
 /tests/atlas-save-picker-*/
+/tests/atlas-save-target-*/
+# Distance-warning and joint-exclusion fixtures when TMPDIR is in the repository.
+/atlas-distance-warning-*/
+/atlas-ignore-joints-*/
+/tests/atlas-distance-warning-*/
+/tests/atlas-ignore-joints-*/
 # tests/ipad_result_file_smoke.mjs creates these import/result stores under TMPDIR.
 /atlas-result-file-*/
 /tests/atlas-result-file-*/

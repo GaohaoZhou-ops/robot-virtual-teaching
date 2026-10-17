@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -73,7 +75,7 @@ def run():
             "data-coordinate-frame"
         ) == "virtual_origin"
 
-        page.get_by_role("button", name="返回主页面").click()
+        topbar_action(page, name="返回主页面").click()
         page.wait_for_url(f"{BASE_URL}/")
         wait_for_home(page)
         assert home.get_attribute("data-has-workspace") == "true"
@@ -95,7 +97,7 @@ def run():
             "data-geometry-source"
         ) == "session-cache"
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.wait_for_url(f"{BASE_URL}/teaching-data")
         page.locator('[data-page="teaching-data"]').wait_for()
         assert page.get_by_role("button", name="主页面").is_visible()

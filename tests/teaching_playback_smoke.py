@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import json
 import os
 from pathlib import Path
@@ -68,7 +70,7 @@ def run():
             str(ROOT / "tests/fixtures/rotation-map.ply")
         )
         page.locator(".loading-curtain").wait_for(state="hidden")
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'",
@@ -193,7 +195,7 @@ def run():
         page.get_by_role("button", name="展开 Z 截面").click()
         assert page.get_by_role("button", name="收起 Z 截面").get_attribute("aria-expanded") == "true"
 
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for()
         page.get_by_role("button", name="选择示教任务 轨迹回放验证").click()
         play_task = page.get_by_role("button", name="播放示教任务 轨迹回放验证")
@@ -313,7 +315,7 @@ def run():
         expect(dock).to_have_attribute("data-playback-status", "paused")
 
         # The hidden workbench cannot resume or stop from another page.
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.evaluate("document.activeElement?.blur()")
         page.keyboard.press("Space")
         page.keyboard.press("Escape")
@@ -496,7 +498,7 @@ def run():
 
         # A new playback can also be terminated while paused, without restarting
         # it on later Space presses or allowing stale animation frames to move it.
-        page.get_by_role("button", name="打开示教数据管理页").click()
+        topbar_action(page, name="打开示教数据管理页").click()
         page.get_by_role("button", name="选择示教任务 轨迹回放验证", exact=True).click(timeout=10_000)
         play_task.click(timeout=10_000)
         expect(dock).to_have_attribute("data-playback-status", "playing")

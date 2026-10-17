@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import os
 from pathlib import Path
 
@@ -67,7 +69,7 @@ def run():
             "data-waypoint-source"
         ) == "point-cloud-slice"
 
-        page.get_by_role("button", name="加载机器人", exact=True).click()
+        topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role(
             "option", name="加载机器人 botx_abx_zivid_m70"
         ).click()

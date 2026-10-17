@@ -1,3 +1,5 @@
+from topbar_tools_helpers import topbar_action
+
 import copy
 import json
 import os
@@ -52,7 +54,7 @@ def run():
             ready(page)
             page.locator('[data-independent-teaching-input]').set_input_files(str(ROOT / 'tests/fixtures/rotation-map.ply'))
             ready(page)
-            page.get_by_role('button', name='加载机器人', exact=True).click()
+            topbar_action(page, name='加载机器人', exact=True).click()
             page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70', exact=True).click()
             canvas = page.locator('.three-canvas')
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
@@ -129,13 +131,13 @@ def run():
             page.screenshot(path=str(ARTIFACTS / 'compact.png'), full_page=True)
             assert dialog.locator('.mobile-solve-dialog').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
             dialog.get_by_role('button', name='关闭姿态计算').click()
-            page.get_by_role('button', name='打开示教数据管理页').click()
+            topbar_action(page, name='打开示教数据管理页').click()
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             expect(dialog.locator('.mobile-solve-results-heading')).to_contain_text('1 / 2 可达')
             dialog.get_by_role('button', name='查看已保存任务').click()
             config = await_saved(page, lambda c: c['ui'].get('activeTeachingTaskId') == tasks[1]['id'])
             assert len(config['project']['virtualTeaching']['tasks']) == 2, 'saving twice must not duplicate the output task'
-            page.get_by_role('button', name='打开示教数据管理页').click()
+            topbar_action(page, name='打开示教数据管理页').click()
             with page.expect_download() as download:
                 start_project_download(page)
             exported = read_exported_project(download.value)['virtualTeaching']['tasks']

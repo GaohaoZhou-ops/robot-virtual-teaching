@@ -1923,7 +1923,7 @@ code {
 
 .map-details-dialog__header {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto 32px;
+  grid-template-columns: 46px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 12px;
   min-height: 86px;
@@ -1973,36 +1973,6 @@ code {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.map-details-dialog__badges {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 5px;
-  max-width: 230px;
-  flex-wrap: wrap;
-}
-
-.map-details-dialog__badges > span {
-  padding: 5px 7px;
-  border: 1px solid rgba(89, 219, 232, 0.18);
-  color: #6c9da0;
-  background: rgba(89, 219, 232, 0.04);
-  font: 7px "SFMono-Regular", Menlo, monospace;
-  white-space: nowrap;
-}
-
-.map-details-dialog__badges > span.is-warning {
-  border-color: rgba(244, 201, 93, 0.28);
-  color: var(--amber);
-  background: rgba(244, 201, 93, 0.06);
-}
-
-.map-details-dialog__badges > span.is-virtual {
-  border-color: rgba(170, 145, 255, 0.36);
-  color: #c8bcf2;
-  background: rgba(170, 145, 255, 0.08);
 }
 
 .map-details-dialog__header > button {
@@ -2340,7 +2310,6 @@ code {
     gap: 9px;
     padding-inline: 12px;
   }
-  .map-details-dialog__badges { display: none; }
   .map-details-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .map-details-file dl { grid-template-columns: 1fr; }
   .map-details-project dl { grid-template-columns: 1fr; }
@@ -2540,7 +2509,7 @@ code {
   font: 9px Menlo, monospace;
 }
 
-.robot-collision-distance {
+.viewer-menu__trigger.robot-collision-distance {
   --collision-tone: var(--cyan);
   --collision-rgb: 89, 219, 232;
   display: inline-flex;
@@ -2554,9 +2523,23 @@ code {
   border: 1px solid rgba(var(--collision-rgb), 0.22);
   color: var(--collision-tone);
   background: rgba(var(--collision-rgb), 0.045);
+  box-shadow: none;
   font: 500 9px "SFMono-Regular", Menlo, monospace;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.viewer-menu__trigger.robot-collision-distance:hover,
+.viewer-menu__trigger.robot-collision-distance:focus-visible,
+.viewer-menu__trigger.robot-collision-distance.is-open {
+  border-color: rgba(var(--collision-rgb), 0.5);
+  color: var(--collision-tone);
+  background: rgba(var(--collision-rgb), 0.12);
+}
+
+.robot-collision-distance.is-disabled {
+  --collision-tone: var(--muted);
+  --collision-rgb: 140, 160, 166;
 }
 
 .robot-collision-distance.is-safe {
@@ -3702,7 +3685,7 @@ code {
 }
 
 .viewer-display-settings__color,
-.viewer-display-settings__warnings {
+.robot-distance-settings__visibility {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3712,7 +3695,7 @@ code {
 }
 
 .viewer-display-settings__color > span,
-.viewer-display-settings__warnings > span {
+.robot-distance-settings__visibility > span {
   display: inline-flex;
   align-items: center;
   gap: 8px;
