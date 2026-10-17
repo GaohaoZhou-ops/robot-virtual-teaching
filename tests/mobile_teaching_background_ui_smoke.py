@@ -47,7 +47,7 @@ def run():
                 samples.append(sample)
             archive['result']['samples'] = samples
             open_ipad_dialog(page, '导入结果文件')
-            ipad = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
+            ipad = page.get_by_role('dialog', name='iPad 示教')
             ipad.locator('[data-ipad-result-input]').set_input_files({
                 'name': 'background.atlas-teaching.json', 'mimeType': 'application/json', 'buffer': json.dumps(archive).encode(),
             })

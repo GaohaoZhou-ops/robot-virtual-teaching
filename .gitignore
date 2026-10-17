@@ -96,6 +96,12 @@ test-results/
 /tests/test-traces/
 /ipad/test-artifacts/
 /vision/test-artifacts/
+# Dated or per-run output roots used when overriding ATLAS_TEST_ARTIFACTS /
+# VISION_ARTIFACTS. Match the directory variants of the ZIP rules below.
+/test-artifacts-*/
+/tests/test-artifacts-*/
+/ipad/test-artifacts-*/
+/vision/test-artifacts-*/
 /ipad/screenshots/
 /vision/screenshots/
 # Packed test artifacts can contain the same local project data.

@@ -1,4 +1,6 @@
+import json
 import os
+import time
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -63,18 +65,106 @@ def run():
             expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()
 
             if mode == 'independent':
-                topbar_action(page, 'iPad / Vision Pro', exact=True).click()
-                mobile = page.get_by_role('menu', name='iPad / Vision Pro', exact=True)
-                expect(mobile).to_be_visible()
-                expect(page.locator('.workbench-menu-panel:visible')).to_have_count(0)
-                page.keyboard.press('ArrowDown')
-                expect(mobile.get_by_role('menuitem', name='示教来源')).to_be_focused()
-                page.keyboard.press('ArrowRight')
-                expect(page.get_by_role('menuitemradio', name='查看独立示教')).to_be_focused()
-                page.keyboard.press('Escape')
-                page.keyboard.press('Escape')
-                expect(mobile).to_have_count(0)
-                expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()
+                for device in ('iPad', 'Vision Pro'):
+                    topbar_action(page, device, exact=True).click()
+                    mobile = page.get_by_role('menu', name=device, exact=True)
+                    expect(mobile).to_be_visible()
+                    expect(page.locator('.workbench-menu-panel:visible')).to_have_count(0)
+                    page.keyboard.press('ArrowDown')
+                    expect(mobile.get_by_role('menuitem', name='示教来源')).to_be_focused()
+                    page.keyboard.press('ArrowRight')
+                    expect(page.get_by_role('menuitemradio', name='查看独立示教')).to_be_focused()
+                    page.keyboard.press('Escape')
+                    page.keyboard.press('Escape')
+                    expect(mobile).to_have_count(0)
+                    expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()
+
+                # Pairing failures still retain the selected device and its recovery path.
+                # Intercept LAN calls so this UI check cannot create a real transfer.
+                page.route('**/__atlas/ipad/**', lambda route: route.fulfill(
+                    status=503, content_type='application/json', body='{"error":"测试：局域网暂不可用"}'))
+                for device, action, title, retry in (
+                    ('Vision Pro', '配对 Vision Pro', 'Vision Pro 空间示教', '重试准备配对信息'),
+                    ('iPad', '扫码配对', 'iPad 示教', '重试生成二维码'),
+                ):
+                    topbar_action(page, device, exact=True).click()
+                    page.get_by_role('menuitem', name='同步与接收', exact=True).click()
+                    sync_menu = page.get_by_role('menu', name='同步与接收', exact=True)
+                    expect(sync_menu.get_by_role('menuitem', name='导入结果文件')).to_have_count(0 if device == 'Vision Pro' else 1)
+                    sync_menu.get_by_role('menuitem', name=action, exact=True).click()
+                    dialog = page.get_by_role('dialog', name=title, exact=True)
+                    expect(dialog).to_be_visible()
+                    expect(dialog.get_by_role('alert')).to_contain_text('局域网暂不可用')
+                    expect(dialog.get_by_role('button', name=retry, exact=True)).to_be_enabled()
+                    expect(dialog.get_by_role('button', name='导入结果文件')).to_have_count(0 if device == 'Vision Pro' else 1)
+                    dialog.get_by_role('button', name='关闭设备示教窗口').click()
+                    expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()
+
+                ticket, requests = {}, []
+
+                def pairing_service(route):
+                    path = route.request.url.split('/__atlas/ipad', 1)[1]
+                    requests.append((route.request.method, path))
+                    if path == '/info':
+                        result = {'addresses': ['http://192.168.1.20:21990']}
+                    elif path == '/sessions' and route.request.method == 'POST':
+                        ticket.update(id='vision-ui-transfer', ownerToken='ui-only', status='preparing',
+                                      manifest=route.request.post_data_json['manifest'],
+                                      createdAt='2026-01-01T00:00:00Z', pairingCode='V123',
+                                      pairingExpiresAt=int(time.time() * 1000) + 600000)
+                        result = ticket
+                    elif path.endswith('/model'):
+                        ticket['status'] = 'ready'
+                        result = ticket
+                    elif path.endswith('/renew'):
+                        ticket['pairingCode'] = 'V456'
+                        result = ticket
+                    elif path == '/sessions/vision-ui-transfer':
+                        result = ticket
+                    else:
+                        raise AssertionError(f'Unexpected pairing request: {path}')
+                    route.fulfill(content_type='application/json', body=json.dumps(result))
+
+                page.unroute('**/__atlas/ipad/**')
+                page.route('**/__atlas/ipad/**', pairing_service)
+                for opening in range(2):
+                    topbar_action(page, 'Vision Pro', exact=True).click()
+                    page.get_by_role('menuitem', name='同步与接收', exact=True).click()
+                    page.get_by_role('menuitem', name='配对 Vision Pro', exact=True).click()
+                    dialog = page.get_by_role('dialog', name='Vision Pro 空间示教', exact=True)
+                    expect(dialog.locator('.ipad-code')).to_have_text('V123' if opening == 0 else 'V456')
+                    expect(dialog).to_contain_text('搜索局域网电脑')
+                    expect(dialog.get_by_role('img', name='设备配对二维码')).to_have_count(0)
+                    expect(dialog.get_by_role('button', name='导入结果文件')).to_have_count(0)
+                    expect(dialog.get_by_role('alert')).to_have_count(0)
+                    expect(dialog.locator('.ipad-history option')).to_have_count(2)
+                    if opening == 0:
+                        dialog.get_by_role('button', name='更新配对码', exact=True).click()
+                        expect(dialog.locator('.ipad-code')).to_have_text('V456')
+                        page.screenshot(path='/tmp/atlas-vision-pairing.png', full_page=True)
+                    dialog.get_by_role('button', name='关闭设备示教窗口').click()
+                    if opening == 0:
+                        # A newer iPad transfer for the same model must neither be reused nor listed here.
+                        page.evaluate('''() => {
+                            const saved = JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'));
+                            const ipad = {...saved[0], id: 'ipad-ui-transfer', targetDevice: 'ipad',
+                                deviceName: 'iPad Pro', status: 'imported', createdAt: new Date().toISOString(),
+                                manifest: {...saved[0].manifest, name: 'iPad 历史传输'}};
+                            localStorage.setItem('atlas-ipad-handoffs-v1', JSON.stringify([ipad, ...saved]));
+                        }''')
+                assert requests.count(('POST', '/sessions')) == 1, 'reopening must reuse the existing transfer'
+                assert not any(path.endswith('/pairing-qr') for _, path in requests), 'Vision Pro pairs without scanning'
+                for device, transfer_id, excluded_id in (
+                    ('Vision Pro', 'vision-ui-transfer', 'ipad-ui-transfer'),
+                    ('iPad', 'ipad-ui-transfer', 'vision-ui-transfer'),
+                ):
+                    topbar_action(page, device, exact=True).click()
+                    page.get_by_role('menuitem', name='传输任务', exact=True).click()
+                    history = page.get_by_role('menu', name='传输任务', exact=True)
+                    expect(history.locator(f'[data-transfer-id="{transfer_id}"]')).to_be_visible()
+                    expect(history.locator(f'[data-transfer-id="{excluded_id}"]')).to_have_count(0)
+                    page.keyboard.press('Escape')
+                    page.keyboard.press('Escape')
 
             for width in (1440, 1024, 680, 390):
                 page.set_viewport_size({'width': width, 'height': 900})

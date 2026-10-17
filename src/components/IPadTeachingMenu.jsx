@@ -1,14 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, ArrowLeftRight, Bot, Check, ChevronDown, ChevronRight, FileUp, History, Plus, QrCode, RefreshCw, Tablet } from 'lucide-react';
-import { ipadRequest, readIPadTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
+import { ArrowDownToLine, ArrowLeftRight, Bot, Check, ChevronDown, ChevronRight, FileUp, Glasses, History, Plus, QrCode, RefreshCw, Tablet, Wifi } from 'lucide-react';
+import { ipadRequest, readDeviceTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
 import './IPadTeachingMenu.css';
 
 const transferStatus = { preparing: '准备模型', ready: '等待配对', paired: '设备示教中', completed: '待接收', imported: '已接收', cancelled: '已结束' };
-const savedTickets = () => readIPadTickets().filter((item) => item?.id && item.manifest)
-  .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-export default function IPadTeachingMenu({ mapData, source, desktopCount, mobileCount, mobileLabel, disabled, onSourceChange, onOpenSync, isActive = true, menuAnchorRef }) {
+export default function IPadTeachingMenu({ device = 'ipad', mapData, source, desktopCount, deviceCount, disabled, onSourceChange, onOpenSync, isActive = true, menuAnchorRef }) {
+  const vision = device === 'vision';
+  const deviceLabel = vision ? 'Vision Pro' : 'iPad';
+  const DeviceIcon = vision ? Glasses : Tablet;
+  const savedTickets = () => readDeviceTickets(device);
   const menuId = useId();
   const triggerRef = useRef(null), menuRef = useRef(null), submenuRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -20,17 +21,17 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
     || tickets.find((item) => mapData?.sourceHash && item.manifest.sourceHash === mapData.sourceHash);
   const canReceive = ['completed', 'imported'].includes(currentTicket?.status);
   const canRenew = ['ready', 'paired'].includes(currentTicket?.status);
-  const currentSourceLabel = source === 'mobile' ? `${mobileLabel} 示教` : '独立示教';
+  const currentSourceLabel = `${deviceCount} 个 ${deviceLabel} 任务${source === device ? ' · 当前显示' : ''}`;
 
   const close = (focus = false) => {
     setOpen(false); setSection(null);
     if (focus) (menuAnchorRef?.current || triggerRef.current)?.focus();
   };
   const run = (action) => { close(true); action(); };
-  const sync = (action, ticketId = currentTicket?.id) => run(() => onOpenSync({ action, ticketId }));
+  const sync = (action, ticketId = currentTicket?.id) => run(() => onOpenSync({ action, ticketId, device }));
   const sections = [
     { id: 'source', label: '示教来源', detail: currentSourceLabel, icon: Bot },
-    { id: 'sync', label: '同步与接收', detail: currentTicket ? transferStatus[currentTicket.status] : '扫码 / 文件', icon: ArrowLeftRight },
+    { id: 'sync', label: '同步与接收', detail: currentTicket ? transferStatus[currentTicket.status] : vision ? '配对码 / 局域网' : '扫码 / 文件', icon: ArrowLeftRight },
     { id: 'history', label: '传输任务', detail: `${tickets.length} 个任务`, icon: History },
   ];
 
@@ -47,7 +48,7 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
       try {
         const results = await Promise.allSettled(stored.filter((item) => ['ready', 'paired'].includes(item.status)).map(async (item) => {
           const next = await ipadRequest(`/sessions/${item.id}`, { token: item.ownerToken, signal: controller.signal });
-          return next.status !== item.status ? { ...item, ...next } : null;
+          return next.status !== item.status || next.deviceName !== item.deviceName ? { ...item, ...next } : null;
         }));
         if (controller.signal.aborted) return;
         results.forEach((result) => { if (result.status === 'fulfilled' && result.value) rememberIPadTicket(result.value); });
@@ -124,15 +125,16 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
     if (!triggerRef.current?.contains(event.relatedTarget) && !menuRef.current?.contains(event.relatedTarget)) close();
   }}>
     <button type="button" className="action-button ipad-teaching-action" ref={triggerRef}
-      aria-label="iPad / Vision Pro" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
+      aria-label={deviceLabel} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
       disabled={disabled} onClick={() => { if (open) close(); else setOpen(true); }}
       onKeyDown={(event) => { if (event.key === 'ArrowDown' && !menuAnchorRef) { event.preventDefault(); setOpen(true); } }}>
-      <Tablet size={15}/><span>iPad / Vision Pro</span><ChevronDown size={12}/>
+      <DeviceIcon size={15}/><span><strong>{deviceLabel}</strong><small>{vision ? '配对码连接 · 空间示教' : '扫码连接 · AR 示教'}</small></span><ChevronDown size={12}/>
     </button>
-    {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label="iPad / Vision Pro" tabIndex={-1} style={position} onKeyDown={keyDown}>
+    {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label={deviceLabel} tabIndex={-1} style={position} onKeyDown={keyDown}>
+      <p className="ipad-nav-title"><DeviceIcon size={14}/>{deviceLabel}</p>
       {sections.map(({ id, label, detail, icon: Icon }) => <button key={id} type="button" role="menuitem" data-section={id}
         aria-label={label} aria-haspopup="menu" aria-expanded={section === id} aria-controls={section === id ? `${menuId}-${id}` : undefined}
-        onPointerEnter={(event) => { if (event.pointerType === 'mouse') setSection(id); }} onClick={() => focusChild(id)}>
+        onPointerMove={(event) => { if (event.pointerType === 'mouse') setSection(id); }} onClick={() => focusChild(id)}>
         <Icon size={14}/><span><strong>{label}</strong><small>{detail}</small></span><ChevronRight size={13}/>
       </button>)}
       {section && <div className="ipad-nav-submenu" ref={submenuRef} id={`${menuId}-${section}`} role="menu"
@@ -141,13 +143,15 @@ export default function IPadTeachingMenu({ mapData, source, desktopCount, mobile
           <button type="button" role="menuitemradio" aria-label="查看独立示教" aria-checked={source === 'desktop'} onClick={() => run(() => onSourceChange('desktop'))}>
             <Bot size={14}/><span><strong>独立示教</strong><small>{desktopCount} 个任务</small></span>{source === 'desktop' && <Check size={14}/>}
           </button>
-          {mobileCount > 0 ? <button type="button" role="menuitemradio" aria-label={`查看 ${mobileLabel} 示教`} aria-checked={source === 'mobile'} onClick={() => run(() => onSourceChange('mobile'))}>
-            <Tablet size={14}/><span><strong>{mobileLabel} 示教</strong><small>{mobileCount} 个任务</small></span>{source === 'mobile' && <Check size={14}/>}
-          </button> : <p className="ipad-nav-empty">接收设备示教后，可在这里切换</p>}
+          {deviceCount > 0 ? <button type="button" role="menuitemradio" aria-label={`查看 ${deviceLabel} 示教`} aria-checked={source === device} onClick={() => run(() => onSourceChange(device))}>
+            <DeviceIcon size={14}/><span><strong>{deviceLabel} 示教</strong><small>{deviceCount} 个任务</small></span>{source === device && <Check size={14}/>}
+          </button> : <p className="ipad-nav-empty">暂无 {deviceLabel} 示教，接收该设备的示教结果后可在这里切换</p>}
         </>}
         {section === 'sync' && <>
-          <button type="button" role="menuitem" aria-label="扫码配对" onClick={() => sync('pairing')}><QrCode size={14}/><span><strong>扫码配对</strong><small>二维码 / 配对码</small></span></button>
-          <button type="button" role="menuitem" aria-label="导入结果文件" onClick={() => sync('file')}><FileUp size={14}/><span><strong>导入结果文件</strong><small>AirDrop / Type-C</small></span></button>
+          <button type="button" role="menuitem" aria-label={vision ? '配对 Vision Pro' : '扫码配对'} onClick={() => sync('pairing')}>
+            {vision ? <Wifi size={14}/> : <QrCode size={14}/>}<span><strong>{vision ? '配对 Vision Pro' : '扫码配对'}</strong><small>{vision ? '搜索电脑后输入 4 位配对码' : '二维码 / 配对码'}</small></span>
+          </button>
+          {!vision && <button type="button" role="menuitem" aria-label="导入结果文件" onClick={() => sync('file')}><FileUp size={14}/><span><strong>导入结果文件</strong><small>AirDrop / Type-C</small></span></button>}
           {currentTicket && <button type="button" role="menuitem" aria-label={canReceive ? currentTicket.status === 'imported' ? '再次接收（去重）' : '接收示教结果' : '检查完成状态'} onClick={() => sync(canReceive ? 'receive' : 'status')}>
             {canReceive ? <ArrowDownToLine size={14}/> : <RefreshCw size={14}/>}<span><strong>{canReceive ? currentTicket.status === 'imported' ? '再次接收（去重）' : '接收示教结果' : '检查完成状态'}</strong>
               <small>{currentTicket.manifest.name}</small></span>

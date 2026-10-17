@@ -5,7 +5,8 @@ export const MAX_MODEL_VERTICES = 5000000;
 export const MAX_MODEL_INDICES = 30000000;
 export const MAX_SAMPLES = 50000;
 export const VISION_HEAD_FRAME = 'visionpro_head_optical_frame';
-export const mobileDeviceLabel = (result) => result?.device?.platform === 'visionOS' ? 'Vision Pro' : 'iPad';
+export const mobileDeviceKey = (result) => result?.device?.platform === 'visionOS' ? 'vision' : 'ipad';
+export const mobileDeviceLabel = (result) => mobileDeviceKey(result) === 'vision' ? 'Vision Pro' : 'iPad';
 
 const check = (condition, message) => { if (!condition) throw new Error(message); };
 const finiteVector = (v, keys) => v && keys.every((key) => Number.isFinite(v[key]));

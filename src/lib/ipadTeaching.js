@@ -62,6 +62,19 @@ export function readIPadTickets() {
   catch { return []; }
 }
 
+export function mobileTicketDevice(ticket) {
+  // Older transfers have no device selection; retain their original iPad entry.
+  // Once paired, the native app's device name takes precedence over that selection.
+  if (/vision\s*pro/i.test(ticket?.deviceName || '')) return 'vision';
+  if (/ipad/i.test(ticket?.deviceName || '')) return 'ipad';
+  return ticket?.targetDevice === 'vision' ? 'vision' : 'ipad';
+}
+
+export function readDeviceTickets(device) {
+  return readIPadTickets().filter((item) => item?.id && item.manifest && mobileTicketDevice(item) === device)
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
 export function rememberIPadTicket(ticket) {
   const tickets = readIPadTickets();
   localStorage.setItem(ticketKey, JSON.stringify([ticket, ...tickets.filter((item) => item.id !== ticket.id)]));
