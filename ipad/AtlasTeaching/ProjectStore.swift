@@ -76,7 +76,7 @@ actor ProjectStore {
         result.createdAt = timestamp(); result.completedAt = nil
         let draft = LocalProject(serverURL: project.serverURL,
             session: PairedSession(id: id, deviceToken: "", manifest: project.session.manifest), result: result,
-            displaySettings: (project.displaySettings ?? ModelDisplaySettings()).forOpening())
+            displaySettings: project.displaySettings ?? ModelDisplaySettings().forOpening())
         let destination = try file(id, ext: "atls")
         try FileManager.default.copyItem(at: source, to: destination)
         do { try save(draft) }

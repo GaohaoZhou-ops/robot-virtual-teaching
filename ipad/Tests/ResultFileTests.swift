@@ -42,6 +42,7 @@ import simd
         precondition(retryURL == url && retryData == data, "retries preserve the frozen result")
 
         var sourceForContinuation = project
+        sourceForContinuation.displaySettings = ModelDisplaySettings(mode: .points, pointDensity: .quarter, meshQuality: .detail)
         sourceForContinuation.syncedAt = timestamp()
         sourceForContinuation.resultSyncDestination = ResultSyncDestination(serverURL: project.serverURL, session: project.session)
         let draft = try await store.continueTeaching(sourceForContinuation)
@@ -49,6 +50,7 @@ import simd
         precondition(draft.result.sessionId == draft.id && draft.result.completedAt == nil)
         precondition(draft.syncedAt == nil && draft.resultSyncDestination == nil && draft.requiresResultPairing)
         precondition(draft.session.deviceToken.isEmpty, "a continuation cannot overwrite a completed desktop transfer")
+        precondition(draft.displaySettings == sourceForContinuation.displaySettings, "continuing teaching retains the shared display quality")
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let draftSamples = try encoder.encode(draft.result.samples), originalSamples = try encoder.encode(project.result.samples)
         let draftCalibrations = try encoder.encode(draft.result.calibrations), originalCalibrations = try encoder.encode(project.result.calibrations)
@@ -58,6 +60,7 @@ import simd
         precondition(draftModel == model, "the continuation retains the exact model")
         let reopened = try await store.projects().first { $0.id == draft.id }
         precondition(reopened?.result.id == draft.result.id && reopened?.requiresResultPairing == true)
+        precondition(reopened?.displaySettings == sourceForContinuation.displaySettings, "display quality survives saving and reopening the draft")
         var rePaired = draft
         rePaired.resultSyncDestination = ResultSyncDestination(serverURL: project.serverURL, session: project.session)
         precondition(!rePaired.requiresResultPairing, "after QR pairing, LAN retry is available")

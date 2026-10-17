@@ -89,7 +89,7 @@ final class TeachingSession: ObservableObject {
         let existing = try await ProjectStore.shared.projects().first { $0.id == paired.id }
         var project = existing ?? LocalProject(serverURL: serverURL, session: paired,
             result: TeachingResult(sessionId: paired.id, modelHash: paired.manifest.modelHash))
-        project.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
+        project.displaySettings = project.displaySettings ?? ModelDisplaySettings().forOpening()
         project.session = paired; project.serverURL = serverURL
         project.resultSyncDestination = nil
         try await ProjectStore.shared.saveModel(data, id: paired.id)
@@ -127,7 +127,7 @@ final class TeachingSession: ObservableObject {
             let data = try await ProjectStore.shared.model(project.id)
             geometry = try await Task.detached(priority: .userInitiated) { try ModelGeometry(data: data, manifest: project.session.manifest) }.value
             var opened = project
-            opened.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
+            opened.displaySettings = project.displaySettings ?? ModelDisplaySettings().forOpening()
             current = opened; pendingModel = nil
             serverAddress = project.resultSyncDestination?.serverURL ?? project.serverURL
             #if os(iOS)
