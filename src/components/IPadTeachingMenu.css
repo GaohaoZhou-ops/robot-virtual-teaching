@@ -1,0 +1,15 @@
+.ipad-teaching-menu { display: flex; flex-shrink: 0; }
+.ipad-teaching-action[aria-expanded="true"] { color: var(--cyan); border-color: #59dbe877; }
+.ipad-nav-menu, .ipad-nav-submenu { position: fixed; z-index: 390; padding: 5px; border: 1px solid #59dbe84d; background: #071114fc; box-shadow: 0 18px 48px #0009; backdrop-filter: blur(16px); outline: none; }
+.ipad-nav-menu { width: min(232px, calc(100vw - 16px)); }
+.ipad-nav-submenu { position: absolute; width: min(310px, calc(100vw - 16px)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #294247 transparent; }
+.ipad-nav-menu button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; padding: 10px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; text-align: left; }
+.ipad-nav-menu button > span:not(.ipad-nav-pending) { display: grid; flex: 1; min-width: 0; gap: 4px; }
+.ipad-nav-menu button > svg { flex-shrink: 0; }
+.ipad-nav-menu strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; color: var(--text); }
+.ipad-nav-menu small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-2); font-size: 9px; }
+.ipad-nav-menu button:hover, .ipad-nav-menu button:focus-visible, .ipad-nav-menu button[aria-expanded="true"], .ipad-nav-menu button[aria-checked="true"] { border-color: #59dbe833; background: #59dbe810; color: var(--cyan); outline: none; }
+.ipad-nav-menu button:focus-visible { box-shadow: inset 2px 0 var(--cyan); }
+.ipad-nav-menu button[aria-checked="true"] strong { color: var(--cyan); }
+.ipad-nav-empty { margin: 0; padding: 13px 10px; font-size: 11px; line-height: 1.7; color: var(--muted); }
+.ipad-nav-pending { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--amber); }

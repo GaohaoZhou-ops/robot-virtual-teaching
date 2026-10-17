@@ -3,6 +3,7 @@ import os
 import uuid
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from ipad_menu_helpers import open_ipad_dialog
 
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:22001')
 NATIVE_FILE = Path(os.environ.get('ATLAS_RESULT_FILE_FIXTURE', '/tmp/atlas-ipad-native-result-file.json'))
@@ -35,7 +36,7 @@ with sync_playwright() as playwright:
         page.locator('[data-independent-teaching-input="true"]').set_input_files(
             str(Path(__file__).parent / 'fixtures/rotation-map.ply'))
         ready(page)
-        page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+        open_ipad_dialog(page)
         dialog = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
         expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
         ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
@@ -80,7 +81,7 @@ with sync_playwright() as playwright:
         page.evaluate("localStorage.removeItem('atlas-ipad-handoffs-v1')")
         page.route('**/__atlas/ipad/**', lambda route: route.fulfill(
             status=503, content_type='application/json', body='{"error":"测试：局域网服务离线"}'))
-        page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+        open_ipad_dialog(page)
         expect(dialog.get_by_role('alert')).to_contain_text('局域网服务离线')
         expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
         second = json.loads(json.dumps(archive))

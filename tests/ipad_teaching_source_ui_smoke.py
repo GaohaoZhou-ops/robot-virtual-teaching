@@ -9,6 +9,7 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 from archive_helpers import read_exported_project
+from ipad_menu_helpers import open_ipad_dialog, open_ipad_menu, select_teaching_source
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,9 +103,9 @@ def fixture_data():
 
 
 def import_result(page, archive):
-    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+    open_ipad_dialog(page, '导入结果文件')
     dialog = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
-    expect(dialog.get_by_role('alert')).to_have_text('测试：文件导入')
+    expect(dialog.get_by_role('alert')).to_have_count(0)
     expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
     dialog.locator('[data-ipad-result-input]').set_input_files({
         'name': 'test.atlas-teaching.json', 'mimeType': 'application/json', 'buffer': json.dumps(archive).encode(),
@@ -117,13 +118,14 @@ def run():
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     project, archive = fixture_data()
     mobile_id = 'ipad-' + archive['result']['id']
-    errors = []
+    errors, lan_requests = [], []
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True, executable_path=CHROME)
         try:
             page = browser.new_page(viewport={'width': 1440, 'height': 900})
             page.set_default_timeout(30000)
             page.on('pageerror', lambda error: errors.append(str(error)))
+            page.on('request', lambda request: lan_requests.append(request.url) if '/__atlas/ipad/' in request.url else None)
             # Exercise file import without creating transfers in the user's LAN store.
             page.route('**/__atlas/ipad/**', lambda route: route.fulfill(
                 status=503, content_type='application/json', body='{"error":"测试：文件导入"}'))
@@ -139,11 +141,46 @@ def run():
             expect(tree).to_have_attribute('data-active-task', 'desktop-task-1')
             expect(tree).to_have_attribute('data-active-parking-point', 'stop-1-1')
             original = saved_workspace(page, 'desktop-task-1', 2)['project']['virtualTeaching']['tasks']
+            # Keyboard navigation traverses both menu levels and returns focus to the trigger.
+            trigger = page.get_by_role('button', name='iPad / Vision Pro', exact=True)
+            trigger.focus()
+            trigger.press('ArrowDown')
+            page.get_by_role('menu', name='iPad / Vision Pro', exact=True).press('ArrowDown')
+            parent = page.get_by_role('menuitem', name='示教来源', exact=True)
+            expect(parent).to_be_focused()
+            parent.press('ArrowRight')
+            source_item = page.get_by_role('menuitemradio', name='查看独立示教', exact=True)
+            expect(source_item).to_be_focused()
+            expect(page.get_by_role('menuitemradio', name='查看 iPad 示教', exact=True)).to_have_count(0)
+            source_item.press('ArrowLeft')
+            expect(parent).to_be_focused()
+            parent.press('ArrowDown')
+            sync_parent = page.get_by_role('menuitem', name='同步与接收', exact=True)
+            expect(sync_parent).to_be_focused()
+            sync_parent.press('ArrowRight')
+            first = page.get_by_role('menuitem', name='扫码配对', exact=True)
+            expect(first).to_be_focused()
+            first.press('End')
+            expect(page.get_by_role('menuitem', name='新建传输', exact=True)).to_be_focused()
+            page.keyboard.press('Home')
+            expect(first).to_be_focused()
+            first.press('Escape')
+            expect(sync_parent).to_be_focused()
+            sync_parent.press('Escape')
+            expect(trigger).to_be_focused()
+            expect(trigger).to_have_attribute('aria-expanded', 'false')
+            trigger.click()
+            parent.hover()
+            expect(source_item).to_be_visible()
+            page.locator('.panel-3d .panel-heading').click(position={'x': 30, 'y': 20})
+            expect(trigger).to_have_attribute('aria-expanded', 'false')
             import_result(page, archive)
+            assert not lan_requests, 'file entry and menu browsing need no LAN session'
             canvas = page.locator('.three-canvas')
-            desktop = page.get_by_role('button', name='查看独立示教', exact=True)
-            mobile = page.get_by_role('button', name='查看 iPad 示教', exact=True)
-            expect(mobile).to_have_attribute('aria-pressed', 'true')
+            desktop = page.get_by_role('menuitemradio', name='查看独立示教', exact=True)
+            mobile = page.get_by_role('menuitemradio', name='查看 iPad 示教', exact=True)
+            open_ipad_menu(page, '示教来源')
+            expect(mobile).to_have_attribute('aria-checked', 'true')
             expect(tree).to_have_attribute('data-task-count', '1')
             expect(tree).to_contain_text('iPad · 2 个 Pose')
             expect(canvas).to_have_attribute('data-mobile-capture-visible', 'true')
@@ -151,32 +188,31 @@ def run():
             view = camera_view(canvas)
             page.screenshot(path=str(ARTIFACTS / 'ipad-view.png'), full_page=True)
             for _ in range(3):
-                desktop.click()
-                expect(desktop).to_have_attribute('aria-pressed', 'true')
+                select_teaching_source(page, '查看独立示教')
                 expect(canvas).to_have_attribute('data-mobile-capture-visible', 'false')
                 expect(tree).to_have_attribute('data-task-count', '2')
                 expect(tree).to_have_attribute('data-active-task', 'desktop-task-1')
                 expect(tree).to_have_attribute('data-active-parking-point', 'stop-1-1')
                 assert camera_view(canvas) == view, 'source switching must not move the 3D camera'
-                mobile.click()
+                select_teaching_source(page, '查看 iPad 示教')
                 expect(canvas).to_have_attribute('data-mobile-capture-visible', 'true')
                 expect(tree).to_have_attribute('data-active-task', mobile_id)
-            desktop.click()
+            select_teaching_source(page, '查看独立示教')
             saved = saved_workspace(page, 'desktop-task-1', 3)
             assert saved['project']['virtualTeaching']['tasks'][:2] == original
             assert saved['project']['virtualTeaching']['tasks'][2]['mobileCapture'] == archive['result']
             page.reload(wait_until='networkidle')
             ready(page)
-            expect(desktop).to_have_attribute('aria-pressed', 'true')
+            open_ipad_menu(page, '示教来源')
+            expect(desktop).to_have_attribute('aria-checked', 'true')
             expect(canvas).to_have_attribute('data-mobile-capture-visible', 'false')
             expect(tree).to_have_attribute('data-active-parking-point', 'stop-1-1')
             page.set_viewport_size({'width': 1280, 'height': 800})
-            for button in [desktop, mobile]:
-                assert button.evaluate('''button => {
-                    const r = button.getBoundingClientRect();
-                    return r.x >= 0 && r.right <= innerWidth && r.y >= 0 && r.bottom <= innerHeight
-                        && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-                }'''), 'source buttons must remain reachable at 1280 × 800'
+            page.wait_for_function('''() => [...document.querySelectorAll('.ipad-nav-submenu button')].every(button => {
+                const r = button.getBoundingClientRect();
+                return r.x >= 0 && r.right <= innerWidth && r.y >= 0 && r.bottom <= innerHeight
+                    && button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
+            })''')
             page.screenshot(path=str(ARTIFACTS / 'desktop-view-1280.png'), full_page=True)
             page.get_by_role('button', name='打开示教数据管理页').click()
             expect(page.locator('.teaching-data-page')).to_have_attribute('data-teaching-task-count', '3')
@@ -197,14 +233,15 @@ def run():
             empty.locator('[data-independent-teaching-input]').set_input_files(str(ROOT / 'tests/fixtures/rotation-map.ply'))
             ready(empty)
             import_result(empty, archive)
-            empty.get_by_role('button', name='查看独立示教', exact=True).click()
+            select_teaching_source(empty, '查看独立示教')
             saved_workspace(empty, None, 1)
             empty.reload(wait_until='networkidle')
             ready(empty)
-            expect(empty.get_by_role('button', name='查看独立示教', exact=True)).to_have_attribute('aria-pressed', 'true')
+            open_ipad_menu(empty, '示教来源')
+            expect(empty.get_by_role('menuitemradio', name='查看独立示教', exact=True)).to_have_attribute('aria-checked', 'true')
             expect(empty.locator('.teaching-capture-tree-card')).to_have_attribute('data-task-count', '0')
             expect(empty.locator('.three-canvas')).to_have_attribute('data-mobile-capture-visible', 'false')
-            empty.get_by_role('button', name='查看 iPad 示教', exact=True).click()
+            select_teaching_source(empty, '查看 iPad 示教')
             expect(empty.locator('.three-canvas')).to_have_attribute('data-mobile-capture-visible', 'true')
             assert not errors, errors
         finally:

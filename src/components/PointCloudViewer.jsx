@@ -1503,6 +1503,7 @@ export default function PointCloudViewer({
   onViewChange,
   resetRequest,
   robotDescriptor,
+  showRobot = true,
   robotLoadState,
   robotPose,
   robotJointValues,
@@ -1550,6 +1551,7 @@ export default function PointCloudViewer({
   const visionCoverageRenderingEnabledRef = useRef(true);
   const teachingSurfaceTintOpacityRef = useRef(TEACHING_SURFACE_TINT_OPACITY);
   const robotLayerRef = useRef(null);
+  const showRobotRef = useRef(showRobot);
   const loadedRobotRef = useRef(null);
   const robotParkingGhostLayerRef = useRef(null);
   const robotParkingGhostVisualRef = useRef(null);
@@ -1666,7 +1668,8 @@ export default function PointCloudViewer({
   onZividCameraPoseChangeRef.current = onZividCameraPoseChange;
   onCameraTeachingResultRef.current = onCameraTeachingResult;
   onCollisionProtectionStatusRef.current = onCollisionProtectionStatus;
-  robotControlEnabledRef.current = Boolean(robotControlEnabled && !teachingPoseEditing);
+  showRobotRef.current = showRobot;
+  robotControlEnabledRef.current = Boolean(showRobot && robotControlEnabled && !teachingPoseEditing);
   robotHeightLockedRef.current = Boolean(robotHeightLocked);
   robotTrajectoryActiveRef.current = Boolean(robotTrajectoryActive);
   robotLoadStateRef.current = robotLoadState;
@@ -2487,7 +2490,7 @@ export default function PointCloudViewer({
   };
 
   const enterEndEffectorControl = (side) => {
-    if (robotTrajectoryActiveRef.current) return false;
+    if (!showRobotRef.current || robotTrajectoryActiveRef.current) return false;
     const isTorso = side === 'torso';
     const controller = isTorso ? torsoControllerRef.current : endEffectorControllersRef.current[side];
     const transform = transformControlsRef.current;
@@ -3676,7 +3679,8 @@ export default function PointCloudViewer({
     robotLayer.name = 'loaded-robot-model';
     robotParkingGhostLayer.name = 'robot-parking-ghost-layer';
     robotParkingGhostLayer.userData.ownedResources = new Set();
-    robotLayer.visible = true;
+    robotLayer.visible = showRobotRef.current;
+    robotParkingGhostLayer.visible = showRobotRef.current;
     scene.add(
       sliceGroup,
       visionCoverageGroup,
@@ -3693,7 +3697,7 @@ export default function PointCloudViewer({
     robotParkingGhostLayerRef.current = robotParkingGhostLayer;
     robotPoseRef.current = applyRobotPose(robotLayer, robotPoseRef.current);
     writeRobotPoseDataset(renderer.domElement, robotPoseRef.current);
-    renderer.domElement.dataset.robotLayerVisible = 'true';
+    renderer.domElement.dataset.robotLayerVisible = String(robotLayer.visible);
     renderer.domElement.dataset.robotLayerRenderIsolation = 'independent';
     renderer.domElement.dataset.robotControlEnabled = robotControlEnabledRef.current
       ? 'true'
@@ -4081,7 +4085,7 @@ export default function PointCloudViewer({
 
     const chassisAtPointer = (event) => {
       const handle = robotChassisHandleRef.current;
-      if (!handle?.target || !setRayFromPointer(event)) return null;
+      if (!showRobotRef.current || !handle?.target || !setRayFromPointer(event)) return null;
       return raycaster.intersectObject(handle.target, false).length ? handle : null;
     };
 
@@ -4180,7 +4184,7 @@ export default function PointCloudViewer({
     };
 
     const updateChassisDragMode = (enabled, reason = 'user', updateUi = true) => {
-      if (enabled && (robotTrajectoryActiveRef.current || teachingPoseEditingRef.current)) return false;
+      if (enabled && (!showRobotRef.current || robotTrajectoryActiveRef.current || teachingPoseEditingRef.current)) return false;
       const nextEnabled = Boolean(enabled && robotChassisHandleRef.current?.target);
       if (!nextEnabled) {
         finishChassisPointerDrag(null, reason, true, updateUi);
@@ -4502,7 +4506,7 @@ export default function PointCloudViewer({
 
     const endEffectorAtPointer = (event) => {
       const rect = renderer.domElement.getBoundingClientRect();
-      if (!rect.width || !rect.height || !robotLayer.children.length) return null;
+      if (!showRobotRef.current || !rect.width || !rect.height || !robotLayer.children.length) return null;
       normalizedPointer.set(
         ((event.clientX - rect.left) / rect.width) * 2 - 1,
         -((event.clientY - rect.top) / rect.height) * 2 + 1,
@@ -5191,7 +5195,7 @@ export default function PointCloudViewer({
           (1 - chassisProjectedPosition.y) * 0.5 * renderer.domElement.clientHeight
         ).toFixed(2);
         renderer.domElement.dataset.robotChassisScreenVisible =
-          Math.abs(chassisProjectedPosition.x) <= 1
+          showRobotRef.current && Math.abs(chassisProjectedPosition.x) <= 1
           && Math.abs(chassisProjectedPosition.y) <= 1
           && chassisProjectedPosition.z >= -1
           && chassisProjectedPosition.z <= 1
@@ -5206,7 +5210,7 @@ export default function PointCloudViewer({
           guide.group.rotation.set(0, 0, THREE.MathUtils.degToRad(robotPoseRef.current.rpy.yaw));
           chassisCameraPosition.copy(chassisWorldPosition).applyMatrix4(camera.matrixWorldInverse);
           const depth = -chassisCameraPosition.z;
-          guide.group.visible = robotControlActive && depth > 1e-9;
+          guide.group.visible = showRobotRef.current && robotControlActive && depth > 1e-9;
           if (guide.group.visible) {
             guide.group.scale.setScalar(
               (CHASSIS_CONTROL_AXIS_SCREEN_LENGTH * depth) / (camera.zoom * focalPixels),
@@ -5248,7 +5252,7 @@ export default function PointCloudViewer({
           (1 - endEffectorProjectedPosition.y) * 0.5 * renderer.domElement.clientHeight
         ).toFixed(2);
         renderer.domElement.dataset[`${prefix}ScreenVisible`] =
-          Math.abs(endEffectorProjectedPosition.x) <= 1
+          showRobotRef.current && Math.abs(endEffectorProjectedPosition.x) <= 1
           && Math.abs(endEffectorProjectedPosition.y) <= 1
           && endEffectorProjectedPosition.z >= -1
           && endEffectorProjectedPosition.z <= 1
@@ -5698,7 +5702,7 @@ export default function PointCloudViewer({
       layer.userData.parkingPointId = robotParkingGhost.parkingPointId;
       robotParkingGhostVisualRef.current = visual;
       updateRobotParkingGhostGuide(visual, robotPoseRef.current, canvas);
-      canvas.dataset.parkingGhostState = 'visible';
+      canvas.dataset.parkingGhostState = showRobotRef.current ? 'visible' : 'hidden';
       canvas.dataset.parkingGhostTargetId = robotParkingGhost.parkingPointId;
       canvas.dataset.parkingGhostPoseId = robotParkingGhost.poseId || '';
       canvas.dataset.parkingGhostMeshCount = String(visual.meshCount);
@@ -5732,6 +5736,20 @@ export default function PointCloudViewer({
       }
     };
   }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost]);
+
+  useEffect(() => {
+    if (robotLayerRef.current) robotLayerRef.current.visible = showRobot;
+    if (robotParkingGhostLayerRef.current) robotParkingGhostLayerRef.current.visible = showRobot;
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) {
+      canvas.dataset.robotLayerVisible = String(showRobot);
+      canvas.dataset.parkingGhostState = showRobot && robotParkingGhostVisualRef.current ? 'visible' : 'hidden';
+    }
+    if (!showRobot) {
+      chassisDragInteractionRef.current?.exit?.('robot-hidden');
+      endEffectorInteractionRef.current?.exit?.();
+    }
+  }, [mapData?.geometry, showRobot]);
 
   useEffect(() => {
     const canvas = controlsRef.current?.domElement;
@@ -6371,7 +6389,7 @@ export default function PointCloudViewer({
   }, [interactionMode, mapData?.geometry, shiftPanArmed]);
 
   const updateRobotKeyboardControl = useCallback((enabled, focus = false) => {
-    enabled = Boolean(enabled && !teachingPoseEditingRef.current);
+    enabled = Boolean(enabled && showRobotRef.current && !teachingPoseEditingRef.current);
     if (enabled && chassisDragModeRef.current) {
       chassisDragInteractionRef.current?.exit?.('robot-keyboard-control');
     }
@@ -6392,11 +6410,11 @@ export default function PointCloudViewer({
   }, []);
 
   useEffect(() => {
-    const available = Boolean(robotDescriptor && robotLoadState?.status === 'loaded');
+    const available = Boolean(showRobot && robotDescriptor && robotLoadState?.status === 'loaded');
     updateRobotKeyboardControl(Boolean(robotControlEnabled && available));
     const canvas = controlsRef.current?.domElement;
     if (canvas) canvas.dataset.robotControlAvailable = available ? 'true' : 'false';
-  }, [mapData?.geometry, robotControlEnabled, robotDescriptor, robotLoadState?.status, updateRobotKeyboardControl]);
+  }, [mapData?.geometry, showRobot, robotControlEnabled, robotDescriptor, robotLoadState?.status, updateRobotKeyboardControl]);
 
   useEffect(() => {
     const locked = Boolean(robotHeightLocked && robotDescriptor);
@@ -7272,7 +7290,7 @@ export default function PointCloudViewer({
   };
 
   const setRobotControlMode = (enabled) => {
-    if (robotTrajectoryActiveRef.current || teachingPoseEditingRef.current) return;
+    if (!showRobotRef.current || robotTrajectoryActiveRef.current || teachingPoseEditingRef.current) return;
     if (robotLoadState?.status !== 'loaded' || !robotDescriptor) return;
     if (enabled) focusRobot();
     updateRobotKeyboardControl(enabled, true);
@@ -7304,7 +7322,7 @@ export default function PointCloudViewer({
 
   const resetView = () => viewActionsRef.current?.reset?.();
   const robotControlActive = Boolean(
-    robotControlEnabled
+    showRobot && robotControlEnabled
     && isActive
     && !robotTrajectoryActive
     && !teachingPoseEditing
@@ -7318,7 +7336,7 @@ export default function PointCloudViewer({
   );
   const displayedRobotPose = normalizeRobotPose(robotPose);
   const robotParkingGhostVisible = Boolean(
-    robotParkingGhost
+    showRobot && robotParkingGhost
     && robotDescriptor
     && robotLoadState?.status === 'loaded',
   );
@@ -7631,7 +7649,7 @@ export default function PointCloudViewer({
                     <button
                       type="button"
                       className={`robot-control-toggle ${robotControlActive ? 'is-active' : ''}`}
-                      disabled={robotTrajectoryActive || teachingPoseEditing}
+                      disabled={!showRobot || robotTrajectoryActive || teachingPoseEditing}
                       onClick={() => setRobotControlMode(!robotControlEnabledRef.current)}
                       aria-label="定位机器人模型"
                       aria-pressed={robotControlActive}
@@ -7654,7 +7672,7 @@ export default function PointCloudViewer({
                       className={chassisDragMode ? 'is-active' : ''}
                       aria-label="拖动底盘"
                       aria-pressed={chassisDragMode}
-                      disabled={robotTrajectoryActive || teachingPoseEditing}
+                      disabled={!showRobot || robotTrajectoryActive || teachingPoseEditing}
                       title={teachingPoseEditing
                         ? '姿态调整期间固定所属停车点；确认修改或按 Esc 结束后可移动底盘'
                         : chassisDragMode

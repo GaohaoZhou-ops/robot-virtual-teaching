@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
 
+from ipad_menu_helpers import open_ipad_dialog, open_ipad_menu
 from ipad_teaching_source_ui_smoke import BASE, CHROME, ROOT, fixture_data, ready, saved_workspace
 
 
@@ -35,7 +36,7 @@ def run():
     '''], input=changed_ply, cwd=ROOT, text=True))
     assert changed['manifest']['modelHash'] != archive['manifest']['modelHash']
     assert changed['manifest']['byteLength'] == archive['manifest']['byteLength']
-    errors, receipts = [], []
+    errors, receipts, mutations = [], [], []
     # Real LAN middleware, with its own temporary store; never modify user transfers.
     with tempfile.TemporaryDirectory(prefix='atlas-model-consistency-') as directory:
         server = subprocess.Popen(['node', '--input-type=module', '-e', '''
@@ -71,6 +72,8 @@ def run():
                     def route_lan(route):
                         request = route.request
                         path = urlsplit(request.url).path
+                        if request.method in ['POST', 'PUT']:
+                            mutations.append(path)
                         if path.endswith('/imported'):
                             receipts.append(path)
                         headers = {key: value for key, value in request.headers.items()
@@ -91,21 +94,40 @@ def run():
                     page.locator('[data-project-guide-input]').set_input_files({
                         'name': 'desktop.json', 'mimeType': 'application/json', 'buffer': json.dumps(project).encode()})
                     original = saved_workspace(page, 'desktop-task-1', 2)['project']['virtualTeaching']['tasks']
-                    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+                    expect(open_ipad_menu(page, '传输任务')).to_contain_text('暂无传输任务')
+                    page.get_by_role('button', name='iPad / Vision Pro', exact=True).click()
+                    assert not mutations, 'browsing menus must not create a transfer'
+                    open_ipad_dialog(page)
                     dialog = page.get_by_role('dialog', name='移动到 iPad 或 Vision Pro 上运行')
                     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
                     ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
                     page.get_by_role('button', name='关闭设备示教窗口').click()
+                    open_ipad_dialog(page, '更新配对码')
+                    expect(dialog.locator('.ipad-code')).not_to_have_text(ticket['pairingCode'])
+                    expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
+                    renewed = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+                    assert renewed['id'] == ticket['id']
+                    assert mutations.count('/__atlas/ipad/sessions/' + ticket['id'] + '/renew') == 1
+                    assert mutations.count('/__atlas/ipad/sessions') == 1
+                    ticket = renewed
+                    page.get_by_role('button', name='关闭设备示教窗口').click()
+                    sync_menu = open_ipad_menu(page, '同步与接收')
+                    expect(sync_menu.get_by_role('menuitem', name='检查完成状态', exact=True)).to_be_visible()
                     ticket, good_result = complete(ticket, archive['result'])
+                    expect(sync_menu.get_by_role('menuitem', name='接收示教结果', exact=True)).to_be_visible(timeout=10000)
+                    page.screenshot(path=str(ARTIFACTS / 'sync-menu-1280.png'), full_page=True)
+                    page.get_by_role('button', name='iPad / Vision Pro', exact=True).click()
                     wrong = api('/sessions', {'manifest': changed['manifest']})
                     api('/sessions/' + wrong['id'] + '/model', base64.b64decode(changed['bytes']), wrong['ownerToken'], 'PUT')
                     wrong, bad_result = complete(wrong, {**archive['result'], 'id': str(uuid.uuid4())})
                     bad_archive = {**archive, 'manifest': wrong['manifest'], 'result': bad_result}
                     page.evaluate("items => localStorage.setItem('atlas-ipad-handoffs-v1', JSON.stringify(items))", [ticket, wrong])
-                    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
+                    history = open_ipad_menu(page, '传输任务')
+                    page.screenshot(path=str(ARTIFACTS / 'history-menu-1280.png'), full_page=True)
+                    history.locator('[data-transfer-id="' + wrong['id'] + '"]').click()
                     expect(dialog.get_by_label('电脑局域网地址')).to_be_visible()
                     expect(dialog.get_by_role('button', name='接收示教结果', exact=True)).to_be_enabled()
-                    dialog.get_by_label('传输任务').select_option(wrong['id'])
+                    expect(dialog.get_by_label('传输任务')).to_have_value(wrong['id'])
                     warning = page.get_by_role('alertdialog', name='独立示教地图不一致')
 
                     def unchanged(task_id='desktop-task-1', count=2):
@@ -135,15 +157,17 @@ def run():
                         expect(warning).not_to_be_visible()
 
                     # Matching content accepts and deduplicates regardless of changed metadata.
-                    dialog.get_by_label('传输任务').select_option(ticket['id'])
-                    dialog.get_by_role('button', name='接收示教结果', exact=True).click()
+                    page.get_by_role('button', name='关闭设备示教窗口').click()
+                    open_ipad_dialog(page, '接收示教结果')
                     expect(dialog.locator('[data-ipad-status="imported"]')).to_be_visible()
                     mobile_id = 'ipad-' + good_result['id']
                     unchanged(mobile_id, 3)
-                    dialog.get_by_role('button', name='再次接收（去重）').click()
+                    page.get_by_role('button', name='关闭设备示教窗口').click()
+                    open_ipad_dialog(page, '再次接收（去重）')
+                    expect(dialog.get_by_label('电脑局域网地址')).to_be_visible()
                     expect(dialog.get_by_role('button', name='再次接收（去重）')).to_be_enabled()
                     unchanged(mobile_id, 3)
-                    assert len(receipts) == 2
+                    assert len(receipts) == 2, receipts
 
                     # File picker and drag/drop share the same validation, including after success.
                     for dropped in [False, True]:
@@ -169,6 +193,12 @@ def run():
                     expect(warning).not_to_be_visible()
                     unchanged(mobile_id, 3)
                     page.get_by_role('button', name='关闭设备示教窗口').click()
+                    open_ipad_dialog(page, '新建传输')
+                    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+                    expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
+                    assert mutations.count('/__atlas/ipad/sessions') == 2, 'one explicit new transfer, even under StrictMode'
+                    assert page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0].id") != ticket['id']
+                    page.get_by_role('button', name='关闭设备示教窗口').click()
                     page.reload(wait_until='networkidle')
                     ready(page)
                     unchanged(mobile_id, 3)
@@ -179,10 +209,8 @@ def run():
                         'name': 'rotation-map.ply', 'mimeType': 'application/octet-stream', 'buffer': changed_ply.encode()})
                     ready(page)
                     saved_workspace(page, None, 0)
-                    page.get_by_role('button', name='移动到 iPad 或 Vision Pro 上运行').click()
-                    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
-                    expect(dialog.get_by_role('button', name='新建传输')).to_be_enabled()
-                    dialog.get_by_label('传输任务').select_option(ticket['id'])
+                    open_ipad_menu(page, '传输任务').locator('[data-transfer-id="' + ticket['id'] + '"]').click()
+                    expect(dialog.get_by_label('传输任务')).to_have_value(ticket['id'])
                     dialog.get_by_role('button', name='再次接收（去重）').click()
                     expect(warning).to_be_visible()
                     saved_workspace(page, None, 0)
@@ -193,7 +221,7 @@ def run():
         finally:
             server.terminate()
             server.wait(timeout=10)
-    print('Map consistency passed: real LAN receipt, file picker, drag/drop, same-name mismatch, repeat validation, safe retry, unchanged desktop data, reload and keyboard modal behavior.')
+    print('Navigation sync and map consistency passed: menu status polling, direct receive/repeat/renew/new actions, exact history selection, real LAN receipt, file picker, drag/drop, mismatch validation, unchanged desktop data, reload and keyboard modal behavior.')
 
 
 if __name__ == '__main__':
