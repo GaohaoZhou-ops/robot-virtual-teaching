@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { mobileDeviceLabel } from '../lib/ipadProtocol.js';
 import {
   Bot,
   Camera,
@@ -531,7 +532,9 @@ export default function VirtualTeachingPanel({
                         onClick={() => selectCaptureTask(task)}
                       >
                         {expanded ? <FolderOpen size={12} /> : <Folder size={12} />}
-                        <span><strong>{task.name}</strong><small>{task.parkingPoints?.length || 0} 停车点 · {taskPoseCount} 姿态</small></span>
+                        <span><strong>{task.name}</strong><small>{task.mobileCapture
+                          ? `${mobileDeviceLabel(task.mobileCapture)} · ${task.mobileCapture.samples.length} 个 Pose`
+                          : `${task.parkingPoints?.length || 0} 停车点 · ${taskPoseCount} 姿态`}</small></span>
                       </button>
                     </div>
 
@@ -597,7 +600,7 @@ export default function VirtualTeachingPanel({
                             </div>
                           );
                         })}
-                        {!task.parkingPoints?.length && (
+                        {!task.parkingPoints?.length && !task.mobileCapture && (
                           <div className="teaching-capture-tree__empty">暂无停车点，可记录机器人当前位置</div>
                         )}
                       </div>

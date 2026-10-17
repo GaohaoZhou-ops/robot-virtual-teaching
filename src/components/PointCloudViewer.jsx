@@ -5469,7 +5469,12 @@ export default function PointCloudViewer({
     if (!sceneRef.current) return undefined;
     const layer = createIPadCaptureLayer(teachingTasks);
     sceneRef.current.add(layer);
-    return () => disposeIPadCaptureLayer(layer);
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.mobileCaptureVisible = layer.children.length ? 'true' : 'false';
+    return () => {
+      disposeIPadCaptureLayer(layer);
+      if (canvas) delete canvas.dataset.mobileCaptureVisible;
+    };
   }, [mapData?.geometry, mapData?.teachingSpaceMode, teachingTasks, viewportCanvasRef]);
 
   useEffect(() => {

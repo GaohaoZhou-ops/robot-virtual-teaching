@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { BufferGeometry, Float32BufferAttribute, Matrix4, Vector3 } from 'three';
-import { packIPadModel, ipadResultTask } from '../src/lib/ipadTeaching.js';
+import { IPadModelMismatchError, packIPadModel, ipadResultTask } from '../src/lib/ipadTeaching.js';
 import { IPAD_PROTOCOL, MAX_MODEL_VERTICES, MAX_MODEL_INDICES, validateIPadResult, validateModelBytes } from '../src/lib/ipadProtocol.js';
 import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
 import { buildExport, normalizeProject } from '../src/lib/io.js';
@@ -112,10 +112,23 @@ try {
     const different = geometry.clone();
     if (field === 'index') different.setIndex([0, 2, 1]);
     else different.getAttribute(field).setX(0, field === 'position' ? 42 : 0.5);
-    await assert.rejects(ipadResultTask(result, ticket, { ...map, geometry: different }), /模型内容不一致/,
+    await assert.rejects(ipadResultTask(result, ticket, { ...map, geometry: different }), (error) => {
+      assert.ok(error instanceof IPadModelMismatchError);
+      assert.match(error.message, /模型内容不一致/);
+      assert.equal(error.currentModelName, map.name);
+      assert.equal(error.incomingModelName, ticket.manifest.name);
+      assert.equal(error.deviceLabel, 'iPad');
+      return true;
+    },
       `same filename, IDs, counts and source hash must not hide changed ${field}`);
     different.dispose();
   }
+  // The exact same task/result/map objects must be checked again after a prior success.
+  const previousX = geometry.getAttribute('position').getX(0);
+  geometry.getAttribute('position').setX(0, previousX + 0.01);
+  await assert.rejects(ipadResultTask(result, ticket, map), IPadModelMismatchError);
+  geometry.getAttribute('position').setX(0, previousX);
+  assert.equal((await ipadResultTask(result, ticket, map)).id, task.id, 'restoring the matching model permits retry');
   const desktopTasks = teachingTransferFixture('independent').config.config.project.virtualTeaching.tasks;
   const desktopBefore = structuredClone(desktopTasks), ipadBefore = structuredClone(result);
   const withDesktopPoses = { ...map, teachingTasks: desktopTasks, samples: desktopTasks[0].parkingPoints[0].poses };

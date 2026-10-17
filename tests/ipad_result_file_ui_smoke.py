@@ -50,6 +50,9 @@ with sync_playwright() as playwright:
         mismatch = json.loads(json.dumps(archive))
         mismatch['manifest']['modelHash'] = mismatch['result']['modelHash'] = '0' * 64
         upload(dialog, mismatch)
+        warning = page.get_by_role('alertdialog', name='独立示教地图不一致')
+        expect(warning).to_contain_text('模型内容不一致')
+        warning.get_by_role('button', name='知道了').click()
         expect(dialog.get_by_role('alert')).to_contain_text('模型内容不一致')
         upload(dialog, archive)
         expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已接收 1 个 Pose')

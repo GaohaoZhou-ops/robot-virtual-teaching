@@ -1617,6 +1617,70 @@ code {
   border-color: rgba(89, 219, 232, 0.2);
 }
 
+.panel-3d.has-teaching-source-switch {
+  grid-template-rows: 45px 42px minmax(0, 1fr);
+}
+
+.panel-3d.has-teaching-source-switch.is-collapsed {
+  grid-template-rows: 45px 0 0;
+}
+
+.teaching-source-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.teaching-source-bar > span {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.teaching-source-switch {
+  display: flex;
+  gap: 3px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, .16);
+}
+
+.teaching-source-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 110px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.teaching-source-switch button:hover:not(:disabled),
+.teaching-source-switch button[aria-pressed="true"] {
+  border-color: rgba(89, 219, 232, .25);
+  background: rgba(89, 219, 232, .12);
+  color: var(--cyan);
+}
+
+.teaching-source-switch button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.teaching-source-switch button:disabled { opacity: .5; cursor: default; }
+.viewport-panel.is-collapsed .teaching-source-bar { visibility: hidden; overflow: hidden; }
+
 .viewport-panel.is-collapsed .panel-heading {
   border-bottom-color: transparent;
 }

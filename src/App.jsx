@@ -40,7 +40,7 @@ import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
-import { ipadResultTask } from './lib/ipadTeaching.js';
+import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceLabel } from './lib/ipadProtocol.js';
 import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
 import { inspectConnectivity } from './lib/graph.js';
@@ -498,6 +498,7 @@ export default function App() {
   const [teachingTasks, setTeachingTasks] = useState([]);
   const [activeTeachingTaskId, setActiveTeachingTaskId] = useState(null);
   const [activeTeachingParkingPointId, setActiveTeachingParkingPointId] = useState(null);
+  const teachingSourceSelectionsRef = useRef(new Map());
   const [robotParkingGhost, setRobotParkingGhost] = useState(null);
   const robotParkingGhostRef = useRef(null);
   robotParkingGhostRef.current = robotParkingGhost;
@@ -548,6 +549,13 @@ export default function App() {
   const alternateTeachingMode = isIndependentTeachingSpace ? 'map' : 'independent';
   const activeCollapsedPanel = isIndependentTeachingSpace ? null : collapsedPanel;
   const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
+  const activeTeachingTask = teachingTasks.find((task) => task.id === activeTeachingTaskId);
+  const teachingSource = activeTeachingTask?.mobileCapture ? 'mobile' : 'desktop';
+  const desktopTeachingTasks = useMemo(() => teachingTasks.filter((task) => !task.mobileCapture), [teachingTasks]);
+  const mobileTeachingTasks = useMemo(() => teachingTasks.filter((task) => task.mobileCapture), [teachingTasks]);
+  const workbenchTeachingTasks = teachingSource === 'mobile' ? mobileTeachingTasks : desktopTeachingTasks;
+  const mobileTeachingLabels = new Set(mobileTeachingTasks.map((task) => mobileDeviceLabel(task.mobileCapture)));
+  const mobileTeachingLabel = mobileTeachingLabels.size === 1 ? [...mobileTeachingLabels][0] : '设备';
   const waypoints = useMemo(() => buildTeachingWaypoints(storedWaypoints, teachingTasks, {
     mapData,
     coordinateFrame,
@@ -586,6 +594,14 @@ export default function App() {
     activeTeachingParkingPointId,
     jointPoses,
   };
+
+  useEffect(() => {
+    if (!mapData?.mapId || !activeTeachingTask) return;
+    teachingSourceSelectionsRef.current.set(`${teachingSpaceMode}:${mapData.mapId}:${teachingSource}`, {
+      taskId: activeTeachingTask.id,
+      parkingPointId: activeTeachingParkingPointId,
+    });
+  }, [mapData?.mapId, teachingSpaceMode, teachingSource, activeTeachingTask, activeTeachingParkingPointId]);
 
   useEffect(() => {
     // Follow task/parking selection, without overriding later manual navigation
@@ -1347,9 +1363,11 @@ export default function App() {
             setEdges(project.edges);
             setTeachingTasks(project.teachingTasks);
             setJointPoses(project.jointPoses);
-            const restoredTeachingTaskId = teachingTaskIds.has(snapshot?.ui?.activeTeachingTaskId)
-              ? snapshot.ui.activeTeachingTaskId
-              : project.teachingTasks[0]?.id || null;
+            const restoredTeachingTaskId = snapshot?.ui?.activeTeachingTaskId === null
+              ? project.teachingTasks.find((task) => !task.mobileCapture)?.id || null
+              : teachingTaskIds.has(snapshot?.ui?.activeTeachingTaskId)
+                ? snapshot.ui.activeTeachingTaskId
+                : project.teachingTasks[0]?.id || null;
             const restoredTeachingTask = project.teachingTasks.find(
               (task) => task.id === restoredTeachingTaskId,
             );
@@ -2625,11 +2643,13 @@ export default function App() {
     teachingTasks.length,
   ]);
 
-  const selectTeachingTask = useCallback((id) => {
+  const selectTeachingTask = useCallback((id, parkingPointId = null) => {
     const task = teachingTasks.find((item) => item.id === id);
+    const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId)
+      || task?.parkingPoints?.[0];
     setActiveTeachingTaskId(id);
-    setActiveTeachingParkingPointId(task?.parkingPoints?.[0]?.id || null);
-    setSelectedWaypointId(task?.parkingPoints?.[0]?.id || null);
+    setActiveTeachingParkingPointId(parkingPoint?.id || null);
+    setSelectedWaypointId(parkingPoint?.id || null);
     setSelectedEdgeId(null);
     setRobotParkingGhost(null);
     setTeachingCaptureState({ status: 'idle', message: '' });
@@ -4516,6 +4536,15 @@ export default function App() {
     }
   };
 
+  const switchTeachingSource = (source) => {
+    if (source === teachingSource || teachingCaptureState.status === 'capturing') return;
+    const tasks = source === 'mobile' ? mobileTeachingTasks : desktopTeachingTasks;
+    const saved = teachingSourceSelectionsRef.current.get(`${teachingSpaceMode}:${mapData?.mapId}:${source}`);
+    const task = tasks.find((item) => item.id === saved?.taskId) || tasks[0];
+    stopTeachingTaskPlayback(false);
+    selectTeachingTask(task?.id || null, saved?.parkingPointId);
+  };
+
   const importIPadTeaching = async (result, ticket) => {
     const current = latestWorkspaceRef.current;
     const workspaceId = sessionIdRef.current;
@@ -4523,7 +4552,11 @@ export default function App() {
     const task = await ipadResultTask(result, ticket, current.mapData);
     const latest = latestWorkspaceRef.current;
     if (latest.mapData !== current.mapData || latest.teachingSpaceMode !== 'independent'
-      || sessionIdRef.current !== workspaceId || !sessionReadyRef.current) throw new Error('校验期间独立示教物体已切换，请重新接收');
+      || sessionIdRef.current !== workspaceId) {
+      throw new IPadModelMismatchError(latest.mapData, ticket.manifest, mobileDeviceLabel(result),
+        '校验期间独立示教地图已切换，已停止接收。请打开对应地图后重新接收。');
+    }
+    if (!sessionReadyRef.current) throw new Error('当前独立示教工程尚未就绪，请重新接收');
     // Preserve desktop poses edited while the model hash was being calculated.
     const next = latest.teachingTasks.some((item) => item.mobileCapture?.id === result.id)
       ? latest.teachingTasks : [...latest.teachingTasks, task];
@@ -4602,6 +4635,7 @@ export default function App() {
       className={`app-shell ${appPage === APP_PAGE_HOME ? 'is-home-background' : appPage === APP_PAGE_TEACHING_DATA ? 'is-route-background' : ''} ${isIndependentTeachingSpace ? 'is-independent-teaching-space' : ''}`}
       data-app-page="workbench"
       data-teaching-space-mode={teachingSpaceMode}
+      data-teaching-source={teachingSource}
       data-coordinate-frame={coordinateFrame}
       aria-hidden={appPage !== APP_PAGE_WORKBENCH}
     >
@@ -4720,7 +4754,7 @@ export default function App() {
           data-collapsed-panel={activeCollapsedPanel || 'none'}
         >
           <section
-            className={`viewport-panel panel-3d ${activeCollapsedPanel === '3d' ? 'is-collapsed' : ''}`}
+            className={`viewport-panel panel-3d ${mobileTeachingTasks.length ? 'has-teaching-source-switch' : ''} ${activeCollapsedPanel === '3d' ? 'is-collapsed' : ''}`}
             data-collapsed={activeCollapsedPanel === '3d' ? 'true' : 'false'}
           >
             <div className="panel-heading">
@@ -4781,6 +4815,25 @@ export default function App() {
                 </button>
               )}
             </div>
+            {mobileTeachingTasks.length > 0 && (
+              <div className="teaching-source-bar" role="group" aria-label="示教来源">
+                <span>示教来源</span>
+                <div className="teaching-source-switch">
+                  <button type="button" aria-pressed={teachingSource === 'desktop'}
+                    aria-label={`查看${isIndependentTeachingSpace ? '独立' : '电脑'}示教`}
+                    disabled={loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
+                    onClick={() => switchTeachingSource('desktop')}>
+                    <Bot size={13} />{isIndependentTeachingSpace ? '独立示教' : '电脑示教'}
+                  </button>
+                  <button type="button" aria-pressed={teachingSource === 'mobile'}
+                    aria-label={`查看 ${mobileTeachingLabel} 示教`}
+                    disabled={loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
+                    onClick={() => switchTeachingSource('mobile')}>
+                    <Tablet size={13} />{mobileTeachingLabel} 示教
+                  </button>
+                </div>
+              </div>
+            )}
             <div
               id="panel-body-3d"
               className="panel-body"
@@ -4818,7 +4871,7 @@ export default function App() {
                 robotParkingGhost={robotParkingGhost}
                 teachingCaptureBusy={teachingCaptureState.status === 'capturing'}
                 teachingSpaceMode={teachingSpaceMode}
-                teachingTasks={teachingTasks}
+                teachingTasks={workbenchTeachingTasks}
                 spaceMouseInputRef={spaceMouseInputRef}
                 viewportCanvasRef={main3DCanvasRef}
                 cameraTeachingCommand={cameraTeachingCommand}
@@ -4967,7 +5020,7 @@ export default function App() {
           onMeshRenderQualityChange={setMeshRenderQuality}
           spaceMouseInputRef={spaceMouseInputRef}
           main3DCanvasRef={main3DCanvasRef}
-          teachingTasks={teachingTasks}
+          teachingTasks={workbenchTeachingTasks}
           activeTeachingTaskId={activeTeachingTaskId}
           activeTeachingParkingPointId={activeTeachingParkingPointId}
           robotParkingGhostId={robotParkingGhost?.parkingPointId || null}
