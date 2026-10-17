@@ -53,6 +53,7 @@ export default function TeachingDataPage({
   onMergeParkingPoints,
   onExportProject,
   onExportAbxTeaching,
+  onSolveMobileTask,
 }) {
   const [archiveSelection, setArchiveSelection] = useState(null);
   const coordinateFrameLabel = teachingSpaceMode === 'independent'
@@ -240,7 +241,7 @@ export default function TeachingDataPage({
               />
             </section>
 
-            {(archiveSelection?.task || activeTask)?.mobileCapture ? <IPadCaptureDetails key={(archiveSelection?.task || activeTask).id} task={archiveSelection?.task || activeTask} /> : <TeachingPoseRobotPreview
+            {(archiveSelection?.task || activeTask)?.mobileCapture ? <IPadCaptureDetails key={(archiveSelection?.task || activeTask).id} task={archiveSelection?.task || activeTask} onSolve={onSolveMobileTask} /> : <TeachingPoseRobotPreview
               task={archiveSelection?.task || activeTask}
               parkingPoint={archiveSelection?.parkingPoint || null}
               pose={archiveSelection?.pose || null}

@@ -129,6 +129,7 @@ export default function VirtualTeachingPanel({
   onApplyPoint,
   onExportProject,
   onOpenCapturePage,
+  onSolveMobileTask,
 }) {
   const isDataView = view === 'data';
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
@@ -476,6 +477,7 @@ export default function VirtualTeachingPanel({
               <span><small>TASK / PARKING</small><strong>任务与停车点</strong></span>
             </div>
             <div className="teaching-capture-tree__actions">
+              {activeTask?.mobileCapture && onSolveMobileTask && <button type="button" onClick={() => onSolveMobileTask(activeTask.id)}><Bot size={12} />计算机器人姿态</button>}
               <button
                 type="button"
                 className="teaching-new-task"

@@ -1,0 +1,40 @@
+.mobile-compute-dock { position: absolute; top: 14px; right: 14px; z-index: 15; width: min(344px, calc(100% - 28px)); color: #cee3e8; background: #0b1a22f2; border: 1px solid #63e6ee50; border-top: 2px solid #63e6ee; border-radius: 9px; box-shadow: 0 12px 36px #0006; backdrop-filter: blur(12px); }
+.mobile-compute-dock.is-floating { position: fixed; z-index: 430; top: auto; bottom: 42px; right: 22px; }
+.mobile-compute-dock > header { display: flex; align-items: center; gap: 9px; padding: 12px; }
+.mobile-compute-dock__mark { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border: 1px solid #63e6ee30; border-radius: 7px; color: #63e6ee; background: #63e6ee0b; }
+.mobile-compute-dock > header > div { min-width: 0; flex: 1; display: grid; gap: 5px; }
+.mobile-compute-dock > header strong { font-size: 12px; font-weight: 600; }
+.mobile-compute-dock > header div small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7899a5; font-size: 10px; }
+.mobile-compute-dock > header > b { flex: none; color: #80e4eb; font: 22px Menlo, monospace; }
+.mobile-compute-dock > header > b small { font-size: 10px; margin-left: 2px; }
+.mobile-compute-dock button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; padding: 7px 8px; border: 1px solid #3b576350; border-radius: 5px; background: #ffffff04; color: #b6cfd8; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.mobile-compute-dock button:hover:not(:disabled) { border-color: #63e6ee99; color: #9af4f8; background: #63e6ee12; }
+.mobile-compute-dock button:focus-visible { outline: 2px solid #63e6ee; outline-offset: 2px; }
+.mobile-compute-dock button:disabled { opacity: .32; cursor: default; }
+.mobile-compute-dock button.is-primary { color: #91eef2; border-color: #63e6ee55; background: #63e6ee15; }
+.mobile-compute-dock .mobile-compute-icon { border: 0; background: transparent; padding: 3px; }
+.mobile-compute-dock.is-collapsed button[aria-expanded] svg { transform: rotate(180deg); }
+.mobile-compute-dock__track { height: 3px; background: #25404b; overflow: hidden; }
+.mobile-compute-dock__track > span { display: block; height: 100%; background: #63e6ee; transition: width 180ms ease; }
+.mobile-compute-dock__body { padding: 12px; }
+.mobile-compute-dock__counts { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #7e9faa; font-size: 10px; }
+.mobile-compute-dock__counts b { margin-left: 3px; color: #d1e4e9; font: 11px Menlo, monospace; }
+.mobile-compute-dock__counts > span:nth-child(2) b { color: #83d6ae; }
+.mobile-compute-dock__current { min-height: 17px; margin: 10px 0 12px; line-height: 1.65; font-size: 10px; color: #88a7b2; overflow-wrap: anywhere; }
+.mobile-compute-dock__controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.mobile-compute-dock__controls button { flex: 1; }
+.mobile-compute-dock__preview { margin-bottom: 12px; padding: 9px; border: 1px solid #63e6ee20; border-radius: 5px; background: #63e6ee04; }
+.mobile-compute-dock__preview > div { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; font-size: 10px; color: #83a8b5; }
+.mobile-compute-dock__preview > div > span { margin-right: auto; }
+.mobile-compute-dock__preview button { padding: 3px 5px; font-size: 10px; }
+.mobile-compute-dock__preview button[aria-pressed="true"] { border-color: #63e6ee70; color: #8ae7ed; }
+.mobile-compute-dock__preview nav { display: flex; gap: 8px; align-items: center; }
+.mobile-compute-dock__preview nav strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
+.mobile-compute-dock__preview nav small { color: #7a9ba7; white-space: nowrap; font: 9px Menlo, monospace; }
+.mobile-compute-dock.is-paused, .mobile-compute-dock.is-pausing { border-top-color: #ebc277; }
+.mobile-compute-dock.is-paused .mobile-compute-dock__mark { color: #ebc277; }
+.mobile-compute-dock.is-paused .mobile-compute-dock__track > span { background: #ebc277; transition: none; }
+.mobile-compute-dock.is-error .mobile-compute-dock__current { color: #e5a97a; }
+.mobile-compute-spin { animation: mobile-compute-spin 1s linear infinite; }
+@keyframes mobile-compute-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .mobile-compute-spin { animation: none; } .mobile-compute-dock__track > span { transition: none; } }
