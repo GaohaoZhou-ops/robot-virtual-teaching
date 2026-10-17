@@ -130,7 +130,11 @@ final class TeachingSession: ObservableObject {
             opened.displaySettings = (project.displaySettings ?? ModelDisplaySettings()).forOpening()
             current = opened; pendingModel = nil
             serverAddress = project.resultSyncDestination?.serverURL ?? project.serverURL
+            #if os(iOS)
+            status = ""
+            #else
             status = project.result.completedAt == nil ? "" : "示教已完成，等待同步或已同步"
+            #endif
         } catch { self.error = error.localizedDescription }
     }
     func continueTeaching() async {
@@ -141,7 +145,11 @@ final class TeachingSession: ObservableObject {
             try await saveNow()
             let draft = try await ProjectStore.shared.continueTeaching(project)
             current = draft
+            #if os(iOS)
+            status = ""
+            #else
             status = "已保留 \(draft.result.samples.count) 个 Pose，请重新放置物体后继续记录；原完成结果保留在本地项目"
+            #endif
             await reload()
         } catch {
             self.error = "创建补录草稿失败：\(error.localizedDescription)"
@@ -292,7 +300,13 @@ final class TeachingSession: ObservableObject {
                 }
                 project.syncedAt = timestamp(); current = project; try await ProjectStore.shared.save(project)
                 status = "同步成功，请在电脑端点击「检查完成状态」并接收结果"
-            } else { status = "示教已完成并保存在 \(TeachingDevice.storageName)，可稍后同步到电脑" }
+            } else {
+                #if os(iOS)
+                status = ""
+                #else
+                status = "示教已完成并保存在 \(TeachingDevice.storageName)，可稍后同步到电脑"
+                #endif
+            }
             await reload()
         } catch { self.error = "结果保留在 \(TeachingDevice.storageName)，可重试：\(error.localizedDescription)"; status = "尚未确认同步成功" }
     }
