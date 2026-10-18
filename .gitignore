@@ -309,6 +309,10 @@ playwright/.auth/
 /tests/atlas-export-separation-*/
 /tests/atlas-save-picker-*/
 /tests/atlas-save-target-*/
+# Model-editor native Save As tests use TemporaryDirectory with this prefix.
+# Keep the complete workspace local when TMPDIR is set to the root or tests/.
+/model-editor-save-*/
+/tests/model-editor-save-*/
 # Distance-warning and joint-exclusion fixtures when TMPDIR is in the repository.
 /atlas-distance-warning-*/
 /atlas-ignore-joints-*/

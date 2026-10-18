@@ -2,7 +2,7 @@
 from playwright.sync_api import expect, sync_playwright
 
 from model_editor_origin_gizmo_ui_smoke import FIELDS, POINTS, distance, fixture, transformed
-from model_editor_ui_smoke import BASE_URL, CHROME, read_export
+from model_editor_ui_smoke import BASE_URL, CHROME, read_export, start_model_download
 
 
 def run():
@@ -46,7 +46,7 @@ def run():
 
         def check_export(name):
             with page.expect_download() as event:
-                page.get_by_role('button', name='导出 PLY', exact=True).click()
+                start_model_download(page)
             path = f'/tmp/{name}.ply'
             event.value.save_as(path); ready()
             points, faces = read_export(path)
