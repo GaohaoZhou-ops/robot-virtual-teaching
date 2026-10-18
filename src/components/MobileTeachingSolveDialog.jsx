@@ -8,7 +8,7 @@ const sideName = (side) => side === 'left' ? '左臂' : '右臂';
 const groups = [['positionTolerance', ['x', 'y', 'z'], '位置容差', 'cm', 100], ['rotationTolerance', ['roll', 'pitch', 'yaw'], '角度容差', '°', 1]];
 const format = (value, scale = 1) => Number.isFinite(value) ? (value * scale).toFixed(2) : '—';
 
-export default function MobileTeachingSolveDialog({ task, robot, robotPose, ready, initialOptions, running, onClose, onCalculate, onApply, onSave }) {
+export default function MobileTeachingSolveDialog({ task, robot, robotPose, ready, initialOptions, initialSampleId, running, onClose, onCalculate, onApply, onSave }) {
   const [options, setOptions] = useState(() => structuredClone(initialOptions || task.mobileSolve?.options || DEFAULT_MOBILE_SOLVE_OPTIONS));
   const report = task.mobileSolve || null;
   const [dirty, setDirty] = useState(false);
@@ -21,7 +21,10 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, read
     panel.current?.focus();
     return () => { previous?.focus?.(); };
   }, []);
-  useEffect(() => { setSelected(0); setPage(0); }, [report?.computedAt]);
+  useEffect(() => {
+    const index = Math.max(0, report?.rows.findIndex((item) => item.sampleId === initialSampleId) ?? 0);
+    setSelected(index); setPage(Math.floor(index / 50));
+  }, [report?.computedAt, initialSampleId]);
   let validation = '';
   try { validateMobileSolveOptions(options); } catch (cause) { validation = cause.message; }
   const update = (patch) => { setOptions((current) => ({ ...current, ...patch })); setDirty(true); setError(''); };

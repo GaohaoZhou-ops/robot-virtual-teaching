@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mobileDeviceLabel } from '../lib/ipadProtocol.js';
+import MobileTeachingPoseList from './MobileTeachingPoseList.jsx';
 import {
   Bot,
   Camera,
@@ -129,6 +130,16 @@ export default function VirtualTeachingPanel({
   onExportTeachingData,
   onOpenCapturePage,
   onSolveMobileTask,
+  teachingDevice = 'desktop',
+  teachingSources = [],
+  onTeachingSourceChange,
+  robotTasks = [],
+  mobilePoseSelection,
+  onSelectMobilePose,
+  onOpenMobileRobotPose,
+  onOpenMobileSource,
+  onEditPose,
+  editingPoseId,
 }) {
   const isDataView = view === 'data';
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
@@ -263,7 +274,7 @@ export default function VirtualTeachingPanel({
   const captureInProgress = captureState?.status === 'capturing';
   const canExport = Boolean(onExportTeachingData && (mapData || robot || tasks.length));
   const teachingPointCount = tasks.reduce(
-    (count, task) => count + (task.parkingPoints || []).reduce(
+    (count, task) => count + (task.mobileCapture?.samples.length || 0) + (task.parkingPoints || []).reduce(
       (poseCount, parkingPoint) => poseCount + (parkingPoint.poses?.length || 0),
       0,
     ),
@@ -418,6 +429,13 @@ export default function VirtualTeachingPanel({
       data-camera-capture-status={captureState?.status || 'idle'}
       data-teaching-point-count={teachingPointCount}
     >
+      {!isDataView && teachingSources.length > 1 && <div className="teaching-review-sources" role="group" aria-label="示教来源">
+        {teachingSources.map((source) => <button type="button" key={source.id} aria-label={source.label}
+          aria-pressed={teachingDevice === source.id} disabled={captureInProgress}
+          onClick={() => onTeachingSourceChange(source.id)}>
+          <strong>{source.label}</strong><small>{source.taskCount} 任务 · {source.poseCount} Pose</small>
+        </button>)}
+      </div>}
       {isDataView && <div className="virtual-teaching__header">
         <div className="virtual-teaching__identity">
           <span><Database size={14} /></span>
@@ -473,11 +491,11 @@ export default function VirtualTeachingPanel({
           <header>
             <div className="teaching-capture-tree__identity">
               <FolderOpen size={13} />
-              <span><small>TASK / PARKING</small><strong>任务与停车点</strong></span>
+              <span><small>{activeTask?.mobileCapture ? 'DEVICE / POSE' : 'TASK / PARKING'}</small><strong>{activeTask?.mobileCapture ? '采样 Pose' : '任务与停车点'}</strong></span>
             </div>
             <div className="teaching-capture-tree__actions">
-              {activeTask?.mobileCapture && onSolveMobileTask && <button type="button" onClick={() => onSolveMobileTask(activeTask.id)}><Bot size={12} />计算机器人姿态</button>}
-              <button
+              {activeTask?.mobileCapture && onSolveMobileTask && <button type="button" className="teaching-mobile-solve-action" onClick={() => onSolveMobileTask(activeTask.id)}><Bot size={12} />计算机器人姿态</button>}
+              {!activeTask?.mobileCapture && <button
                 type="button"
                 className="teaching-new-task"
                 onClick={openTaskCreateDialog}
@@ -487,8 +505,8 @@ export default function VirtualTeachingPanel({
                   : `请先加载${environmentLabel}与机器人`}
               >
                 <CirclePlus size={12} /> 新建示教任务
-              </button>
-              <button
+              </button>}
+              {!activeTask?.mobileCapture && <button
                 type="button"
                 onClick={onCreateParkingPoint}
                 disabled={!canCreateParkingPoint || captureInProgress}
@@ -496,7 +514,7 @@ export default function VirtualTeachingPanel({
                 title={`以机器人当前 ${coordinateFrameLabel} 位姿新增停车点`}
               >
                 <CirclePlus size={11} /> 新增停车点
-              </button>
+              </button>}
             </div>
           </header>
 
@@ -541,6 +559,9 @@ export default function VirtualTeachingPanel({
 
                     {expanded && (
                       <div className="teaching-capture-tree__parking-group" role="group">
+                        {task.mobileCapture && <MobileTeachingPoseList task={task} robotTasks={robotTasks}
+                          selection={mobilePoseSelection} onSelect={onSelectMobilePose}
+                          onOpenRobotPose={onOpenMobileRobotPose} onSolve={onSolveMobileTask} />}
                         {(task.parkingPoints || []).map((parkingPoint, index) => {
                           const parkingIsActive = taskIsActive
                             && parkingPoint.id === activeParkingPoint?.id;
@@ -620,6 +641,17 @@ export default function VirtualTeachingPanel({
               <span>YAW <b>{formatValue(activeParkingPoint.mapPose.rpy.yaw, 1)}°</b></span>
             </div>
           )}
+          {activeTask?.mobileSolveSource && <div className="teaching-review-hint">
+            <span>已转换为机器人关节姿态；选择 Pose 后可调整并确认修改。</span>
+            {onOpenMobileSource && <button type="button" onClick={() => onOpenMobileSource(activeTask.mobileSolveSource.taskId)}>查看来源采样</button>}
+          </div>}
+          {previewPoseId && activeParkingPoint?.poses.some((pose) => pose.id === previewPoseId) && onEditPose && <div className="teaching-review-hint">
+            <button type="button" disabled={Boolean(editingPoseId) || captureInProgress}
+              onClick={() => onEditPose(activeTask.id, activeParkingPoint.id, previewPoseId)}>
+              {editingPoseId ? '正在调整姿态' : '调整选中姿态'}
+            </button>
+            <span>{editingPoseId ? '调整关节后，在 3D 预览卡片中点击“确认修改”。' : '编辑已保存的机器人关节动作。'}</span>
+          </div>}
         </section>
       )}
 
@@ -768,7 +800,7 @@ export default function VirtualTeachingPanel({
             </section>
           )}
 
-          {!isDataView && <>
+          {!isDataView && !activeTask.mobileCapture && <>
           <button
             type="button"
             className="teaching-capture-button"

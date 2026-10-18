@@ -119,6 +119,15 @@ export default function Inspector({
   spaceMouseInputRef,
   main3DCanvasRef,
   teachingTasks = [],
+  teachingDevice,
+  teachingSources,
+  onTeachingSourceChange,
+  robotTasks,
+  mobilePoseSelection,
+  onSelectMobilePose,
+  onOpenMobileRobotPose,
+  onOpenMobileSource,
+  onEditTeachingPose,
   activeTeachingTaskId,
   activeTeachingParkingPointId,
   robotParkingGhostId,
@@ -711,6 +720,16 @@ export default function Inspector({
             aria-labelledby="inspector-tab-teaching"
           >
             <VirtualTeachingPanel
+              teachingDevice={teachingDevice}
+              teachingSources={teachingSources}
+              onTeachingSourceChange={onTeachingSourceChange}
+              robotTasks={robotTasks}
+              mobilePoseSelection={mobilePoseSelection}
+              onSelectMobilePose={onSelectMobilePose}
+              onOpenMobileRobotPose={onOpenMobileRobotPose}
+              onOpenMobileSource={onOpenMobileSource}
+              onEditPose={onEditTeachingPose}
+              editingPoseId={editingTeachingPoseId}
               teachingSpaceMode={teachingSpaceMode}
               tasks={teachingTasks}
               activeTaskId={activeTeachingTaskId}

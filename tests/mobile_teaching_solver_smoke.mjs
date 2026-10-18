@@ -5,6 +5,8 @@ import { readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader
 import { normalizeTeachingTasks } from '../src/lib/io.js';
 import { transformTeachingTasks } from '../src/lib/teachingTransfer.js';
 import { createMobileTeachingPauseGate, restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { mobileRobotPoseLinks, mobileSampleStatus } from '../src/lib/mobileTeachingReview.js';
+import { createMobilePosePreview, disposeIPadCaptureLayer } from '../src/lib/ipadCaptureDisplay.js';
 
 // A limited six-axis Cartesian arm makes feasibility and impossible targets
 // independently known, while still exercising the same URDF joint update code.
@@ -80,6 +82,30 @@ assert.deepEqual(normalized[0].mobileSolve, result);
 assert.equal(normalized[1].parkingPoints[0].poses.length, 1);
 assert.equal(normalized[1].parkingPoints[0].poses[0].mobileSampleId, 'sample');
 assert.deepEqual(normalized[1].parkingPoints[0].poses[0].fullBodyJoints.values, result.rows[0].solutions.left.jointValues);
+const linked = mobileRobotPoseLinks(normalized[0], normalized).get('sample');
+assert.equal(linked.pose.id, normalized[1].parkingPoints[0].poses[0].id);
+assert.equal(linked.parkingPoint.id, normalized[1].parkingPoints[0].id);
+assert.equal(mobileSampleStatus(null, null), '待计算');
+assert.equal(mobileSampleStatus({ feasible: false }, null), '未通过');
+assert.equal(mobileSampleStatus(result.rows[0], null), '可达 · 待保存');
+assert.equal(mobileSampleStatus(result.rows[0], linked), '已保存 · 可精修');
+const unrelated = structuredClone(normalized[1]); unrelated.mobileSolveSource.taskId = 'other-source';
+assert.equal(mobileRobotPoseLinks(normalized[0], [unrelated]).size, 0, 'identical sample IDs from another source must not be linked');
+const differentFrame = { ...normalized[1], coordinateFrame: 'map' };
+assert.equal(mobileRobotPoseLinks(normalized[0], [differentFrame]).size, 0);
+const deleted = structuredClone(normalized[1]); deleted.parkingPoints[0].poses = [];
+assert.equal(mobileRobotPoseLinks(normalized[0], [deleted]).size, 0, 'deleted saved poses must fall back to the computation result');
+const preferred = { ...normalized[1], id: 'preferred', createdAt: '2020-01-01' };
+assert.equal(mobileRobotPoseLinks({ ...normalized[0], mobileSolve: { ...result, savedTaskId: preferred.id } },
+  [normalized[1], preferred]).get('sample').task.id, preferred.id, 'prefer the saved task belonging to the current report');
+const originalCapture = structuredClone(task.mobileCapture);
+const preview = createMobilePosePreview({ ...task, mobileTransform: new THREE.Matrix4().makeRotationY(Math.PI / 2).setPosition(2, 3, 1).toArray() }, task.mobileCapture.samples[0]);
+assert.ok(preview.children[0].position.distanceTo(new THREE.Vector3(2.4, 3.2, 0.25)) < 1e-9);
+assert.ok(new THREE.Vector3(0, 1, 0).applyQuaternion(preview.children[1].quaternion).distanceTo(new THREE.Vector3(1, 0, 0)) < 1e-9,
+  'the preview arrow follows optical +Z, after the workspace transform');
+const scene = new THREE.Scene(); scene.add(preview); disposeIPadCaptureLayer(preview);
+assert.equal(scene.children.length, 0);
+assert.deepEqual(task.mobileCapture, originalCapture, 'preview and linking leave the raw capture intact');
 assert.equal(transformTeachingTasks(normalized, transform, 'map', { name: 'map' })[0].mobileSolve, null, 'coordinate transfer invalidates the old solve report');
 const empty = structuredClone(task); empty.mobileCapture.samples[0].kind = 'trajectory';
 await assert.rejects(() => run({}, { task: empty }), /没有可计算/);

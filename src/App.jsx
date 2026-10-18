@@ -38,6 +38,7 @@ import ProjectExportDialog from './components/ProjectExportDialog.jsx';
 import RobotPicker from './components/RobotPicker.jsx';
 import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
+import ModelEditorPage from './components/ModelEditorPage.jsx';
 import TeachingDataPage from './components/TeachingDataPage.jsx';
 import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
@@ -125,6 +126,7 @@ const pointColorModes = new Set(['height', 'source', 'white']);
 const APP_PAGE_HOME = 'home';
 const APP_PAGE_WORKBENCH = 'workbench';
 const APP_PAGE_TEACHING_DATA = 'teaching-data';
+const APP_PAGE_MODEL_EDITOR = 'model-editor';
 const PROJECT_GUIDE_FILE_ACCEPT = '.json,.zip';
 
 const teachingModeLabel = (mode) => mode === 'independent' ? '独立示教' : '地图示教';
@@ -211,6 +213,7 @@ const appPageFromLocation = () => {
   if (typeof window === 'undefined') return APP_PAGE_HOME;
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   if (path.endsWith('/teaching-data')) return APP_PAGE_TEACHING_DATA;
+  if (path.endsWith('/model-editor')) return APP_PAGE_MODEL_EDITOR;
   if (path.endsWith('/workbench')) return APP_PAGE_WORKBENCH;
   return APP_PAGE_HOME;
 };
@@ -487,6 +490,8 @@ export default function App() {
   const [teachingTransferDialog, setTeachingTransferDialog] = useState(null);
   const [ipadTeachingOpen, setIPadTeachingOpen] = useState(false);
   const [mobileSolveTaskId, setMobileSolveTaskId] = useState(null);
+  const [mobileSolveSampleId, setMobileSolveSampleId] = useState(null);
+  const [mobilePoseSelection, setMobilePoseSelection] = useState(null);
   const [mobileComputation, setMobileComputation] = useState(null);
   const [ipadTeachingEntry, setIPadTeachingEntry] = useState({ action: 'pairing' });
   const teachingTransferBusyRef = useRef(false);
@@ -591,6 +596,20 @@ export default function App() {
     vision: mobileTeachingTasks.filter((task) => mobileDeviceKey(task.mobileCapture) === 'vision'),
   }), [mobileTeachingTasks]);
   const workbenchTeachingTasks = teachingDevice === 'desktop' ? desktopTeachingTasks : mobileTasksByDevice[teachingDevice];
+  const teachingSources = useMemo(() => [
+    { id: 'desktop', label: '机器人示教', tasks: desktopTeachingTasks },
+    { id: 'ipad', label: 'iPad 示教', tasks: mobileTasksByDevice.ipad },
+    { id: 'vision', label: 'Vision Pro 示教', tasks: mobileTasksByDevice.vision },
+  ].filter((source) => source.id === 'desktop' || source.tasks.length).map((source) => ({
+    id: source.id, label: source.label, taskCount: source.tasks.length,
+    poseCount: source.tasks.reduce((total, task) => total + (task.mobileCapture?.samples.length
+      || task.parkingPoints.reduce((count, point) => count + point.poses.length, 0)), 0),
+  })), [desktopTeachingTasks, mobileTasksByDevice]);
+  const selectedMobilePose = useMemo(() => {
+    if (!mobilePoseSelection || activeTeachingTask?.id !== mobilePoseSelection.taskId) return null;
+    const sample = activeTeachingTask.mobileCapture?.samples.find((item) => item.id === mobilePoseSelection.sampleId);
+    return sample ? { task: activeTeachingTask, sample } : null;
+  }, [mobilePoseSelection, activeTeachingTask]);
   const waypoints = useMemo(() => buildTeachingWaypoints(storedWaypoints, teachingTasks, {
     mapData,
     coordinateFrame,
@@ -753,19 +772,21 @@ export default function App() {
   useEffect(() => {
     document.title = appPage === APP_PAGE_TEACHING_DATA
       ? '示教数据 · 虚拟示教平台'
+      : appPage === APP_PAGE_MODEL_EDITOR
+        ? '模型编辑 · 虚拟示教平台'
       : appPage === APP_PAGE_WORKBENCH
         ? '工作台 · 虚拟示教平台'
         : '虚拟示教平台';
   }, [appPage]);
 
   const navigateAppPage = useCallback((nextPage, options = {}) => {
-    const normalized = [APP_PAGE_HOME, APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA]
+    const normalized = [APP_PAGE_HOME, APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA, APP_PAGE_MODEL_EDITOR]
       .includes(nextPage)
       ? nextPage
       : APP_PAGE_HOME;
     const targetPath = normalized === APP_PAGE_HOME
       ? '/'
-      : normalized === APP_PAGE_WORKBENCH ? '/workbench' : '/teaching-data';
+      : `/${normalized}`;
     if (normalized === APP_PAGE_HOME) {
       setStartPageMode(options.teachingSpaceMode == null
         ? null
@@ -2738,6 +2759,8 @@ export default function App() {
     setSelectedWaypointId(parkingPoint?.id || null);
     setSelectedEdgeId(null);
     setRobotParkingGhost(null);
+    setMobilePoseSelection(null);
+    setSynchronizedFocus((current) => current?.type === 'mobile-pose' ? null : current);
     setTeachingCaptureState({ status: 'idle', message: '' });
   }, [teachingTasks]);
 
@@ -4704,9 +4727,36 @@ export default function App() {
     setIPadTeachingOpen(true);
   };
 
-  const openMobileTeachingSolve = (taskId) => {
+  const selectMobilePose = (taskId, sampleId) => {
     stopTeachingTaskPlayback(false);
     setRobotControlEnabled(false);
+    setMobileComputation((current) => current ? { ...current, preview: null, followLatest: false } : current);
+    selectTeachingTask(taskId);
+    setMobilePoseSelection({ taskId, sampleId });
+    requestSynchronizedFocus('mobile-pose', sampleId);
+  };
+
+  const openMobileRobotPose = (parkingPointId, poseId) => {
+    stopTeachingTaskPlayback(false);
+    setShowRobotModel(true);
+    setMobilePoseSelection(null);
+    previewTeachingParkingPoint(parkingPointId, poseId);
+    navigateAppPage(APP_PAGE_WORKBENCH);
+  };
+
+  const openMobileSource = (taskId) => {
+    if (!teachingTasks.some((task) => task.id === taskId && task.mobileCapture)) {
+      notify('来源采样任务不在当前工程中；已保存的机器人姿态仍可编辑', 'info');
+      return;
+    }
+    stopTeachingTaskPlayback(false);
+    selectTeachingTask(taskId);
+  };
+
+  const openMobileTeachingSolve = (taskId, sampleId = null) => {
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    setMobileSolveSampleId(sampleId);
     setMobileSolveTaskId(taskId);
   };
 
@@ -4952,7 +5002,7 @@ export default function App() {
       onChange={handleProjectDirectoryFiles}
     />
     <div
-      className={`app-shell ${appPage === APP_PAGE_HOME ? 'is-home-background' : appPage === APP_PAGE_TEACHING_DATA ? 'is-route-background' : ''} ${isIndependentTeachingSpace ? 'is-independent-teaching-space' : ''}`}
+      className={`app-shell ${appPage === APP_PAGE_HOME ? 'is-home-background' : appPage !== APP_PAGE_WORKBENCH ? 'is-route-background' : ''} ${isIndependentTeachingSpace ? 'is-independent-teaching-space' : ''}`}
       data-app-page="workbench"
       data-teaching-space-mode={teachingSpaceMode}
       data-teaching-source={teachingSource}
@@ -5251,6 +5301,7 @@ export default function App() {
                 teachingCaptureBusy={teachingCaptureState.status === 'capturing'}
                 teachingSpaceMode={teachingSpaceMode}
                 teachingTasks={workbenchTeachingTasks}
+                selectedMobilePose={selectedMobilePose}
                 spaceMouseInputRef={spaceMouseInputRef}
                 viewportCanvasRef={main3DCanvasRef}
                 cameraTeachingCommand={cameraTeachingCommand}
@@ -5403,6 +5454,15 @@ export default function App() {
           spaceMouseInputRef={spaceMouseInputRef}
           main3DCanvasRef={main3DCanvasRef}
           teachingTasks={workbenchTeachingTasks}
+          teachingDevice={teachingDevice}
+          teachingSources={isIndependentTeachingSpace ? teachingSources : []}
+          onTeachingSourceChange={switchTeachingSource}
+          robotTasks={desktopTeachingTasks}
+          mobilePoseSelection={selectedMobilePose ? mobilePoseSelection : null}
+          onSelectMobilePose={selectMobilePose}
+          onOpenMobileRobotPose={openMobileRobotPose}
+          onOpenMobileSource={openMobileSource}
+          onEditTeachingPose={beginTeachingPoseEdit}
           activeTeachingTaskId={activeTeachingTaskId}
           activeTeachingParkingPointId={activeTeachingParkingPointId}
           robotParkingGhostId={robotParkingGhost?.parkingPointId || null}
@@ -5545,6 +5605,7 @@ export default function App() {
           onLoadProject={showProjectLoadDialog}
           onContinue={(modeId) => continueWorkspace(modeId, APP_PAGE_WORKBENCH)}
           onOpenTeachingData={(modeId) => continueWorkspace(modeId, APP_PAGE_TEACHING_DATA)}
+          onOpenModelEditor={() => navigateAppPage(APP_PAGE_MODEL_EDITOR)}
         />
         {toast && (
           <div className={`toast-message ${toast.kind}`} role="status">
@@ -5554,6 +5615,7 @@ export default function App() {
         )}
       </>
     )}
+    <ModelEditorPage active={appPage === APP_PAGE_MODEL_EDITOR} onHome={() => navigateAppPage(APP_PAGE_HOME)} />
     {appPage === APP_PAGE_TEACHING_DATA && (
       <div className="app-shell is-teaching-data-page" data-app-page="teaching-data">
         <TeachingDataPage
@@ -5627,6 +5689,7 @@ export default function App() {
         : setMobileComputation((value) => ({ ...value, followLatest: false }))}
       onFocusPreview={() => requestSynchronizedFocus('robot-ghost', mobileComputation.preview?.parkingPointId)} />
     {mobileSolveTaskId && teachingTasks.find((task) => task.id === mobileSolveTaskId)?.mobileCapture && <MobileTeachingSolveDialog
+      initialSampleId={mobileSolveSampleId}
       key={mobileSolveTaskId} task={teachingTasks.find((task) => task.id === mobileSolveTaskId)} robot={selectedRobot} robotPose={robotPose}
       initialOptions={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.options : undefined}
       running={['running', 'pausing', 'paused'].includes(mobileComputation?.status)}

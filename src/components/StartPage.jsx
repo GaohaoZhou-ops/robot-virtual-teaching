@@ -7,6 +7,7 @@ import {
   FolderOpen,
   FolderPlus,
   Map as MapIcon,
+  PencilRuler,
   Route,
   ScanLine,
   Server,
@@ -25,6 +26,7 @@ export default function StartPage({
   onLoadProject,
   onContinue,
   onOpenTeachingData,
+  onOpenModelEditor,
 }) {
   const [selectedMode, setSelectedMode] = useState(() => normalizeMode(initialMode));
   const modeTouchedRef = useRef(false);
@@ -87,6 +89,11 @@ export default function StartPage({
       <main className="start-page__main">
         <section className="start-page__intro" aria-labelledby="start-page-title">
           <h1 id="start-page-title"><strong>虚拟示教平台</strong></h1>
+          <button type="button" className="start-page__model-editor" onClick={onOpenModelEditor} disabled={busy} aria-label="模型编辑">
+            <span><PencilRuler size={21} /></span>
+            <span><small>MODEL STUDIO</small><strong>模型编辑</strong><em>坐标原点 · 区域裁剪 · 模型精简</em></span>
+            <ArrowRight size={17} />
+          </button>
         </section>
 
         <section className="start-page__flow" aria-label="开始示教">

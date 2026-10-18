@@ -8,7 +8,6 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 from ipad_teaching_source_ui_smoke import fixture_data, import_result, ready
-from ipad_menu_helpers import select_teaching_source
 from archive_helpers import start_project_download, read_exported_project
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +64,15 @@ def run():
             archive['result']['samples'][1]['cameraPose'].update(position={'x': 20, 'y': 20, 'z': 20}, quaternion=dict(zip('xyzw', quaternion)))
             original_capture = copy.deepcopy(archive['result'])
             import_result(page, archive)
+            sources = page.get_by_role('group', name='示教来源', exact=True)
+            expect(sources.get_by_role('button', name='iPad 示教', exact=True)).to_have_attribute('aria-pressed', 'true')
+            sample = page.get_by_role('treeitem', name='预览采样 Pose Pose 001', exact=True)
+            expect(sample).to_be_visible()
+            sample.click()
+            expect(canvas).to_have_attribute('data-mobile-selected-sample', original_capture['samples'][0]['id'])
+            expect(page.get_by_label('采样 Pose 详情', exact=True)).to_contain_text('待计算')
+            expect(canvas).to_have_attribute('data-synchronized-focus-state', 'settled')
+            page.screenshot(path=str(ARTIFACTS / 'sampling-poses.png'), full_page=True)
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             dialog = page.get_by_role('dialog', name='计算机器人姿态', exact=True)
             for axis in ['X', 'Y', 'Z']:
@@ -114,9 +122,34 @@ def run():
             assert tasks[0]['mobileCapture'] == original_capture
             assert tasks[1]['parkingPoints'][0]['poses'][0]['mobileSampleId'] == original_capture['samples'][0]['id']
             assert tasks[1]['parkingPoints'][0]['poses'][0]['opticalTargets']['left']['position'] == archive['result']['samples'][0]['cameraPose']['position']
+            expect(sources.get_by_role('button', name='机器人示教', exact=True)).to_have_attribute('aria-pressed', 'true')
+            page.get_by_role('button', name='查看来源采样', exact=True).click()
+            sample.click()
+            expect(page.get_by_label('采样 Pose 详情', exact=True)).to_contain_text('已保存 · 可精修')
+            page.get_by_role('button', name='打开机器人姿态', exact=True).click()
+            robot_pose = tasks[1]['parkingPoints'][0]['poses'][0]
+            card = page.get_by_label('停车点机器人虚影', exact=True)
+            expect(card).to_have_attribute('data-pose-id', robot_pose['id'])
+            page.get_by_role('button', name='调整选中姿态', exact=True).click()
+            expect(card).to_have_attribute('data-pose-edit-state', 'editing')
+            expect(page.get_by_role('dialog', name='全关节控制浮动窗口')).to_be_visible()
+            page.get_by_role('spinbutton', name='right_J1 关节值', exact=True).fill('12')
+            card.get_by_role('button', name='确认修改', exact=True).click()
+            expect(card).to_have_attribute('data-pose-edit-state', 'idle')
+            refined = await_saved(page, lambda c: abs(c['project']['virtualTeaching']['tasks'][1]['parkingPoints'][0]['poses'][0]['fullBodyJoints']['values'].get('right_J1', 0) - 12) < 1e-6)
+            refined_pose = refined['project']['virtualTeaching']['tasks'][1]['parkingPoints'][0]['poses'][0]
+            assert refined_pose['id'] == robot_pose['id']
+            assert refined_pose['mobileSampleId'] == original_capture['samples'][0]['id']
+            assert refined['project']['virtualTeaching']['tasks'][0]['mobileCapture'] == original_capture
+            page.screenshot(path=str(ARTIFACTS / 'refined-robot-pose.png'), full_page=True)
             page.reload(wait_until='networkidle')
             ready(page)
-            select_teaching_source(page, '查看 iPad 示教')
+            sources.get_by_role('button', name='iPad 示教', exact=True).click()
+            page.get_by_role('treeitem', name='预览采样 Pose Pose 002', exact=True).click()
+            page.get_by_role('button', name='查看此 Pose 的计算结果', exact=True).click()
+            expect(dialog.locator('.mobile-solve-detail h4')).to_contain_text('Pose 002')
+            expect(dialog.get_by_role('button', name='应用左臂解', exact=True)).to_be_disabled()
+            dialog.get_by_role('button', name='关闭姿态计算').click()
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             expect(dialog.locator('.mobile-solve-results-heading')).to_contain_text('1 / 2 可达')
             expect(dialog.get_by_role('button', name='查看已保存任务')).to_be_enabled()
@@ -144,10 +177,15 @@ def run():
             assert exported[0]['mobileCapture'] == original_capture
             assert exported[0]['mobileSolve']['feasibleCount'] == 1
             assert len(exported[1]['parkingPoints'][0]['poses']) == 1
+            exported_pose = exported[1]['parkingPoints'][0]['poses'][0]
+            for field in ['id', 'mobileSampleId', 'mapPose', 'opticalTargets']:
+                assert exported_pose[field] == refined_pose[field], f'reopening a saved solve must preserve {field}'
+            assert exported_pose['fullBodyJoints']['values'] == refined_pose['fullBodyJoints']['values']
+            assert exported_pose['cameraCapture']['capturedAt'] == refined_pose['cameraCapture']['capturedAt']
             assert not errors, errors
         finally:
             browser.close()
-    print('Mobile solve UI: real URDF IK, defaults, validation, live application, persistence, cancellation, data page, idempotent save and ZIP export passed.')
+    print('Mobile solve UI: sample selection, real URDF IK, report navigation, linked robot refinement, reload, cancellation, idempotent save and ZIP export passed.')
 
 
 if __name__ == '__main__':

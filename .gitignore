@@ -155,6 +155,9 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Model-editor smoke-test captures copied from /tmp for local inspection.
+/model-editor-*.png
+/tests/model-editor-*.png
 # Browser recordings / traces saved beside smoke-test screenshots.
 /atlas-*.mp4
 /atlas-*.webm
@@ -168,6 +171,12 @@ playwright/.auth/
 /tests/transfer-*.webm
 /tests/atlas-*-trace.zip
 /tests/transfer-*-trace.zip
+/model-editor-*.mp4
+/model-editor-*.webm
+/model-editor-*-trace.zip
+/tests/model-editor-*.mp4
+/tests/model-editor-*.webm
+/tests/model-editor-*-trace.zip
 /atlas-ipad-*.mov
 /atlas-ipad-*.heic
 /ipad/atlas-ipad-*.png
