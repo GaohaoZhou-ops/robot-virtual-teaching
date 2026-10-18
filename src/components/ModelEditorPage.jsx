@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, Box, Crop, FileText, FolderOpen, Layers3, LoaderCircle, MousePointer2, Move3D, Rotate3D, RotateCcw, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, Box, Boxes, Crop, FileText, FolderOpen, Layers3, LoaderCircle, MousePointer2, Move3D, Rotate3D, RotateCcw, Upload, X } from 'lucide-react';
 import ModelEditorViewport from './ModelEditorViewport.jsx';
 import ModelExportDialog from './ModelExportDialog.jsx';
 import { readModelOrigin, ZERO_MODEL_ORIGIN } from '../lib/modelOriginTransform.js';
@@ -46,7 +46,7 @@ function ModelDetailsDialog({ source, result, pending, editError, onClose }) {
   </dialog>;
 }
 
-export default function ModelEditorPage({ active, onHome }) {
+export default function ModelEditorPage({ active, onHome, onOpenPair }) {
   const inputRef = useRef(null), workerRef = useRef(null), pendingRef = useRef(new Map()), sequenceRef = useRef(0);
   const loadedRevisionRef = useRef(0), exportUrlRef = useRef(null), exportBusyRef = useRef(false);
   const settingsRef = useRef(null), historyRef = useRef({ past: [], group: null });
@@ -322,6 +322,7 @@ export default function ModelEditorPage({ active, onHome }) {
       <span className="model-editor__brand-icon"><Box size={22} strokeWidth={1.5} /></span>
       <div className="model-editor__title"><small>VIRTUAL TEACHING / MODEL STUDIO</small><h1>模型编辑</h1></div>
       <div className="model-editor__header-actions">
+        {source && onOpenPair && <button type="button" className="model-editor__pair-shortcut" onClick={onOpenPair} disabled={busy || manipulating} aria-label="双模型处理" title="双模型处理"><Boxes size={15} /><span>双模型处理</span></button>}
         <button type="button" onClick={() => setDetailsOpen(true)} disabled={!source || busy || manipulating} aria-haspopup="dialog"><FileText size={15} />模型详情</button>
         <button type="button" onClick={() => inputRef.current?.click()} disabled={busy || manipulating}><FolderOpen size={15} />{source ? '更换模型' : '导入 PLY'}</button>
         <button type="button" className="model-editor__primary" onClick={() => exportModel()} disabled={!ready}><ArrowDownToLine size={15} />导出 PLY</button>
@@ -335,8 +336,12 @@ export default function ModelEditorPage({ active, onHome }) {
         onDrop={(event) => { event.preventDefault(); setDragging(false); loadFile(event.dataTransfer.files[0]); }}>
         <div className="model-editor__empty-art"><Box size={76} strokeWidth={0.8} /><span className="is-x">X</span><span className="is-y">Y</span><span className="is-z">Z</span></div>
         <small>PREPARE YOUR SCENE</small><h2>模型编辑空间</h2>
-        <button type="button" className="model-editor__primary" onClick={() => inputRef.current?.click()} disabled={busy}><Upload size={17} />选择 PLY 模型</button>
-        <div className="model-editor__capabilities"><span><Move3D size={18} />XYZ / RPY 原点</span><span><Crop size={18} />三维范围裁剪</span><span><Layers3 size={18} />降采样与简化</span></div>
+        <div className="model-editor__workspaces">
+          <section><div className="model-editor__workspace-title"><Box size={22} /><h3>单模型处理</h3><small>01</small></div>
+            <p>坐标原点 · 裁剪 · 降采样</p><button type="button" className="model-editor__primary" onClick={() => inputRef.current?.click()} disabled={busy}><Upload size={17} />选择 PLY 模型</button></section>
+          <section><div className="model-editor__workspace-title"><Boxes size={23} /><h3>双模型处理</h3><small>02</small></div>
+            <p>模型 A + B · 姿态调整 · 替换与合并</p><button type="button" onClick={onOpenPair} disabled={busy}><Boxes size={17} />打开双模型处理</button></section>
+        </div>
       </div> : <>
         <section className="model-editor__scene" aria-label="模型预览">
           <ModelEditorViewport fileName={source.name} preview={cropDirty ? source.preview : result?.preview} crop={previewCrop}

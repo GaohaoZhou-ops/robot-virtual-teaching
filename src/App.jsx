@@ -39,6 +39,7 @@ import RobotPicker from './components/RobotPicker.jsx';
 import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
 import ModelEditorPage from './components/ModelEditorPage.jsx';
+import ModelPairEditorPage from './components/ModelPairEditorPage.jsx';
 import TeachingDataPage from './components/TeachingDataPage.jsx';
 import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
@@ -127,6 +128,7 @@ const APP_PAGE_HOME = 'home';
 const APP_PAGE_WORKBENCH = 'workbench';
 const APP_PAGE_TEACHING_DATA = 'teaching-data';
 const APP_PAGE_MODEL_EDITOR = 'model-editor';
+const APP_PAGE_MODEL_PAIR_EDITOR = 'model-editor/dual';
 const PROJECT_GUIDE_FILE_ACCEPT = '.json,.zip';
 
 const teachingModeLabel = (mode) => mode === 'independent' ? '独立示教' : '地图示教';
@@ -213,6 +215,7 @@ const appPageFromLocation = () => {
   if (typeof window === 'undefined') return APP_PAGE_HOME;
   const path = window.location.pathname.replace(/\/+$/, '') || '/';
   if (path.endsWith('/teaching-data')) return APP_PAGE_TEACHING_DATA;
+  if (path.endsWith('/model-editor/dual')) return APP_PAGE_MODEL_PAIR_EDITOR;
   if (path.endsWith('/model-editor')) return APP_PAGE_MODEL_EDITOR;
   if (path.endsWith('/workbench')) return APP_PAGE_WORKBENCH;
   return APP_PAGE_HOME;
@@ -772,6 +775,8 @@ export default function App() {
   useEffect(() => {
     document.title = appPage === APP_PAGE_TEACHING_DATA
       ? '示教数据 · 虚拟示教平台'
+      : appPage === APP_PAGE_MODEL_PAIR_EDITOR
+        ? '双模型处理 · 虚拟示教平台'
       : appPage === APP_PAGE_MODEL_EDITOR
         ? '模型编辑 · 虚拟示教平台'
       : appPage === APP_PAGE_WORKBENCH
@@ -780,7 +785,7 @@ export default function App() {
   }, [appPage]);
 
   const navigateAppPage = useCallback((nextPage, options = {}) => {
-    const normalized = [APP_PAGE_HOME, APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA, APP_PAGE_MODEL_EDITOR]
+    const normalized = [APP_PAGE_HOME, APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA, APP_PAGE_MODEL_EDITOR, APP_PAGE_MODEL_PAIR_EDITOR]
       .includes(nextPage)
       ? nextPage
       : APP_PAGE_HOME;
@@ -5615,7 +5620,8 @@ export default function App() {
         )}
       </>
     )}
-    <ModelEditorPage active={appPage === APP_PAGE_MODEL_EDITOR} onHome={() => navigateAppPage(APP_PAGE_HOME)} />
+    <ModelEditorPage active={appPage === APP_PAGE_MODEL_EDITOR} onHome={() => navigateAppPage(APP_PAGE_HOME)} onOpenPair={() => navigateAppPage(APP_PAGE_MODEL_PAIR_EDITOR)} />
+    <ModelPairEditorPage active={appPage === APP_PAGE_MODEL_PAIR_EDITOR} onBack={() => navigateAppPage(APP_PAGE_MODEL_EDITOR)} />
     {appPage === APP_PAGE_TEACHING_DATA && (
       <div className="app-shell is-teaching-data-page" data-app-page="teaching-data">
         <TeachingDataPage
