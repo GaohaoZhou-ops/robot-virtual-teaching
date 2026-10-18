@@ -3,7 +3,7 @@ import math
 
 from playwright.sync_api import expect, sync_playwright
 
-from model_editor_ui_smoke import BASE_URL, CHROME, read_export
+from model_editor_ui_smoke import BASE_URL, CHROME, read_export, start_model_download
 
 
 FIELDS = ['X', 'Y', 'Z', 'roll', 'pitch', 'yaw']
@@ -109,7 +109,7 @@ def run():
 
         def check_export(name):
             with page.expect_download() as event:
-                page.get_by_role('button', name='导出 PLY', exact=True).click()
+                start_model_download(page)
             path = f'/tmp/{name}.ply'
             event.value.save_as(path)
             ready()
@@ -252,19 +252,38 @@ def run():
         assert origin() == before
         assert_fixed(original_anchor)
 
+        comparison_camera = camera()
         page.get_by_role('button', name='原始模型', exact=True).click()
-        expect(canvas).to_have_attribute('data-origin-locked', 'false')
-        expect(canvas).to_have_attribute('data-origin-gizmo-visible', 'false')
-        expect(page.get_by_role('button', name='浏览视图', exact=True)).to_have_attribute('aria-pressed', 'true')
-        assert origin() == before
-        page.get_by_role('button', name='旋转模型', exact=True).click()
-        expect(page.get_by_role('button', name='编辑结果', exact=True)).to_have_attribute('aria-pressed', 'true')
+        expect(canvas).to_have_attribute('data-original-visible', 'true')
+        expect(canvas).to_have_attribute('data-origin-locked', 'true')
         expect(canvas).to_have_attribute('data-origin-gizmo-visible', 'true')
+        expect(page.get_by_role('button', name='旋转模型', exact=True)).to_have_attribute('aria-pressed', 'true')
+        assert origin() == before
+        assert camera() == comparison_camera
+        original_transform = canvas.get_attribute('data-original-transform')
+        free_drag(release=False)
+        assert origin() != before
+        assert canvas.get_attribute('data-original-transform') == original_transform
+        page.mouse.up(); ready()
+        assert camera() == comparison_camera
+        assert_fixed(original_anchor)
+        check_export('model-editor-ghost-drag')
+        canvas.focus(); page.keyboard.press('Control+z'); ready()
+        assert origin() == before
+        expect(canvas).to_have_attribute('data-original-visible', 'true')
+        # Escape closes model details without also leaving the active edit tool.
+        page.get_by_role('button', name='模型详情', exact=True).click()
+        page.keyboard.press('Escape')
+        expect(page.get_by_role('dialog', name='模型详情', exact=True)).to_have_count(0)
+        expect(canvas).to_have_attribute('data-origin-edit-mode', 'rotate')
         page.get_by_label('显示质量', exact=True).select_option('performance')
         expect(canvas).to_have_attribute('data-display-quality', 'performance')
+        expect(canvas).to_have_attribute('data-original-quality', 'performance')
         ready()
         assert origin() == before
         assert ground() == initial_ground
+        page.get_by_role('button', name='继续编辑', exact=True).click()
+        expect(canvas).to_have_attribute('data-original-visible', 'false')
         page.get_by_role('button', name='归零', exact=True).click(); ready()
         assert origin() == [0] * 6
         check_export('model-editor-gizmo-reset')

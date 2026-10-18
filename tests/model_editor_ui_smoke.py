@@ -1,3 +1,4 @@
+import hashlib
 import math
 import os
 import struct
@@ -9,6 +10,16 @@ from playwright.sync_api import expect, sync_playwright
 BASE_URL = os.environ.get('BASE_URL', 'http://127.0.0.1:21990').rstrip('/')
 FIXTURES = Path(__file__).parent / 'fixtures'
 CHROME = Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+
+
+def start_model_download(page, name=None):
+    """Use named-download fallback for tests that inspect exported PLY bytes."""
+    page.evaluate('window.showSaveFilePicker = undefined')
+    page.get_by_role('button', name='导出 PLY', exact=True).click()
+    dialog = page.get_by_role('dialog', name='保存模型副本', exact=True)
+    if name is not None:
+        dialog.get_by_label('文件名', exact=True).fill(name)
+    dialog.get_by_role('button', name='下载 PLY', exact=True).click()
 
 
 def read_export(path):
@@ -50,7 +61,9 @@ def run():
         editor = page.locator('[data-app-page="model-editor"]')
         picker = page.get_by_label('导入模型文件', exact=True)
         export = page.get_by_role('button', name='导出 PLY', exact=True)
+        details_button = page.get_by_role('button', name='模型详情', exact=True)
         expect(export).to_be_disabled()
+        expect(details_button).to_be_disabled()
 
         def ready():
             expect(editor).to_have_attribute('data-editor-state', 'ready')
@@ -61,7 +74,7 @@ def run():
 
         def download(name):
             with page.expect_download() as event:
-                export.click()
+                start_model_download(page)
             target = f'/tmp/{name}'
             event.value.save_as(target)
             ready()
@@ -73,6 +86,19 @@ def run():
         picker.set_input_files(str(FIXTURES / 'rotation-map.ply'))
         ready()
         point_count(24)
+        canvas = page.get_by_label('模型编辑三维预览', exact=True)
+        expect(page.locator('.model-editor__scene .model-editor__statistics')).to_have_count(0)
+        expect(page.locator('.model-editor__view-label')).to_have_count(0)
+        details_button.click()
+        details = page.get_by_role('dialog', name='模型详情', exact=True)
+        expect(details).to_be_visible()
+        expect(details).to_contain_text('rotation-map.ply')
+        expect(details.locator('.model-editor__statistics > div').nth(0)).to_contain_text('原始 24')
+        expect(details.locator('.model-editor__statistics > div').nth(0).locator('strong')).to_have_text('24')
+        expect(details).to_contain_text('结果尺寸 · m')
+        page.keyboard.press('Escape')
+        expect(details).to_have_count(0)
+        expect(details_button).to_be_focused()
         page.locator('.model-editor__viewport canvas[data-render-state="ready"]').wait_for()
         # All six pose controls are editable; the known yaw checks transform direction.
         for axis in ['roll', 'pitch', 'yaw']:
@@ -94,12 +120,24 @@ def run():
         ready()
         edited_count = int(page.locator('[data-model-point-count]').get_attribute('data-model-point-count'))
         assert 0 < edited_count < 24
+        edited_image = hashlib.sha256(canvas.screenshot()).hexdigest()
         page.get_by_role('button', name='原始模型', exact=True).click()
-        expect(page.locator('.model-editor__viewport canvas')).to_have_attribute('data-preview-points', '24')
-        page.get_by_role('button', name='编辑结果', exact=True).click()
-        expect(page.locator('.model-editor__viewport canvas')).to_have_attribute('data-preview-points', str(edited_count))
+        expect(canvas).to_have_attribute('data-preview-points', str(edited_count))
+        expect(canvas).to_have_attribute('data-original-visible', 'true')
+        expect(canvas).to_have_attribute('data-original-points', '24')
+        assert 0 < float(canvas.get_attribute('data-original-opacity')) < 1
+        assert hashlib.sha256(canvas.screenshot()).hexdigest() != edited_image
+        expect(page.get_by_role('button', name='继续编辑', exact=True)).to_have_attribute('aria-pressed', 'true')
+        # The overlay never enters exports or the edited statistics.
         points, _ = download('model-editor-cropped-sampled.ply')
         assert len(points) == edited_count and all(-1e-6 <= point[0] <= 1 + 1e-6 for point in points)
+        details_button.click()
+        expect(details.locator('.model-editor__statistics > div').nth(0).locator('strong')).to_have_text(str(edited_count))
+        page.get_by_role('button', name='关闭模型详情', exact=True).click()
+        expect(details_button).to_be_focused()
+        page.get_by_role('button', name='继续编辑', exact=True).click()
+        expect(canvas).to_have_attribute('data-original-visible', 'false')
+        expect(canvas).to_have_attribute('data-original-points', '0')
 
         page.get_by_role('button', name='主页面', exact=True).click()
         page.wait_for_url(f'{BASE_URL}/')
@@ -149,6 +187,11 @@ def run():
         ready()
         points, faces = download('model-editor-mesh-crop.ply')
         assert faces > 0 and all(abs(point[0]) <= 0.5 and abs(point[1]) <= 0.5 for point in points)
+        page.get_by_role('button', name='原始模型', exact=True).click()
+        expect(canvas).to_have_attribute('data-original-visible', 'true')
+        expect(canvas).to_have_attribute('data-original-faces', '2')
+        expect(canvas).to_have_attribute('data-original-points', '3')
+        assert 0 < float(canvas.get_attribute('data-original-opacity')) < 1
         page.get_by_role('button', name='关闭提示').click()
         page.screenshot(path='/tmp/model-editor-mesh.png', full_page=True)
 
@@ -161,6 +204,9 @@ def run():
         dense_ply = '\n'.join(['ply', 'format ascii 1.0', 'element vertex 121', 'property float x', 'property float y', 'property float z', 'element face 200', 'property list uchar int vertex_indices', 'end_header'] + vertices + triangles) + '\n'
         picker.set_input_files({'name': 'dense.ply', 'mimeType': 'application/octet-stream', 'buffer': dense_ply.encode()})
         ready()
+        expect(canvas).to_have_attribute('data-original-visible', 'false')
+        expect(canvas).to_have_attribute('data-original-faces', '0')
+        expect(page.get_by_role('button', name='原始模型', exact=True)).to_be_visible()
         page.get_by_label('降采样方式', exact=True).select_option('voxel')
         page.get_by_label('体素尺寸', exact=True).fill('0')
         expect(page.get_by_role('alert')).to_contain_text('体素尺寸必须大于 0')
@@ -182,7 +228,7 @@ def run():
         expect(page.get_by_role('button', name='选择 PLY 模型')).to_be_visible()
         expect(export).to_be_disabled()
         assert not errors, errors
-        print('model editor UI: import, transforms, crop, simplify, export, validation, reset, navigation, and WebGL passed')
+        print('model editor UI: details dialog, point/mesh ghost overlay, import, transforms, crop, simplify, export, validation, reset, navigation, and WebGL passed')
         browser.close()
 
 

@@ -5,7 +5,7 @@ import struct
 
 from playwright.sync_api import expect, sync_playwright
 
-from model_editor_ui_smoke import BASE_URL, CHROME, FIXTURES, read_export
+from model_editor_ui_smoke import BASE_URL, CHROME, FIXTURES, read_export, start_model_download
 
 
 def distance(left, right):
@@ -132,13 +132,19 @@ def run():
         page.get_by_role('button', name='原始模型', exact=True).click()
         expect(canvas).to_have_attribute('data-display-quality', 'detail')
         expect(canvas).to_have_attribute('data-preview-points', str(count))
+        expect(canvas).to_have_attribute('data-original-points', str(count))
+        expect(canvas).to_have_attribute('data-original-quality', 'detail')
+        assert all(distance(camera()[key], user_camera[key]) < 1e-6 for key in ['position', 'target', 'up'])
         select_quality('performance')
-        page.get_by_role('button', name='编辑结果', exact=True).click()
+        expect(canvas).to_have_attribute('data-original-quality', 'performance')
+        assert int(canvas.get_attribute('data-original-points')) <= 80000
+        page.get_by_role('button', name='继续编辑', exact=True).click()
+        expect(canvas).to_have_attribute('data-original-visible', 'false')
         expect(canvas).to_have_attribute('data-display-quality', 'performance')
         expect(page.get_by_label('降采样方式', exact=True)).to_have_value('none')
         ready()
         with page.expect_download() as download:
-            page.get_by_role('button', name='导出 PLY', exact=True).click()
+            start_model_download(page)
         export_path = '/tmp/model-editor-display-full-export.ply'
         download.value.save_as(export_path)
         points, faces = read_export(export_path)
@@ -151,18 +157,45 @@ def run():
         picker.set_input_files({'name': 'display-mesh.ply', 'mimeType': 'application/octet-stream', 'buffer': mesh})
         ready()
         expect(canvas).to_have_attribute('data-preview-faces', '180000')
+        page.get_by_role('button', name='原始模型', exact=True).click()
+        expect(canvas).to_have_attribute('data-original-faces', '180000')
         select_quality('full')
         expect(canvas).to_have_attribute('data-preview-faces', str(face_count))
+        expect(canvas).to_have_attribute('data-original-faces', str(face_count))
+        expect(canvas).to_have_attribute('data-original-quality', 'full')
         expect(page.locator('[data-model-face-count]')).to_have_attribute('data-model-face-count', str(face_count))
         expect(page.locator('[data-model-point-count]')).to_have_attribute('data-model-point-count', str(vertices))
         select_quality('balanced')
         expect(canvas).to_have_attribute('data-preview-faces', str(face_count))
-        page.set_viewport_size({'width': 1024, 'height': 768})
-        page.wait_for_timeout(200)
-        expect(quality).to_be_visible()
-        rect = quality.bounding_box()
-        assert rect['x'] + rect['width'] <= 1024
-        page.screenshot(path='/tmp/model-editor-display-1024.png', full_page=True)
+        expect(canvas).to_have_attribute('data-original-quality', 'balanced')
+        for width in [1440, 1024, 900, 800, 760, 390]:
+            page.set_viewport_size({'width': width, 'height': 900 if width == 1440 else 768})
+            page.wait_for_timeout(100)
+            layout = page.evaluate('''() => {
+                const scene = document.querySelector('.model-editor__scene').getBoundingClientRect();
+                const shell = document.querySelector('.model-editor__viewport-shell').getBoundingClientRect();
+                const slider = document.querySelector('.model-editor__point-size').getBoundingClientRect();
+                const toggle = document.querySelector('.model-editor__interaction-mode').getBoundingClientRect();
+                const toolbar = document.querySelector('.model-editor__view-toolbar');
+                return {sceneRight: scene.right, shellRight: shell.right, shellBottom: shell.bottom, sceneBottom: scene.bottom,
+                    sliderRight: slider.right, sliderCenter: (slider.top + slider.bottom) / 2,
+                    toggleLeft: toggle.left, toggleCenter: (toggle.top + toggle.bottom) / 2,
+                    toolbarWidth: toolbar.clientWidth, toolbarScroll: toolbar.scrollWidth};
+            }''')
+            assert layout['shellRight'] <= layout['sceneRight'] <= width, (width, layout)
+            assert 0 < layout['sceneBottom'] - layout['shellBottom'] <= 20, (width, layout)
+            assert layout['toolbarScroll'] <= layout['toolbarWidth'] + 1, (width, layout)
+            assert layout['toggleLeft'] > layout['sliderRight'], (width, layout)
+            assert abs(layout['sliderCenter'] - layout['toggleCenter']) < 1, (width, layout)
+            expect(page.get_by_role('button', name='模型详情', exact=True)).to_be_in_viewport()
+            if width in [1440, 900, 390]:
+                page.screenshot(path=f'/tmp/model-editor-display-{width}.png', full_page=True)
+        page.get_by_role('button', name='模型详情', exact=True).click()
+        details = page.get_by_role('dialog', name='模型详情', exact=True)
+        expect(details).to_be_visible()
+        assert details.evaluate('(element) => element.scrollWidth <= element.clientWidth')
+        page.screenshot(path='/tmp/model-editor-details-390.png', full_page=True)
+        page.keyboard.press('Escape')
         assert not errors, errors
         browser.close()
         print('model editor viewport: real rotation, pan, wheel zoom, point size, quality budgets, camera preservation, full export, and mesh quality passed')

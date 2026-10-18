@@ -26,7 +26,7 @@ export function createModelOriginGizmo({ camera, canvas, scene, model, getState,
   const updateModel = (origin) => {
     const state = getState();
     const desired = modelMatrixFromOrigin(origin), base = modelMatrixFromOrigin(state.previewOrigin);
-    if (!state.sourceView && desired && base) model.matrix.copy(desired).multiply(base.invert());
+    if (desired && base) model.matrix.copy(desired).multiply(base.invert());
     else model.matrix.identity();
     model.matrixWorldNeedsUpdate = true;
     canvas.dataset.modelTransform = JSON.stringify(model.matrix.toArray());
@@ -35,7 +35,7 @@ export function createModelOriginGizmo({ camera, canvas, scene, model, getState,
     const state = getState();
     const origin = gesture?.latest || state.originPose;
     updateModel(origin);
-    const available = !state.sourceView && !state.originDisabled && state.sourceBounds && readModelOrigin(origin);
+    const available = !state.originDisabled && state.sourceBounds && readModelOrigin(origin);
     const enabled = Boolean(available && state.originMode !== 'view');
     if (!gesture) {
       transform.enabled = enabled;

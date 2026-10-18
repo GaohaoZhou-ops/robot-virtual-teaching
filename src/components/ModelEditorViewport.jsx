@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
-import { Focus, Grid3X3, Scan, Box } from 'lucide-react';
+import { Focus, Grid3X3, Box } from 'lucide-react';
 import { MODEL_EDITOR_DISPLAY_QUALITIES } from '../lib/modelEditorDisplay.js';
 import { configureViewportTrackball, createViewportNavigation, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
@@ -13,14 +13,42 @@ const meshMaterial = (hasColors, wireframe) => wireframe
   ? new THREE.MeshBasicMaterial({ color: hasColors ? 0xffffff : 0xb5d2d8, vertexColors: hasColors, side: THREE.DoubleSide, wireframe: true })
   : new THREE.MeshStandardMaterial({ color: hasColors ? 0xffffff : 0x9fbdc3, vertexColors: hasColors, roughness: 0.9, side: THREE.DoubleSide, flatShading: true });
 
-export default function ModelEditorViewport({ fileName, preview, crop, sourceView, onSourceViewChange, revision, display, onDisplayChange, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo }) {
+const clearPreview = (group) => {
+  for (const object of [...group.children]) { object.geometry.dispose(); object.material.dispose(); group.remove(object); }
+};
+const addPreview = (group, data, { pointSize, wireframe }, ghost = false) => {
+  if (!data?.positions.length) return;
+  const geometry = () => {
+    const value = new THREE.BufferGeometry();
+    value.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
+    if (!ghost && data.colors) value.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
+    if (!ghost && data.normals) value.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
+    return value;
+  };
+  if (data.indices.length) {
+    const meshGeometry = geometry(); meshGeometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
+    group.add(new THREE.Mesh(meshGeometry, ghost
+      ? new THREE.MeshBasicMaterial({ color: 0x8bbdce, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
+        forceSinglePass: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
+      : meshMaterial(Boolean(data.colors), wireframe)));
+  }
+  if (data.pointIndices.length) {
+    const pointsGeometry = geometry(); pointsGeometry.setIndex(new THREE.BufferAttribute(data.pointIndices, 1));
+    group.add(new THREE.Points(pointsGeometry, new THREE.PointsMaterial({
+      color: ghost ? 0x8bbdce : data.colors ? 0xffffff : 0x85d6df, vertexColors: !ghost && Boolean(data.colors),
+      size: pointSize, sizeAttenuation: false, transparent: ghost, opacity: ghost ? 0.28 : 1, depthWrite: !ghost,
+    })));
+  }
+};
+
+export default function ModelEditorViewport({ fileName, preview, originalPreview, crop, showOriginal, onShowOriginalChange, revision, display, onDisplayChange, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo }) {
   const hostRef = useRef(null), canvasRef = useRef(null), sceneRef = useRef(null), dataRef = useRef(null);
   const [error, setError] = useState(''), [view, setView] = useState('perspective');
   const [gridVisible, setGridVisible] = useState(true), [wireframe, setWireframe] = useState(false);
   const [interactionMode, setInteractionMode] = useState('rotate'), [shiftPanArmed, setShiftPanArmed] = useState(false);
   const interactionModeRef = useRef('rotate');
-  const editingOrigin = !sourceView && originMode !== 'view';
-  dataRef.current = { preview, crop, gridVisible, wireframe, pointSize: display.pointSize, sourceView, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo };
+  const editingOrigin = originMode !== 'view';
+  dataRef.current = { preview, originalPreview, crop, gridVisible, wireframe, pointSize: display.pointSize, showOriginal, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo };
 
   useEffect(() => {
     const canvas = canvasRef.current, host = hostRef.current;
@@ -38,6 +66,8 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
     canvas.dataset.controlMode = 'free-trackball';
     canvas.dataset.zoomMode = 'hybrid-continuous-detail';
     const model = new THREE.Group(); scene.add(model);
+    // The reference stays in the imported coordinates, independent of edits.
+    const original = new THREE.Group(); scene.add(original);
     const axes = new THREE.AxesHelper(1); axes.material.depthTest = false; axes.renderOrder = 10; scene.add(axes);
     const origin = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
     origin.renderOrder = 11; scene.add(origin);
@@ -46,8 +76,8 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
     const box = new THREE.Box3Helper(new THREE.Box3(), 0xf4c95d); scene.add(box);
     scene.add(new THREE.HemisphereLight(0xdcefff, 0x394139, 2));
     const light = new THREE.DirectionalLight(0xffffff, 2.4); light.position.set(4, -5, 8); scene.add(light);
-    let frame = 0, disposed = false, currentPreview = null, referenceBounds = null, fitted = false, originEditing = false;
-    const isOriginEditing = () => !dataRef.current.sourceView && dataRef.current.originMode !== 'view';
+    let frame = 0, disposed = false, currentPreview = null, currentOriginalPreview = null, referenceBounds = null, fitted = false, originEditing = false;
+    const isOriginEditing = () => dataRef.current.originMode !== 'view';
     const currentInteractionMode = () => isOriginEditing() ? (dataRef.current.originMode === 'translate' ? 'pan' : 'rotate') : interactionModeRef.current;
     const render = () => {
       frame = 0; if (disposed) return;
@@ -56,6 +86,7 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
       renderer.render(scene, camera);
       originGizmo.writeTelemetry();
       canvas.dataset.groundTransform = JSON.stringify(grid.matrixWorld.toArray());
+      canvas.dataset.originalTransform = JSON.stringify(original.matrixWorld.toArray());
       const projectedOrigin = new THREE.Vector3().project(camera);
       canvas.dataset.originScreenPosition = JSON.stringify([(projectedOrigin.x + 1) * canvas.clientWidth / 2, (1 - projectedOrigin.y) * canvas.clientHeight / 2]);
       canvas.dataset.renderState = 'ready';
@@ -76,11 +107,9 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
         dataRef.current.onOriginDragChange(dragging);
       },
     });
-    const clearModel = () => {
-      for (const object of [...model.children]) { object.geometry.dispose(); object.material.dispose(); model.remove(object); }
-    };
     const fit = (direction = null) => {
       const bounds = toBox(dataRef.current.preview?.bounds).applyMatrix4(model.matrix);
+      if (dataRef.current.showOriginal) bounds.union(toBox(dataRef.current.originalPreview?.bounds));
       const center = isOriginEditing() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
       // In origin editing, explicit view presets frame both the fixed origin
       // and the model. Ordinary editing never refits the camera.
@@ -109,27 +138,15 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
       originGizmo.sync();
       const previewChanged = data !== currentPreview;
       if (previewChanged) {
-        clearModel(); currentPreview = data;
-        if (data?.positions.length) {
-          const geometry = () => {
-            const value = new THREE.BufferGeometry();
-            value.setAttribute('position', new THREE.BufferAttribute(data.positions, 3));
-            if (data.colors) value.setAttribute('color', new THREE.BufferAttribute(data.colors, 3));
-            if (data.normals) value.setAttribute('normal', new THREE.BufferAttribute(data.normals, 3));
-            return value;
-          };
-          if (data.indices.length) {
-            const meshGeometry = geometry(); meshGeometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
-            model.add(new THREE.Mesh(meshGeometry, meshMaterial(Boolean(data.colors), current.wireframe)));
-          }
-          if (data.pointIndices.length) {
-            const pointsGeometry = geometry(); pointsGeometry.setIndex(new THREE.BufferAttribute(data.pointIndices, 1));
-            model.add(new THREE.Points(pointsGeometry, new THREE.PointsMaterial({
-              color: data.colors ? 0xffffff : 0x85d6df, vertexColors: Boolean(data.colors), size: current.pointSize, sizeAttenuation: false,
-            })));
-          }
-        }
+        clearPreview(model); currentPreview = data;
+        addPreview(model, data, current);
       }
+      const originalData = current.showOriginal ? current.originalPreview : null;
+      if (originalData !== currentOriginalPreview) {
+        clearPreview(original); currentOriginalPreview = originalData;
+        addPreview(original, originalData, current, true);
+      }
+      original.visible = Boolean(current.showOriginal);
       // All modes share the same world Z=0 reference. Only a new source model
       // changes its scale; edits, preview replacements and tool switches do not.
       if (current.sourceBounds !== referenceBounds || !fitted) {
@@ -154,6 +171,7 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
         object.material.dispose(); object.material = meshMaterial(Boolean(data.colors), current.wireframe);
       }
       for (const object of model.children) if (object.isPoints) object.material.size = current.pointSize;
+      for (const object of original.children) if (object.isPoints) object.material.size = current.pointSize;
       grid.visible = current.gridVisible;
       box.visible = Boolean(current.crop?.enabled);
       if (box.visible) box.box.copy(toBox(current.crop));
@@ -161,6 +179,11 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
       canvas.dataset.previewFaces = String((data?.indices.length || 0) / 3);
       canvas.dataset.displayQuality = data?.quality || 'balanced';
       canvas.dataset.pointSize = String(current.pointSize);
+      canvas.dataset.originalVisible = String(original.visible && original.children.length > 0);
+      canvas.dataset.originalPoints = String(original.children.find((object) => object.isPoints)?.geometry.index.count || 0);
+      canvas.dataset.originalFaces = String((original.children.find((object) => object.isMesh)?.geometry.index.count || 0) / 3);
+      canvas.dataset.originalQuality = originalData?.quality || '';
+      canvas.dataset.originalOpacity = String(original.children[0]?.material.opacity || 0);
       invalidate();
     };
     let pointerStart = null;
@@ -349,7 +372,7 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
       controls.removeEventListener('start', startInteraction);
       controls.removeEventListener('end', invalidate);
       controls.removeEventListener('change', invalidate);
-      controls.dispose(); clearModel();
+      controls.dispose(); clearPreview(model); clearPreview(original);
       scene.traverse((object) => { object.geometry?.dispose(); if (object.material) object.material.dispose(); });
       // React StrictMode reuses this canvas immediately after effect cleanup.
       // Losing its WebGL context here prevents the next renderer from starting.
@@ -357,7 +380,7 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
     };
   }, []);
 
-  useEffect(() => { sceneRef.current?.sync(); }, [preview, crop, gridVisible, wireframe, display.pointSize, sourceView, originPose, previewOrigin, sourceBounds, originMode, originDisabled]);
+  useEffect(() => { sceneRef.current?.sync(); }, [preview, originalPreview, crop, gridVisible, wireframe, display.pointSize, showOriginal, originPose, previewOrigin, sourceBounds, originMode, originDisabled]);
   useEffect(() => { if (preview) { sceneRef.current?.fit('perspective'); setView('perspective'); } }, [revision]); // New file only; retain the camera while editing.
   const toggleInteractionMode = () => {
     if (canvasRef.current?.dataset.originDragging === 'true') return;
@@ -373,9 +396,8 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
 
   return <div className="model-editor__viewport-shell">
     <div className="model-editor__view-toolbar">
-      <div className="model-editor__segmented" aria-label="预览内容">
-        <button type="button" aria-pressed={!sourceView} onClick={() => onSourceViewChange(false)}>编辑结果</button>
-        <button type="button" aria-pressed={sourceView} onClick={() => onSourceViewChange(true)}>原始模型</button>
+      <div className="model-editor__segmented" aria-label="原始模型对照">
+        <button type="button" aria-pressed={showOriginal} onClick={() => onShowOriginalChange(!showOriginal)}>{showOriginal ? '继续编辑' : '原始模型'}</button>
       </div>
       <span className="model-editor__filename" title={fileName}>{fileName}</span>
       <div className="model-editor__display-controls">
@@ -383,6 +405,7 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
           {MODEL_EDITOR_DISPLAY_QUALITIES.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
         </select></label>
         <label className="model-editor__point-size">点大小<input type="range" aria-label="点大小" min="1" max="8" step="0.5" value={display.pointSize} onChange={(event) => onDisplayChange({ ...display, pointSize: Number(event.target.value) })} /><output>{display.pointSize}px</output></label>
+        <ViewportInteractionModeButton className="model-editor__interaction-mode" mode={editingOrigin ? (originMode === 'translate' ? 'pan' : 'rotate') : interactionMode} shiftPanArmed={shiftPanArmed} onClick={toggleInteractionMode} />
       </div>
       <div className="model-editor__view-actions">
         <button type="button" aria-label="显示网格" aria-pressed={gridVisible} onClick={() => setGridVisible(!gridVisible)} title="显示地面网格"><Grid3X3 size={15} /></button>
@@ -392,8 +415,6 @@ export default function ModelEditorViewport({ fileName, preview, crop, sourceVie
     </div>
     <div className="model-editor__viewport" ref={hostRef}>
       <canvas ref={canvasRef} aria-label="模型编辑三维预览" tabIndex={0} />
-      <div className="model-editor__view-label"><Scan size={13} /><span>{sourceView ? '原始坐标系' : editingOrigin ? '原点已固定' : '编辑后坐标系'}</span><i />{view === 'custom' ? '自由视角' : 'Z 向上'}</div>
-      <ViewportInteractionModeButton className="model-editor__interaction-mode" mode={editingOrigin ? (originMode === 'translate' ? 'pan' : 'rotate') : interactionMode} shiftPanArmed={shiftPanArmed} onClick={toggleInteractionMode} />
       {error && <div className="model-editor__viewport-message" role="alert">{error}</div>}
       {!error && !preview?.positions.length && <div className="model-editor__viewport-message">裁剪范围内没有模型，请扩大范围。</div>}
       <div className="model-editor__directions" aria-label="模型视角">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, Box, Crop, FolderOpen, Layers3, LoaderCircle, MousePointer2, Move3D, Rotate3D, RotateCcw, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, Box, Crop, FileText, FolderOpen, Layers3, LoaderCircle, MousePointer2, Move3D, Rotate3D, RotateCcw, Upload, X } from 'lucide-react';
 import ModelEditorViewport from './ModelEditorViewport.jsx';
+import ModelExportDialog from './ModelExportDialog.jsx';
 import { readModelOrigin, ZERO_MODEL_ORIGIN } from '../lib/modelOriginTransform.js';
 import './ModelEditorPage.css';
 
@@ -15,13 +16,43 @@ function NumericField({ label, value, onChange, step = 0.01, unit, ...props }) {
   return <label className="model-editor__numeric"><span>{label}</span><div><input type="number" value={value} step={step} onChange={(event) => onChange(event.target.value)} {...props} /><small>{unit}</small></div></label>;
 }
 
+function ModelDetailsDialog({ source, result, pending, editError, onClose }) {
+  const dialogRef = useRef(null);
+  useEffect(() => {
+    const previous = document.activeElement, dialog = dialogRef.current;
+    dialog.showModal();
+    return () => { dialog.close(); if (previous?.isConnected) previous.focus(); };
+  }, []);
+  const bounds = result.stats.bounds;
+  const reduction = source.stats.pointCount ? (1 - result.stats.pointCount / source.stats.pointCount) * 100 : 0;
+  return <dialog ref={dialogRef} className="model-editor__details" aria-labelledby="model-editor-details-title"
+    onCancel={(event) => { event.preventDefault(); onClose(); }}
+    onClick={(event) => {
+      if (event.target !== event.currentTarget) return;
+      const rect = event.currentTarget.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose();
+    }}>
+    <header><FileText size={20} /><h2 id="model-editor-details-title">模型详情</h2><button type="button" aria-label="关闭模型详情" onClick={onClose}><X size={18} /></button></header>
+    <div className="model-editor__details-file"><strong>{source.name}</strong><span>原始文件 · {formatBytes(source.byteLength)}</span></div>
+    <div className="model-editor__statistics" aria-label="编辑结果统计" aria-busy={pending}>
+      <div><small>顶点 / 点数</small><strong>{formatCount(result.stats.pointCount)}</strong><span>原始 {formatCount(source.stats.pointCount)}</span></div>
+      <div><small>三角面</small><strong>{formatCount(result.stats.faceCount)}</strong><span>原始 {formatCount(source.stats.faceCount)}</span></div>
+      <div><small>数据体积 · 约</small><strong>{formatBytes(result.stats.payloadBytes)}</strong><span>{reduction >= 0 ? `顶点减少 ${reduction.toFixed(1)}%` : '裁剪边界新增顶点'}</span></div>
+      <div className="model-editor__dimensions"><small>结果尺寸 · m</small>{AXES.map((axis) => <span key={axis}><b>{axis.toUpperCase()}</b>{bounds ? (bounds.max[axis] - bounds.min[axis]).toFixed(3) : '—'}</span>)}</div>
+    </div>
+    {(pending || editError) && <p className="model-editor__details-status" role="status">{editError ? '当前为上次有效编辑结果。' : '正在更新编辑结果…'}</p>}
+  </dialog>;
+}
+
 export default function ModelEditorPage({ active, onHome }) {
   const inputRef = useRef(null), workerRef = useRef(null), pendingRef = useRef(new Map()), sequenceRef = useRef(0);
-  const loadedRevisionRef = useRef(0), exportUrlRef = useRef(null);
+  const loadedRevisionRef = useRef(0), exportUrlRef = useRef(null), exportBusyRef = useRef(false);
   const settingsRef = useRef(null), historyRef = useRef({ past: [], group: null });
   const [source, setSource] = useState(null), [settings, setSettings] = useState(null), [result, setResult] = useState(null);
   const [phase, setPhase] = useState(''), [error, setError] = useState(''), [editError, setEditError] = useState('');
-  const [notice, setNotice] = useState(''), [sourceView, setSourceView] = useState(false), [dragging, setDragging] = useState(false);
+  const [notice, setNotice] = useState(''), [showOriginal, setShowOriginal] = useState(false), [dragging, setDragging] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [exportDialog, setExportDialog] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [display, setDisplay] = useState({ quality: 'balanced', pointSize: 3 });
   const [displayPending, setDisplayPending] = useState(false);
@@ -32,13 +63,12 @@ export default function ModelEditorPage({ active, onHome }) {
   const pending = Boolean(source && (originDragging || processing || settingsKey !== result?.key) && !editError);
   const busy = Boolean(phase), ready = Boolean(source && !busy && !editError && !pending && result?.stats.pointCount > 0);
   const loading = phase === 'loading';
-  const shownPreview = sourceView ? source?.preview : result?.preview;
   const previewOrigin = useMemo(() => result?.key ? JSON.parse(result.key).origin : ZERO_MODEL_ORIGIN, [result?.key]);
 
   useEffect(() => {
     if (!active) {
       if (historyRef.current.group?.kind === 'field') finishEditGroup();
-      setOriginMode('view'); setOriginDragging(false);
+      setOriginMode('view'); setOriginDragging(false); setDetailsOpen(false); setExportDialog(null);
     }
   }, [active]);
 
@@ -88,23 +118,27 @@ export default function ModelEditorPage({ active, onHome }) {
   // Display quality only rebuilds preview buffers from the worker's full model.
   // It must not rerun edits, change export data, or reset the camera.
   useEffect(() => {
-    if (!source || loading || originDragging || (!sourceView && (processing || settingsKey !== result?.key))
-      || shownPreview?.quality === display.quality) {
+    const targets = [];
+    if (result?.preview?.quality !== display.quality) targets.push('result');
+    if (showOriginal && source?.preview?.quality !== display.quality) targets.push('source');
+    if (!source || loading || originDragging || processing || settingsKey !== result?.key || !targets.length) {
       setDisplayPending(false);
       return undefined;
     }
     let cancelled = false;
     setDisplayPending(true);
-    request('preview', { quality: display.quality, target: sourceView ? 'source' : 'result', key: result?.key })
-      .then(({ preview }) => {
+    Promise.all(targets.map(async (target) => ({ target, ...await request('preview', { quality: display.quality, target, key: result?.key }) })))
+      .then((previews) => {
         if (cancelled) return;
-        if (sourceView) setSource((current) => ({ ...current, preview }));
-        else setResult((current) => ({ ...current, preview }));
+        for (const { target, preview } of previews) {
+          if (target === 'source') setSource((current) => ({ ...current, preview }));
+          else setResult((current) => ({ ...current, preview }));
+        }
       })
       .catch((failure) => { if (!cancelled) setError(`显示质量更新失败：${failure.message}`); })
       .finally(() => { if (!cancelled) setDisplayPending(false); });
     return () => { cancelled = true; };
-  }, [display.quality, sourceView, source?.revision, result?.key, shownPreview?.quality, loading, processing, settingsKey, originDragging]);
+  }, [display.quality, showOriginal, source?.revision, source?.preview?.quality, result?.key, result?.preview?.quality, loading, processing, settingsKey, originDragging]);
 
   const rememberSettings = (before) => {
     historyRef.current.past.push(clone(before));
@@ -124,7 +158,7 @@ export default function ModelEditorPage({ active, onHome }) {
   };
   const applySettings = (next) => {
     settingsRef.current = next;
-    setEditError(''); setNotice(''); setSourceView(false);
+    setEditError(''); setNotice('');
     setSettings(next);
   };
   const updateSettings = (update) => {
@@ -161,32 +195,59 @@ export default function ModelEditorPage({ active, onHome }) {
       historyRef.current = { past: [], group: null };
       settingsRef.current = next.defaults;
       setSource({ name: file.name, byteLength: file.size, stats: next.stats, preview: next.preview, defaults: next.defaults, revision });
-      setSettings(next.defaults); setResult(next); setSourceView(false); setOriginMode('view'); setOriginDragging(false);
+      setSettings(next.defaults); setResult(next); setShowOriginal(false); setDetailsOpen(false); setExportDialog(null); setOriginMode('view'); setOriginDragging(false);
     } catch (failure) { if (revision === loadedRevisionRef.current) setError(failure.message); }
     finally { if (revision === loadedRevisionRef.current) setPhase(''); }
   };
-  const exportModel = async () => {
-    if (!ready) return;
-    setPhase('exporting'); setError(''); setNotice('');
+  const exportModel = async (downloadName) => {
+    if (!ready || exportBusyRef.current) return;
+    exportBusyRef.current = true;
+    setError(''); setNotice('');
+    const filename = typeof downloadName === 'string' ? downloadName : `${source.name.replace(/\.ply$/i, '')}-edited.ply`;
+    let fileHandle = null, writable = null;
     try {
+      if (typeof downloadName !== 'string') {
+        if (typeof window.showSaveFilePicker !== 'function') { setExportDialog(filename); return; }
+        setPhase('selecting');
+        try {
+          // Open during the click's user activation, before the worker encodes a large model.
+          fileHandle = await window.showSaveFilePicker({
+            id: 'model-editor-ply-export', suggestedName: filename, excludeAcceptAllOption: true,
+            types: [{ description: 'PLY 点云 / 网格', accept: { 'application/octet-stream': ['.ply'] } }],
+          });
+        } catch (failure) {
+          if (failure.name === 'AbortError') return;
+          if (['SecurityError', 'NotSupportedError'].includes(failure.name)) { setExportDialog(filename); return; }
+          throw failure;
+        }
+      }
+      setExportDialog(null); setPhase('exporting');
       const { buffer } = await request('export', { key: settingsKey });
-      if (exportUrlRef.current) URL.revokeObjectURL(exportUrlRef.current);
-      const url = URL.createObjectURL(new Blob([buffer], { type: 'application/octet-stream' }));
-      exportUrlRef.current = url;
-      const link = document.createElement('a'); link.href = url; link.download = `${source.name.replace(/\.ply$/i, '')}-edited.ply`;
-      document.body.appendChild(link); link.click(); link.remove();
-      setNotice(`已导出 ${link.download} · ${formatBytes(buffer.byteLength)}`);
-    } catch (failure) { setError(failure.message); }
-    finally { setPhase(''); }
+      if (fileHandle) {
+        writable = await fileHandle.createWritable();
+        await writable.write(buffer);
+        await writable.close(); writable = null;
+        setNotice(`已保存 ${fileHandle.name} · ${formatBytes(buffer.byteLength)}`);
+      } else {
+        if (exportUrlRef.current) URL.revokeObjectURL(exportUrlRef.current);
+        const url = URL.createObjectURL(new Blob([buffer], { type: 'application/octet-stream' }));
+        exportUrlRef.current = url;
+        const link = document.createElement('a'); link.href = url; link.download = filename;
+        document.body.appendChild(link); link.click(); link.remove();
+        setNotice(`已开始下载 ${filename} · ${formatBytes(buffer.byteLength)}`);
+      }
+    } catch (failure) {
+      if (writable) { try { await writable.abort(); } catch { /* The stream may already be closed or errored. */ } }
+      setError(`模型导出失败：${failure.message || '无法写入所选文件'}`);
+    } finally { exportBusyRef.current = false; setPhase(''); }
   };
 
   if (!active) return null;
   const hasMesh = source?.stats.faceCount > 0;
   const resetCrop = () => updateSettings((next) => ({ ...next, crop: { ...clone(result.transformedBounds), enabled: next.crop.enabled } }));
-  const bounds = result?.stats.bounds;
-  const reduction = source?.stats.pointCount ? (1 - (result?.stats.pointCount || 0) / source.stats.pointCount) * 100 : 0;
 
   return <div className="model-editor" data-app-page="model-editor" data-editor-state={phase || (editError ? 'error' : pending || displayPending ? 'processing' : source ? 'ready' : 'empty')}
+    data-model-point-count={result?.stats.pointCount} data-model-face-count={result?.stats.faceCount}
     onFocusCapture={(event) => { if (isHistoryField(event.target)) beginEditGroup('field', event.target); }}
     onBlurCapture={(event) => { if (historyRef.current.group?.target === event.target) finishEditGroup(); }}
     onPointerDownCapture={(event) => {
@@ -204,8 +265,9 @@ export default function ModelEditorPage({ active, onHome }) {
       <span className="model-editor__brand-icon"><Box size={22} strokeWidth={1.5} /></span>
       <div className="model-editor__title"><small>VIRTUAL TEACHING / MODEL STUDIO</small><h1>模型编辑</h1></div>
       <div className="model-editor__header-actions">
+        <button type="button" onClick={() => setDetailsOpen(true)} disabled={!source || busy || originDragging} aria-haspopup="dialog"><FileText size={15} />模型详情</button>
         <button type="button" onClick={() => inputRef.current?.click()} disabled={busy || originDragging}><FolderOpen size={15} />{source ? '更换模型' : '导入 PLY'}</button>
-        <button type="button" className="model-editor__primary" onClick={exportModel} disabled={!ready}><ArrowDownToLine size={15} />导出 PLY</button>
+        <button type="button" className="model-editor__primary" onClick={() => exportModel()} disabled={!ready}><ArrowDownToLine size={15} />导出 PLY</button>
       </div>
     </header>
 
@@ -219,18 +281,12 @@ export default function ModelEditorPage({ active, onHome }) {
         <button type="button" className="model-editor__primary" onClick={() => inputRef.current?.click()} disabled={busy}><Upload size={17} />选择 PLY 模型</button>
         <div className="model-editor__capabilities"><span><Move3D size={18} />XYZ / RPY 原点</span><span><Crop size={18} />三维范围裁剪</span><span><Layers3 size={18} />降采样与简化</span></div>
       </div> : <>
-        <section className="model-editor__scene" aria-label="模型预览与统计">
-          <ModelEditorViewport fileName={source.name} preview={shownPreview} crop={!sourceView && settings.crop.enabled && (result?.key === settingsKey || originDragging) ? settings.crop : null}
-            sourceView={sourceView} onSourceViewChange={(value) => { setSourceView(value); if (value) setOriginMode('view'); }}
+        <section className="model-editor__scene" aria-label="模型预览">
+          <ModelEditorViewport fileName={source.name} preview={result?.preview} crop={settings.crop.enabled && (result?.key === settingsKey || originDragging) ? settings.crop : null}
+            originalPreview={source.preview} showOriginal={showOriginal} onShowOriginalChange={setShowOriginal}
             revision={source.revision} display={display} onDisplayChange={setDisplay}
             originPose={settings.origin} previewOrigin={previewOrigin} sourceBounds={source.stats.bounds} originMode={originMode} onOriginModeChange={setOriginMode} originDisabled={busy}
             onOriginChange={(origin) => updateSettings((next) => ({ ...next, origin }))} onOriginDragChange={originDragChanged} onUndo={undoSettings} />
-          <div className="model-editor__statistics" aria-label="编辑结果统计" aria-busy={pending}>
-            <div><small>顶点 / 点数</small><strong data-model-point-count={result.stats.pointCount}>{formatCount(result.stats.pointCount)}</strong><span>原始 {formatCount(source.stats.pointCount)}</span></div>
-            <div><small>三角面</small><strong data-model-face-count={result.stats.faceCount}>{formatCount(result.stats.faceCount)}</strong><span>原始 {formatCount(source.stats.faceCount)}</span></div>
-            <div><small>数据体积 · 约</small><strong>{formatBytes(result.stats.payloadBytes)}</strong><span>{reduction >= 0 ? `顶点减少 ${reduction.toFixed(1)}%` : '裁剪边界新增顶点'}</span></div>
-            <div className="model-editor__dimensions"><small>结果尺寸 · m</small>{AXES.map((a) => <span key={a}><b>{a.toUpperCase()}</b>{bounds ? (bounds.max[a] - bounds.min[a]).toFixed(3) : '—'}</span>)}</div>
-          </div>
         </section>
         <aside className="model-editor__settings" aria-label="模型编辑参数">
           <div className="model-editor__settings-title"><div><small>EDIT PIPELINE</small><strong>编辑参数</strong></div><button type="button" disabled={busy || originDragging} onClick={() => updateSettings(() => clone(source.defaults))}><RotateCcw size={13} />重置全部</button></div>
@@ -242,7 +298,7 @@ export default function ModelEditorPage({ active, onHome }) {
                   type="button" key={mode} aria-pressed={originMode === mode} disabled={mode !== 'view' && !readModelOrigin(settings.origin)}
                   aria-keyshortcuts={mode === 'view' ? 'Escape' : undefined}
                   title={mode === 'view' ? '结束模型操纵，浏览视角（Esc）' : `${label}：原点固定，直接拖动画布或操纵柄；右键 / Shift + 左键移动模型，Esc 退出调整，Ctrl + Z 撤销`}
-                  onClick={() => { setOriginMode(mode); if (mode !== 'view') setSourceView(false); }}><Icon size={13} />{label}</button>)}
+                  onClick={() => setOriginMode(mode)}><Icon size={13} />{label}</button>)}
               </div>
               <div className="model-editor__triple">{AXES.map((axis) => <NumericField key={axis} label={axis.toUpperCase()} unit="m" aria-label={`原点 ${axis.toUpperCase()}`} value={settings.origin[axis]} onChange={(value) => updateSettings((next) => { next.origin[axis] = value; return next; })} />)}</div>
               <div className="model-editor__triple">{['roll', 'pitch', 'yaw'].map((axis) => <NumericField key={axis} label={axis.toUpperCase()} unit="°" step={1} aria-label={`原点 ${axis}`} value={settings.origin[axis]} onChange={(value) => updateSettings((next) => { next.origin[axis] = value; return next; })} />)}</div>
@@ -269,8 +325,10 @@ export default function ModelEditorPage({ active, onHome }) {
         </aside>
       </>}
     </main>
+    {detailsOpen && source && <ModelDetailsDialog source={source} result={result} pending={pending} editError={editError} onClose={() => setDetailsOpen(false)} />}
+    {exportDialog && <ModelExportDialog filename={exportDialog} onSave={exportModel} onClose={() => setExportDialog(null)} />}
     {(error || editError || notice || (!pending && result?.stats.pointCount === 0)) && <div className={`model-editor__message ${error || editError || result?.stats.pointCount === 0 ? 'is-error' : ''}`} role={error || editError ? 'alert' : 'status'}>{error || editError || notice || '裁剪结果为空，请扩大裁剪范围后再导出。'}{editError && <small>当前显示上次有效预览。</small>}<button type="button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); }} disabled={Boolean(editError) || result?.stats.pointCount === 0}><X size={14} /></button></div>}
-    {busy && <div className="model-editor__busy" role="status"><LoaderCircle size={23} /><strong>{phase === 'loading' ? '正在读取模型…' : '正在导出模型…'}</strong><span>正在后台处理，请稍候</span></div>}
+    {busy && <div className="model-editor__busy" role="status"><LoaderCircle size={23} /><strong>{phase === 'loading' ? '正在读取模型…' : phase === 'selecting' ? '请选择文件名和保存位置…' : '正在导出模型…'}</strong>{phase !== 'selecting' && <span>正在后台处理，请稍候</span>}</div>}
     <footer className="model-editor__footer"><span><i />MODEL EDITOR · PLY</span><span>原文件保留 · 返回主页保留当前编辑 · 刷新前请导出</span></footer>
   </div>;
 }
