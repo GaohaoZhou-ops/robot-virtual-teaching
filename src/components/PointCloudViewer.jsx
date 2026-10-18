@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { createIPadCaptureLayer, disposeIPadCaptureLayer } from '../lib/ipadCaptureDisplay.js';
+import { createIPadCaptureLayer, createMobilePosePreview, disposeIPadCaptureLayer, mobileSamplePosition } from '../lib/ipadCaptureDisplay.js';
 import { solveMobileTeachingInWorker } from '../lib/mobileTeachingWorker.js';
 import * as THREE from 'three';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
@@ -34,6 +34,8 @@ import EndEffectorControlPanel from './EndEffectorControlPanel.jsx';
 import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
+import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
+import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
@@ -99,10 +101,6 @@ const RESOLUTION_LEVELS = [
 
 const DEFAULT_RESOLUTION_INDEX = RESOLUTION_LEVELS.length - 1;
 const AUTO_POINT_BUDGET = 1_000_000;
-const DETAIL_DOLLY_FLOOR_RATIO = 1e-5;
-// Kept below the float32 projection ceiling while providing 30 orders of
-// optical detail range beyond the precision-safe dolly floor.
-const MAX_OPTICAL_ZOOM = 1e30;
 const WAYPOINT_VOLUME_RATIO = 0.14;
 const WAYPOINT_RADIUS_SCALE = Math.cbrt(WAYPOINT_VOLUME_RATIO);
 // Keep the interaction target at its former size while making only the visible
@@ -117,7 +115,7 @@ const MAX_WAYPOINT_SCREEN_DIAMETER = 10;
 const MAX_WAYPOINT_LOD_SCALE = 24;
 const ROS_AXIS_SCREEN_LENGTH = 68;
 const MIN_ROS_AXIS_LOD_SCALE = 1e-30;
-const PICK_DRAG_THRESHOLD = 5;
+const PICK_DRAG_THRESHOLD = VIEWPORT_DRAG_THRESHOLD;
 const KEYBOARD_TAP_DURATION = 0.065;
 const KEYBOARD_WORLD_SPEED_RATIO = 0.75;
 const KEYBOARD_MIN_PROJECTED_AXIS = 1e-4;
@@ -1524,6 +1522,7 @@ export default function PointCloudViewer({
   teachingCaptureBusy = false,
   teachingSpaceMode = 'map',
   teachingTasks = [],
+  selectedMobilePose = null,
   spaceMouseInputRef,
   viewportCanvasRef,
   cameraTeachingCommand,
@@ -3221,8 +3220,7 @@ export default function PointCloudViewer({
     const overviewNear = Math.max(radius / 2000, 0.01);
     const detailDollyFloor = Math.max(radius * DETAIL_DOLLY_FLOOR_RATIO, 1e-7);
     const minimumEffectiveDistance = detailDollyFloor / MAX_OPTICAL_ZOOM;
-    const detailMinNear = Math.max(radius * 1e-10, 1e-10);
-    const camera = new THREE.PerspectiveCamera(46, 1, overviewNear, radius * 30);
+    const camera = new THREE.PerspectiveCamera(VIEWPORT_FOV, 1, overviewNear, radius * 30);
     camera.up.set(0, 0, 1);
     camera.position.set(
       center.x - radius * 0.6,
@@ -3232,16 +3230,7 @@ export default function PointCloudViewer({
 
     const controls = new TrackballControls(camera, renderer.domElement);
     controls.target.copy(center);
-    controls.rotateSpeed = 1.35;
-    // Wheel zoom is handled below so its response remains useful at microscopic distances.
-    controls.noZoom = true;
-    // Native Trackball panning eventually rounds down to zero at extreme optical
-    // zoom. Pointer panning below uses a world/projection hybrid instead.
-    controls.noPan = true;
-    controls.staticMoving = true;
-    // WASD, Q/E and the arrow keys are owned by the application. Disable
-    // TrackballControls' legacy A/S/D modes so it cannot process them twice.
-    controls.keys = [];
+    configureViewportTrackball(controls);
     controls.minDistance = detailDollyFloor;
     controls.maxDistance = radius * 6;
     renderer.domElement.dataset.controlMode = 'free-trackball';
@@ -3313,7 +3302,8 @@ export default function PointCloudViewer({
       zoom: 1,
       projectionOffset: { x: 0, y: 0 },
     };
-    const projectionPan = { x: 0, y: 0 };
+    const navigation = createViewportNavigation(camera, controls, radius);
+    const { projectionPan, applyProjectionPan, getPanMetrics, needsPrecisionPanForDistance, zoomBoostForDistance } = navigation;
 
     const claimKeyboardFocus = (source) => {
       if (document.activeElement !== renderer.domElement) {
@@ -3437,31 +3427,14 @@ export default function PointCloudViewer({
     renderer.domElement.dataset.mapRenderIsolation = 'scene-map-only';
     scene.add(mapLayer);
 
-    const zoomBoostForDistance = (effectiveDistance) => {
-      const detailOrders = Math.max(
-        0,
-        Math.log10(radius / Math.max(effectiveDistance, minimumEffectiveDistance)),
-      );
-      return Math.min(3.5, 1 + detailOrders * 0.24);
-    };
-
     // Dolly toward the target first, then continue optically before floating-point
     // precision can collapse camera.position onto controls.target.
     const syncDetailView = () => {
-      const distance = camera.position.distanceTo(controls.target);
-      const opticalZoom = Math.max(camera.zoom, 1);
-      const effectiveDistance = distance / opticalZoom;
-      const nextNear = Math.max(detailMinNear, Math.min(overviewNear, distance / 1000));
-      const nextFar = Math.max(radius * 8, distance + radius * 4);
+      const { distance, opticalZoom, effectiveDistance, near: nextNear } = navigation.syncClipping();
       const normalizedDistance = Math.max(effectiveDistance / (radius * 0.35), 1e-24);
       const pointSizeScale = Math.min(1, Math.max(normalizedDistance ** 0.82, 2e-5));
 
       material.size = overviewPointSize * pointSizeScale;
-      if (camera.near !== nextNear || camera.far !== nextFar) {
-        camera.near = nextNear;
-        camera.far = nextFar;
-        camera.updateProjectionMatrix();
-      }
 
       renderer.domElement.dataset.cameraDistance = distance.toPrecision(8);
       renderer.domElement.dataset.effectiveCameraDistance = effectiveDistance.toExponential(8);
@@ -3481,34 +3454,6 @@ export default function PointCloudViewer({
       renderer.domElement.dataset.cameraUpZ = camera.up.z.toPrecision(10);
     };
 
-    const applyMouseWheelZoomFactor = (factor) => {
-      if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) < 1e-12) {
-        return false;
-      }
-      const offset = camera.position.clone().sub(controls.target);
-      const distance = offset.length();
-      if (!distance) return false;
-      const effectiveDistance = distance / Math.max(camera.zoom, 1);
-      const nextEffectiveDistance = THREE.MathUtils.clamp(
-        effectiveDistance * factor,
-        minimumEffectiveDistance,
-        controls.maxDistance,
-      );
-      const nextDistance = Math.max(nextEffectiveDistance, detailDollyFloor);
-      const nextOpticalZoom = Math.min(
-        MAX_OPTICAL_ZOOM,
-        nextDistance / nextEffectiveDistance,
-      );
-      camera.position.copy(controls.target).addScaledVector(offset.normalize(), nextDistance);
-      camera.zoom = nextOpticalZoom;
-      camera.updateProjectionMatrix();
-      controls.update();
-      syncDetailView();
-      reportCameraView();
-      renderer.domElement.dataset.lastZoomSource = 'wheel';
-      return true;
-    };
-
     const readLastSpaceMousePhysicalMotionAt = () => Math.max(
       Number(spaceMouseInputRef?.current?.lastPhysicalMotionTimestamp || 0),
       Number(spaceMouseInputRef?.current?.lastMotionTimestamp || 0),
@@ -3523,12 +3468,11 @@ export default function PointCloudViewer({
     };
     const applyProgressiveWheelDelta = (delta) => {
       claimKeyboardFocus('wheel');
-      const effectiveDistance =
-        camera.position.distanceTo(controls.target) / Math.max(camera.zoom, 1);
-      const normalizedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 160);
-      applyMouseWheelZoomFactor(
-        Math.exp(normalizedDelta * 0.0017 * zoomBoostForDistance(effectiveDistance)),
-      );
+      if (navigation.applyWheelDelta(delta)) {
+        syncDetailView();
+        reportCameraView();
+        renderer.domElement.dataset.lastZoomSource = 'wheel';
+      }
       renderer.domElement.dataset.lastZoomDecision = 'accepted-mouse-wheel';
       renderer.domElement.dataset.spacemouseWheelArbitration = 'accepted';
     };
@@ -3559,11 +3503,7 @@ export default function PointCloudViewer({
       applyProgressiveWheelDelta(pending.delta);
     };
     const progressiveWheelZoom = (event) => {
-      let delta = event.deltaY;
-      if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 16;
-      if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
-        delta *= Math.max(renderer.domElement.clientHeight, 1);
-      }
+      const delta = viewportWheelDelta(event, renderer.domElement.clientHeight);
       if (!Number.isFinite(delta) || delta === 0) return;
 
       event.preventDefault();
@@ -3832,26 +3772,6 @@ export default function PointCloudViewer({
     let pointerStart = null;
     let chassisPointerDrag = null;
 
-    const applyProjectionPan = () => {
-      const width = Math.max(renderer.domElement.clientWidth, 1);
-      const height = Math.max(renderer.domElement.clientHeight, 1);
-      if (Math.abs(projectionPan.x) < 1e-9 && Math.abs(projectionPan.y) < 1e-9) {
-        camera.clearViewOffset();
-      } else {
-        camera.setViewOffset(
-          width,
-          height,
-          projectionPan.x,
-          projectionPan.y,
-          width,
-          height,
-        );
-      }
-      camera.updateProjectionMatrix();
-      renderer.domElement.dataset.precisionPanX = projectionPan.x.toFixed(3);
-      renderer.domElement.dataset.precisionPanY = projectionPan.y.toFixed(3);
-    };
-
     const clearProjectionPan = () => {
       projectionPan.x = 0;
       projectionPan.y = 0;
@@ -3926,73 +3846,12 @@ export default function PointCloudViewer({
     }
     controls.addEventListener('change', onControlsChange);
 
-    const getPanMetrics = () => {
-      const height = Math.max(renderer.domElement.clientHeight, 1);
-      const distance = camera.position.distanceTo(controls.target);
-      const effectiveDistance = distance / Math.max(camera.zoom, 1);
-      const unitsPerPixel =
-        (2 * effectiveDistance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)))
-        / height;
-      const largestCoordinate = Math.max(
-        1,
-        radius,
-        Math.abs(camera.position.x),
-        Math.abs(camera.position.y),
-        Math.abs(camera.position.z),
-        Math.abs(controls.target.x),
-        Math.abs(controls.target.y),
-        Math.abs(controls.target.z),
-      );
-      // Three.js performs camera matrix arithmetic in JS doubles, but uploads
-      // the result as float32 uniforms. Use a conservative GPU-space floor so
-      // keyboard motion switches before several sub-pixel frames accumulate
-      // into a visible jump.
-      const representableFloor = Math.max(
-        Number.EPSILON * largestCoordinate * 64,
-        largestCoordinate * (2 ** -21),
-      );
-      renderer.domElement.dataset.keyboardGpuPrecisionFloor =
-        representableFloor.toExponential(6);
-      return { effectiveDistance, height, representableFloor, unitsPerPixel };
-    };
-
-    const needsPrecisionPanForDistance = (intendedWorldDistance, metrics) =>
-      camera.zoom > 1.000001
-      || intendedWorldDistance <= metrics.representableFloor
-      || Math.abs(projectionPan.x) > 1e-9
-      || Math.abs(projectionPan.y) > 1e-9;
-
     const panByPixels = (deltaX, deltaY) => {
-      if (!deltaX && !deltaY) return null;
-      const metrics = getPanMetrics();
-      const intendedWorldDistance = metrics.unitsPerPixel * Math.hypot(deltaX, deltaY);
-      const needsPrecisionPan = needsPrecisionPanForDistance(intendedWorldDistance, metrics);
-
-      if (needsPrecisionPan) {
-        // setViewOffset is measured in screen pixels, so it remains responsive
-        // even when a world-space delta is smaller than machine precision.
-        projectionPan.x -= deltaX;
-        projectionPan.y -= deltaY;
-        applyProjectionPan();
-        reportCameraView();
-        renderer.domElement.dataset.panImplementation = 'precision-offset';
-      } else {
-        camera.updateMatrixWorld(true);
-        const cameraRight = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-        const cameraUp = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
-        const translation = cameraRight
-          .multiplyScalar(-deltaX * metrics.unitsPerPixel)
-          .add(cameraUp.multiplyScalar(deltaY * metrics.unitsPerPixel));
-        camera.position.add(translation);
-        controls.target.add(translation);
-        controls.update();
-        syncDetailView();
-        renderer.domElement.dataset.panImplementation = 'world';
-      }
-      renderer.domElement.dataset.panMovementCount = String(
-        Number(renderer.domElement.dataset.panMovementCount || 0) + 1,
-      );
-      return renderer.domElement.dataset.panImplementation;
+      const implementation = navigation.panByPixels(deltaX, deltaY);
+      if (!implementation) return null;
+      syncDetailView();
+      reportCameraView();
+      return implementation;
     };
 
     const previewOrbitOffset = new THREE.Vector3();
@@ -5510,6 +5369,19 @@ export default function PointCloudViewer({
   }, [mapData?.geometry, mapData?.teachingSpaceMode, teachingTasks, viewportCanvasRef]);
 
   useEffect(() => {
+    if (!sceneRef.current || !selectedMobilePose) return undefined;
+    const { task, sample } = selectedMobilePose;
+    const layer = createMobilePosePreview(task, sample);
+    sceneRef.current.add(layer);
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.mobileSelectedSample = sample.id;
+    return () => {
+      disposeIPadCaptureLayer(layer);
+      if (canvas) delete canvas.dataset.mobileSelectedSample;
+    };
+  }, [mapData?.geometry, selectedMobilePose]);
+
+  useEffect(() => {
     const layer = robotLayerRef.current;
     const canvas = controlsRef.current?.domElement;
     if (!layer || !canvas) return undefined;
@@ -6223,7 +6095,12 @@ export default function PointCloudViewer({
     const pointById = new Map(waypoints.map((point) => [point.id, point]));
     let target = null;
     let subjectSpan = 0;
-    if (focusRequest.type === 'waypoint') {
+    if (focusRequest.type === 'mobile-pose') {
+      if (selectedMobilePose?.sample.id === focusRequest.id) {
+        target = mobileSamplePosition(selectedMobilePose.sample, selectedMobilePose.task);
+        subjectSpan = 0.5;
+      }
+    } else if (focusRequest.type === 'waypoint') {
       const point = pointById.get(focusRequest.id);
       if (point) target = new THREE.Vector3(point.pose.x, point.pose.y, point.pose.z);
     } else if (focusRequest.type === 'edge') {
@@ -6284,6 +6161,8 @@ export default function PointCloudViewer({
         ? Math.max(subjectSpan * 1.45, sphere.radius * 0.12, routeScale * 12)
         : focusRequest.type === 'robot'
           ? Math.max(subjectSpan * 1.72, 0.9)
+          : focusRequest.type === 'mobile-pose'
+            ? 2.2
           : focusRequest.type === 'robot-ghost'
             ? Math.max(subjectSpan * 1.48, 1.05)
           : Math.max(sphere.radius * WAYPOINT_FOCUS_DISTANCE_RATIO, routeScale * 12),
@@ -7660,25 +7539,11 @@ export default function PointCloudViewer({
             >
               <div className="viewer-tool-switch" role="group" aria-label="视图操作">
                 <p className="viewer-tool-switch__title">视图操作</p>
-                <button
-                  type="button"
-                  className={`viewer-interaction-mode is-active ${temporaryShiftPan ? 'is-temporary' : ''} ${persistentPanMode ? 'is-pan-mode' : ''}`}
-                  aria-label={temporaryShiftPan ? 'Shift 临时平移' : persistentPanMode ? '平移' : '旋转'}
-                  aria-pressed="true"
-                  aria-keyshortcuts="Shift"
-                  data-base-mode={interactionMode}
-                  data-mode={shiftPanArmed ? 'shift-pan' : interactionMode}
-                  data-switchable="true"
+                <ViewportInteractionModeButton
+                  mode={interactionMode}
+                  shiftPanArmed={shiftPanArmed}
                   onClick={toggleInteractionMode}
-                  title={temporaryShiftPan
-                    ? 'Shift 已按下：左键拖拽临时平移，松开后恢复旋转'
-                    : persistentPanMode
-                      ? '平移模式：左键拖拽平移；点击切换为旋转'
-                      : '旋转模式：左键拖拽旋转；点击切换为平移；按住 Shift 临时平移'}
-                >
-                  {effectiveViewportPan ? <Move3D size={13} /> : <Rotate3D size={13} />}
-                  {temporaryShiftPan ? 'Shift 平移' : persistentPanMode ? '平移' : '旋转'}
-                </button>
+                />
                 <button
                   type="button"
                   className={showWaypoints ? 'is-active' : 'is-hidden-state'}

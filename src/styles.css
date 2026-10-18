@@ -10254,6 +10254,71 @@ input[type="number"]::-webkit-inner-spin-button {
   background: rgba(154, 126, 255, 0.11);
 }
 
+.teaching-review-sources {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-bottom: 7px;
+}
+
+.teaching-review-sources button {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--panel-soft);
+  cursor: pointer;
+}
+
+.teaching-review-sources strong { font-size: 10px; font-weight: 500; }
+.teaching-review-sources small { font-size: 8px; }
+.teaching-review-sources button[aria-pressed="true"] { color: var(--cyan); border-color: var(--cyan); background: #59dbe811; }
+.teaching-review-sources button:disabled { opacity: .45; cursor: default; }
+
+.mobile-pose-detail {
+  margin: 6px 9px 10px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  background: #59dbe809;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.mobile-pose-detail header { display: flex; flex-wrap: wrap; gap: 6px; justify-content: space-between; }
+.mobile-pose-detail strong { color: var(--text); font-size: 11px; overflow-wrap: anywhere; }
+.mobile-pose-detail p { line-height: 1.7; margin: 8px 0; overflow-wrap: anywhere; }
+.mobile-pose-position { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font: 9px Menlo, monospace; }
+.mobile-pose-position b { color: var(--text); font-weight: 400; }
+.mobile-pose-list .teaching-capture-tree__pose-item { min-height: 32px; }
+.mobile-pose-list .teaching-capture-tree__pose-item > span { font-size: 10px; }
+.mobile-pose-list .teaching-capture-tree__pose-item > small,
+.mobile-pose-list .teaching-capture-tree__pose-item > i { font-size: 8px; }
+.teaching-capture-tree__actions > .teaching-mobile-solve-action { font-size: 10px; min-height: 29px; }
+.mobile-pose-pages { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 6px; color: var(--muted); font-size: 10px; }
+.mobile-pose-detail button,
+.mobile-pose-pages button,
+.teaching-review-hint button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--cyan);
+  font-size: 10px;
+  cursor: pointer;
+}
+.mobile-pose-pages button:disabled,
+.teaching-review-hint button:disabled { opacity: .45; cursor: default; }
+.teaching-review-hint { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: 8px; padding: 9px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.6; }
+.teaching-review-hint span { flex: 1 1 150px; }
+
 .teaching-capture-tree-card {
   display: flex;
   flex: 1;

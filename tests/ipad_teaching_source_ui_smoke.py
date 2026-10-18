@@ -112,7 +112,7 @@ def import_result(page, archive):
     dialog.locator('[data-ipad-result-input]').set_input_files({
         'name': 'test.atlas-teaching.json', 'mimeType': 'application/json', 'buffer': json.dumps(archive).encode(),
     })
-    expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已接收 2 个 Pose')
+    expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text(f"已接收 {len(archive['result']['samples'])} 个 Pose")
     page.get_by_role('button', name='关闭设备示教窗口').click()
 
 
@@ -300,6 +300,44 @@ def run():
             mixed_export = read_exported_project(download.value)['virtualTeaching']['tasks']
             assert {task['mobileCapture']['id'] for task in mixed_export} == {
                 archive['result']['id'], second_ipad['result']['id'], vision['result']['id']}
+
+            # Large Vision Pro captures remain browsable without loading a robot.
+            large_archive = copy.deepcopy(vision)
+            large_archive['result'].update(id=str(uuid.uuid4()), sessionId=str(uuid.uuid4()))
+            large_archive['result']['samples'] = [
+                {**copy.deepcopy(vision['result']['samples'][0]), 'id': f'vision-{i}', 'name': f'Pose {i + 1:03}'}
+                for i in range(55)]
+            large = browser.new_page(viewport={'width': 1280, 'height': 800})
+            large.on('pageerror', lambda error: errors.append(str(error)))
+            large.route('**/__atlas/ipad/**', lambda route: route.fulfill(
+                status=503, content_type='application/json', body='{"error":"文件导入测试"}'))
+            large.goto(BASE + '/workbench', wait_until='networkidle')
+            ready(large)
+            large.locator('[data-independent-teaching-input]').set_input_files(str(ROOT / 'tests/fixtures/rotation-map.ply'))
+            ready(large)
+            import_result(large, large_archive)
+            expect(large.locator('[data-mobile-sample-id]')).to_have_count(50)
+            large.get_by_role('button', name='下一页采样 Pose').click()
+            expect(large.locator('[data-mobile-sample-id]')).to_have_count(5)
+            large.get_by_role('treeitem', name='预览采样 Pose Pose 055', exact=True).click()
+            large_canvas = large.locator('.three-canvas')
+            expect(large_canvas).to_have_attribute('data-mobile-selected-sample', 'vision-54')
+            expect(large_canvas).to_have_attribute('data-synchronized-focus-state', 'settled')
+            large.get_by_role('button', name='计算机器人姿态', exact=True).click()
+            solve = large.get_by_role('dialog', name='计算机器人姿态', exact=True)
+            expect(solve.get_by_role('button', name='开始计算', exact=True)).to_be_disabled()
+            expect(solve).to_contain_text('请先在工作台加载机器人')
+            solve.get_by_role('button', name='关闭姿态计算').click()
+            large.screenshot(path=str(ARTIFACTS / 'vision-poses-paginated.png'), full_page=True)
+            sources = large.get_by_role('group', name='示教来源', exact=True)
+            view = camera_view(large_canvas)
+            sources.get_by_role('button', name='机器人示教', exact=True).click()
+            expect(large_canvas).to_have_attribute('data-mobile-capture-visible', 'false')
+            assert large_canvas.get_attribute('data-mobile-selected-sample') is None
+            assert camera_view(large_canvas) == view
+            sources.get_by_role('button', name='Vision Pro 示教', exact=True).click()
+            expect(sources).to_contain_text('55 Pose')
+            assert large.locator('.teaching-review-sources').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
             assert not errors, errors
         finally:
             browser.close()

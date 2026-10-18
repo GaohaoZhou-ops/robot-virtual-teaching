@@ -96,6 +96,8 @@ def run():
         # A quick tap must produce a deterministic movement impulse even when
         # keydown and keyup happen between two animation frames. Keyboard travel
         # is always available while the mouse remains in its default rotate mode.
+        # The viewer-tools menu above owns focus and consumes its own keys.
+        canvas.focus()
         page.keyboard.press("w")
         page.wait_for_timeout(100)
         assert canvas.get_attribute("data-interaction-mode") == "rotate"

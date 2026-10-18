@@ -38,3 +38,24 @@ export function createIPadCaptureLayer(tasks) {
 export function disposeIPadCaptureLayer(group) {
   group.removeFromParent(); group.traverse((child) => { child.geometry?.dispose(); child.material?.dispose(); });
 }
+
+export function createMobilePosePreview(task, sample) {
+  const group = new THREE.Group();
+  group.name = 'selected-mobile-pose';
+  const position = mobileSamplePosition(sample, task);
+  const q = sample.cameraPose.quaternion;
+  const orientation = new THREE.Quaternion().setFromRotationMatrix(mobileCaptureMatrix(task))
+    .multiply(new THREE.Quaternion(q.x, q.y, q.z, q.w)).normalize();
+  const axes = new THREE.AxesHelper(0.18);
+  axes.position.copy(position); axes.quaternion.copy(orientation);
+  const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(orientation);
+  const arrow = new THREE.ArrowHelper(direction, position, 0.45, '#fff0a3', 0.09, 0.045);
+  const marker = new THREE.Points(new THREE.BufferGeometry().setFromPoints([position]),
+    new THREE.PointsMaterial({ color: '#ffffff', size: 14, sizeAttenuation: false }));
+  group.add(axes, arrow, marker);
+  group.traverse((child) => {
+    child.renderOrder = 40;
+    if (child.material) child.material.depthTest = false;
+  });
+  return group;
+}
