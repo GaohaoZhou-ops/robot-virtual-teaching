@@ -6,6 +6,8 @@ import { MODEL_EDITOR_DISPLAY_QUALITIES } from '../lib/modelEditorDisplay.js';
 import { configureViewportTrackball, createViewportNavigation, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { createModelOriginGizmo } from '../lib/modelOriginGizmo.js';
+import { createModelCropGizmo } from '../lib/modelCropGizmo.js';
+import { modelMatrixFromOrigin } from '../lib/modelOriginTransform.js';
 
 const VIEWS = { perspective: [1.25, -1.7, 1.1], top: [0, 0, 1], front: [0, -1, 0], side: [1, 0, 0] };
 const toBox = (b) => b ? new THREE.Box3(new THREE.Vector3(Number(b.min.x), Number(b.min.y), Number(b.min.z)), new THREE.Vector3(Number(b.max.x), Number(b.max.y), Number(b.max.z))) : new THREE.Box3(new THREE.Vector3(-1, -1, -1), new THREE.Vector3(1, 1, 1));
@@ -16,7 +18,7 @@ const meshMaterial = (hasColors, wireframe) => wireframe
 const clearPreview = (group) => {
   for (const object of [...group.children]) { object.geometry.dispose(); object.material.dispose(); group.remove(object); }
 };
-const addPreview = (group, data, { pointSize, wireframe }, ghost = false) => {
+const addPreview = (group, data, { pointSize, wireframe }, ghost = false, ghostColor = 0x8bbdce) => {
   if (!data?.positions.length) return;
   const geometry = () => {
     const value = new THREE.BufferGeometry();
@@ -28,27 +30,46 @@ const addPreview = (group, data, { pointSize, wireframe }, ghost = false) => {
   if (data.indices.length) {
     const meshGeometry = geometry(); meshGeometry.setIndex(new THREE.BufferAttribute(data.indices, 1));
     group.add(new THREE.Mesh(meshGeometry, ghost
-      ? new THREE.MeshBasicMaterial({ color: 0x8bbdce, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide,
+      ? new THREE.MeshBasicMaterial({ color: ghostColor, transparent: true, opacity: ghostColor === 0xffa12f ? 0.34 : 0.22, depthWrite: false, side: THREE.DoubleSide,
         forceSinglePass: true, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
       : meshMaterial(Boolean(data.colors), wireframe)));
   }
   if (data.pointIndices.length) {
     const pointsGeometry = geometry(); pointsGeometry.setIndex(new THREE.BufferAttribute(data.pointIndices, 1));
     group.add(new THREE.Points(pointsGeometry, new THREE.PointsMaterial({
-      color: ghost ? 0x8bbdce : data.colors ? 0xffffff : 0x85d6df, vertexColors: !ghost && Boolean(data.colors),
-      size: pointSize, sizeAttenuation: false, transparent: ghost, opacity: ghost ? 0.28 : 1, depthWrite: !ghost,
+      color: ghost ? ghostColor : data.colors ? 0xffffff : 0x85d6df, vertexColors: !ghost && Boolean(data.colors),
+      size: pointSize, sizeAttenuation: false, transparent: ghost, opacity: ghost ? (ghostColor === 0xffa12f ? 0.4 : 0.28) : 1, depthWrite: !ghost,
     })));
   }
 };
 
-export default function ModelEditorViewport({ fileName, preview, originalPreview, crop, showOriginal, onShowOriginalChange, revision, display, onDisplayChange, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo }) {
+const clipPreview = (group, crop, outside) => {
+  // Expand the preview planes slightly to avoid camera-space roundoff flicker
+  // on surfaces exactly on the box. CPU clipping/export uses the exact bounds.
+  const epsilon = crop ? Math.max(...['x', 'y', 'z'].map((axis) => crop.max[axis] - crop.min[axis]), 1) * 1e-5 : 0;
+  const planes = crop?.enabled ? ['x', 'y', 'z'].flatMap((axis) => {
+    const normal = new THREE.Vector3(); normal[axis] = 1;
+    return [new THREE.Plane(normal, -crop.min[axis] + epsilon), new THREE.Plane(normal.clone().negate(), crop.max[axis] + epsilon)];
+  }) : [];
+  if (outside) {
+    // Include boundary points in the inside set, matching the exported crop.
+    for (const plane of planes) plane.negate();
+  }
+  for (const object of group.children) {
+    const material = object.material;
+    if (material.clippingPlanes?.length !== planes.length || material.clipIntersection !== outside) material.needsUpdate = true;
+    material.clippingPlanes = planes; material.clipIntersection = outside;
+  }
+};
+
+export default function ModelEditorViewport({ fileName, preview, originalPreview, crop, cropPreview, cropEditing, onCropChange, onCropDragChange, showOriginal, onShowOriginalChange, revision, display, onDisplayChange, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo }) {
   const hostRef = useRef(null), canvasRef = useRef(null), sceneRef = useRef(null), dataRef = useRef(null);
   const [error, setError] = useState(''), [view, setView] = useState('perspective');
   const [gridVisible, setGridVisible] = useState(true), [wireframe, setWireframe] = useState(false);
   const [interactionMode, setInteractionMode] = useState('rotate'), [shiftPanArmed, setShiftPanArmed] = useState(false);
   const interactionModeRef = useRef('rotate');
   const editingOrigin = originMode !== 'view';
-  dataRef.current = { preview, originalPreview, crop, gridVisible, wireframe, pointSize: display.pointSize, showOriginal, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo };
+  dataRef.current = { preview, originalPreview, crop, cropPreview, cropEditing, onCropChange, onCropDragChange, gridVisible, wireframe, pointSize: display.pointSize, showOriginal, originPose, previewOrigin, sourceBounds, originMode, onOriginModeChange, originDisabled, onOriginChange, onOriginDragChange, onUndo };
 
   useEffect(() => {
     const canvas = canvasRef.current, host = hostRef.current;
@@ -57,6 +78,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     catch { setError('三维预览初始化失败，请检查浏览器 WebGL 支持或重新打开页面。'); return undefined; }
     setError('');
     renderer.setClearColor(0x070f13);
+    renderer.localClippingEnabled = true;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(VIEWPORT_FOV, 1, 0.001, 10000);
     camera.up.set(0, 0, 1); camera.position.set(4, -6, 4);
@@ -68,25 +90,27 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     const model = new THREE.Group(); scene.add(model);
     // The reference stays in the imported coordinates, independent of edits.
     const original = new THREE.Group(); scene.add(original);
+    const removed = new THREE.Group(); removed.matrixAutoUpdate = false; removed.renderOrder = 1; scene.add(removed);
     const axes = new THREE.AxesHelper(1); axes.material.depthTest = false; axes.renderOrder = 10; scene.add(axes);
     const origin = new THREE.Mesh(new THREE.SphereGeometry(0.012, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
     origin.renderOrder = 11; scene.add(origin);
     const grid = new THREE.GridHelper(1, 20, 0x28444c, 0x16282f);
     grid.rotation.x = Math.PI / 2; scene.add(grid);
-    const box = new THREE.Box3Helper(new THREE.Box3(), 0xf4c95d); scene.add(box);
     scene.add(new THREE.HemisphereLight(0xdcefff, 0x394139, 2));
     const light = new THREE.DirectionalLight(0xffffff, 2.4); light.position.set(4, -5, 8); scene.add(light);
-    let frame = 0, disposed = false, currentPreview = null, currentOriginalPreview = null, referenceBounds = null, fitted = false, originEditing = false;
+    let frame = 0, disposed = false, currentPreview = null, currentOriginalPreview = null, currentRemovedPreview = null, referenceBounds = null, fitted = false, originEditing = false;
     const isOriginEditing = () => dataRef.current.originMode !== 'view';
     const currentInteractionMode = () => isOriginEditing() ? (dataRef.current.originMode === 'translate' ? 'pan' : 'rotate') : interactionModeRef.current;
     const render = () => {
       frame = 0; if (disposed) return;
       controls.update();
       const { distance, effectiveDistance, opticalZoom } = navigation.syncClipping();
+      cropGizmo.update();
       renderer.render(scene, camera);
       originGizmo.writeTelemetry();
       canvas.dataset.groundTransform = JSON.stringify(grid.matrixWorld.toArray());
       canvas.dataset.originalTransform = JSON.stringify(original.matrixWorld.toArray());
+      canvas.dataset.removedTransform = JSON.stringify(removed.matrixWorld.toArray());
       const projectedOrigin = new THREE.Vector3().project(camera);
       canvas.dataset.originScreenPosition = JSON.stringify([(projectedOrigin.x + 1) * canvas.clientWidth / 2, (1 - projectedOrigin.y) * canvas.clientHeight / 2]);
       canvas.dataset.renderState = 'ready';
@@ -107,9 +131,17 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
         dataRef.current.onOriginDragChange(dragging);
       },
     });
+    const cropGizmo = createModelCropGizmo({ camera, canvas, scene, getState: () => dataRef.current, invalidate,
+      onDraggingChange: (dragging, cancelled) => {
+        if (dragging) cancelGesture();
+        controls.enabled = !dragging && !isOriginEditing();
+        dataRef.current.onCropDragChange(dragging, cancelled);
+      },
+    });
     const fit = (direction = null) => {
       const bounds = toBox(dataRef.current.preview?.bounds).applyMatrix4(model.matrix);
       if (dataRef.current.showOriginal) bounds.union(toBox(dataRef.current.originalPreview?.bounds));
+      if (dataRef.current.crop?.enabled) bounds.union(toBox(dataRef.current.crop));
       const center = isOriginEditing() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
       // In origin editing, explicit view presets frame both the fixed origin
       // and the model. Ordinary editing never refits the camera.
@@ -133,9 +165,10 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       const current = dataRef.current, data = current.preview;
       const editing = isOriginEditing(), editingChanged = editing !== originEditing;
       if (editingChanged) cancelGesture();
-      controls.enabled = !editing && !originGizmo.dragging;
+      controls.enabled = !editing && !originGizmo.dragging && !cropGizmo.dragging;
       controls.noRotate = editing;
       originGizmo.sync();
+      cropGizmo.sync();
       const previewChanged = data !== currentPreview;
       if (previewChanged) {
         clearPreview(model); currentPreview = data;
@@ -147,6 +180,15 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
         addPreview(original, originalData, current, true);
       }
       original.visible = Boolean(current.showOriginal);
+      const removedData = current.crop?.enabled ? current.originalPreview : null;
+      if (removedData !== currentRemovedPreview) {
+        clearPreview(removed); currentRemovedPreview = removedData;
+        addPreview(removed, removedData, current, true, 0xffa12f);
+      }
+      const sourceTransform = modelMatrixFromOrigin(current.originPose);
+      if (sourceTransform) removed.matrix.copy(sourceTransform);
+      removed.matrixWorldNeedsUpdate = true;
+      removed.visible = Boolean(removedData);
       // All modes share the same world Z=0 reference. Only a new source model
       // changes its scale; edits, preview replacements and tool switches do not.
       if (current.sourceBounds !== referenceBounds || !fitted) {
@@ -172,9 +214,10 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       }
       for (const object of model.children) if (object.isPoints) object.material.size = current.pointSize;
       for (const object of original.children) if (object.isPoints) object.material.size = current.pointSize;
+      for (const object of removed.children) if (object.isPoints) object.material.size = current.pointSize;
+      clipPreview(model, current.crop, current.crop?.mode === 'outside');
+      clipPreview(removed, current.crop, current.crop?.mode !== 'outside');
       grid.visible = current.gridVisible;
-      box.visible = Boolean(current.crop?.enabled);
-      if (box.visible) box.box.copy(toBox(current.crop));
       canvas.dataset.previewPoints = String(data?.pointIndices.length || 0);
       canvas.dataset.previewFaces = String((data?.indices.length || 0) / 3);
       canvas.dataset.displayQuality = data?.quality || 'balanced';
@@ -184,6 +227,16 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       canvas.dataset.originalFaces = String((original.children.find((object) => object.isMesh)?.geometry.index.count || 0) / 3);
       canvas.dataset.originalQuality = originalData?.quality || '';
       canvas.dataset.originalOpacity = String(original.children[0]?.material.opacity || 0);
+      canvas.dataset.originalColor = original.children[0]?.material.color.getHexString() || '';
+      canvas.dataset.cropPreview = String(current.cropPreview);
+      canvas.dataset.cropMode = current.crop?.mode || 'inside';
+      canvas.dataset.removedVisible = String(removed.visible && removed.children.length > 0);
+      canvas.dataset.removedColor = removed.children[0]?.material.color.getHexString() || '';
+      canvas.dataset.removedOpacity = String(removed.children[0]?.material.opacity || 0);
+      canvas.dataset.removedPoints = String(removed.children.find((object) => object.isPoints)?.geometry.index.count || 0);
+      canvas.dataset.removedFaces = String((removed.children.find((object) => object.isMesh)?.geometry.index.count || 0) / 3);
+      canvas.dataset.removedQuality = removedData?.quality || '';
+      canvas.dataset.removedClipIntersection = String(removed.children[0]?.material.clipIntersection || false);
       invalidate();
     };
     let pointerStart = null;
@@ -228,12 +281,13 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     };
     const pointerDown = (event) => {
       if (event.button !== 0 && event.button !== 2) return;
-      if (originGizmo.dragging) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+      if (originGizmo.dragging || cropGizmo.dragging) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       claimFocus();
       if (event.shiftKey) updateShift(true);
       const shiftPan = event.button === 0 && (event.shiftKey || shiftPressed);
       const modePan = event.button === 0 && currentInteractionMode() === 'pan';
       const panGesture = event.button === 2 || shiftPan || modePan;
+      if (!shiftPan && cropGizmo.begin(event)) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       if (isOriginEditing()) {
         originGizmo.begin(event, { mode: panGesture ? 'translate' : 'rotate', allowHandles: !shiftPan && event.button === 0 });
         event.preventDefault(); event.stopImmediatePropagation(); return;
@@ -248,6 +302,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     };
     const pointerMove = (event) => {
       if (event.shiftKey) updateShift(true);
+      if (cropGizmo.move(event)) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       if (originGizmo.move(event)) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       if (pointerStart?.id === event.pointerId) {
         const rect = canvas.getBoundingClientRect();
@@ -265,9 +320,13 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       }
       // Native Trackball rotation emits change only after update().
       if (event.buttons || event.pointerType === 'touch') invalidate();
-      if (!event.buttons) originGizmo.hover(event, !event.shiftKey && !shiftPressed);
+      if (!event.buttons) {
+        const cropHandle = cropGizmo.hover(event, !event.shiftKey && !shiftPressed);
+        originGizmo.hover(event, !cropHandle && !event.shiftKey && !shiftPressed);
+      }
     };
     const pointerUp = (event) => {
+      if (cropGizmo.dragging) { cropGizmo.finish(false, event); event.preventDefault(); event.stopImmediatePropagation(); return; }
       if (originGizmo.dragging) {
         originGizmo.finish(false, event);
         event.preventDefault(); event.stopImmediatePropagation(); return;
@@ -283,9 +342,12 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       invalidate();
     };
     const pointerLeave = () => { if (pointerStart) cancelGesture('cancelled-on-leave'); };
-    const pointerCancel = () => { originGizmo.finish(true); if (pointerStart || controls.state !== -1) cancelGesture('cancelled-by-browser'); };
+    const pointerCancel = () => { cropGizmo.finish(true); originGizmo.finish(true); if (pointerStart || controls.state !== -1) cancelGesture('cancelled-by-browser'); };
     const keyDown = (event) => {
       if (event.defaultPrevented || event.isComposing || event.target?.closest?.('[aria-modal="true"], dialog[open]')) return;
+      if (event.code === 'Escape' && cropGizmo.dragging) {
+        event.preventDefault(); event.stopPropagation(); cropGizmo.finish(true); return;
+      }
       if (event.code === 'Escape' && isOriginEditing()) {
         event.preventDefault(); event.stopPropagation();
         originGizmo.finish(true);
@@ -295,7 +357,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       if ((event.ctrlKey || event.metaKey) && event.code === 'KeyZ' && !event.shiftKey && !event.altKey) {
         if (event.target?.isContentEditable || event.target?.closest?.('textarea')) return;
         event.preventDefault(); event.stopPropagation();
-        if (!dataRef.current.originDisabled && !originGizmo.finish(true)) dataRef.current.onUndo();
+        if (!dataRef.current.originDisabled && !cropGizmo.finish(true) && !originGizmo.finish(true)) dataRef.current.onUndo();
         return;
       }
       if (event.code !== 'ShiftLeft' && event.code !== 'ShiftRight') return;
@@ -306,10 +368,10 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       if (event.code !== 'ShiftLeft' && event.code !== 'ShiftRight') return;
       shiftKeys.delete(event.code); updateShift(shiftKeys.size > 0);
     };
-    const resetInput = () => { originGizmo.finish(true); shiftKeys.clear(); updateShift(false); cancelGesture(); };
+    const resetInput = () => { cropGizmo.finish(true); originGizmo.finish(true); shiftKeys.clear(); updateShift(false); cancelGesture(); };
     const visibilityChange = () => { if (document.visibilityState !== 'visible') resetInput(); };
     const wheel = (event) => {
-      if (originGizmo.dragging) { event.preventDefault(); event.stopImmediatePropagation(); return; }
+      if (originGizmo.dragging || cropGizmo.dragging) { event.preventDefault(); event.stopImmediatePropagation(); return; }
       const delta = viewportWheelDelta(event, canvas.clientHeight);
       if (!delta) return;
       event.preventDefault(); event.stopImmediatePropagation(); claimFocus();
@@ -357,6 +419,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     return () => {
       disposed = true; cancelAnimationFrame(frame); observer.disconnect();
       originGizmo.dispose();
+      cropGizmo.dispose();
       cancelGesture();
       canvas.removeEventListener('pointerdown', pointerDown, true);
       canvas.removeEventListener('pointermove', pointerMove, true);
@@ -372,7 +435,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
       controls.removeEventListener('start', startInteraction);
       controls.removeEventListener('end', invalidate);
       controls.removeEventListener('change', invalidate);
-      controls.dispose(); clearPreview(model); clearPreview(original);
+      controls.dispose(); clearPreview(model); clearPreview(original); clearPreview(removed);
       scene.traverse((object) => { object.geometry?.dispose(); if (object.material) object.material.dispose(); });
       // React StrictMode reuses this canvas immediately after effect cleanup.
       // Losing its WebGL context here prevents the next renderer from starting.
@@ -380,10 +443,10 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     };
   }, []);
 
-  useEffect(() => { sceneRef.current?.sync(); }, [preview, originalPreview, crop, gridVisible, wireframe, display.pointSize, showOriginal, originPose, previewOrigin, sourceBounds, originMode, originDisabled]);
+  useEffect(() => { sceneRef.current?.sync(); }, [preview, originalPreview, crop, cropPreview, cropEditing, gridVisible, wireframe, display.pointSize, showOriginal, originPose, previewOrigin, sourceBounds, originMode, originDisabled]);
   useEffect(() => { if (preview) { sceneRef.current?.fit('perspective'); setView('perspective'); } }, [revision]); // New file only; retain the camera while editing.
   const toggleInteractionMode = () => {
-    if (canvasRef.current?.dataset.originDragging === 'true') return;
+    if (canvasRef.current?.dataset.originDragging === 'true' || canvasRef.current?.dataset.cropDragging === 'true') return;
     if (editingOrigin) {
       onOriginModeChange(originMode === 'translate' ? 'rotate' : 'translate');
       canvasRef.current?.focus({ preventScroll: true });
@@ -416,7 +479,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     <div className="model-editor__viewport" ref={hostRef}>
       <canvas ref={canvasRef} aria-label="模型编辑三维预览" tabIndex={0} />
       {error && <div className="model-editor__viewport-message" role="alert">{error}</div>}
-      {!error && !preview?.positions.length && <div className="model-editor__viewport-message">裁剪范围内没有模型，请扩大范围。</div>}
+      {!error && !preview?.positions.length && !crop?.enabled && <div className="model-editor__viewport-message">当前编辑结果为空。</div>}
       <div className="model-editor__directions" aria-label="模型视角">
         {[['perspective', '透视'], ['top', '俯视'], ['front', '正视'], ['side', '侧视']].map(([id, label]) => <button type="button" key={id} aria-pressed={view === id} onClick={() => { setView(id); sceneRef.current?.fit(id); }}>{label}</button>)}
       </div>

@@ -158,6 +158,15 @@ playwright/.auth/
 # Model-editor smoke-test captures copied from /tmp for local inspection.
 /model-editor-*.png
 /tests/model-editor-*.png
+# Grouped model-editor diagnostics and their archives stay local as well.
+/model-editor-artifacts/
+/model-editor-artifacts-*/
+/model-editor-artifacts.zip
+/model-editor-artifacts-*.zip
+/tests/model-editor-artifacts/
+/tests/model-editor-artifacts-*/
+/tests/model-editor-artifacts.zip
+/tests/model-editor-artifacts-*.zip
 # Browser recordings / traces saved beside smoke-test screenshots.
 /atlas-*.mp4
 /atlas-*.webm
@@ -313,6 +322,9 @@ playwright/.auth/
 # Keep the complete workspace local when TMPDIR is set to the root or tests/.
 /model-editor-save-*/
 /tests/model-editor-save-*/
+# Packed copies may contain exported models from native save-dialog checks.
+/model-editor-save-*.zip
+/tests/model-editor-save-*.zip
 # Distance-warning and joint-exclusion fixtures when TMPDIR is in the repository.
 /atlas-distance-warning-*/
 /atlas-ignore-joints-*/

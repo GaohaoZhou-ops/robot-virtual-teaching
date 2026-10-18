@@ -1,6 +1,7 @@
 import { Euler, Matrix4, Quaternion, Vector3 } from 'three';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { createUniformMeshIndex } from './mapGeometry.js';
+import { modelCropError } from './modelCrop.js';
 
 const AXES = ['x', 'y', 'z'];
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
@@ -61,17 +62,15 @@ export function defaultModelEditSettings(model) {
   const span = Math.max(...AXES.map((a) => bounds.max[a] - bounds.min[a]), 0.01);
   return {
     origin: { x: 0, y: 0, z: 0, roll: 0, pitch: 0, yaw: 0 },
-    crop: { enabled: false, ...bounds },
+    crop: { enabled: false, mode: 'inside', ...bounds },
     reduction: { mode: 'none', voxelSize: Number((span / 100).toPrecision(4)), percentage: 50 },
   };
 }
 
 export function validateModelEditSettings(settings, hasMesh = false) {
   assert(['x', 'y', 'z', 'roll', 'pitch', 'yaw'].every((a) => finite(settings.origin?.[a])), 'XYZ 和 RPY 必须填写有效数值');
-  if (settings.crop?.enabled) {
-    assert(AXES.every((a) => finite(settings.crop.min?.[a]) && finite(settings.crop.max?.[a])), '请填写完整的裁剪范围');
-    assert(AXES.every((a) => Number(settings.crop.min[a]) <= Number(settings.crop.max[a])), '裁剪下限不能大于上限');
-  }
+  const cropError = modelCropError(settings.crop);
+  assert(!cropError, cropError);
   const reduction = settings.reduction;
   assert(['none', 'voxel', 'uniform'].includes(reduction?.mode), '请选择有效的降采样方式');
   if (reduction.mode === 'voxel') assert(finite(reduction.voxelSize) && Number(reduction.voxelSize) > 0, '体素尺寸必须大于 0');
@@ -133,13 +132,17 @@ function pickVertices(model, selected, indices = new Uint32Array()) {
 // vertices interpolate RGB and normals; cuts remain open (no artificial caps).
 export function cropModel(model, bounds) {
   const lower = AXES.map((a) => Number(bounds.min[a])), upper = AXES.map((a) => Number(bounds.max[a]));
+  const outside = bounds.mode === 'outside';
+  const inside = (id) => {
+    const x = model.positions[id * 3], y = model.positions[id * 3 + 1], z = model.positions[id * 3 + 2];
+    return x >= lower[0] && x <= upper[0] && y >= lower[1] && y <= upper[1] && z >= lower[2] && z <= upper[2];
+  };
   const count = model.positions.length / 3;
   if (!model.indices.length) {
     const selected = new Uint32Array(count);
     let kept = 0;
     for (let i = 0; i < count; i += 1) {
-      const x = model.positions[i * 3], y = model.positions[i * 3 + 1], z = model.positions[i * 3 + 2];
-      if (x >= lower[0] && x <= upper[0] && y >= lower[1] && y <= upper[1] && z >= lower[2] && z <= upper[2]) selected[kept++] = i;
+      if (inside(i) !== outside) selected[kept++] = i;
     }
     return pickVertices(model, selected.subarray(0, kept));
   }
@@ -160,39 +163,49 @@ export function cropModel(model, bounds) {
     return index;
   };
   for (let i = 0; i < count; i += 1) {
-    if ([0, 1, 2].every((a) => model.positions[i * 3 + a] >= lower[a] && model.positions[i * 3 + a] <= upper[a])) append(readVertex(i));
+    if (inside(i) !== outside) append(readVertex(i));
   }
+  const emit = (polygon) => {
+    const emitted = [];
+    const indexFor = (index) => emitted[index] ?? (emitted[index] = append(polygon[index]));
+    for (let i = 1; i < polygon.length - 1; i += 1) {
+      const a = polygon[0].p, b = polygon[i].p, c = polygon[i + 1].p;
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) > 0) indices.push(indexFor(0), indexFor(i), indexFor(i + 1));
+    }
+  };
   for (let f = 0; f < model.indices.length; f += 3) {
     const ids = [model.indices[f], model.indices[f + 1], model.indices[f + 2]];
-    if (ids.every((id) => remap[id] >= 0)) { indices.push(...ids.map((id) => remap[id])); continue; }
-    if ([0, 1, 2].some((a) => ids.every((id) => model.positions[id * 3 + a] < lower[a]) || ids.every((id) => model.positions[id * 3 + a] > upper[a]))) continue;
+    if (ids.every(inside)) { if (!outside) indices.push(...ids.map((id) => remap[id])); continue; }
+    if ([0, 1, 2].some((a) => ids.every((id) => model.positions[id * 3 + a] < lower[a]) || ids.every((id) => model.positions[id * 3 + a] > upper[a]))) {
+      if (outside) indices.push(...ids.map((id) => remap[id]));
+      continue;
+    }
     let polygon = ids.map(readVertex);
     for (let a = 0; a < 3 && polygon.length; a += 1) {
       for (const [limit, direction] of [[lower[a], 1], [upper[a], -1]]) {
-        const clipped = [];
+        const clipped = [], removed = [];
         for (let i = 0; i < polygon.length; i += 1) {
           const from = polygon[i], to = polygon[(i + 1) % polygon.length];
           const fromInside = (from.p[a] - limit) * direction >= 0, toInside = (to.p[a] - limit) * direction >= 0;
-          if (fromInside) clipped.push(from);
+          if (fromInside) clipped.push(from); else if (outside) removed.push(from);
           if (fromInside !== toInside) {
             const t = (limit - from.p[a]) / (to.p[a] - from.p[a]);
             const interpolate = (left, right) => left?.map((v, j) => v + (right[j] - v) * t) || null;
             const vertex = { id: -1, p: interpolate(from.p, to.p), c: interpolate(from.c, to.c), n: interpolate(from.n, to.n) };
             vertex.p[a] = limit;
             clipped.push(vertex);
+            if (outside) removed.push(vertex);
           }
         }
+        // Each outside fragment belongs to the first plane it exits. This
+        // partitions the complement without overlapping faces or filling holes.
+        if (outside) emit(removed);
         polygon = clipped;
       }
     }
-    if (polygon.length < 3) continue;
-    const emitted = polygon.map(append);
-    for (let i = 1; i < emitted.length - 1; i += 1) {
-      const a = polygon[0].p, b = polygon[i].p, c = polygon[i + 1].p;
-      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
-      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
-      if (Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) > 0) indices.push(emitted[0], emitted[i], emitted[i + 1]);
-    }
+    if (!outside) emit(polygon);
   }
   return { positions: positions.finish(), colors: colors?.finish() || null, normals: normals?.finish() || null, indices: indices.finish() };
 }
@@ -251,8 +264,11 @@ export function editModel(source, settings) {
   validateModelEditSettings(settings, source.indices.length > 0);
   let result = rebaseModel(source, settings.origin);
   const transformedBounds = modelBounds(result);
-  if (settings.crop.enabled && !AXES.every((a) => Number(settings.crop.min[a]) <= transformedBounds.min[a]
-    && Number(settings.crop.max[a]) >= transformedBounds.max[a])) result = cropModel(result, settings.crop);
+  if (settings.crop.enabled) {
+    const enclosesModel = AXES.every((a) => Number(settings.crop.min[a]) <= transformedBounds.min[a] && Number(settings.crop.max[a]) >= transformedBounds.max[a]);
+    if (settings.crop.mode === 'outside' && enclosesModel) result = pickVertices(result, new Uint32Array());
+    else if (!enclosesModel) result = cropModel(result, settings.crop);
+  }
   if (settings.reduction.mode === 'voxel') result = voxelReduceModel(result, Number(settings.reduction.voxelSize));
   if (settings.reduction.mode === 'uniform' && result.positions.length) {
     const count = result.positions.length / 3;
