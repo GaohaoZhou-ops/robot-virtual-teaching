@@ -390,6 +390,5 @@ export default function ModelEditorPage({ active, onHome }) {
     {exportDialog && <ModelExportDialog filename={exportDialog} onSave={exportModel} onClose={() => setExportDialog(null)} />}
     {(error || editError || notice || (!pending && !cropDirty && result?.stats.pointCount === 0)) && <div className={`model-editor__message ${error || editError || result?.stats.pointCount === 0 ? 'is-error' : ''}`} role={error || editError ? 'alert' : 'status'}>{error || editError || notice || '裁剪结果为空，请调整范围或取内／取外后再确认。'}{editError && <small>当前显示上次有效预览。</small>}<button type="button" aria-label="关闭提示" onClick={() => { setError(''); setNotice(''); }} disabled={Boolean(editError) || result?.stats.pointCount === 0}><X size={14} /></button></div>}
     {busy && <div className="model-editor__busy" role="status"><LoaderCircle size={23} /><strong>{phase === 'loading' ? '正在读取模型…' : phase === 'selecting' ? '请选择文件名和保存位置…' : '正在导出模型…'}</strong>{phase !== 'selecting' && <span>正在后台处理，请稍候</span>}</div>}
-    <footer className="model-editor__footer"><span><i />MODEL EDITOR · PLY</span><span>原文件保留 · 返回主页保留当前编辑 · 刷新前请导出</span></footer>
   </div>;
 }
