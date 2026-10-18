@@ -301,13 +301,18 @@ def run():
         page.wait_for_timeout(80)
         assert camera() != before_camera and origin() == [0] * 6
 
-        # A model far from (0, 0, 0) must bring the origin into view on entry.
+        # A model far from (0, 0, 0) preserves the customized view on entry.
+        # Bringing the origin back into view requires an explicit fit action.
         page.get_by_label('原点 X', exact=True).fill('100'); ready()
         page.get_by_role('button', name='适应模型视图', exact=True).click()
         page.wait_for_timeout(80)
         assert not (0 < origin_screen()[0] < box['width'] and 0 < origin_screen()[1] < box['height'])
+        before_camera, before_anchor = camera(), origin_screen()
         page.get_by_role('button', name='移动模型', exact=True).click()
         expect(canvas).to_have_attribute('data-origin-locked', 'true')
+        page.wait_for_timeout(80)
+        assert camera() == before_camera and distance(origin_screen(), before_anchor) < 0.01
+        page.get_by_role('button', name='适应模型视图', exact=True).click()
         page.wait_for_timeout(80)
         anchor = origin_screen()
         assert distance(anchor, [box['width'] / 2, box['height'] / 2]) < 1
@@ -316,7 +321,7 @@ def run():
         assert_fixed(anchor)
         assert not errors, errors
         browser.close()
-        print('origin editing: stable Z=0 ground across all mode switches, fixed screen origin, direct model/handle drags, Shift/right pan, zoom, numeric sync, full exports, Escape, offscreen origin recovery and browse navigation passed')
+        print('origin editing: stable Z=0 ground across all mode switches, fixed screen origin, direct model/handle drags, Shift/right pan, zoom, numeric sync, full exports, Escape, preserved offscreen view, explicit origin recovery and browse navigation passed')
 
 
 if __name__ == '__main__':

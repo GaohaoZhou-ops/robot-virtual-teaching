@@ -128,13 +128,15 @@ function pickVertices(model, selected, indices = new Uint32Array()) {
   return { positions: copy(model.positions), colors: copy(model.colors), normals: copy(model.normals), indices };
 }
 
-// Clip every intersecting triangle against all six AABB planes. New boundary
-// vertices interpolate RGB and normals; cuts remain open (no artificial caps).
-export function cropModel(model, bounds) {
+// Clip against six box planes. Optional coordinates locate each source vertex
+// in an oriented box's frame; output geometry stays in the model's frame.
+// New boundary vertices interpolate RGB/normals; cuts remain open (no caps).
+export function cropModel(model, bounds, boxCoordinates = model.positions) {
   const lower = AXES.map((a) => Number(bounds.min[a])), upper = AXES.map((a) => Number(bounds.max[a]));
   const outside = bounds.mode === 'outside';
+  const inModelFrame = boxCoordinates === model.positions;
   const inside = (id) => {
-    const x = model.positions[id * 3], y = model.positions[id * 3 + 1], z = model.positions[id * 3 + 2];
+    const x = boxCoordinates[id * 3], y = boxCoordinates[id * 3 + 1], z = boxCoordinates[id * 3 + 2];
     return x >= lower[0] && x <= upper[0] && y >= lower[1] && y <= upper[1] && z >= lower[2] && z <= upper[2];
   };
   const count = model.positions.length / 3;
@@ -149,11 +151,12 @@ export function cropModel(model, bounds) {
   const remap = new Int32Array(count).fill(-1);
   const positions = new BufferBuilder(Float32Array), colors = model.colors ? new BufferBuilder(Float32Array) : null;
   const normals = model.normals ? new BufferBuilder(Float32Array) : null, indices = new BufferBuilder(Uint32Array);
-  const readVertex = (i) => ({
-    id: i, p: Array.from(model.positions.subarray(i * 3, i * 3 + 3)),
-    c: model.colors ? Array.from(model.colors.subarray(i * 3, i * 3 + 3)) : null,
-    n: model.normals ? Array.from(model.normals.subarray(i * 3, i * 3 + 3)) : null,
-  });
+  const readVertex = (i) => {
+    const p = Array.from(model.positions.subarray(i * 3, i * 3 + 3));
+    return { id: i, p, q: inModelFrame ? p : Array.from(boxCoordinates.subarray(i * 3, i * 3 + 3)),
+      c: model.colors ? Array.from(model.colors.subarray(i * 3, i * 3 + 3)) : null,
+      n: model.normals ? Array.from(model.normals.subarray(i * 3, i * 3 + 3)) : null };
+  };
   const append = (v) => {
     if (v.id >= 0 && remap[v.id] >= 0) return remap[v.id];
     const index = positions.length / 3;
@@ -178,7 +181,7 @@ export function cropModel(model, bounds) {
   for (let f = 0; f < model.indices.length; f += 3) {
     const ids = [model.indices[f], model.indices[f + 1], model.indices[f + 2]];
     if (ids.every(inside)) { if (!outside) indices.push(...ids.map((id) => remap[id])); continue; }
-    if ([0, 1, 2].some((a) => ids.every((id) => model.positions[id * 3 + a] < lower[a]) || ids.every((id) => model.positions[id * 3 + a] > upper[a]))) {
+    if ([0, 1, 2].some((a) => ids.every((id) => boxCoordinates[id * 3 + a] < lower[a]) || ids.every((id) => boxCoordinates[id * 3 + a] > upper[a]))) {
       if (outside) indices.push(...ids.map((id) => remap[id]));
       continue;
     }
@@ -188,13 +191,14 @@ export function cropModel(model, bounds) {
         const clipped = [], removed = [];
         for (let i = 0; i < polygon.length; i += 1) {
           const from = polygon[i], to = polygon[(i + 1) % polygon.length];
-          const fromInside = (from.p[a] - limit) * direction >= 0, toInside = (to.p[a] - limit) * direction >= 0;
+          const fromInside = (from.q[a] - limit) * direction >= 0, toInside = (to.q[a] - limit) * direction >= 0;
           if (fromInside) clipped.push(from); else if (outside) removed.push(from);
           if (fromInside !== toInside) {
-            const t = (limit - from.p[a]) / (to.p[a] - from.p[a]);
+            const t = (limit - from.q[a]) / (to.q[a] - from.q[a]);
             const interpolate = (left, right) => left?.map((v, j) => v + (right[j] - v) * t) || null;
-            const vertex = { id: -1, p: interpolate(from.p, to.p), c: interpolate(from.c, to.c), n: interpolate(from.n, to.n) };
-            vertex.p[a] = limit;
+            const p = interpolate(from.p, to.p);
+            const vertex = { id: -1, p, q: inModelFrame ? p : interpolate(from.q, to.q), c: interpolate(from.c, to.c), n: interpolate(from.n, to.n) };
+            vertex.q[a] = limit;
             clipped.push(vertex);
             if (outside) removed.push(vertex);
           }

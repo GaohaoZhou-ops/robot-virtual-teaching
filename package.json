@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:model-editor": "node tests/model_editing_smoke.mjs",
+    "test:model-composition": "node tests/model_composition_smoke.mjs",
     "test:torso": "node tests/torso_control_smoke.mjs",
     "test:playback": "node tests/teaching_playback_smoke.mjs",
     "test:archive": "node tests/project_archive_smoke.mjs",

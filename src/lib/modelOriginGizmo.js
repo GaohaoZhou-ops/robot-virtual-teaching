@@ -147,7 +147,7 @@ export function createModelOriginGizmo({ camera, canvas, scene, model, getState,
     canvas.classList.remove('is-origin-dragging', 'is-origin-handle');
     canvas.dataset.originGizmoAxis = '';
     canvas.dataset.originDragging = 'false';
-    onDraggingChange(false);
+    onDraggingChange(false, cancel);
     invalidate();
     return true;
   };
