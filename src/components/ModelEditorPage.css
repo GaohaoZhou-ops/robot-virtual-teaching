@@ -1,5 +1,5 @@
 .model-editor {
-  position: fixed; inset: 0; z-index: 420; display: grid; grid-template-rows: 70px minmax(0, 1fr) 25px;
+  position: fixed; inset: 0; z-index: 420; display: grid; grid-template-rows: 70px minmax(0, 1fr);
   background: #050b0e; color: var(--text); --editor-accent: #f4c95d;
 }
 .model-editor button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); background: #0d1a1f; cursor: pointer; font-size: 12px; transition: color 150ms, border-color 150ms, background 150ms; }
@@ -147,12 +147,9 @@
 .model-editor__message.is-error { border-color: #7f5141; background: #2d1c17f5; color: #f5bd9c; }
 .model-editor__message small { font-size: 10px; color: #b8a193; }
 .model-editor__message button { border: 0; background: transparent; padding: 0; }
-.model-editor__busy { position: absolute; inset: 70px 0 25px; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; background: #050b0ee8; color: #d6c084; }
+.model-editor__busy { position: absolute; inset: 70px 0 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; background: #050b0ee8; color: #d6c084; }
 .model-editor__busy strong { font-size: 15px; font-weight: 500; }
 .model-editor__busy span { font-size: 11px; color: #7b9091; }
-.model-editor__footer { display: flex; justify-content: space-between; align-items: center; padding: 0 20px; border-top: 1px solid var(--line); color: #70898b; font-size: 9px; }
-.model-editor__footer > span:first-child { display: flex; align-items: center; gap: 7px; font: 8px Menlo, monospace; letter-spacing: 0.08em; color: #a5986b; }
-.model-editor__footer i { width: 5px; height: 5px; background: #c6b269; border-radius: 50%; }
 /* A separate tool entry keeps the two teaching modes visually paired. */
 .start-page__model-editor { display: flex; align-items: center; gap: 12px; margin-top: 28px; width: 100%; max-width: 330px; padding: 16px; border: 1px solid #88763d66; background: #302a151f; text-align: left; cursor: pointer; }
 .start-page__model-editor > span:first-child { display: grid; place-items: center; width: 36px; height: 36px; color: #dfc37d; border: 1px solid #88763d66; }
@@ -184,10 +181,9 @@
   .model-editor__settings { overflow: visible; }
   .model-editor__main.is-empty { padding: 18px; }
   .model-editor__capabilities { gap: 15px; }
-  .model-editor__footer > span:last-child { display: none; }
 }
 @media (max-width: 520px) {
-  .model-editor { grid-template-rows: auto minmax(0, 1fr) 25px; }
+  .model-editor { grid-template-rows: auto minmax(0, 1fr); }
   .model-editor__header { flex-wrap: wrap; gap: 10px; padding: 12px; }
   .model-editor .model-editor__home { padding: 8px 10px; border: 1px solid var(--line); }
   .model-editor__header-actions { width: 100%; gap: 8px; }
