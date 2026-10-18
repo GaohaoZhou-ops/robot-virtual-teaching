@@ -114,6 +114,7 @@ def run():
         point_count(24)
         page.get_by_label('裁剪 X 下限', exact=True).fill('0')
         page.get_by_label('裁剪 X 上限', exact=True).fill('1')
+        page.get_by_role('button', name='确定裁剪', exact=True).click()
         ready()
         # Float rotations can move boundary values slightly; export must stay in range.
         page.get_by_label('降采样方式', exact=True).select_option('uniform')
@@ -161,6 +162,7 @@ def run():
         page.get_by_label('启用模型裁剪').check()
         page.get_by_label('裁剪 X 上限', exact=True).fill('101')
         page.get_by_label('裁剪 X 下限', exact=True).fill('100')
+        page.get_by_role('button', name='确定裁剪', exact=True).click()
         ready()
         point_count(0)
         expect(export).to_be_disabled()
@@ -184,6 +186,7 @@ def run():
         for axis in ['X', 'Y']:
             page.get_by_label(f'裁剪 {axis} 下限', exact=True).fill('-0.5')
             page.get_by_label(f'裁剪 {axis} 上限', exact=True).fill('0.5')
+        page.get_by_role('button', name='确定裁剪', exact=True).click()
         ready()
         points, faces = download('model-editor-mesh-crop.ply')
         assert faces > 0 and all(abs(point[0]) <= 0.5 and abs(point[1]) <= 0.5 for point in points)

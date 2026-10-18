@@ -53,6 +53,8 @@
 .model-editor__viewport canvas.is-panning { cursor: grabbing; }
 .model-editor__viewport canvas.is-origin-edit, .model-editor__viewport canvas.is-origin-handle { cursor: grab; }
 .model-editor__viewport canvas.is-origin-dragging { cursor: grabbing; }
+.model-editor__viewport canvas.is-crop-handle { cursor: grab; }
+.model-editor__viewport canvas.is-crop-dragging { cursor: grabbing; }
 .model-editor .model-editor__interaction-mode { flex-shrink: 0; min-width: 76px; height: 29px; padding: 0 10px; font-size: 10px; color: #e3d2a2; border-color: #645733; background: #22271fe8; white-space: nowrap; }
 .model-editor .model-editor__interaction-mode.is-pan-mode, .model-editor .model-editor__interaction-mode.is-temporary { color: #92f1d0; border-color: #40886c; background: repeating-linear-gradient(135deg, #5ae1b221 0 5px, #5ae1b20b 5px 10px), #10231feb; }
 .model-editor__directions { position: absolute; bottom: 15px; left: 16px; display: flex; gap: 1px; background: #0d1a21; border: 1px solid #2a414a; }
@@ -129,6 +131,14 @@
 .model-editor__range-row b { font: 10px Menlo, monospace; color: #a3b5ae; }
 .model-editor__crop-fields:disabled { opacity: 0.4; }
 .model-editor .model-editor__crop-fields { margin-top: 14px; }
+.model-editor__crop-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.model-editor__crop-choice label { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 9px; border: 1px solid #2c4045; color: #8daba9; font-size: 11px; cursor: pointer; }
+.model-editor__crop-choice label:has(input:checked) { border-color: #a48740; background: #2c291b; color: #eed28e; }
+.model-editor__crop-choice input { margin: 0; accent-color: var(--editor-accent); }
+.model-editor__crop-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.model-editor__crop-actions > span { font-size: 10px; color: #a99b72; }
+.model-editor__crop-actions button { min-width: 86px; padding: 8px 18px; }
+.model-editor__crop-error { margin: 10px 0 0; color: #f5bd9c; font-size: 11px; }
 .model-editor .model-editor__text-action { margin-top: 9px; padding: 4px 0; border: 0; background: transparent; color: #c2b17d; font-size: 10px; }
 .model-editor__select-label { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; color: #8c9d9e; font-size: 10px; }
 .model-editor__select-label select { width: 100%; padding: 9px; border: 1px solid #2c4045; border-radius: 0; background: #071014; color: #cbdcda; font: inherit; font-size: 11px; }

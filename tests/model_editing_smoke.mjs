@@ -54,6 +54,45 @@ const isolated = cropModel(hybrid, bounds([-0.01, -0.01, 1.1], [0.01, 0.01, 1.3]
 assert.equal(isolated.positions.length / 3, 1); assert.equal(isolated.indices.length, 0);
 assert.equal(cropModel(points, bounds([100, 100, 100], [200, 200, 200])).positions.length, 0);
 
+// Outside clips the complement, including triangles that surround the whole box.
+const region = bounds([-0.25, -0.25, 0], [0.25, 0.25, 0]);
+const complement = cropModel(triangle, { ...region, mode: 'outside' });
+const surfaceArea = (mesh) => {
+  let sum = 0;
+  for (let face = 0; face < mesh.indices.length; face += 3) {
+    const [a, b, c] = Array.from(mesh.indices.subarray(face, face + 3), (id) => new Vector3().fromArray(mesh.positions, id * 3));
+    sum += b.sub(a).cross(c.sub(a)).length() / 2;
+  }
+  return sum;
+};
+close(surfaceArea(complement), 7.75);
+for (let i = 0; i < complement.positions.length; i += 3) {
+  close(complement.colors[i] + complement.colors[i + 1] + complement.colors[i + 2], 1);
+  close(complement.normals[i + 2], 1);
+}
+const boundaryPoints = model([-2, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 0, 2, 0, 0]);
+assert.deepEqual(Array.from(cropModel(boundaryPoints, { ...bounds([-1, -1, -1], [1, 1, 1]), mode: 'outside' }).positions), [-2, 0, 0, 2, 0, 0]);
+const removeAll = defaultModelEditSettings(triangle); removeAll.crop.enabled = true; removeAll.crop.mode = 'outside';
+assert.equal(editModel(triangle, removeAll).model.positions.length, 0);
+assert.deepEqual(cropModel(triangle, { ...bounds([100, 100, 100], [101, 101, 101]), mode: 'outside' }).indices, triangle.indices);
+assert.equal(cropModel(hybrid, { ...bounds([-0.01, -0.01, 1.1], [0.01, 0.01, 1.3]), mode: 'outside' }).positions.length / 3, 6);
+
+// Area conservation across varied 3D crossings catches overlap and missing fragments.
+let seed = 12345;
+const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32) * 4 - 2;
+for (let i = 0; i < 40; i += 1) {
+  const face = model(Array.from({ length: 9 }, random), [0, 1, 2]);
+  const box = bounds([-0.5, -0.4, -0.6], [0.3, 0.6, 0.4]);
+  const inner = cropModel(face, box), outer = cropModel(face, { ...box, mode: 'outside' });
+  close(surfaceArea(inner) + surfaceArea(outer), surfaceArea(face));
+  for (let j = 0; j < outer.indices.length; j += 3) {
+    const center = new Vector3();
+    for (const id of outer.indices.subarray(j, j + 3)) center.add(new Vector3().fromArray(outer.positions, id * 3));
+    center.divideScalar(3);
+    assert.ok(['x', 'y', 'z'].some((axis) => center[axis] <= box.min[axis] + 1e-6 || center[axis] >= box.max[axis] - 1e-6));
+  }
+}
+
 const sampleSettings = defaultModelEditSettings(points);
 sampleSettings.reduction = { mode: 'uniform', percentage: 25 };
 const sampled = editModel(points, sampleSettings).model;
@@ -76,7 +115,7 @@ assert.ok(reduced.positions.length < grid.positions.length);
 assert.ok(reduced.indices.every((i) => i < reduced.positions.length / 3));
 assert.throws(() => voxelReduceModel(grid, 10), /体素尺寸过大/);
 
-for (const originalModel of [points, hybrid, clipped, reduced, rebased]) {
+for (const originalModel of [points, hybrid, clipped, complement, reduced, rebased]) {
   const exported = encodeModelPly(originalModel), restored = parseEditablePly(exported);
   assert.deepEqual(restored.positions, originalModel.positions);
   assert.deepEqual(restored.indices, originalModel.indices);
