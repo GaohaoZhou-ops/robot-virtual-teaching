@@ -13,6 +13,18 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertEqual(element.value as? String, value)
     }
 
+    private func dragPreview(_ preview: XCUIElement, dx: CGFloat, dy: CGFloat) {
+        let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5 + dx, dy: 0.5 + dy))
+        start.press(forDuration: 0.4, thenDragTo: end)
+    }
+
+    private func expectPreviewChanged(from value: String, in preview: XCUIElement) {
+        expectation(for: NSPredicate(format: "value != %@", value), evaluatedWith: preview)
+        waitForExpectations(timeout: 5)
+        XCTAssertNotEqual(preview.value as? String, value, "the gesture must remain applied after releasing")
+    }
+
     @MainActor func testExistingLocalModelPreview() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let projectID = environment["ATLAS_PREVIEW_PROJECT_ID"],
@@ -26,12 +38,12 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         let preview = app.descendants(matching: .any).matching(identifier: "model-preview").firstMatch
         XCTAssertTrue(preview.waitForExistence(timeout: 30))
         let poseCount = app.staticTexts["pose-count"].label
-        app.buttons["preview-rotate-right"].tap()
-        app.buttons["preview-zoom-in"].tap()
-        expectValue("水平 0°，俯仰 20°，缩放 125%", in: preview)
+        let initialView = try XCTUnwrap(preview.value as? String)
+        dragPreview(preview, dx: 0.12, dy: -0.12)
+        expectPreviewChanged(from: initialView, in: preview)
         _ = try await URLSession.shared.data(from: URL(string: captureURL + "/rotated")!)
-        app.buttons["preview-reset"].tap()
-        expectValue("水平 -30°，俯仰 20°，缩放 100%", in: preview)
+        preview.doubleTap()
+        expectValue(initialView, in: preview)
         _ = try await URLSession.shared.data(from: URL(string: captureURL + "/default")!)
         XCTAssertEqual(app.staticTexts["pose-count"].label, poseCount)
         XCTAssertFalse(app.buttons["place-front"].exists)
@@ -81,21 +93,20 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertFalse(app.buttons["place-front"].exists, "previewing does not start spatial placement")
         XCTAssertFalse(app.buttons["finish-local"].exists, "completion belongs to the teaching workspace")
         let initialView = try XCTUnwrap(preview.value as? String)
-        app.buttons["preview-rotate-right"].tap()
-        app.buttons["preview-tilt-up"].tap()
-        app.buttons["preview-zoom-in"].tap()
-        expectValue("水平 0°，俯仰 35°，缩放 125%", in: preview)
+        XCTAssertFalse(app.buttons["preview-rotate-right"].exists)
+        XCTAssertFalse(app.buttons["preview-zoom-in"].exists)
+        dragPreview(preview, dx: 0.12, dy: 0)
+        expectPreviewChanged(from: initialView, in: preview)
+        let horizontalView = try XCTUnwrap(preview.value as? String)
+        dragPreview(preview, dx: 0, dy: -0.15)
+        expectPreviewChanged(from: horizontalView, in: preview)
+        XCTAssertFalse((preview.value as? String ?? "").contains("俯仰 20°"), "vertical dragging rotates instead of scrolling the page")
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("0"), "preview transforms must not record poses")
         _ = try await testAPI("screenshot-preview")
-        app.buttons["preview-reset"].tap()
+        preview.doubleTap()
         expectValue(initialView, in: preview)
-        for _ in 0..<4 { app.buttons["preview-zoom-in"].tap() }
-        XCTAssertFalse(app.buttons["preview-zoom-in"].isEnabled, "zoom has a usable upper bound")
-        _ = try await testAPI("screenshot-preview-zoomed")
-        app.buttons["preview-reset"].tap()
-        app.buttons["preview-zoom-out"].tap(); app.buttons["preview-zoom-out"].tap()
-        XCTAssertFalse(app.buttons["preview-zoom-out"].isEnabled, "zoom has a usable lower bound")
-        app.buttons["preview-reset"].tap()
+        // visionOS XCTest doesn't expose a two-hand pinch API. Scale composition
+        // and limits are covered by VisionCoreTests; hand input needs a headset.
         app.buttons["defer-teaching"].tap()
         XCTAssertTrue(app.buttons["pair-model"].waitForExistence(timeout: 10))
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "模型同步测试.ply")).firstMatch.tap()

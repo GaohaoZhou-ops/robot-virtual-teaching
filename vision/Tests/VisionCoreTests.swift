@@ -54,6 +54,21 @@ import ImageIO
         let smallPreview = try VisionMeshData.preview(model: model)
         precondition(smallPreview.isMesh && smallPreview.primitiveCount == model.indices / 3,
                      "small preview models keep their complete surfaces")
+        let previewStart = VisionPreviewPose()
+        let previewDrag = previewStart.applying(drag: [100, -100], magnification: 1.5)
+        precondition(previewDrag.yaw == 5 && previewDrag.pitch == -15 && previewDrag.zoom == 1.5)
+        precondition(previewStart == VisionPreviewPose(), "live gesture updates and cancellation leave the committed pose untouched")
+        precondition(previewDrag == previewStart.applying(drag: [100, -100], magnification: 1.5),
+                     "repeated gesture totals must not accumulate rotation or scale")
+        let previewNext = previewDrag.applying(drag: [-100, 100], magnification: 0.8)
+        precondition(previewNext.yaw == -30 && previewNext.pitch == 20 && abs(previewNext.zoom - 1.2) < 0.00001,
+                     "a new gesture continues from the previously committed view")
+        let previewLimit = previewStart.applying(drag: [10_000, 10_000], magnification: 100)
+        precondition(abs(previewLimit.yaw) <= 180 && previewLimit.pitch == 80 && previewLimit.zoom == 2)
+        let previewLowerLimit = previewLimit.applying(drag: [0, -10_000], magnification: 0.001)
+        precondition(previewLowerLimit.pitch == -80 && previewLowerLimit.zoom == 0.5)
+        precondition(previewStart.applying(drag: [.nan, .infinity], magnification: .nan) == previewStart,
+                     "invalid gesture samples must not corrupt the preview transform")
         let denseFixture = URL(fileURLWithPath: args[2] + "-dense")
         let denseManifest = try JSONDecoder().decode(ModelManifest.self, from: Data(contentsOf: denseFixture.appendingPathExtension("json")))
         let denseBytes = try Data(contentsOf: denseFixture.appendingPathExtension("atls"))
