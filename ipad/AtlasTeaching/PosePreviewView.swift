@@ -44,15 +44,18 @@ struct PosePreviewView: UIViewRepresentable {
     let mode: PosePreviewMode
     let resetRevision: Int
     @Binding var showsCameraPose: Bool
+    @Binding var showsModelOrigin: Bool
     @Binding var overviewExpanded: Bool
 
     func makeUIView(context: Context) -> PosePreviewSurface { PosePreviewSurface() }
     func updateUIView(_ view: PosePreviewSurface, context: Context) {
         view.onCameraPoseVisibilityChange = { showsCameraPose = $0 }
+        view.onModelOriginVisibilityChange = { showsModelOrigin = $0 }
         view.onOverviewExpansionChange = { overviewExpanded = $0 }
         view.update(rendered: rendered, overview: overview, footprint: footprint, status: status,
                     sample: sample, mode: mode, resetRevision: resetRevision)
         view.setCameraPoseVisible(showsCameraPose)
+        view.setModelOriginVisible(showsModelOrigin)
         view.setOverviewExpanded(overviewExpanded && mode == .interactive)
     }
     static func dismantleUIView(_ view: PosePreviewSurface, coordinator: ()) { view.stop() }
@@ -179,9 +182,12 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     let overviewCamera = SCNNode()
     let overviewObject = SCNNode()
     let overviewPose = SCNNode()
+    let overviewOrigin = SCNNode()
     let cameraPoseSwitch = UISwitch()
+    let modelOriginSwitch = UISwitch()
     let overviewCollapseButton = UIButton(type: .system)
     private let cameraPoseControl = UIStackView()
+    private let modelOriginControl = UIStackView()
     private let overviewContainer = PoseOverviewContainer()
     private let overviewDoubleTap = UITapGestureRecognizer()
     private let statusLabel = UILabel()
@@ -198,7 +204,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     private var pendingOverviewFit = false
     private(set) var overviewExpanded = false
     private(set) var showsCameraPose = false
+    private(set) var showsModelOrigin = false
     var onCameraPoseVisibilityChange: ((Bool) -> Void)?
+    var onModelOriginVisibilityChange: ((Bool) -> Void)?
     var onOverviewExpansionChange: ((Bool) -> Void)?
     private var sampleID: String?
     private var recordedTransform: [Float] = []
@@ -242,6 +250,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewScene.rootNode.addChildNode(overviewCamera)
         overviewScene.rootNode.addChildNode(overviewPose)
         overviewPose.name = "selected-pose-camera"; overviewPose.isHidden = true
+        overviewScene.rootNode.addChildNode(overviewOrigin)
+        overviewOrigin.name = "model-coordinate-origin"; overviewOrigin.isHidden = true
+        buildModelOriginAxes()
         overviewCamera.camera = SCNCamera()
         overviewCamera.camera?.usesOrthographicProjection = true
         overviewCamera.camera?.projectionDirection = .vertical
@@ -270,30 +281,33 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewCollapseButton.addTarget(self, action: #selector(collapseOverview), for: .touchUpInside)
         overviewContainer.addSubview(overviewView)
         overviewContainer.addSubview(overviewCollapseButton)
-        let cameraPoseLabel = UILabel()
-        cameraPoseLabel.text = "相机姿态与投影"; cameraPoseLabel.textColor = .white.withAlphaComponent(0.9)
-        cameraPoseLabel.font = .preferredFont(forTextStyle: .subheadline)
-        cameraPoseLabel.adjustsFontForContentSizeCategory = true
-        cameraPoseSwitch.onTintColor = UIColor(red: 0.2, green: 0.8, blue: 0.85, alpha: 1)
-        cameraPoseSwitch.accessibilityLabel = "相机姿态与投影"
-        cameraPoseSwitch.accessibilityIdentifier = "pose-camera-projection-toggle"
-        cameraPoseSwitch.addTarget(self, action: #selector(cameraPoseToggled), for: .valueChanged)
-        cameraPoseControl.axis = .horizontal; cameraPoseControl.alignment = .center; cameraPoseControl.spacing = 8
-        cameraPoseControl.addArrangedSubview(cameraPoseLabel); cameraPoseControl.addArrangedSubview(cameraPoseSwitch)
-        cameraPoseControl.isLayoutMarginsRelativeArrangement = true
-        cameraPoseControl.layoutMargins = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
-        cameraPoseControl.backgroundColor = UIColor.black.withAlphaComponent(0.4)
-        cameraPoseControl.layer.cornerRadius = 12
-        cameraPoseControl.layer.borderWidth = 1
-        cameraPoseControl.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
-        cameraPoseControl.isHidden = true
-        overviewContainer.addSubview(cameraPoseControl)
+        for (title, toggle, control, identifier, action) in [
+            ("相机姿态与投影", cameraPoseSwitch, cameraPoseControl, "pose-camera-projection-toggle", #selector(cameraPoseToggled)),
+            ("模型坐标原点", modelOriginSwitch, modelOriginControl, "pose-model-origin-toggle", #selector(modelOriginToggled))
+        ] {
+            let label = UILabel(); label.text = title; label.textColor = .white.withAlphaComponent(0.9)
+            label.font = .preferredFont(forTextStyle: .subheadline)
+            label.adjustsFontForContentSizeCategory = true
+            toggle.onTintColor = UIColor(red: 0.2, green: 0.8, blue: 0.85, alpha: 1)
+            toggle.accessibilityLabel = title; toggle.accessibilityIdentifier = identifier
+            toggle.addTarget(self, action: action, for: .valueChanged)
+            control.axis = .horizontal; control.alignment = .center; control.spacing = 8
+            control.addArrangedSubview(label); control.addArrangedSubview(toggle)
+            control.isLayoutMarginsRelativeArrangement = true
+            control.layoutMargins = UIEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+            control.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+            control.layer.cornerRadius = 12; control.layer.borderWidth = 1
+            control.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
+            control.isHidden = true; overviewContainer.addSubview(control)
+        }
+        modelOriginSwitch.accessibilityHint = "显示模型原点，X 红色、Y 绿色、Z 蓝色"
         overviewContainer.isAccessibilityElement = true
         overviewContainer.accessibilityTraits = .button
         overviewContainer.accessibilityIdentifier = "pose-global-thumbnail"
         overviewContainer.accessibilityLabel = "全局缩略图，绿色为当前 Pose"
         overviewContainer.accessibilityHint = "双击放大全局视图"
         overviewContainer.onActivate = { [weak self] in self?.expandOverview() }
+        updateOverviewAccessibility()
         overviewDoubleTap.numberOfTapsRequired = 2
         overviewDoubleTap.addTarget(self, action: #selector(expandOverview))
         overviewContainer.addGestureRecognizer(overviewDoubleTap)
@@ -451,9 +465,15 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             overviewContainer.frame = bounds
             overviewView.frame = overviewContainer.bounds
             overviewCollapseButton.frame = CGRect(x: 12, y: 12, width: 44, height: 44)
-            let controlSize = cameraPoseControl.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-            cameraPoseControl.frame = CGRect(x: max(68, bounds.width - controlSize.width - 12), y: 12,
-                width: min(controlSize.width, max(0, bounds.width - 80)), height: max(44, controlSize.height))
+            let controls = [cameraPoseControl, modelOriginControl]
+            let sizes = controls.map { $0.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize) }
+            let controlWidth = min(sizes.map(\.width).max() ?? 0, max(0, bounds.width - 80))
+            var controlY: CGFloat = 12
+            for (control, size) in zip(controls, sizes) {
+                control.frame = CGRect(x: bounds.width - controlWidth - 12, y: controlY,
+                                       width: controlWidth, height: max(44, size.height))
+                controlY = control.frame.maxY + 8
+            }
         } else {
             overviewContainer.frame = CGRect(x: bounds.width - width - 12, y: bounds.height - height - 12, width: width, height: height)
             overviewView.frame = overviewContainer.bounds.insetBy(dx: 1, dy: 1)
@@ -552,7 +572,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             pendingOverviewFit = true; return
         }
         pendingOverviewFit = false
-        // Frame the model alone: camera markers and delayed projection rays
+        // Frame the model alone: origin axes, camera markers and projection rays
         // must never change the point cloud's displayed size or orbit center.
         let (minimum, maximum) = geometry.boundingBox
         let lower = SIMD3<Float>(minimum.x, minimum.y, minimum.z)
@@ -578,9 +598,54 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewView.setNeedsDisplay()
     }
 
+    private func buildModelOriginAxes() {
+        func material(_ color: UIColor) -> SCNMaterial {
+            let material = SCNMaterial(); material.lightingModel = .constant
+            material.diffuse.contents = color; material.isDoubleSided = true
+            // Keep the coordinate reference visible even when the origin is inside the model.
+            material.readsFromDepthBuffer = false; material.writesToDepthBuffer = false
+            return material
+        }
+        let center = SCNSphere(radius: 0.04); center.segmentCount = 12
+        center.materials = [material(.white)]
+        let dot = SCNNode(geometry: center); dot.renderingOrder = 20
+        overviewOrigin.addChildNode(dot)
+        for (name, direction, color) in [("X", SIMD3<Float>(1, 0, 0), UIColor.systemRed),
+                                        ("Y", SIMD3<Float>(0, 1, 0), UIColor.systemGreen),
+                                        ("Z", SIMD3<Float>(0, 0, 1), UIColor.systemBlue)] {
+            let axis = SCNNode(); axis.name = "model-origin-\(name)"
+            axis.simdOrientation = simd_quatf(from: SIMD3(0, 1, 0), to: direction)
+            let shaft = SCNCylinder(radius: 0.018, height: 0.8); shaft.radialSegmentCount = 8
+            let arrow = SCNCone(topRadius: 0, bottomRadius: 0.065, height: 0.2); arrow.radialSegmentCount = 12
+            for (geometry, y) in [(shaft as SCNGeometry, Float(0.4)), (arrow as SCNGeometry, Float(0.9))] {
+                geometry.materials = [material(color)]
+                let node = SCNNode(geometry: geometry); node.simdPosition.y = y; node.renderingOrder = 20
+                axis.addChildNode(node)
+            }
+            overviewOrigin.addChildNode(axis)
+            let text = SCNText(string: name, extrusionDepth: 0)
+            text.font = .systemFont(ofSize: 1, weight: .bold); text.flatness = 0.1
+            text.materials = [material(color)]
+            let label = SCNNode(geometry: text); label.name = "model-origin-\(name)-label"
+            let (minimum, maximum) = text.boundingBox
+            label.pivot = SCNMatrix4MakeTranslation((minimum.x + maximum.x) / 2, (minimum.y + maximum.y) / 2, 0)
+            label.simdScale = SIMD3(repeating: 0.18); label.simdPosition = direction * 1.15
+            label.constraints = [SCNBillboardConstraint()]; label.renderingOrder = 20
+            overviewOrigin.addChildNode(label)
+        }
+        // The node stays at model (0, 0, 0), independent of the model's bounds center or any Pose.
+    }
+
     private func updateOverviewGeometry() {
         let geometry = overviewExpanded ? (sourceGeometry ?? sourceOverview) : sourceOverview
         overviewObject.geometry = geometry.map(Self.copyForInspection)
+        modelOriginSwitch.isEnabled = geometry != nil
+        overviewOrigin.isHidden = !showsModelOrigin || geometry == nil
+        if let bounds = (sourceOverview ?? sourceGeometry)?.boundingBox {
+            let extent = SIMD3<Float>(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z)
+            let radius = simd_length(extent) / 2
+            if radius.isFinite { overviewOrigin.simdScale = SIMD3(repeating: max(radius, 0.05) * 0.25) }
+        }
         if let footprint = overviewFootprint, footprint.frameCount > 0 {
             for material in overviewObject.geometry?.materials ?? [] {
                 TeachingCoverageRenderer.apply(footprint, opacity: 0.65, to: material)
@@ -597,14 +662,31 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     @objc private func cameraPoseToggled() {
         setCameraPoseVisible(cameraPoseSwitch.isOn); onCameraPoseVisibilityChange?(showsCameraPose)
     }
+    @objc private func modelOriginToggled() {
+        setModelOriginVisible(modelOriginSwitch.isOn); onModelOriginVisibilityChange?(showsModelOrigin)
+    }
+
+    func setModelOriginVisible(_ visible: Bool) {
+        guard visible != showsModelOrigin else { return }
+        showsModelOrigin = visible; modelOriginSwitch.setOn(visible, animated: false)
+        overviewOrigin.isHidden = !visible || overviewObject.geometry == nil
+        updateOverviewAccessibility()
+        overviewView.setNeedsDisplay()
+    }
 
     func setCameraPoseVisible(_ visible: Bool) {
         guard visible != showsCameraPose else { return }
         showsCameraPose = visible; cameraPoseSwitch.setOn(visible, animated: false)
         overviewPose.isHidden = !visible || overviewPose.childNodes.isEmpty
-        overviewView.accessibilityValue = visible ? "相机姿态与投影已显示" : "相机姿态与投影已隐藏"
-        overviewContainer.accessibilityValue = overviewView.accessibilityValue
+        updateOverviewAccessibility()
         overviewView.setNeedsDisplay()
+    }
+
+    private func updateOverviewAccessibility() {
+        let camera = showsCameraPose ? "相机姿态与投影已显示" : "相机姿态与投影已隐藏"
+        let origin = showsModelOrigin ? "模型坐标原点已显示" : "模型坐标原点已隐藏"
+        overviewView.accessibilityValue = "\(camera)；\(origin)"
+        overviewContainer.accessibilityValue = overviewView.accessibilityValue
     }
 
     func setOverviewExpanded(_ expanded: Bool) {
@@ -618,6 +700,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewView.isAccessibilityElement = expanded
         overviewCollapseButton.isHidden = !expanded
         cameraPoseControl.isHidden = !expanded
+        modelOriginControl.isHidden = !expanded
         overviewContainer.isAccessibilityElement = !expanded
         overviewContainer.accessibilityIdentifier = expanded ? "pose-global-overview-container" : "pose-global-thumbnail"
         sceneView.isUserInteractionEnabled = mode == .interactive && !expanded

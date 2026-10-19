@@ -51,7 +51,9 @@ xcuserdata/
 *.xcarchive/
 *.xcarchive.zip
 *.app/
+*.app.zip
 *.xctest/
+*.xctest.zip
 *.ipa
 *.dSYM/
 *.dSYM.zip
@@ -240,6 +242,21 @@ playwright/.auth/
 /tests/atlas-vision-*-shots-[0-9]*/
 /tests/atlas-vision-*-attachments/
 /tests/atlas-vision-*-attachments-[0-9]*/
+
+# ZIP copies of native screenshots and attachments, including numbered retries.
+# Keep the same output locations as the directories above; fixture/design ZIPs stay visible.
+/atlas-ipad-*-shots*.zip
+/atlas-ipad-*-attachments*.zip
+/ipad/atlas-ipad-*-shots*.zip
+/ipad/atlas-ipad-*-attachments*.zip
+/tests/atlas-ipad-*-shots*.zip
+/tests/atlas-ipad-*-attachments*.zip
+/atlas-vision-*-shots*.zip
+/atlas-vision-*-attachments*.zip
+/vision/atlas-vision-*-shots*.zip
+/vision/atlas-vision-*-attachments*.zip
+/tests/atlas-vision-*-shots*.zip
+/tests/atlas-vision-*-attachments*.zip
 
 # Ad-hoc device snapshots may contain local poses and pairing credentials.
 # Limit these rules to diagnostic filenames, keeping app source/fixtures visible.

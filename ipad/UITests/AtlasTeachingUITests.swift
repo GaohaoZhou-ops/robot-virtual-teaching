@@ -925,6 +925,119 @@ final class AtlasTeachingUITests: XCTestCase {
         view.stop()
     }
 
+    func testModelOriginTogglePreservesViewAndRecordedImage() throws {
+        let geometry = SCNBox(width: 4, height: 3, length: 1, chamferRadius: 0)
+        geometry.firstMaterial?.lightingModel = .constant
+        geometry.firstMaterial?.diffuse.contents = UIColor.lightGray
+        var sample = TeachingSample(segmentId: "model-origin", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 5)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        defer { view.stop() }
+        func update(_ mode: PosePreviewMode) {
+            view.update(rendered: geometry, overview: geometry, sample: sample, mode: mode, resetRevision: 0)
+            view.layoutIfNeeded()
+        }
+        update(.image)
+        let recorded = try XCTUnwrap(view.imageView.image?.pngData())
+        update(.interactive); view.setOverviewExpanded(true)
+        XCTAssertFalse(view.modelOriginSwitch.isOn); XCTAssertTrue(view.overviewOrigin.isHidden)
+        let originControl = try XCTUnwrap(view.modelOriginSwitch.superview)
+        let cameraControl = try XCTUnwrap(view.cameraPoseSwitch.superview)
+        var selection: Bool?
+        view.onModelOriginVisibilityChange = { selection = $0 }
+        view.zoomOverview(by: 1.3); view.translateOverview(by: CGPoint(x: 20, y: 15))
+        let camera = view.overviewCamera.simdTransform.elements
+        let scale = try XCTUnwrap(view.overviewCamera.camera).orthographicScale
+        let local = view.camera.simdTransform.elements
+        view.modelOriginSwitch.setOn(true, animated: false)
+        view.modelOriginSwitch.sendActions(for: .valueChanged)
+        XCTAssertEqual(selection, true); XCTAssertTrue(view.showsModelOrigin)
+        XCTAssertFalse(view.overviewOrigin.isHidden)
+        XCTAssertTrue(view.overviewOrigin.parent === view.overviewView.scene?.rootNode)
+        XCTAssertNil(view.sceneView.scene?.rootNode.childNode(withName: "model-coordinate-origin", recursively: true))
+        XCTAssertEqual(view.overviewCamera.simdTransform.elements, camera)
+        XCTAssertEqual(view.overviewCamera.camera?.orthographicScale, scale, "showing the origin cannot reframe the model")
+        XCTAssertEqual(view.camera.simdTransform.elements, local)
+        for size in [CGSize(width: 800, height: 600), CGSize(width: 600, height: 800), CGSize(width: 320, height: 240)] {
+            view.frame.size = size; view.layoutIfNeeded()
+            XCTAssertFalse(originControl.isHidden)
+            XCTAssertTrue(view.bounds.contains(originControl.frame))
+            XCTAssertGreaterThan(originControl.frame.minY, cameraControl.frame.maxY)
+            XCTAssertFalse(originControl.frame.intersects(view.overviewCollapseButton.frame))
+            XCTAssertEqual(view.overviewCamera.simdTransform.elements, camera, "resizing must retain global inspection")
+        }
+        view.frame.size = CGSize(width: 800, height: 600); view.layoutIfNeeded()
+        view.setCameraPoseVisible(true); XCTAssertFalse(view.overviewOrigin.isHidden)
+        view.setCameraPoseVisible(false); XCTAssertFalse(view.overviewOrigin.isHidden)
+        view.setOverviewExpanded(false)
+        XCTAssertTrue(originControl.isHidden); XCTAssertFalse(view.overviewOrigin.isHidden, "the thumbnail keeps the origin visible")
+        sample.id = UUID().uuidString; sample.cameraPose.position.x = 0.2
+        update(.interactive); view.setOverviewExpanded(true)
+        XCTAssertTrue(view.modelOriginSwitch.isOn); XCTAssertFalse(view.overviewOrigin.isHidden)
+        view.update(rendered: geometry.copy() as? SCNGeometry, overview: geometry,
+                    sample: sample, mode: .interactive, resetRevision: 0)
+        XCTAssertEqual(view.overviewOrigin.simdPosition, .zero, "quality and Pose changes never move the model origin")
+        sample.cameraPose.position.x = 0
+        update(.image)
+        XCTAssertEqual(view.imageView.image?.pngData(), recorded, "model axes never enter the recorded 2D image")
+        XCTAssertTrue(originControl.isHidden); XCTAssertFalse(view.overviewExpanded)
+        update(.interactive); view.setOverviewExpanded(true)
+        XCTAssertTrue(view.modelOriginSwitch.isOn)
+        view.modelOriginSwitch.setOn(false, animated: false)
+        view.modelOriginSwitch.sendActions(for: .valueChanged)
+        XCTAssertEqual(selection, false); XCTAssertTrue(view.overviewOrigin.isHidden)
+    }
+
+    func testModelOriginAxesRenderAtModelZero() throws {
+        let geometry = SCNBox(width: 4, height: 3, length: 1, chamferRadius: 0)
+        geometry.firstMaterial?.lightingModel = .constant
+        geometry.firstMaterial?.diffuse.contents = UIColor.lightGray
+        let sample = TeachingSample(segmentId: "origin-render", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 5)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        defer { view.stop() }
+        view.update(rendered: geometry, overview: geometry, sample: sample, mode: .interactive, resetRevision: 0)
+        view.layoutIfNeeded(); view.setOverviewExpanded(true); view.setModelOriginVisible(true)
+        view.overviewCamera.position = SCNVector3(5, -7, 6)
+        view.overviewCamera.look(at: SCNVector3Zero, up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, 0, -1))
+        let renderer = SCNRenderer(device: MTLCreateSystemDefaultDevice(), options: nil)
+        renderer.scene = view.overviewView.scene; renderer.pointOfView = view.overviewCamera
+        let image = renderer.snapshot(atTime: 0, with: view.bounds.size, antialiasingMode: .multisampling4X)
+        let cg = try XCTUnwrap(image.cgImage)
+        let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        var counts = [0, 0, 0]
+        for index in 0..<(cg.width * cg.height) {
+            let rgb = (0..<3).map { Int(pixels[index * 4 + $0]) }
+            for axis in 0..<3 where rgb[axis] > 100 && rgb[axis] > rgb[(axis + 1) % 3] + 45 && rgb[axis] > rgb[(axis + 2) % 3] + 45 {
+                counts[axis] += 1
+            }
+        }
+        for count in counts { XCTAssertGreaterThan(count, 10, "all three colored axes render even with the origin inside the model") }
+        let shot = XCTAttachment(image: image); shot.name = "Global model with RGB model origin"
+        shot.lifetime = .keepAlways; add(shot)
+        view.setModelOriginVisible(false)
+        XCTAssertNotEqual(renderer.snapshot(atTime: 0, with: view.bounds.size, antialiasingMode: .multisampling4X).pngData(), image.pngData())
+
+        // A model whose geometry is offset from zero must not recenter its coordinate frame.
+        let offset = SCNGeometry(sources: [SCNGeometrySource(vertices: [SCNVector3(2, -1, 0),
+            SCNVector3(4, -1, 0), SCNVector3(4, 1, 0), SCNVector3(2, 1, 0)])],
+            elements: [SCNGeometryElement(indices: [Int32(0), 1, 2, 0, 2, 3], primitiveType: .triangles)])
+        view.update(rendered: offset, overview: offset, sample: sample, mode: .interactive, resetRevision: 0)
+        view.setModelOriginVisible(true)
+        XCTAssertEqual(view.overviewOrigin.simdWorldPosition, .zero)
+        for (name, direction) in [("X", SIMD3<Float>(1, 0, 0)), ("Y", SIMD3<Float>(0, 1, 0)), ("Z", SIMD3<Float>(0, 0, 1))] {
+            let axis = try XCTUnwrap(view.overviewOrigin.childNode(withName: "model-origin-\(name)", recursively: false))
+            let tip = simd_normalize(axis.simdConvertPosition(SIMD3(0, 1, 0), to: view.overviewView.scene?.rootNode))
+            XCTAssertLessThan(simd_length(tip - direction), 0.00001, "axes stay in the model frame, not the camera frame")
+        }
+    }
+
     func testCameraProjectionMatchesSavedLensAndSurfaceDepth() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         var transform = simd_float4x4(simd_quatf(angle: 0.8, axis: simd_normalize(SIMD3<Float>(1, 2, 3))))
@@ -1132,7 +1245,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let beforeProjection = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         beforeProjection.name = "Global overview before camera overlay"; beforeProjection.lifetime = .keepAlways; add(beforeProjection)
         poseSwitch.tap(); XCTAssertEqual(poseSwitch.value as? String, "1")
-        XCTAssertEqual(overview.value as? String, "相机姿态与投影已显示")
+        XCTAssertTrue((overview.value as? String)?.contains("相机姿态与投影已显示") == true)
         let afterProjection = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         afterProjection.name = "Global overview with camera overlay"; afterProjection.lifetime = .keepAlways; add(afterProjection)
         let fittedOverview = overview.screenshot().pngRepresentation
@@ -1217,7 +1330,7 @@ final class AtlasTeachingUITests: XCTestCase {
             shot.name = "Pose camera projection \(orientation.isLandscape ? "landscape" : "portrait")"
             shot.lifetime = .keepAlways; add(shot)
         }
-        collapse.tap(); XCTAssertEqual(thumbnail.value as? String, "相机姿态与投影已显示")
+        collapse.tap(); XCTAssertTrue((thumbnail.value as? String)?.contains("相机姿态与投影已显示") == true)
         app.buttons["close-pose-review"].tap()
         XCTAssertTrue(review.waitForExistence(timeout: 10))
         app.buttons["本地项目"].tap()

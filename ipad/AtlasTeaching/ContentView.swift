@@ -1065,6 +1065,7 @@ struct PoseReviewView: View {
     @State private var previewMode: PosePreviewMode = .interactive
     @State private var previewReset = 0
     @State private var showsPoseCamera = false
+    @State private var showsModelOrigin = false
     @State private var overviewExpanded = false
     @State private var poseEditorHeight: CGFloat = 0
     @StateObject private var previewPreparation = PosePreviewPreparation()
@@ -1228,7 +1229,8 @@ struct PoseReviewView: View {
                                     footprint: ready ? previewPreparation.footprint : nil,
                                     status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
                                     sample: selected, mode: previewMode, resetRevision: previewReset,
-                                    showsCameraPose: $showsPoseCamera, overviewExpanded: $overviewExpanded)
+                                    showsCameraPose: $showsPoseCamera, showsModelOrigin: $showsModelOrigin,
+                                    overviewExpanded: $overviewExpanded)
                         .frame(width: width, height: height)
                         .accessibilityElement(children: .contain)
                         .accessibilityLabel("\(selected.name) 的物体视角")
