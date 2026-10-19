@@ -47,6 +47,26 @@ with sync_playwright() as playwright:
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     expect(dialog.locator('.ipad-code')).to_have_text(re.compile(r'^[A-Z0-9]{4}$'))
     assert len(creations) == 1, 'opening under StrictMode must create only one transfer'
+    # Refresh renews the current transfer instead of creating/uploading another.
+    first_ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    first_qr = dialog.get_by_role('img', name='设备配对二维码').get_attribute('src')
+    page.route('**/__atlas/ipad/sessions/*/renew', lambda route: route.fulfill(
+        status=503, content_type='application/json', body=json.dumps({'error': '测试二维码刷新中断'})))
+    refresh_qr = dialog.get_by_role('button', name='刷新二维码', exact=True)
+    refresh_qr.click()
+    expect(dialog.get_by_role('alert')).to_have_text('测试二维码刷新中断')
+    expect(refresh_qr).to_be_enabled()
+    expect(dialog.locator('.ipad-code')).to_have_text(first_ticket['pairingCode'])
+    page.unroute('**/__atlas/ipad/sessions/*/renew')
+    refresh_qr.click()
+    expect(dialog.locator('.ipad-code')).not_to_have_text(first_ticket['pairingCode'])
+    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+    expect(dialog.get_by_role('alert')).not_to_be_visible()
+    refreshed = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    assert refreshed['id'] == first_ticket['id'] and refreshed['status'] == 'ready'
+    assert refreshed['pairingExpiresAt'] >= first_ticket['pairingExpiresAt']
+    assert dialog.get_by_role('img', name='设备配对二维码').get_attribute('src') != first_qr
+    assert len(creations) == 1
     page.screenshot(path='/tmp/atlas-ipad-pairing.png', full_page=True)
     ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
     page.get_by_role('button', name='关闭设备示教窗口').click()
@@ -83,10 +103,13 @@ with sync_playwright() as playwright:
     expect(dialog.locator('[data-ipad-status="paired"]')).to_be_visible()
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     expect(dialog).to_contain_text('扫描二维码，同步示教结果')
-    page.get_by_role('button', name='更新配对码').click()
+    previous_qr = dialog.get_by_role('img', name='设备配对二维码').get_attribute('src')
+    page.get_by_role('button', name='刷新二维码', exact=True).click()
     expect(dialog.locator('.ipad-code')).not_to_have_text(ticket['pairingCode'])
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
+    assert dialog.get_by_role('img', name='设备配对二维码').get_attribute('src') != previous_qr
+    assert ticket['id'] == renewed['id'] and ticket['pairingExpiresAt'] >= renewed['pairingExpiresAt']
     assert len(creations) == 1, 'opening must not replace a paired task'
     request = Request(BASE + '/__atlas/ipad/sessions/' + ticket['id'] + '/model', headers={"Authorization": "Bearer " + paired['deviceToken']})
     with urlopen(request) as response:

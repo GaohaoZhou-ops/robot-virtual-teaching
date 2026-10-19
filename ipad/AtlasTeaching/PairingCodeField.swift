@@ -6,6 +6,7 @@ import UIKit
 struct PairingCodeField: UIViewRepresentable {
     @Binding var code: String
     @Binding var isFocused: Bool
+    var onSubmit: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
     func makeUIView(context: Context) -> CodeTextField {
@@ -13,7 +14,7 @@ struct PairingCodeField: UIViewRepresentable {
         field.delegate = context.coordinator
         field.accessibilityIdentifier = "pairing-code"
         field.accessibilityLabel = "4 位配对码"
-        field.accessibilityHint = "输入四位大写字母或数字"
+        field.accessibilityHint = "输入四位大写字母或数字后自动连接；按连接可再次提交"
         return field
     }
     func updateUIView(_ field: CodeTextField, context: Context) {
@@ -44,7 +45,9 @@ struct PairingCodeField: UIViewRepresentable {
         func textFieldDidBeginEditing(_ field: UITextField) { parent.isFocused = true; (field as? CodeTextField)?.refreshCells() }
         func textFieldDidEndEditing(_ field: UITextField) { parent.isFocused = false; (field as? CodeTextField)?.refreshCells() }
         func textFieldDidChangeSelection(_ field: UITextField) { (field as? CodeTextField)?.refreshCells() }
-        func textFieldShouldReturn(_ field: UITextField) -> Bool { field.resignFirstResponder(); return true }
+        func textFieldShouldReturn(_ field: UITextField) -> Bool {
+            parent.onSubmit(); field.resignFirstResponder(); return true
+        }
     }
 }
 
@@ -58,7 +61,7 @@ final class CodeTextField: UITextField {
         font = .monospacedSystemFont(ofSize: 28, weight: .medium)
         keyboardType = .asciiCapable; textContentType = .oneTimeCode
         autocapitalizationType = .allCharacters; autocorrectionType = .no; spellCheckingType = .no
-        smartInsertDeleteType = .no; returnKeyType = .done
+        smartInsertDeleteType = .no; returnKeyType = .join
         stack.axis = .horizontal; stack.distribution = .fillEqually; stack.spacing = 10
         stack.isUserInteractionEnabled = false; stack.accessibilityElementsHidden = true
         for cell in cells {

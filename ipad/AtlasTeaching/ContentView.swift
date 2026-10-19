@@ -10,8 +10,10 @@ struct ContentView: View {
     @State private var scanning = false
     @State private var scannedCode: PairingQRCode?
     @State private var codeFocused = false
+    @State private var pendingManualPairing: Task<Void, Never>?
     @State private var projectToDelete: LocalProject?
     @State private var revealedProjectID: String?
+    @State private var deleteActionFrames: [String: CGRect] = [:]
     var body: some View {
         GeometryReader { viewport in
         Group {
@@ -52,8 +54,10 @@ struct ContentView: View {
             .frame(width: viewport.size.width, height: viewport.size.height)
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
-            .simultaneousGesture(TapGesture().onEnded {
-                revealedProjectID = nil
+            .coordinateSpace(name: LocalProjectSwipeLayout.coordinateSpace)
+            .onPreferenceChange(LocalProjectDeleteFrames.self) { deleteActionFrames = $0 }
+            .simultaneousGesture(SpatialTapGesture(coordinateSpace: .named(LocalProjectSwipeLayout.coordinateSpace)).onEnded { tap in
+                handleLibraryTap(at: tap.location)
             })
         }
         .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
@@ -71,11 +75,22 @@ struct ContentView: View {
             Text("将删除「\(project.session.manifest.name)」在此 iPad 上的模型、全部 \(project.result.samples.count) 个 Pose 和应用生成的导出副本。电脑上的工程和已同步结果不受影响。")
         }
         .onAppear { if !scanning { discovery.start() } }
-        .onDisappear { discovery.stop() }
+        .onDisappear { discovery.stop(); pendingManualPairing?.cancel(); pendingManualPairing = nil }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active && session.current == nil && !scanning { discovery.start() }
             else { discovery.stop() }
         }
+    }
+    private func handleLibraryTap(at location: CGPoint) {
+        guard !session.busy else { return }
+        // A native scroll view can consume the first button touch while settling.
+        // Route a tap on its visible delete area to the same confirmation before
+        // dismissing the swipe; outside taps still reach the other controls.
+        if let id = revealedProjectID, let frame = deleteActionFrames[id], frame.contains(location),
+           let project = session.projects.first(where: { $0.id == id }) {
+            projectToDelete = project
+        }
+        revealedProjectID = nil
     }
     private func finishScanning() {
         if let qr = scannedCode {
@@ -84,10 +99,29 @@ struct ContentView: View {
         } else { discovery.start() }
     }
     private func beginScanning() {
+        pendingManualPairing?.cancel(); pendingManualPairing = nil
         codeFocused = false; discovery.stop()
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         // Finish the native field's resignation before SwiftUI presents the camera.
         DispatchQueue.main.async { scanning = true }
+    }
+    private var canPairManually: Bool {
+        !session.busy && !scanning && session.current == nil && session.serverConnection.canConnect && PairingCode.isValid(session.code)
+    }
+    private func pairManually(after delay: Duration = .zero) {
+        pendingManualPairing?.cancel(); pendingManualPairing = nil
+        guard canPairManually else { return }
+        let address = session.serverAddress, code = session.code
+        pendingManualPairing = Task {
+            // Let a complete paste/edit settle so a longer or invalid code never
+            // submits just because its first four characters were valid.
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard !Task.isCancelled, canPairManually, session.serverAddress == address, session.code == code else { return }
+            pendingManualPairing = nil
+            codeFocused = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            await session.pair()
+        }
     }
     private var libraryHeader: some View {
         HStack(alignment: .center, spacing: 24) {
@@ -103,21 +137,28 @@ struct ContentView: View {
     private func pairingPanel(minHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("从电脑接收物体", systemImage: "wifi").font(.title2.weight(.medium))
+            if let progress = session.transferProgress { modelTransferProgress(progress) }
+            pairingMethodHeader("方式一", title: "扫码配对", symbol: "qrcode")
+            Button(action: beginScanning) {
+                Label("扫码配对", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity).padding(.vertical, 10)
+            }.buttonStyle(.borderedProminent)
+                .disabled(session.busy).accessibilityIdentifier("scan-pairing-code")
+            Divider().padding(.vertical, 4)
+            pairingMethodHeader("方式二", title: "手动连接", symbol: "globe")
             discoveryPanel
-            LANAddressFields(address: $session.serverConnection).disabled(session.busy)
+            LANAddressFields(address: $session.serverConnection, onSubmit: { pairManually() }).disabled(session.busy)
             VStack(alignment: .leading, spacing: 8) {
                 Text("4 位配对码 · 大写字母或数字").font(.caption).foregroundStyle(.secondary)
                 pairingCodeInput
             }
-            Button { Task { await session.pair() } } label: {
-                Label("接收物体", systemImage: "arrow.down.circle").frame(maxWidth: .infinity).padding(.vertical, 10)
-            }
-            .buttonStyle(.borderedProminent).disabled(session.busy || !session.serverConnection.canConnect || !PairingCode.isValid(session.code))
-            .accessibilityIdentifier("receive-model")
-            if session.busy { ProgressView() }
+            if session.busy && session.transferProgress == nil { ProgressView() }
             if !session.error.isEmpty { Text(session.error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
+            if session.error.hasPrefix("接收失败：") {
+                Button("重试连接") { pairManually() }
+                    .buttonStyle(.bordered).disabled(!canPairManually).accessibilityIdentifier("retry-pairing")
+            }
             Spacer(minLength: 4)
-            if !session.status.isEmpty {
+            if !session.status.isEmpty && session.transferProgress == nil {
                 Text(session.status).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -126,24 +167,73 @@ struct ContentView: View {
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
     }
+    private func pairingMethodHeader(_ method: String, title: String, symbol: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: symbol)
+                .font(.system(size: 38, weight: .light)).foregroundStyle(accent)
+                .frame(width: 64, height: 64)
+                .background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(accent.opacity(0.18)))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(method).font(.caption.weight(.medium)).foregroundStyle(accent)
+                Text(title).font(.headline)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 4)
+    }
+    private func modelTransferProgress(_ progress: ModelTransferProgress) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(progress.title).font(.callout.weight(.medium))
+                    .accessibilityIdentifier("model-transfer-stage")
+                Spacer(minLength: 0)
+                Text("\(progress.step) / 4").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            if case .downloading(let download) = progress {
+                ProgressView(value: download.fractionCompleted).progressViewStyle(.linear)
+                    .accessibilityLabel("物体下载进度").accessibilityIdentifier("model-download-progress")
+                HStack {
+                    Text("\(Int(download.fractionCompleted * 100))%")
+                        .accessibilityIdentifier("model-download-percent")
+                    Spacer(minLength: 8)
+                    Text("\(ByteCountFormatter.string(fromByteCount: download.receivedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: download.totalBytes, countStyle: .file))")
+                        .accessibilityIdentifier("model-download-bytes")
+                }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 5) {
+                    ForEach(1...4, id: \.self) { step in
+                        Capsule().fill(step <= progress.step ? accent : Color.white.opacity(0.12)).frame(height: 4)
+                    }
+                }.accessibilityHidden(true)
+                Text(progress.step == 1 ? "正在验证配对信息，请稍候…" : "下载已完成，处理完成后将自动打开物体。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("model-transfer-progress")
+    }
     private var pairingCodeInput: some View {
         let characters = Array(session.code)
         let invalid = characters.count > 4 || characters.contains { !$0.isASCII || !("A"..."Z").contains(String($0)) && !("0"..."9").contains(String($0)) }
         return VStack(alignment: .leading, spacing: 8) {
-            PairingCodeField(code: $session.code, isFocused: $codeFocused)
+            PairingCodeField(code: Binding(get: { session.code }, set: { value in
+                session.code = value
+                pairManually(after: .milliseconds(600))
+            }), isFocused: $codeFocused, onSubmit: { pairManually() })
                 .frame(maxWidth: .infinity).frame(height: 58).disabled(session.busy)
             if invalid { Text("请输入 4 位字母或数字").font(.caption).foregroundStyle(.orange) }
+            else if PairingCode.isValid(session.code) && !session.serverConnection.canConnect {
+                Text("请先选择服务器或填写有效地址与端口").font(.caption).foregroundStyle(.orange)
+            }
         }
     }
     private var discoveryPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button(action: beginScanning) {
-                    Label("扫码配对", systemImage: "qrcode.viewfinder")
-                }.buttonStyle(.borderedProminent).font(.callout)
-                    .disabled(session.busy).accessibilityIdentifier("scan-pairing-code")
                 Button { discovery.start() } label: {
-                    Label("搜索局域网服务", systemImage: "network")
+                    Label("搜索服务器", systemImage: "network")
                 }.buttonStyle(.bordered).font(.callout)
                     .disabled(discovery.isSearching || session.busy).accessibilityIdentifier("discover-services")
                 Spacer(minLength: 4)
@@ -156,6 +246,7 @@ struct ContentView: View {
                             Button {
                                 session.serverAddress = server.address
                                 session.error = ""
+                                pairManually(after: .milliseconds(600))
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: "desktopcomputer").foregroundStyle(accent)
@@ -240,6 +331,19 @@ struct ContentView: View {
 
 }
 
+private enum LocalProjectSwipeLayout {
+    static let coordinateSpace = "library-swipe-actions"
+    static let actionWidth: CGFloat = 88
+    static let spacing: CGFloat = 12
+}
+
+private struct LocalProjectDeleteFrames: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 /// A horizontal scroll keeps vertical page scrolling native, while allowing the
 /// action and card to share their actual height (including larger text sizes).
 private struct LocalProjectSwipeRow<Content: View>: View {
@@ -249,11 +353,12 @@ private struct LocalProjectSwipeRow<Content: View>: View {
     let onDelete: () -> Void
     @ViewBuilder let content: Content
     @State private var showingAction = false
+    @State private var scrollOffset: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal) {
-                HStack(spacing: 12) {
+                HStack(spacing: LocalProjectSwipeLayout.spacing) {
                     content
                         .containerRelativeFrame(.horizontal)
                         .id("card")
@@ -271,7 +376,7 @@ private struct LocalProjectSwipeRow<Content: View>: View {
                             Text("删除").font(.callout.weight(.semibold))
                         }
                         .foregroundStyle(.white)
-                        .frame(width: 88).frame(maxHeight: .infinity)
+                        .frame(width: LocalProjectSwipeLayout.actionWidth).frame(maxHeight: .infinity)
                         .background(Color.red, in: RoundedRectangle(cornerRadius: 14))
                         .contentShape(RoundedRectangle(cornerRadius: 14))
                     }
@@ -281,12 +386,13 @@ private struct LocalProjectSwipeRow<Content: View>: View {
                     .accessibilityHidden(!showingAction)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .onGeometryChange(for: Bool.self) { geometry in
-                    geometry.frame(in: .scrollView(axis: .horizontal)).minX < -1
-                } action: { revealed in
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    -geometry.frame(in: .scrollView(axis: .horizontal)).minX
+                } action: { offset in
+                    let revealed = offset > 1
                     if revealed && !showingAction { revealedProjectID = projectID }
                     if !revealed && revealedProjectID == projectID { revealedProjectID = nil }
-                    showingAction = revealed
+                    showingAction = revealed; scrollOffset = offset
                 }
             }
             .scrollIndicators(.hidden)
@@ -294,6 +400,15 @@ private struct LocalProjectSwipeRow<Content: View>: View {
             .scrollDisabled(disabled)
             .fixedSize(horizontal: false, vertical: true)
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .background {
+                GeometryReader { geometry in
+                    let viewport = geometry.frame(in: .named(LocalProjectSwipeLayout.coordinateSpace))
+                    let action = CGRect(x: viewport.maxX + LocalProjectSwipeLayout.spacing - scrollOffset,
+                        y: viewport.minY, width: LocalProjectSwipeLayout.actionWidth, height: viewport.height)
+                    Color.clear.preference(key: LocalProjectDeleteFrames.self,
+                        value: showingAction && !disabled ? [projectID: action.intersection(viewport)] : [:])
+                }
+            }
             .onChange(of: revealedProjectID) { _, id in
                 if id != projectID && showingAction { close(using: proxy) }
             }
@@ -319,6 +434,7 @@ private struct LocalProjectSwipeSnap: ScrollTargetBehavior {
 
 private struct LANAddressFields: View {
     @Binding var address: LANAddressInput
+    var onSubmit: () -> Void = {}
     @State private var hostError = ""
     @FocusState private var portFocused: Bool
     var body: some View {
@@ -349,6 +465,7 @@ private struct LANAddressFields: View {
                 .focused($portFocused).submitLabel(.done).onSubmit {
                     if address.port.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { address.port = LANAddressInput.defaultPort }
                     portFocused = false
+                    onSubmit()
                 }
                 .font(.system(.body, design: .monospaced)).multilineTextAlignment(.center)
                 .textFieldStyle(.plain).frame(height: 44)

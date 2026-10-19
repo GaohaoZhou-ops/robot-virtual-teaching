@@ -10,6 +10,27 @@ struct PendingModelTransfer: Identifiable {
     var id: String { session.id }
 }
 
+enum ModelTransferProgress {
+    case pairing, downloading(ModelDownloadProgress), validating, saving
+
+    var title: String {
+        switch self {
+        case .pairing: return "正在连接电脑并配对"
+        case .downloading: return "正在下载物体"
+        case .validating: return "正在校验和加载模型"
+        case .saving: return "正在保存到本机"
+        }
+    }
+    var step: Int {
+        switch self {
+        case .pairing: return 1
+        case .downloading: return 2
+        case .validating: return 3
+        case .saving: return 4
+        }
+    }
+}
+
 @MainActor
 final class TeachingSession: ObservableObject {
     @Published var projects: [LocalProject] = []
@@ -27,8 +48,10 @@ final class TeachingSession: ObservableObject {
     @Published var code = ""
     @Published var geometry: ModelGeometry?
     @Published private(set) var pendingModel: PendingModelTransfer?
+    @Published private(set) var transferProgress: ModelTransferProgress?
     var displaySettings: ModelDisplaySettings { current?.displaySettings ?? ModelDisplaySettings() }
     private var saveTask: Task<Void, Never>?
+    private var modelTransferID: UUID?
     private var lastSaved = Date.distantPast
     private var deviceID: String {
         if let id = UserDefaults.standard.string(forKey: "deviceID") { return id }
@@ -60,7 +83,9 @@ final class TeachingSession: ObservableObject {
     }
     #endif
     func pair(qr: PairingQRCode? = nil, confirmNewModel: Bool = false) async {
-        guard !busy else { return }; busy = true; error = ""; defer { busy = false }
+        guard !busy else { return }; busy = true; error = ""
+        modelTransferID = UUID(); transferProgress = .pairing
+        defer { busy = false; transferProgress = nil; modelTransferID = nil }
         do {
             pendingModel = nil
             if let qr { try qr.validate(); serverAddress = qr.address; code = PairingCode.normalize(qr.code) }
@@ -68,6 +93,7 @@ final class TeachingSession: ObservableObject {
             status = "连接电脑并配对…"
             let paired = try await client.pair(code: code, deviceID: deviceID, name: TeachingDevice.current.model, qr: qr)
             if confirmNewModel {
+                transferProgress = .validating
                 status = "配对成功，正在校验本地模型…"
                 if let local = try await ProjectStore.shared.matchingModel(paired.manifest, preferredID: paired.id) {
                     let data = try await ProjectStore.shared.model(local.id)
@@ -80,11 +106,25 @@ final class TeachingSession: ObservableObject {
                 return
             }
             status = "通过局域网下载物体…"
-            let data = try await client.download(paired)
+            let data = try await downloadModel(paired, client: client)
             try await acceptModel(data, paired: paired, serverURL: client.baseURL.absoluteString)
         } catch { self.error = "接收失败：\(error.localizedDescription)"; status = "请检查局域网地址、配对码与本地网络权限" }
     }
+    private func downloadModel(_ paired: PairedSession, client: LANClient) async throws -> Data {
+        let transferID = modelTransferID
+        transferProgress = .downloading(ModelDownloadProgress(receivedBytes: 0, totalBytes: Int64(paired.manifest.byteLength)))
+        return try await client.download(paired) { [weak self] progress in
+            Task { @MainActor [weak self] in
+                // Ignore delayed callbacks after completion, failure, or a retry.
+                guard let self, self.modelTransferID == transferID,
+                      case .downloading(let previous) = self.transferProgress,
+                      progress.receivedBytes >= previous.receivedBytes else { return }
+                self.transferProgress = .downloading(progress)
+            }
+        }
+    }
     private func acceptModel(_ data: Data, paired: PairedSession, serverURL: String) async throws {
+        transferProgress = .validating; status = "下载完成，正在校验和加载模型…"
         let geometry = try await Task.detached { try ModelGeometry(data: data, manifest: paired.manifest) }.value
         let existing = try await ProjectStore.shared.projects().first { $0.id == paired.id }
         var project = existing ?? LocalProject(serverURL: serverURL, session: paired,
@@ -92,6 +132,7 @@ final class TeachingSession: ObservableObject {
         project.displaySettings = project.displaySettings ?? ModelDisplaySettings().forOpening()
         project.session = paired; project.serverURL = serverURL
         project.resultSyncDestination = nil
+        transferProgress = .saving; status = "正在将模型保存到 \(TeachingDevice.storageName)…"
         try await ProjectStore.shared.saveModel(data, id: paired.id)
         try await ProjectStore.shared.save(project)
         UserDefaults.standard.set(serverURL, forKey: "serverAddress")
@@ -114,9 +155,10 @@ final class TeachingSession: ObservableObject {
     }
     func syncPendingModel() async {
         guard !busy, let pending = pendingModel else { return }
-        busy = true; error = ""; status = "正在同步模型…"; defer { busy = false }
+        busy = true; error = ""; status = "正在同步模型…"; modelTransferID = UUID()
+        defer { busy = false; transferProgress = nil; modelTransferID = nil }
         do {
-            let data = try await LANClient(address: pending.serverURL).download(pending.session)
+            let data = try await downloadModel(pending.session, client: LANClient(address: pending.serverURL))
             try await acceptModel(data, paired: pending.session, serverURL: pending.serverURL)
         } catch { self.error = "模型同步失败，可重试：\(error.localizedDescription)"; status = "等待重试同步模型" }
     }
