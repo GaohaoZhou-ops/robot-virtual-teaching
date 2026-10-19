@@ -312,7 +312,7 @@ final class TeachingSession: ObservableObject {
             await reload()
         } catch {
             self.error = "扫码同步失败，本地 Pose 仍保留：\(error.localizedDescription)"
-            status = "可重新扫码；已连接的任务也可使用局域网按钮重试"
+            status = "可重新扫码；已连接的任务也可切换到 Wi-Fi 重试"
         }
     }
     func finish(sync: Bool) async {
@@ -323,7 +323,7 @@ final class TeachingSession: ObservableObject {
                 throw TeachingError("模拟演练数据只能保存在本机，不能同步")
             }
             guard !sync || !project.requiresResultPairing else {
-                throw TeachingError("补录结果需要新的传输任务，请在电脑点击「新建传输」，再使用「扫码同步到电脑」")
+                throw TeachingError("补录结果需要新的传输任务，请在电脑点击「新建传输」，再扫码同步")
             }
             await saveTask?.value
             if project.result.completedAt == nil { project.result.completedAt = timestamp() }

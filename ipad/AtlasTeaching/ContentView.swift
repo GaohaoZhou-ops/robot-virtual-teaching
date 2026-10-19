@@ -140,17 +140,17 @@ struct ContentView: View {
             if let progress = session.transferProgress { modelTransferProgress(progress) }
             pairingMethodHeader("方式一", title: "扫码配对", symbol: "qrcode")
             Button(action: beginScanning) {
-                Label("扫码配对", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity).padding(.vertical, 10)
+                pairingActionLabel("扫码配对", systemImage: "qrcode.viewfinder")
             }.buttonStyle(.borderedProminent)
                 .disabled(session.busy).accessibilityIdentifier("scan-pairing-code")
             Divider().padding(.vertical, 4)
             pairingMethodHeader("方式二", title: "手动连接", symbol: "globe")
-            discoveryPanel
             LANAddressFields(address: $session.serverConnection, onSubmit: { pairManually() }).disabled(session.busy)
             VStack(alignment: .leading, spacing: 8) {
                 Text("4 位配对码 · 大写字母或数字").font(.caption).foregroundStyle(.secondary)
                 pairingCodeInput
             }
+            discoveryPanel
             if session.busy && session.transferProgress == nil { ProgressView() }
             if !session.error.isEmpty { Text(session.error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
             if session.error.hasPrefix("接收失败：") {
@@ -166,6 +166,10 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
+    }
+    private func pairingActionLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage).font(.body)
+            .frame(maxWidth: .infinity).padding(.vertical, 10)
     }
     private func pairingMethodHeader(_ method: String, title: String, symbol: String) -> some View {
         HStack(spacing: 14) {
@@ -231,14 +235,15 @@ struct ContentView: View {
     }
     private var discoveryPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Button { discovery.start() } label: {
-                    Label("搜索服务器", systemImage: "network")
-                }.buttonStyle(.bordered).font(.callout)
-                    .disabled(discovery.isSearching || session.busy).accessibilityIdentifier("discover-services")
-                Spacer(minLength: 4)
-                if discovery.isSearching { ProgressView().controlSize(.small) }
-            }
+            Button { discovery.start() } label: {
+                pairingActionLabel("搜索服务器", systemImage: "network")
+                    .overlay(alignment: .trailing) {
+                        if discovery.isSearching {
+                            ProgressView().controlSize(.small).padding(.trailing, 8).accessibilityHidden(true)
+                        }
+                    }
+            }.buttonStyle(.bordered)
+                .disabled(discovery.isSearching || session.busy).accessibilityIdentifier("discover-services")
             if !discovery.servers.isEmpty {
                 ScrollView {
                     VStack(spacing: 6) {
@@ -477,6 +482,127 @@ private struct LANAddressFields: View {
     }
 }
 
+private struct TeachingResultSyncView: View {
+    private enum Method: String, CaseIterable {
+        case scan = "扫码", wifi = "Wi-Fi", airDrop = "AirDrop 导出"
+    }
+    @EnvironmentObject private var session: TeachingSession
+    @Environment(\.dismiss) private var dismiss
+    @State private var method: Method = .scan
+    @State private var scanning = false
+    @State private var scannedCode: PairingQRCode?
+    @State private var resultShare: TeachingResultShareItem?
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(session.current?.session.manifest.name ?? "示教结果").font(.title3)
+                        Text("已完成 · \(session.current?.result.samples.count ?? 0) 个 Pose")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("选择同步方式").font(.headline)
+                        Picker("同步方式", selection: $method) {
+                            ForEach(Method.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }.pickerStyle(.segmented).disabled(session.busy)
+                            .accessibilityIdentifier("result-sync-method")
+                    }
+                    Group {
+                        switch method {
+                        case .scan: scanContent
+                        case .wifi: wifiContent
+                        case .airDrop: airDropContent
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    if session.busy { ProgressView("正在处理…") }
+                    if !session.status.isEmpty {
+                        Text(session.status).font(.callout).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("result-sync-status")
+                    }
+                    if !session.error.isEmpty {
+                        Text(session.error).font(.callout).foregroundStyle(.orange)
+                            .accessibilityIdentifier("result-sync-error")
+                    }
+                }.padding(24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Color(red: 0.025, green: 0.05, blue: 0.065))
+            .navigationTitle("同步数据").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) {
+                Button("关闭") { dismiss() }.disabled(session.busy)
+                    .accessibilityIdentifier("close-result-sync")
+            } }
+        }
+        .interactiveDismissDisabled(session.busy)
+        .onChange(of: method) { _, _ in
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        .sheet(isPresented: $scanning, onDismiss: syncScannedResult) {
+            PairingScannerView(purpose: .syncResult) { qr in
+                scannedCode = qr; scanning = false
+            }
+        }
+    }
+
+    private var scanContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("扫码同步", systemImage: "qrcode.viewfinder").font(.title3)
+            Text("电脑与 iPad 连接同一局域网后，打开电脑「iPad 示教」窗口，扫描其中的二维码。核对模型后将自动上传示教结果。")
+                .font(.callout).foregroundStyle(.secondary)
+            Button { scanning = true } label: {
+                Label("开始扫码", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity).padding(10)
+            }.buttonStyle(.borderedProminent).disabled(session.busy)
+                .accessibilityIdentifier("scan-sync-result")
+        }
+    }
+    private var wifiContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Wi-Fi 同步", systemImage: "wifi").font(.title3)
+            Text("电脑与 iPad 需连接同一局域网。确认电脑的 IPv4 地址与端口后，上传到已配对的传输任务。")
+                .font(.callout).foregroundStyle(.secondary)
+            LANAddressFields(address: $session.serverConnection).disabled(session.busy)
+            if session.current?.requiresResultPairing == true {
+                Text("补录结果需要先配对新的传输任务。请在电脑点击「新建传输」，再切换到扫码同步。")
+                    .font(.callout).foregroundStyle(.orange)
+                Button("切换到扫码") { method = .scan }.disabled(session.busy)
+            }
+            Button { Task { await session.finish(sync: true) } } label: {
+                Label("通过 Wi-Fi 同步", systemImage: "wifi").frame(maxWidth: .infinity).padding(10)
+            }.buttonStyle(.borderedProminent)
+                .disabled(session.busy || !session.serverConnection.canConnect || session.current?.requiresResultPairing == true)
+                .accessibilityIdentifier("wifi-sync-result")
+        }
+    }
+    private var airDropContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("AirDrop 导出", systemImage: "square.and.arrow.up").font(.title3)
+            Text("导出结果文件后，在系统分享面板选择 AirDrop 发送到 Mac，或存储到「文件」。收到后，在电脑「iPad 示教」窗口导入结果文件。")
+                .font(.callout).foregroundStyle(.secondary)
+            Button {
+                Task {
+                    if let url = await session.exportResult() { resultShare = TeachingResultShareItem(url: url) }
+                }
+            } label: {
+                Label("导出并分享", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity).padding(10)
+            }.buttonStyle(.borderedProminent).disabled(session.busy)
+                .accessibilityIdentifier("share-teaching-result")
+                .popover(item: $resultShare) { item in
+                    TeachingResultShareSheet(url: item.url) { activity, completed, error in
+                        session.resultShareFinished(activity: activity, completed: completed, error: error)
+                        resultShare = nil
+                    }.presentationCompactAdaptation(.sheet)
+                }
+        }
+    }
+    private func syncScannedResult() {
+        guard let qr = scannedCode else { return }
+        scannedCode = nil
+        Task { await session.syncResult(qr: qr) }
+    }
+}
+
 struct TeachingView: View {
     @EnvironmentObject private var session: TeachingSession
     @Environment(\.scenePhase) private var scenePhase
@@ -485,9 +611,7 @@ struct TeachingView: View {
     @StateObject private var coverage = TeachingCoverageRenderer()
     @State private var review = false
     @State private var finishing = false
-    @State private var resultShare: TeachingResultShareItem?
-    @State private var scanningResult = false
-    @State private var scannedResultCode: PairingQRCode?
+    @State private var resultSyncOpen = false
     @State private var displaySettingsOpen = false
     @State private var levelVisible = true
     @State private var zividFieldOfViewEnabled = false
@@ -620,7 +744,7 @@ struct TeachingView: View {
                     Divider()
                     if completed {
                         Button { Task { await session.continueTeaching() } } label: {
-                            Label("继续示教", systemImage: "camera.fill").frame(maxWidth: .infinity).padding(10)
+                            teachingActionLabel("继续示教", systemImage: "camera.fill")
                         }.buttonStyle(.bordered).disabled(session.busy || !ARController.supported)
                             .accessibilityIdentifier("continue-teaching")
                         Divider()
@@ -643,33 +767,11 @@ struct TeachingView: View {
                     } else {
                         Button {
                             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            scanningResult = true
+                            resultSyncOpen = true
                         } label: {
-                            Label("扫码同步到电脑", systemImage: "qrcode.viewfinder")
-                                .frame(maxWidth: .infinity).padding(10)
+                            teachingActionLabel("同步数据", systemImage: "arrow.triangle.2.circlepath")
                         }.buttonStyle(.borderedProminent).disabled(session.busy)
-                            .accessibilityIdentifier("scan-sync-result")
-                            .sheet(isPresented: $scanningResult, onDismiss: syncScannedResult) {
-                                PairingScannerView(purpose: .syncResult) { qr in
-                                    scannedResultCode = qr; scanningResult = false
-                                }
-                            }
-                        Button { Task { await shareResult() } } label: {
-                            Label("AirDrop / 导出结果", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity).padding(10)
-                        }
-                            .buttonStyle(.bordered).disabled(session.busy)
-                            .accessibilityIdentifier("share-teaching-result")
-                            .popover(item: $resultShare) { item in
-                                TeachingResultShareSheet(url: item.url) { activity, completed, error in
-                                    session.resultShareFinished(activity: activity, completed: completed, error: error)
-                                    resultShare = nil
-                                }.presentationCompactAdaptation(.sheet)
-                            }
-                        Divider()
-                        LANAddressFields(address: $session.serverConnection).disabled(session.busy)
-                        Button { Task { await session.finish(sync: true) } } label: { Label("局域网同步到电脑", systemImage: "wifi").frame(maxWidth: .infinity).padding(10) }
-                            .buttonStyle(.bordered).disabled(session.busy || !session.serverConnection.canConnect || session.current?.requiresResultPairing == true)
+                            .accessibilityIdentifier("sync-teaching-result")
                     }
                     if session.busy { ProgressView() }
                     if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.secondary) }
@@ -718,6 +820,7 @@ struct TeachingView: View {
             else { coverage.resume(); if !completed { Task { await ar.start() } } }
         }
         .sheet(isPresented: $displaySettingsOpen) { ModelDisplaySettingsView(geometry: geometry, renderer: renderer).environmentObject(session) }
+        .sheet(isPresented: $resultSyncOpen) { TeachingResultSyncView().environmentObject(session) }
         .fullScreenCover(isPresented: $review, onDismiss: { ar.refreshMarkers(session.current?.result.samples ?? []) }) {
             PoseReviewView(geometry: geometry, renderer: renderer, coverage: coverage).environmentObject(session)
         }
@@ -753,35 +856,18 @@ struct TeachingView: View {
         // On iPad the confirmation is a popover. Anchor it to the tapped button,
         // rather than the whole AR viewport and its other presentation modifiers.
         .confirmationDialog("完成示教？", isPresented: $finishing, titleVisibility: .visible) {
-            Button("完成并扫码同步") {
+            Button("完成并同步数据") {
                 ar.stop()
                 Task {
                     await session.finish(sync: false)
-                    if session.error.isEmpty && completed { scanningResult = true }
+                    if session.error.isEmpty && completed { resultSyncOpen = true }
                 }
             }
-            Button("完成并通过 AirDrop 分享") {
-                ar.stop()
-                Task {
-                    await session.finish(sync: false)
-                    if session.error.isEmpty && completed { await shareResult() }
-                }
-            }
-            Button("完成并同步到电脑") { ar.stop(); Task { await session.finish(sync: true) } }
-                .disabled(session.current?.requiresResultPairing == true)
             Button("仅完成并保存在 iPad") { ar.stop(); Task { await session.finish(sync: false) } }
             Button("继续示教", role: .cancel) {}
         } message: {
             Text("已记录 \(count) 个 Pose。完成后将锁定本次示教；可以现在同步，或仅保存在 iPad 后再同步。")
         }
-    }
-    private func shareResult() async {
-        if let url = await session.exportResult() { resultShare = TeachingResultShareItem(url: url) }
-    }
-    private func syncScannedResult() {
-        guard let qr = scannedResultCode else { return }
-        scannedResultCode = nil
-        Task { await session.syncResult(qr: qr) }
     }
     private func setSidebarCollapsed(_ collapsed: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

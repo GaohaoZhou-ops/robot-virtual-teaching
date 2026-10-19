@@ -36,7 +36,7 @@ export default function IPadPairingQRCode({ device = 'ipad', ticket, address, di
         <li>打开「Atlas 空间示教」，点击「搜索局域网电脑」。</li>
         <li>选择这台电脑，输入下方 4 位配对码，点击「配对并检查模型」。</li>
         <li>确认同步模型，预览后进入空间示教。</li>
-      </ol> : <p>iPad 首页扫码接收物体；已有示教结果时，点击「扫码同步到电脑」扫描此码。</p>}
+      </ol> : <p>iPad 首页扫码接收物体；已有示教结果时，点击「同步数据」，选择「扫码」后扫描此码。</p>}
       <div className="ipad-qr__manual"><div><strong className="ipad-code">{ticket.pairingCode}</strong></div>
         <button aria-label="复制配对码" disabled={disabled || expired} onClick={onCopy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>
       </div>

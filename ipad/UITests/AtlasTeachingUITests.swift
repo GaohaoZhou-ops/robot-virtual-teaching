@@ -201,14 +201,50 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         let project = app.buttons["local-project-\(fixtureID)"]
         XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
-        let scan = app.buttons["scan-sync-result"]
-        XCTAssertTrue(scan.waitForExistence(timeout: 30))
-        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait, .landscapeLeft] {
+        let sync = app.buttons["sync-teaching-result"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 30))
+        XCTAssertEqual(sync.label, "同步数据")
+        for (index, orientation) in [UIDeviceOrientation.landscapeLeft, .portrait, .landscapeLeft].enumerated() {
             XCUIDevice.shared.orientation = orientation
-            for _ in 0..<5 where !scan.isHittable {
+            for _ in 0..<5 where !sync.isHittable {
                 app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.82))
                     .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
             }
+            XCTAssertFalse(app.buttons["局域网同步到电脑"].exists)
+            XCTAssertFalse(app.buttons["AirDrop / 导出结果"].exists)
+            XCTAssertFalse(app.buttons["扫码同步到电脑"].exists)
+            XCTAssertFalse(app.textFields["server-port"].exists)
+            XCTAssertTrue(sync.isEnabled); sync.tap()
+            XCTAssertTrue(app.navigationBars["同步数据"].waitForExistence(timeout: 10))
+            let methods = app.segmentedControls["result-sync-method"]
+            XCTAssertTrue(methods.waitForExistence(timeout: 5), app.debugDescription)
+            let scan = app.buttons["scan-sync-result"]
+            XCTAssertTrue(scan.exists)
+            XCTAssertFalse(app.staticTexts["scanner-status"].exists, "selecting a method does not open the camera")
+            methods.buttons["Wi-Fi"].tap()
+            let port = app.textFields["server-port"]
+            XCTAssertTrue(port.waitForExistence(timeout: 5))
+            XCTAssertFalse(scan.exists)
+            let originalPort = port.value as? String ?? "21990"
+            if index == 0 {
+                port.tap()
+                port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: originalPort.count) + "65536")
+                XCTAssertFalse(app.buttons["wifi-sync-result"].isEnabled, "invalid ports cannot upload")
+            }
+            methods.buttons["AirDrop 导出"].tap()
+            XCTAssertTrue(app.buttons["share-teaching-result"].waitForExistence(timeout: 5))
+            XCTAssertFalse(port.exists)
+            XCTAssertFalse(app.buttons["wifi-sync-result"].exists)
+            XCTAssertFalse(app.staticTexts["result-sync-status"].exists, "changing methods does not export or sync")
+            methods.buttons["Wi-Fi"].tap()
+            XCTAssertEqual(port.value as? String, index == 0 ? "65536" : originalPort, "switching methods retains the address")
+            if index == 0 {
+                port.tap()
+                port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5) + originalPort + "\n")
+            }
+            let dialog = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            dialog.name = "Wi-Fi sync options - \(orientation.rawValue)"; dialog.lifetime = .keepAlways; add(dialog)
+            methods.buttons["扫码"].tap()
             XCTAssertTrue(scan.isEnabled); scan.tap()
             XCTAssertTrue(app.navigationBars["扫码同步到电脑"].waitForExistence(timeout: 10), app.debugDescription)
             XCTAssertTrue(app.staticTexts["scanner-status"].exists)
@@ -216,8 +252,11 @@ final class AtlasTeachingUITests: XCTestCase {
             attachment.name = "Result QR scanner - \(orientation.rawValue)"; attachment.lifetime = .keepAlways; add(attachment)
             app.buttons["cancel-pairing-scan"].tap()
             XCTAssertTrue(scan.waitForExistence(timeout: 5)); XCTAssertTrue(scan.isEnabled)
+            XCTAssertTrue(app.navigationBars["同步数据"].exists, "cancel returns to the method selector")
+            app.buttons["close-result-sync"].tap()
+            XCTAssertTrue(sync.waitForExistence(timeout: 5))
             XCTAssertFalse(app.buttons["finish-teaching"].exists)
-            XCTAssertTrue(app.buttons["share-teaching-result"].exists)
+            XCTAssertFalse(app.buttons["share-teaching-result"].exists)
         }
     }
 
@@ -238,14 +277,17 @@ final class AtlasTeachingUITests: XCTestCase {
                 .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
         }
         finish.tap()
-        let action = app.buttons["完成并扫码同步"]
+        let action = app.buttons["完成并同步数据"]
         XCTAssertTrue(action.waitForExistence(timeout: 8)); action.tap()
+        XCTAssertTrue(app.navigationBars["同步数据"].waitForExistence(timeout: 10), app.debugDescription)
+        app.buttons["scan-sync-result"].tap()
         XCTAssertTrue(app.navigationBars["扫码同步到电脑"].waitForExistence(timeout: 10), app.debugDescription)
         app.buttons["cancel-pairing-scan"].tap()
         XCTAssertTrue(app.buttons["scan-sync-result"].waitForExistence(timeout: 5))
+        app.buttons["close-result-sync"].tap()
         app.terminate(); app.launch()
         XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
-        XCTAssertTrue(app.buttons["scan-sync-result"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["sync-teaching-result"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["capture-pose"].exists)
     }
 
@@ -279,16 +321,14 @@ final class AtlasTeachingUITests: XCTestCase {
             attachment.name = "Draft completion options - \(orientation.rawValue)"
             attachment.lifetime = .keepAlways; add(attachment)
             XCTAssertTrue(opened, app.debugDescription)
-            XCTAssertTrue(app.buttons["完成并扫码同步"].exists)
-            XCTAssertTrue(app.buttons["完成并通过 AirDrop 分享"].exists)
-            XCTAssertTrue(app.buttons["完成并同步到电脑"].exists)
+            XCTAssertTrue(app.buttons["完成并同步数据"].exists)
             let cancel = app.buttons["继续示教"]
             if cancel.exists && cancel.isHittable { cancel.tap() }
             else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.25)).tap() }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == false"), object: save)], timeout: 5), .completed)
             XCTAssertTrue(finish.exists, "cancel preserves the editable draft")
-            XCTAssertFalse(app.buttons["share-teaching-result"].exists, "opening completion must not lock the project")
+            XCTAssertFalse(app.buttons["sync-teaching-result"].exists, "opening completion must not lock the project")
         }
     }
 
@@ -312,26 +352,31 @@ final class AtlasTeachingUITests: XCTestCase {
                     .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.35)))
             }
             finish.tap()
-            let action = app.buttons[index == 0 ? "仅完成并保存在 iPad" : "完成并通过 AirDrop 分享"]
+            let action = app.buttons[index == 0 ? "仅完成并保存在 iPad" : "完成并同步数据"]
             XCTAssertTrue(action.waitForExistence(timeout: 8)); action.tap()
-            let share = app.buttons["share-teaching-result"]
-            XCTAssertTrue(share.waitForExistence(timeout: 15), app.debugDescription)
+            let sync = app.buttons["sync-teaching-result"]
+            XCTAssertTrue(sync.waitForExistence(timeout: 15), app.debugDescription)
             XCTAssertFalse(app.buttons["capture-pose"].exists)
             if index == 1 {
+                XCTAssertTrue(app.navigationBars["同步数据"].waitForExistence(timeout: 10))
+                app.segmentedControls["result-sync-method"].buttons["AirDrop 导出"].tap()
+                let share = app.buttons["share-teaching-result"]
+                XCTAssertTrue(share.waitForExistence(timeout: 5)); share.tap()
                 let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "拷贝", "复制"])).firstMatch
                 XCTAssertTrue(copy.waitForExistence(timeout: 15), "completion must open the share sheet: \(app.debugDescription)")
                 let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
                 attachment.name = "Share immediately after completion"; attachment.lifetime = .keepAlways; add(attachment)
-                let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["Close", "关闭"])).firstMatch
+                let close = app.buttons.matching(NSPredicate(format: "label IN %@ AND identifier != %@", ["Close", "关闭"], "close-result-sync")).firstMatch
                 if close.exists { close.tap() }
                 else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.25)).tap() }
                 XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                     predicate: NSPredicate(format: "exists == false"), object: copy)], timeout: 5), .completed)
                 XCTAssertTrue(share.isEnabled, "cancelled sharing can be retried")
+                app.buttons["close-result-sync"].tap()
             }
             app.terminate(); app.launch()
             XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
-            XCTAssertTrue(share.waitForExistence(timeout: 15), "completed state survives relaunch")
+            XCTAssertTrue(sync.waitForExistence(timeout: 15), "completed state survives relaunch")
             XCTAssertFalse(app.buttons["finish-teaching"].exists)
             XCTAssertFalse(app.buttons["capture-pose"].exists)
             app.terminate()
@@ -348,18 +393,23 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         let project = app.buttons["local-project-\(fixtureID)"]
         XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
-        let share = app.buttons["share-teaching-result"]
-        XCTAssertTrue(share.waitForExistence(timeout: 30))
+        let sync = app.buttons["sync-teaching-result"]
+        XCTAssertTrue(sync.waitForExistence(timeout: 30))
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
-            if !share.isHittable { app.swipeUp() }
+            if !sync.isHittable { app.swipeUp() }
+            sync.tap()
+            let methods = app.segmentedControls["result-sync-method"]
+            XCTAssertTrue(methods.waitForExistence(timeout: 5))
+            methods.buttons["AirDrop 导出"].tap()
+            let share = app.buttons["share-teaching-result"]
             XCTAssertTrue(share.isEnabled); share.tap()
             let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "拷贝", "复制"])).firstMatch
             XCTAssertTrue(copy.waitForExistence(timeout: 15), app.debugDescription)
             let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             attachment.name = "Result share sheet - \(orientation.rawValue)"
             attachment.lifetime = .keepAlways; add(attachment)
-            let close = app.buttons.matching(NSPredicate(format: "label IN %@", ["Close", "关闭"])).firstMatch
+            let close = app.buttons.matching(NSPredicate(format: "label IN %@ AND identifier != %@", ["Close", "关闭"], "close-result-sync")).firstMatch
             if close.exists { close.tap() }
             else { app.coordinate(withNormalizedOffset: CGVector(dx: 0.03, dy: 0.25)).tap() }
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
@@ -367,6 +417,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertTrue(share.waitForExistence(timeout: 5))
             XCTAssertTrue(share.isEnabled, "cancelled sharing can be retried")
             XCTAssertFalse(app.buttons["capture-pose"].exists, "completed results stay locked")
+            app.buttons["close-result-sync"].tap()
         }
     }
 
