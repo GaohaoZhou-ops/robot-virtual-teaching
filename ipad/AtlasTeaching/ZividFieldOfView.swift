@@ -9,6 +9,27 @@ struct ZividFieldOfView: Equatable {
     static let horizontalDegrees: CGFloat = 56.6
     static let verticalDegrees: CGFloat = 35.6
     static let previewVerticalDegrees: CGFloat = 60
+    static let nativeWidth = 1944, nativeHeight = 1200
+    static let nativeAspect = CGFloat(nativeWidth) / CGFloat(nativeHeight)
+    static let near: Float = 0.3, far: Float = 1.3
+    static let tangentX = Float(tan(horizontalDegrees * .pi / 360))
+    static let tangentY = Float(tan(verticalDegrees * .pi / 360))
+
+    /// The saved robot optical frame looks along +Z. SceneKit uses -Z; the
+    /// caller applies opticalToARCamera once, independently of screen rotation.
+    static var projectionMatrix: simd_float4x4 {
+        simd_float4x4(columns: (
+            SIMD4(1 / tangentX, 0, 0, 0), SIMD4(0, 1 / tangentY, 0, 0),
+            SIMD4(0, 0, -(far + near) / (far - near), -1),
+            SIMD4(0, 0, -2 * far * near / (far - near), 0)))
+    }
+
+    static func fittedFrame(in available: CGSize) -> CGRect {
+        let width = max(0, min(available.width, available.height * nativeAspect))
+        let size = CGSize(width: width, height: width / nativeAspect)
+        return CGRect(x: (available.width - size.width) / 2, y: (available.height - size.height) / 2,
+                      width: size.width, height: size.height)
+    }
 
     let imageAspect: CGFloat
     /// Normalized display coordinates, before clipping. Never shrink a frustum

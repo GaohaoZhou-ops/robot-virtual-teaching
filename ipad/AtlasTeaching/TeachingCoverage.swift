@@ -32,9 +32,9 @@ enum TeachingCoverageProfile {
     // Twice the desktop depth-envelope resolution in each direction. The
     // footprint itself is evaluated per fragment, not per model vertex.
     static let columns = 28, rows = 18
-    static let near: Float = 0.3, far: Float = 1.3
-    static let tangentX = Float(tan(ZividFieldOfView.horizontalDegrees * .pi / 360))
-    static let tangentY = Float(tan(ZividFieldOfView.verticalDegrees * .pi / 360))
+    static let near = ZividFieldOfView.near, far = ZividFieldOfView.far
+    static let tangentX = ZividFieldOfView.tangentX
+    static let tangentY = ZividFieldOfView.tangentY
     static let rasterNear: Float = 0.001
 
     static func contains(_ point: SIMD3<Float>, depths: [Float]) -> Bool {
@@ -105,23 +105,13 @@ struct TeachingCoverageFrustum {
 
     static func recordedView(_ sample: TeachingSample) throws -> (cameraFromModel: simd_float4x4, frustum: Self) {
         guard let pose = TeachingCoveragePose(sample.cameraPose) else { throw TeachingError("Pose 相机参数无效") }
-        var cameraFromModel = pose.cameraFromModel
-        if let saved = sample.previewCameraTransform, saved.count == 16, saved.allSatisfy(\.isFinite) {
-            cameraFromModel = TeachingCoordinates.opticalToARCamera * simd_float4x4(elements: saved).inverse
-        }
+        let cameraFromModel = pose.cameraFromModel
         guard cameraFromModel.elements.allSatisfy(\.isFinite) else { throw TeachingError("Pose 相机变换无效") }
-        let aspect = sample.previewAspect.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? (4 / 3)
-        let tangentY = Float(tan(Double.pi / 6)) // Matches the legacy preview's 60° vertical lens.
-        var tangents = SIMD2(tangentY * aspect, tangentY), offset = SIMD2<Float>.zero
-        if let projection = sample.previewProjection, projection.count == 16, projection.allSatisfy(\.isFinite),
-           projection[0] > 0, projection[5] > 0 {
-            tangents = SIMD2(1 / projection[0], 1 / projection[5])
-            offset = SIMD2(-projection[8], projection[9])
-        }
-        // Inspection follows the saved image, including surfaces beyond the
-        // M70 working range. Use a finer depth map than the live coverage tint.
-        let frustum = Self(columns: 160, rows: 120, near: 0.001, far: 1000,
-            tangents: tangents, offset: offset, tolerance: SIMD3(0.003, 0.002, 0.05))
+        // Legacy preview fields describe the iPad screen's lens. All Pose
+        // inspection now uses the same M70 optical frame and range as desktop IK.
+        let frustum = Self(columns: 160, rows: 100, near: ZividFieldOfView.near, far: ZividFieldOfView.far,
+            tangents: SIMD2(ZividFieldOfView.tangentX, ZividFieldOfView.tangentY), offset: .zero,
+            tolerance: SIMD3(0.003, 0.002, 0.05))
         return (cameraFromModel, frustum)
     }
 }

@@ -27,7 +27,7 @@ final class PosePreviewPreparation: ObservableObject {
             let result = try await coverage.previewSnapshot(for: sample)
             try Task.checkCancellation()
             footprint = result
-            status = result.frameCount == 0 ? "此 Pose 的记录视野内没有点云" : ""
+            status = result.frameCount == 0 ? "此 Pose 的 M70 视野与工作距离内没有点云" : ""
         } catch {
             guard !Task.isCancelled else { return }
             status = "点云预览失败：\(error.localizedDescription)"
@@ -69,8 +69,8 @@ private final class PoseOverviewContainer: UIView {
     }
 }
 
-/// Uses the same optical frame and off-axis lens as the selected surface mask.
-/// The cone ends at the furthest visible surface, not at the preview's 1 km far plane.
+/// Uses the same M70 optical frame and lens as the selected surface mask.
+/// The cone ends at the furthest visible surface within the working range.
 struct PoseCameraProjection {
     let modelFromCamera: simd_float4x4
     let frustum: TeachingCoverageFrustum
@@ -352,12 +352,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let q = sample.cameraPose.quaternion
         var transform = simd_float4x4(simd_quatf(ix: q.x, iy: q.y, iz: q.z, r: q.w)) * TeachingCoordinates.opticalToARCamera
         transform.columns.3 = SIMD4(sample.cameraPose.position.simd, 1)
-        if let saved = sample.previewCameraTransform, saved.count == 16, saved.allSatisfy(\.isFinite) {
-            transform = simd_float4x4(elements: saved)
-        }
-        let projection = sample.previewProjection.flatMap { values in
-            values.count == 16 && values.allSatisfy(\.isFinite) ? values : nil
-        }
+        let projection = ZividFieldOfView.projectionMatrix.elements
         let poseChanged = sampleID != sample.id || recordedTransform != transform.elements || recordedProjection != projection
         let geometryChanged = sourceGeometry !== rendered
         let overviewChanged = sourceOverview !== overview
@@ -391,10 +386,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         if poseChanged {
             sampleID = sample.id; recordedTransform = transform.elements; recordedProjection = projection
             recordedCamera.simdTransform = transform
-            // Use a new camera so legacy samples never inherit a previous Pose's projection.
-            let lens = SCNCamera(); lens.zNear = 0.01; lens.zFar = 1000
-            lens.projectionDirection = .vertical; lens.fieldOfView = 60
-            if let projection { lens.projectionTransform = SCNMatrix4(simd_float4x4(elements: projection)) }
+            let lens = SCNCamera(); lens.zNear = Double(ZividFieldOfView.near); lens.zFar = Double(ZividFieldOfView.far)
+            lens.projectionDirection = .vertical; lens.fieldOfView = ZividFieldOfView.verticalDegrees
+            lens.projectionTransform = SCNMatrix4(simd_float4x4(elements: projection))
             recordedCamera.camera = lens
             snapshotDirty = true
         }
@@ -457,7 +451,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        sceneView.frame = bounds
+        sceneView.frame = ZividFieldOfView.fittedFrame(in: bounds.size)
         layoutImageViewport()
         let width = min(220, max(136, bounds.width * 0.28), max(0, bounds.width - 24))
         let height = min(width * 0.75, max(0, bounds.height * 0.42))
@@ -532,10 +526,20 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     func restoreRecordedView() {
         controller.stopInertia()
         camera.simdTransform = recordedCamera.simdTransform
-        camera.camera = recordedCamera.camera?.copy() as? SCNCamera
-        // SCNCamera.copy() drops a custom projection matrix.
+        // The inspection camera starts with the captured framing, but it is
+        // independent of the physical capture camera. Moving around an already
+        // captured cloud must never recrop it to M70's 0.3–1.3 m working range.
+        let lens = recordedCamera.camera?.copy() as? SCNCamera ?? SCNCamera()
+        let near: Float = 0.001, far: Float = 1000
+        lens.zNear = Double(near); lens.zFar = Double(far)
+        camera.camera = lens
+        // SCNCamera.copy() drops a custom projection matrix. Preserve image
+        // framing while replacing only its depth planes for free inspection.
         if let recordedProjection {
-            camera.camera?.projectionTransform = SCNMatrix4(simd_float4x4(elements: recordedProjection))
+            var projection = simd_float4x4(elements: recordedProjection)
+            projection[2].z = -(far + near) / (far - near)
+            projection[3].z = -2 * far * near / (far - near)
+            lens.projectionTransform = SCNMatrix4(projection)
         }
         controller = SCNCameraController()
         controller.pointOfView = camera
@@ -768,7 +772,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         }
         // Bound memory even on a Retina iPad; cache only the selected Pose.
         let scale = min((window?.screen.scale ?? 2) * imageDetailScale, 3200 / max(bounds.width, bounds.height))
-        let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        let fitted = ZividFieldOfView.fittedFrame(in: bounds.size).size
+        let width = max(1, (fitted.width * scale).rounded())
+        let size = CGSize(width: width, height: (width / ZividFieldOfView.nativeAspect).rounded())
         guard snapshotDirty || size != snapshotSize else { return }
         let renderer = SCNRenderer(device: sceneView.device, options: nil)
         renderer.scene = recordedScene; renderer.pointOfView = recordedCamera

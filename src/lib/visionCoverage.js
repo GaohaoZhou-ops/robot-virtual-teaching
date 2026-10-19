@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { ZIVID_M70_PROFILE } from './zividCamera.js';
 
 export const VISION_COVERAGE_MODE = 'surface-truncated-optical-frusta';
 export const VISION_COVERAGE_SURFACE_STOP = 'first-point-depth-grid';
@@ -121,20 +122,20 @@ export const buildVisionCoverageDepthGrid = (
   )));
   const rows = Math.max(3, Math.floor(finiteNumber(options.rows, DEFAULT_GRID_ROWS)));
   const horizontalFov = THREE.MathUtils.clamp(
-    finiteNumber(calibration?.horizontalFov, 56.6),
+    finiteNumber(calibration?.horizontalFov, ZIVID_M70_PROFILE.horizontalFov),
     1,
     175,
   );
   const verticalFov = THREE.MathUtils.clamp(
-    finiteNumber(calibration?.verticalFov, 35.6),
+    finiteNumber(calibration?.verticalFov, ZIVID_M70_PROFILE.verticalFov),
     1,
     175,
   );
   const near = Math.max(
     MINIMUM_DEPTH,
-    finiteNumber(calibration?.workingNear, 0.3),
+    finiteNumber(calibration?.workingNear, ZIVID_M70_PROFILE.near),
   );
-  const far = Math.max(near, finiteNumber(calibration?.workingFar, 1.3));
+  const far = Math.max(near, finiteNumber(calibration?.workingFar, ZIVID_M70_PROFILE.far));
   const tangentX = Math.tan(THREE.MathUtils.degToRad(horizontalFov / 2));
   const tangentY = Math.tan(THREE.MathUtils.degToRad(verticalFov / 2));
   const buckets = Array.from({ length: columns * rows }, () => []);

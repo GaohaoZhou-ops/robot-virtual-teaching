@@ -1,0 +1,8 @@
+.mobile-teaching-save { display: grid; gap: 8px; margin: 12px 0; padding: 12px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-soft); }
+.mobile-teaching-save > strong { color: var(--text); font-size: 11px; }
+.mobile-teaching-save > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.mobile-teaching-save > button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 12px; border: 1px solid var(--cyan); border-radius: 5px; color: var(--cyan); background: var(--panel); font-size: 11px; cursor: pointer; }
+.mobile-teaching-save > button:hover:not(:disabled) { background: var(--panel-soft); }
+.mobile-teaching-save > button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.mobile-teaching-save > button:disabled { opacity: .45; cursor: default; }
+.mobile-teaching-save > small { color: var(--muted); font-size: 10px; line-height: 1.6; }

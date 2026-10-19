@@ -5,6 +5,7 @@ import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
+import { ZIVID_M70_PROFILE } from './zividCamera.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -270,7 +271,7 @@ const normalizeTeachingCameraCapture = (value) => {
   return {
     version: Math.max(1, Math.floor(numberOr(value.version, 1))),
     status: String(value.status || 'complete'),
-    cameraModel: String(value.cameraModel || 'Zivid 2 M70'),
+    cameraModel: String(value.cameraModel || ZIVID_M70_PROFILE.model),
     capturedAt: String(value.capturedAt || ''),
     imageResolution,
     calibration: {
@@ -279,11 +280,11 @@ const normalizeTeachingCameraCapture = (value) => {
         ? value.calibration.nativeResolution
           .slice(0, 2)
           .map((item) => Math.max(1, Math.floor(numberOr(item, 1))))
-        : [1944, 1200],
-      horizontalFov: numberOr(value.calibration?.horizontalFov, 56.6),
-      verticalFov: numberOr(value.calibration?.verticalFov, 35.6),
-      workingNear: numberOr(value.calibration?.workingNear, 0.3),
-      workingFar: numberOr(value.calibration?.workingFar, 1.3),
+        : [ZIVID_M70_PROFILE.nativeWidth, ZIVID_M70_PROFILE.nativeHeight],
+      horizontalFov: numberOr(value.calibration?.horizontalFov, ZIVID_M70_PROFILE.horizontalFov),
+      verticalFov: numberOr(value.calibration?.verticalFov, ZIVID_M70_PROFILE.verticalFov),
+      workingNear: numberOr(value.calibration?.workingNear, ZIVID_M70_PROFILE.near),
+      workingFar: numberOr(value.calibration?.workingFar, ZIVID_M70_PROFILE.far),
     },
     pointBudgetPerCamera: Math.max(0, Math.floor(numberOr(value.pointBudgetPerCamera))),
     map: {

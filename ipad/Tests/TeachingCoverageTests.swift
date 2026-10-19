@@ -63,14 +63,23 @@ import AppKit
         precondition(missing.frameCount == 0 && missing.frames == nil)
         var previewSample = TeachingSample(segmentId: "preview", kind: "keyframe", cameraPose: camera())
         let distantPreview = try await emptyEngine.preview(previewSample)
-        precondition(distantPreview.frameCount == 1 && abs(Float(distantPreview.modelBounds!.0.z) - 2) < 0.0001,
-                     "Pose inspection includes visible surfaces beyond M70's working range")
+        precondition(distantPreview.frameCount == 0,
+                     "Pose inspection and desktop capture share M70's working range")
         previewSample.previewCameraTransform = TeachingCoordinates.opticalToARCamera.elements
         previewSample.previewProjection = [4, 0, 0, 0, 0, 4, 0, 0, 0.3, -0.2, -1.000001, -1, 0, 0, -0.001000001, 0]
-        let offAxis = try await emptyEngine.preview(previewSample)
+        previewSample.previewCameraTransform![12] = 3
+        previewSample.previewAspect = 4 / 3
+        let savedSample = try JSONEncoder().encode(previewSample)
+        let offAxis = try await engine.preview(previewSample)
         let offAxisBounds = offAxis.modelBounds!
-        precondition(abs(Float(offAxisBounds.0.x) + 0.35) < 0.0001 && abs(Float(offAxisBounds.1.y) - 0.6) < 0.0001,
-                     "preview clipping preserves the saved focal lengths, principal point and camera orientation")
+        precondition(abs(Float(offAxisBounds.0.x) + TeachingCoverageProfile.tangentX) < 0.0001
+                     && abs(Float(offAxisBounds.1.y) - TeachingCoverageProfile.tangentY) < 0.0001,
+                     "old iPad preview lens and screen transform cannot alter the M70 frame at the saved optical Pose")
+        let unchangedSample = try JSONEncoder().encode(previewSample)
+        let savedObject = try JSONSerialization.jsonObject(with: savedSample) as! NSDictionary
+        let unchangedObject = try JSONSerialization.jsonObject(with: unchangedSample) as! NSDictionary
+        precondition(savedObject == unchangedObject,
+                     "reinterpreting old previews does not rewrite saved samples")
 
         let q = simd_quatf(angle: 0.76, axis: simd_normalize(SIMD3<Float>(1, 2, 3)))
         let movedPose = TeachingCoveragePose(camera(position: SIMD3(0.8, -0.3, 0.4), rotation: q))!
@@ -154,11 +163,11 @@ import AppKit
         let clippedBack = capture("pose-local-occlusion.png")
         precondition(clippedBack[center] == 0 && clippedBack[center + 1] == 0 && clippedBack[center + 2] == 0,
                      "rotating behind the selected Pose cannot reveal a rear surface hidden in the recorded view")
-        node.geometry = try distant.makeGeometry(settings: ModelDisplaySettings(meshQuality: .full))
+        node.geometry = try flat.makeGeometry(settings: ModelDisplaySettings(meshQuality: .full))
         TeachingCoverageRenderer.apply(offAxis, opacity: 0, to: node.geometry!.firstMaterial!, clipOutside: true)
         let recordedFrustum = capture("pose-recorded-frustum.png")
         precondition(recordedFrustum[center] > 0 && recordedFrustum[outside] == 0,
-                     "the actual preview shader uses its own depth resolution and recorded projection beyond the working range")
+                     "the actual preview shader uses the unified M70 projection and its higher depth resolution")
 
         let display = TeachingCoverageRenderer()
         let sample = TeachingSample(segmentId: "test", kind: "keyframe", cameraPose: camera())

@@ -57,6 +57,8 @@ export default function TeachingDataPage({
   canExportTeachingData = false,
   onExportAbxTeaching,
   onSolveMobileTask,
+  onSaveMobileTask,
+  mobileSaveDisabledReason,
 }) {
   const [archiveSelection, setArchiveSelection] = useState(null);
   const coordinateFrameLabel = teachingSpaceMode === 'independent'
@@ -251,7 +253,8 @@ export default function TeachingDataPage({
               />
             </section>
 
-            {(archiveSelection?.task || activeTask)?.mobileCapture ? <IPadCaptureDetails key={(archiveSelection?.task || activeTask).id} task={archiveSelection?.task || activeTask} onSolve={onSolveMobileTask} /> : <TeachingPoseRobotPreview
+            {(archiveSelection?.task || activeTask)?.mobileCapture ? <IPadCaptureDetails key={(archiveSelection?.task || activeTask).id} task={archiveSelection?.task || activeTask} tasks={tasks}
+              onSolve={onSolveMobileTask} onSave={onSaveMobileTask} saveDisabledReason={mobileSaveDisabledReason} /> : <TeachingPoseRobotPreview
               task={archiveSelection?.task || activeTask}
               parkingPoint={archiveSelection?.parkingPoint || null}
               pose={archiveSelection?.pose || null}

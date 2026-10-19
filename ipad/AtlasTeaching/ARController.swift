@@ -292,9 +292,9 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
         return TeachingSample(segmentId: segmentID, kind: "keyframe",
             cameraPose: TeachingCoordinates.opticalPose(camera: frame.camera.transform, worldFromModel: worldFromModel),
             surfacePoint: surfaceWorldPoint().map { TeachingCoordinates.modelPoint($0, worldFromModel: worldFromModel) },
-            previewCameraTransform: view.pointOfView.map { (worldFromModel.inverse * $0.simdWorldTransform).elements },
-            previewProjection: view.pointOfView?.camera.map { simd_float4x4($0.projectionTransform).elements },
-            previewAspect: Float(view.bounds.width / view.bounds.height))
+            previewCameraTransform: (worldFromModel.inverse * frame.camera.transform).elements,
+            previewProjection: ZividFieldOfView.projectionMatrix.elements,
+            previewAspect: Float(ZividFieldOfView.nativeAspect))
     }
     func recordKeyframe(_ sample: TeachingSample) {
         // Confirmation commits the original frame, never a new camera sample.

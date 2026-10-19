@@ -279,6 +279,28 @@ playwright/.auth/
 /tests/atlas-vision-*.plist
 /tests/atlas-vision-projects-*/
 
+# Pose review / batch-edit and M70 comparison workspaces copied from /tmp.
+# These contain device project snapshots as well as screenshots and test reports.
+# Scope the directories and ZIPs to local output locations, preserving fixtures.
+/atlas-pose-batch-*/
+/atlas-pose-batch-*.zip
+/ipad/atlas-pose-batch-*/
+/ipad/atlas-pose-batch-*.zip
+/tests/atlas-pose-batch-*/
+/tests/atlas-pose-batch-*.zip
+/atlas-pose-header-*/
+/atlas-pose-header-*.zip
+/ipad/atlas-pose-header-*/
+/ipad/atlas-pose-header-*.zip
+/tests/atlas-pose-header-*/
+/tests/atlas-pose-header-*.zip
+/atlas-ipad-fov-review-*/
+/atlas-ipad-fov-review-*.zip
+/ipad/atlas-ipad-fov-review-*/
+/ipad/atlas-ipad-fov-review-*.zip
+/tests/atlas-ipad-fov-review-*/
+/tests/atlas-ipad-fov-review-*.zip
+
 # USB pairing records created by local device-debugging tools contain credentials.
 /atlas-ipad-*-pairing/
 /ipad/atlas-ipad-*-pairing/
@@ -502,6 +524,7 @@ Desktop.ini
 
 # Local iPad / Vision Pro model-transfer payloads
 *.atls
+*.atls.zip
 
 # Locally recovered/exported projects may contain hundreds of MB of map data
 # Scope the recovery workspace to the root, preserving nested fixture inputs.

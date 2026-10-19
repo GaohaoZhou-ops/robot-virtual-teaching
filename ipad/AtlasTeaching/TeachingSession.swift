@@ -233,6 +233,38 @@ final class TeachingSession: ObservableObject {
         current?.result.samples = remaining
         scheduleSave(force: true)
     }
+    @discardableResult
+    func deleteSelectedSamples(_ ids: Set<String>) async -> Bool {
+        guard !busy, !ids.isEmpty, let project = current else { return false }
+        guard ids.isSubset(of: Set(project.result.samples.map(\.id))) else {
+            error = "所选 Pose 已变化，请重新选择"; return false
+        }
+        busy = true; error = ""
+        defer { busy = false }
+        // Drain earlier autosaves before persisting the batch so they cannot
+        // restore a deleted Pose afterward. Publish only a successfully saved edit.
+        await saveTask?.value
+        do {
+            let edited: LocalProject
+            if project.result.completedAt != nil {
+                edited = try await ProjectStore.shared.continueTeaching(project, removingSampleIDs: ids)
+            } else {
+                var draft = project
+                draft.result.samples.removeAll { ids.contains($0.id) }
+                try await ProjectStore.shared.save(draft)
+                edited = draft
+            }
+            current = edited
+            status = project.result.completedAt == nil
+                ? "已删除 \(ids.count) 个 Pose 并保存"
+                : "已在编辑副本中删除 \(ids.count) 个 Pose；原完成结果保留在本地项目"
+            await reload()
+            return true
+        } catch {
+            self.error = "批量删除未保存，Pose 保持原样：\(error.localizedDescription)"
+            return false
+        }
+    }
     private func scheduleSave(force: Bool = false) {
         guard let project = current, force || Date().timeIntervalSince(lastSaved) >= 1 else { return }
         lastSaved = Date()

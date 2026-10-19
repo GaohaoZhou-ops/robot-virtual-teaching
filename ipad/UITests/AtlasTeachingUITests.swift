@@ -566,7 +566,8 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertFalse(first.exists)
         XCTAssertTrue(app.otherElements["pose-review-preview"].exists, "deleting the current Pose selects a remaining preview")
 
-        let enter = app.buttons["delete-review-pose"], bulk = app.buttons["delete-selected-poses"]
+        let enter = app.buttons["select-poses"], bulk = app.buttons["delete-selected-poses"]
+        XCTAssertTrue(enter.isHittable, "multi-select is always available above the list")
         let all = app.buttons["select-all-poses"], selectedCount = app.staticTexts["selected-poses-count"]
         enter.tap()
         XCTAssertTrue(all.waitForExistence(timeout: 5))
@@ -623,12 +624,118 @@ final class AtlasTeachingUITests: XCTestCase {
         expectCount(0)
         XCTAssertTrue(app.staticTexts["还没有 Pose"].exists)
         XCTAssertFalse(app.otherElements["pose-review-preview"].exists)
-        XCTAssertFalse(all.exists); XCTAssertFalse(enter.exists)
+        XCTAssertFalse(all.exists); XCTAssertFalse(enter.isEnabled)
         screenshot("Pose review after deleting all")
         close.tap()
         XCTAssertFalse(review.isEnabled)
         app.buttons["本地项目"].tap()
         XCTAssertTrue(project.waitForExistence(timeout: 10))
+    }
+
+    func testCompletedPoseBatchDeletionPreservesOriginal() throws {
+        guard let fixtureID = ProcessInfo.processInfo.environment["ATLAS_BATCH_COMPLETED_FIXTURE_ID"],
+              UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Provide a disposable completed project named UI-Batch-Completed; this test removes its fixtures")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(fixtureID)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15))
+        XCTAssertTrue(project.label.contains("UI-Batch-Completed"))
+        project.tap()
+        let review = app.buttons["review-poses"], close = app.buttons["close-pose-review"]
+        XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
+        let enter = app.buttons["select-poses"]
+        XCTAssertTrue(enter.waitForExistence(timeout: 10)); XCTAssertTrue(enter.isHittable)
+        let count = app.staticTexts["pose-review-count"]
+        let initial = try XCTUnwrap(Int(count.label.split(separator: " ").first ?? ""))
+        XCTAssertGreaterThanOrEqual(initial, 6)
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-pose-"))
+        let firstID = rows.element(boundBy: 0).identifier, secondID = rows.element(boundBy: 1).identifier
+        let selectedCount = app.staticTexts["selected-poses-count"]
+        let all = app.buttons["select-all-poses"], remove = app.buttons["delete-selected-poses"]
+        enter.tap()
+        XCTAssertTrue(app.staticTexts["completed-pose-edit-note"].exists)
+        XCTAssertFalse(remove.isEnabled)
+        app.buttons[firstID].tap(); app.buttons[secondID].tap()
+        XCTAssertEqual(selectedCount.label, "已选 2/\(initial)")
+        all.tap()
+        XCTAssertEqual(selectedCount.label, "已选 \(initial)/\(initial)")
+        XCTAssertEqual(all.value as? String, "已全选")
+        all.tap()
+        XCTAssertEqual(selectedCount.label, "已选 0/\(initial)")
+        XCTAssertFalse(remove.isEnabled)
+        app.buttons[firstID].tap(); app.buttons[secondID].tap()
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(all.isHittable); XCTAssertTrue(remove.isHittable)
+            XCTAssertEqual(selectedCount.label, "已选 2/\(initial)")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Pose batch selection \(orientation.isLandscape ? "landscape" : "portrait")"
+            shot.lifetime = .keepAlways; add(shot)
+        }
+        app.buttons["cancel-pose-selection"].tap()
+        XCTAssertEqual(count.label, "\(initial) 个 Pose")
+        XCTAssertFalse(app.textFields["review-pose-name"].exists)
+        enter.tap()
+        XCTAssertEqual(selectedCount.label, "已选 0/\(initial)")
+        app.buttons[firstID].tap(); app.buttons[secondID].tap(); remove.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", "\(initial - 2) 个 Pose"), object: count)], timeout: 30), .completed)
+        XCTAssertTrue(app.textFields["review-pose-name"].waitForExistence(timeout: 10), "the result is an editable draft")
+        XCTAssertFalse(app.buttons[firstID].exists); XCTAssertFalse(app.buttons[secondID].exists)
+        XCTAssertFalse(all.exists)
+        close.tap(); app.buttons["本地项目"].tap()
+        XCTAssertTrue(project.waitForExistence(timeout: 15))
+        app.terminate(); app.launch()
+        let copies = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "local-project-", "UI-Batch-Completed"))
+        XCTAssertEqual(copies.count, 2, "a completed edit creates one copy and retains the original")
+        let copy = (0..<copies.count).map { copies.element(boundBy: $0) }.first { $0.identifier != project.identifier }!
+        let copyID = String(copy.identifier.dropFirst("local-project-".count))
+        copy.tap(); XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.label, "\(initial - 2) 个 Pose", "batch deletion survives reopening")
+        XCTAssertFalse(app.buttons[firstID].exists); XCTAssertFalse(app.buttons[secondID].exists)
+        close.tap(); app.buttons["本地项目"].tap()
+        project.tap(); XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertEqual(count.label, "\(initial) 个 Pose")
+        XCTAssertTrue(app.buttons[firstID].exists); XCTAssertTrue(app.buttons[secondID].exists)
+        XCTAssertFalse(app.textFields["review-pose-name"].exists, "the original is still completed")
+        close.tap(); app.buttons["本地项目"].tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        for id in [copyID, fixtureID] {
+            let row = app.buttons["local-project-\(id)"]
+            XCTAssertTrue(row.label.contains("UI-Batch-Completed"))
+            row.swipeLeft(); app.buttons["swipe-delete-local-project-\(id)"].tap()
+            let confirm = app.buttons["confirm-delete-local-project"].firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+        }
+    }
+
+    func testRemoveDisposablePoseBatchFixtures() throws {
+        let ids = (ProcessInfo.processInfo.environment["ATLAS_BATCH_CLEANUP_IDS"] ?? "").split(separator: ",").map(String.init)
+        guard !ids.isEmpty, ids.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+            throw XCTSkip("Provide explicit disposable batch fixture IDs for cleanup")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.otherElements["library-content"].waitForExistence(timeout: 15))
+        for id in ids {
+            let row = app.buttons["local-project-\(id)"]
+            for _ in 0..<5 where !row.isHittable { app.swipeUp() }
+            XCTAssertTrue(row.exists)
+            XCTAssertTrue(row.label.contains("UI-Batch-"), "cleanup is limited to marked test fixtures")
+            row.swipeLeft(); app.buttons["swipe-delete-local-project-\(id)"].tap()
+            let confirm = app.buttons["confirm-delete-local-project"].firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+        }
     }
 
     func testPoseLeftSwipeAcrossRowAndRefresh() throws {
@@ -684,14 +791,14 @@ final class AtlasTeachingUITests: XCTestCase {
     }
 
     func testPosePreviewKeepsRecordedImageAndCameraIndependent() throws {
-        let geometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
+        let geometry = SCNBox(width: 0.5, height: 0.4, length: 0.2, chamferRadius: 0)
         let material = SCNMaterial(); material.lightingModel = .constant; material.diffuse.contents = UIColor.orange
         geometry.materials = [material]
-        var transform = matrix_identity_float4x4; transform.columns.3 = SIMD4(0, 0, 3, 1)
+        var transform = matrix_identity_float4x4; transform.columns.3 = SIMD4(0, 0, 1, 1)
         let projection = simd_float4x4(columns: (
             SIMD4(1.3, 0, 0, 0), SIMD4(0, 1.73, 0, 0), SIMD4(0.08, -0.04, -1.00002, -1), SIMD4(0, 0, -0.0200002, 0)))
         var sample = TeachingSample(segmentId: "preview-test", kind: "keyframe",
-            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 3)), quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))),
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)), quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))),
             previewCameraTransform: transform.elements, previewProjection: projection.elements, previewAspect: 4 / 3)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let original = try encoder.encode(sample)
@@ -702,6 +809,8 @@ final class AtlasTeachingUITests: XCTestCase {
         }
         update(.image)
         let recordedImage = try XCTUnwrap(view.imageView.image)
+        XCTAssertEqual(recordedImage.size.width / recordedImage.size.height, ZividFieldOfView.nativeAspect, accuracy: 0.005)
+        XCTAssertEqual(view.sceneView.frame.width / view.sceneView.frame.height, ZividFieldOfView.nativeAspect, accuracy: 0.0001)
         let recordedPNG = try XCTUnwrap(recordedImage.pngData())
         let screenshot = XCTAttachment(image: recordedImage); screenshot.name = "Recorded 2D model image"
         screenshot.lifetime = .keepAlways; add(screenshot)
@@ -709,8 +818,12 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertFalse(view.sceneView.isUserInteractionEnabled)
         update(.interactive)
         view.zoom(by: 2)
-        XCTAssertEqual(view.camera.simdPosition.z, 1.5, accuracy: 0.001, "pinch must dolly with a custom projection")
-        XCTAssertEqual(simd_float4x4(try XCTUnwrap(view.camera.camera).projectionTransform).elements, projection.elements)
+        XCTAssertEqual(view.camera.simdPosition.z, 0.5, accuracy: 0.001, "pinch must dolly with a custom projection")
+        let inspectionLens = try XCTUnwrap(view.camera.camera)
+        XCTAssertEqual(simd_float4x4(inspectionLens.projectionTransform)[0].x, ZividFieldOfView.projectionMatrix[0].x)
+        XCTAssertEqual(simd_float4x4(inspectionLens.projectionTransform)[1].y, ZividFieldOfView.projectionMatrix[1].y)
+        XCTAssertLessThan(inspectionLens.zNear, Double(ZividFieldOfView.near))
+        XCTAssertGreaterThan(inspectionLens.zFar, Double(ZividFieldOfView.far))
         view.translate(by: CGPoint(x: 35, y: -20))
         XCTAssertNotEqual(view.camera.simdPosition.x, 0)
         let inspected = view.camera.simdTransform.elements
@@ -725,19 +838,82 @@ final class AtlasTeachingUITests: XCTestCase {
         update(.interactive)
         XCTAssertEqual(view.camera.simdTransform.elements, inspected, "unrelated SwiftUI updates must not reset the camera")
         update(.interactive, reset: 1)
-        XCTAssertEqual(view.camera.simdTransform.elements, transform.elements)
+        for (actual, expected) in zip(view.camera.simdTransform.elements, transform.elements) {
+            XCTAssertEqual(actual, expected, accuracy: 0.00001)
+        }
         // Force a fresh snapshot after interaction and resizing, not only a cache hit.
         view.frame.size = CGSize(width: 800, height: 600); update(.image, reset: 1)
         XCTAssertNotNil(view.imageView.image)
         view.frame.size = CGSize(width: 400, height: 300); update(.image, reset: 1)
         XCTAssertEqual(view.imageView.image?.pngData(), recordedPNG)
         sample.id = UUID().uuidString; sample.previewCameraTransform = nil; sample.previewProjection = nil
-        sample.cameraPose.position = Point3(SIMD3(0.4, 0.2, 4))
+        sample.cameraPose.position = Point3(SIMD3(0.4, 0.2, 0.9))
         update(.interactive, reset: 1)
-        XCTAssertEqual(view.camera.simdPosition, SIMD3(0.4, 0.2, 4))
-        XCTAssertNotEqual(simd_float4x4(try XCTUnwrap(view.camera.camera).projectionTransform).elements, projection.elements,
-                          "legacy samples cannot inherit another Pose's custom intrinsics")
+        XCTAssertEqual(view.camera.simdPosition, SIMD3(0.4, 0.2, 0.9))
+        let legacyLens = simd_float4x4(try XCTUnwrap(view.camera.camera).projectionTransform)
+        XCTAssertEqual(legacyLens[0].x, ZividFieldOfView.projectionMatrix[0].x)
+        XCTAssertEqual(legacyLens[1].y, ZividFieldOfView.projectionMatrix[1].y,
+                       "legacy samples start at their captured framing with an independent inspection camera")
+        view.frame.size = CGSize(width: 300, height: 600); update(.interactive, reset: 1)
+        XCTAssertEqual(view.sceneView.frame.width / view.sceneView.frame.height, ZividFieldOfView.nativeAspect, accuracy: 0.0001)
         view.stop()
+    }
+
+    func testPoseInspectionMovesFreelyWithoutRecapturingCloud() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        let geometry = SCNPlane(width: 4, height: 3)
+        let material = SCNMaterial(); material.lightingModel = .constant
+        material.diffuse.contents = UIColor.orange; material.isDoubleSided = true
+        geometry.materials = [material]
+        let sample = TeachingSample(segmentId: "fixed-capture", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let original = try encoder.encode(sample)
+        var frame = try XCTUnwrap(TeachingCoveragePose(sample.cameraPose)).cameraFromModel
+        let frames = try XCTUnwrap(device.makeBuffer(bytes: &frame, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
+        let values = [Float](repeating: 1, count: TeachingCoverageProfile.columns * TeachingCoverageProfile.rows)
+        let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
+        let footprint = TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1)
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 648, height: 400)
+        defer { view.stop() }
+        func update(_ mode: PosePreviewMode) {
+            view.update(rendered: geometry, footprint: footprint, sample: sample, mode: mode, resetRevision: 0)
+            view.layoutIfNeeded()
+        }
+        update(.image)
+        let capturedImage = try XCTUnwrap(view.imageView.image?.pngData())
+        update(.interactive)
+        let renderer = SCNRenderer(device: device, options: nil)
+        renderer.scene = view.sceneView.scene; renderer.pointOfView = view.camera
+        func assertSurfaceVisible(_ label: String) throws {
+            let image = renderer.snapshot(atTime: 0, with: CGSize(width: 324, height: 200), antialiasingMode: .none)
+            let cg = try XCTUnwrap(image.cgImage)
+            var rgba = [UInt8](repeating: 0, count: 4)
+            try rgba.withUnsafeMutableBytes { raw in
+                let context = try XCTUnwrap(CGContext(data: raw.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: -cg.width / 2, y: -cg.height / 2, width: cg.width, height: cg.height))
+            }
+            XCTAssertGreaterThan(rgba[0], 200, label)
+            XCTAssertGreaterThan(rgba[1], 70, label)
+            XCTAssertLessThan(rgba[2], 40, label)
+        }
+        try assertSurfaceVisible("captured surface at the original Pose")
+        view.zoom(by: 0.25)
+        XCTAssertGreaterThan(view.camera.simdPosition.z, ZividFieldOfView.far)
+        try assertSurfaceVisible("zooming out beyond M70 range keeps the captured cloud visible")
+        view.zoom(by: 20)
+        XCTAssertLessThan(view.camera.simdPosition.z, ZividFieldOfView.near)
+        try assertSurfaceVisible("zooming in closer than M70 range keeps the captured cloud visible")
+        view.camera.simdPosition = SIMD3(2, 0, 2)
+        view.camera.look(at: SCNVector3Zero)
+        try assertSurfaceVisible("orbiting the captured surface never recalculates its acquisition mask")
+        XCTAssertEqual(frames.contents().load(as: simd_float4x4.self).elements, frame.elements)
+        update(.image)
+        XCTAssertEqual(view.imageView.image?.pngData(), capturedImage, "inspection cannot change the recorded 2D result")
+        XCTAssertEqual(try encoder.encode(sample), original, "inspection cannot change the saved Pose or camera parameters")
     }
 
     func testPoseImageExcludesCoverageWhileGlobalModelKeepsIt() throws {
@@ -825,9 +1001,9 @@ final class AtlasTeachingUITests: XCTestCase {
     }
 
     func testPoseImageZoomPanRestoreAndResize() throws {
-        var geometry: SCNGeometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
+        var geometry: SCNGeometry = SCNBox(width: 0.5, height: 0.4, length: 0.2, chamferRadius: 0)
         var sample = TeachingSample(segmentId: "image-detail", kind: "keyframe",
-            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 3)),
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)),
                 quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
         let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
         func update(_ mode: PosePreviewMode, reset: Int = 0) {
@@ -869,7 +1045,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(view.camera.simdTransform.elements, inspected, "fitting the image does not reset the 3D camera")
         scroll.setZoomScale(2, animated: false)
         update(.interactive, reset: 2)
-        XCTAssertEqual(view.camera.simdPosition.z, 3, accuracy: 0.001)
+        XCTAssertEqual(view.camera.simdPosition.z, 1, accuracy: 0.001)
         XCTAssertEqual(scroll.zoomScale, 2, accuracy: 0.001, "resetting 3D leaves the image zoom alone")
         sample.id = UUID().uuidString
         update(.image, reset: 2)
@@ -1089,25 +1265,26 @@ final class AtlasTeachingUITests: XCTestCase {
         }
     }
 
-    func testCameraProjectionMatchesSavedLensAndSurfaceDepth() throws {
+    func testCameraProjectionMatchesM70LensAndSurfaceDepth() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         var transform = simd_float4x4(simd_quatf(angle: 0.8, axis: simd_normalize(SIMD3<Float>(1, 2, 3))))
         transform.columns.3 = SIMD4(2, -1, 3, 1)
-        let lens = simd_float4x4(columns: (
+        let oldLens = simd_float4x4(columns: (
             SIMD4(1.2, 0, 0, 0), SIMD4(0, 1.8, 0, 0), SIMD4(0.15, -0.1, -1.00002, -1), SIMD4(0, 0, -0.0200002, 0)))
         var sample = TeachingSample(segmentId: "projection", kind: "keyframe",
-            cameraPose: CameraPose(position: Point3(.zero), quaternion: Rotation4(simd_quatf(angle: 0, axis: SIMD3(0, 1, 0)))),
-            previewCameraTransform: transform.elements, previewProjection: lens.elements, previewAspect: 4 / 3)
+            cameraPose: CameraPose(position: Point3(transform.translation), quaternion: Rotation4(simd_quatf(transform))),
+            previewCameraTransform: matrix_identity_float4x4.elements, previewProjection: oldLens.elements, previewAspect: 4 / 3)
+        let lens = ZividFieldOfView.projectionMatrix
         let recorded = try TeachingCoverageFrustum.recordedView(sample)
         var frame = recorded.cameraFromModel
         let frames = try XCTUnwrap(device.makeBuffer(bytes: &frame, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
-        var values = [Float](repeating: 2, count: recorded.frustum.columns * recorded.frustum.rows)
-        values[0] = 3; values[1] = .nan; values[2] = 0; values[3] = 1001
+        var values = [Float](repeating: 0.7, count: recorded.frustum.columns * recorded.frustum.rows)
+        values[0] = 1.1; values[1] = .nan; values[2] = 0; values[3] = 1.31
         let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
         let snapshot = TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1, frustum: recorded.frustum)
         let projection = try XCTUnwrap(PoseCameraProjection(sample: sample, footprint: snapshot))
-        XCTAssertEqual(projection.surfaceDepth, 3, "empty, invalid and out-of-range depth cells cannot stretch the cone")
-        let expectedTransform = transform * TeachingCoordinates.opticalToARCamera
+        XCTAssertEqual(projection.surfaceDepth, 1.1, "empty, invalid and out-of-range depth cells cannot stretch the cone")
+        let expectedTransform = transform
         for (actual, expected) in zip(projection.modelFromCamera.elements, expectedTransform.elements) {
             XCTAssertEqual(actual, expected, accuracy: 0.00001)
         }
@@ -1115,12 +1292,12 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(projection.corners.count, 4)
         for (corner, expected) in zip(projection.corners, expectedCorners) {
             let world = projection.modelFromCamera * SIMD4(corner, 1)
-            let clip = lens * transform.inverse * world
+            let clip = lens * (transform * TeachingCoordinates.opticalToARCamera).inverse * world
             XCTAssertEqual(clip.x / clip.w, expected.x, accuracy: 0.00001)
             XCTAssertEqual(clip.y / clip.w, expected.y, accuracy: 0.00001,
-                           "the global cone must map to the actual saved image corners, including roll and principal-point offsets")
+                           "the global cone must map to M70 image corners at the saved optical Pose, ignoring old native iPad intrinsics")
         }
-        sample.previewCameraTransform![12] += 1
+        sample.cameraPose.position.x += 1
         XCTAssertNil(PoseCameraProjection(sample: sample, footprint: snapshot)?.surfaceDepth,
                      "a stale depth map cannot draw a cone from a different camera")
         sample.previewCameraTransform = nil; sample.previewProjection = nil
@@ -1128,7 +1305,7 @@ final class AtlasTeachingUITests: XCTestCase {
             quaternion: Rotation4(simd_quatf(angle: 0.6, axis: SIMD3(0, 1, 0))))
         let legacy = try XCTUnwrap(PoseCameraProjection(sample: sample, footprint: nil))
         XCTAssertLessThan(simd_length(legacy.modelFromCamera.translation - SIMD3(1, 2, 3)), 0.00001)
-        XCTAssertEqual(legacy.frustum.tangents.y, Float(tan(Double.pi / 6)), accuracy: 0.00001)
+        XCTAssertEqual(legacy.frustum.tangents.y, ZividFieldOfView.tangentY, accuracy: 0.00001)
         XCTAssertTrue(legacy.corners.isEmpty, "without visible surface depths, show only the camera and axes")
         sample.cameraPose.position.x = .nan
         XCTAssertNil(PoseCameraProjection(sample: sample, footprint: nil))
@@ -1140,13 +1317,13 @@ final class AtlasTeachingUITests: XCTestCase {
         geometry.firstMaterial?.diffuse.contents = UIColor.lightGray
         geometry.firstMaterial?.lightingModel = .constant
         var sample = TeachingSample(segmentId: "projection-state", kind: "keyframe",
-            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 2)),
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)),
                 quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
         func snapshot() throws -> TeachingCoverageSnapshot {
             let recorded = try TeachingCoverageFrustum.recordedView(sample)
             var frame = recorded.cameraFromModel
             let frames = try XCTUnwrap(device.makeBuffer(bytes: &frame, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
-            let values = [Float](repeating: 2, count: recorded.frustum.columns * recorded.frustum.rows)
+            let values = [Float](repeating: 1, count: recorded.frustum.columns * recorded.frustum.rows)
             let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
             return TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1, frustum: recorded.frustum)
         }
@@ -1232,6 +1409,47 @@ final class AtlasTeachingUITests: XCTestCase {
                        "restoring an expanded view before layout must fit only the model in its final viewport")
         recreated.stop()
         view.stop()
+    }
+
+    func testM70ExistingProjectReadOnly() throws {
+        guard let projectID = ProcessInfo.processInfo.environment["ATLAS_M70_REVIEW_PROJECT_ID"],
+              UUID(uuidString: projectID) != nil else {
+            throw XCTSkip("Provide an existing project for read-only M70 review")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(projectID)"]
+        XCTAssertTrue(app.otherElements["library-content"].waitForExistence(timeout: 15))
+        for _ in 0..<6 where !project.isHittable { app.swipeUp() }
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let review = app.buttons["review-poses"]
+        XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
+        let profile = app.staticTexts["pose-camera-profile"]
+        let imageMode = app.buttons["pose-preview-mode-2d"]
+        XCTAssertTrue(imageMode.waitForExistence(timeout: 10))
+        XCTAssertFalse(profile.exists, "free 3D inspection does not display capture camera parameters")
+        imageMode.tap()
+        XCTAssertTrue(profile.waitForExistence(timeout: 10))
+        XCTAssertTrue(profile.label.contains("Zivid 2 M70"))
+        XCTAssertTrue(profile.label.contains("1944 × 1200"))
+        XCTAssertTrue(app.buttons["select-poses"].isHittable)
+        let count = app.staticTexts["pose-review-count"].label
+        let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-pose-"))
+        XCTAssertGreaterThan(rows.count, 0)
+        if rows.count > 6 { rows.element(boundBy: 6).tap() }
+        for mode in ["2d", "3d"] {
+            app.buttons["pose-preview-mode-\(mode)"].tap()
+            let pending = app.staticTexts["正在提取当前 Pose 点云…"]
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: pending)], timeout: 30), .completed)
+            let preview = app.otherElements["pose-review-preview"]
+            XCTAssertTrue(preview.exists)
+            XCTAssertEqual(preview.frame.width / preview.frame.height, ZividFieldOfView.nativeAspect, accuracy: 0.01)
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Existing Pose M70 \(mode)"; shot.lifetime = .keepAlways; add(shot)
+            XCTAssertEqual(app.staticTexts["pose-review-count"].label, count)
+        }
     }
 
     func testPosePreviewInteractionAndImageSwitching() throws {
@@ -1450,7 +1668,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let secondID = rows.element(boundBy: 1).identifier
         app.buttons[secondID].tap()
         XCTAssertFalse(preview.label.contains("Review renamed Pose"), "selecting another Pose changes the preview")
-        app.buttons["delete-review-pose"].tap()
+        app.buttons["select-poses"].tap()
         app.buttons[secondID].tap()
         app.buttons["delete-selected-poses"].tap()
         XCTAssertFalse(app.buttons[secondID].exists, "delete updates the list immediately")
@@ -2344,6 +2562,9 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(collapse.waitForExistence(timeout: 15))
         let scene = app.otherElements["teaching-viewport"], capture = app.buttons["capture-pose"]
         guard capture.exists else { throw XCTSkip("Requires an unfinished project") }
+        let maskToggle = app.switches["zivid-fov-toggle"]
+        XCTAssertEqual(maskToggle.value as? String, "1")
+        maskToggle.tap()
         let surface = app.otherElements["teaching-render-surface"]
         let target = app.images["teaching-placement-target"]
         func assertFrame(_ element: XCUIElement, _ expected: CGRect, file: StaticString = #filePath, line: UInt = #line) {
@@ -2382,7 +2603,6 @@ final class AtlasTeachingUITests: XCTestCase {
             assertFrame(target, expandedTarget)
         }
         XCUIDevice.shared.orientation = .landscapeLeft
-        let maskToggle = app.switches["zivid-fov-toggle"]
         maskToggle.tap()
         let aperture = app.otherElements["zivid-fov-aperture"]
         XCTAssertTrue(aperture.waitForExistence(timeout: 10))
@@ -2606,8 +2826,10 @@ final class AtlasTeachingUITests: XCTestCase {
         project.tap()
         let toggle = app.switches["zivid-fov-toggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 60))
-        XCTAssertEqual(toggle.value as? String, "0")
+        XCTAssertEqual(toggle.value as? String, "1")
         let aperture = app.otherElements["zivid-fov-aperture"]
+        XCTAssertTrue(aperture.waitForExistence(timeout: 15))
+        toggle.tap()
         XCTAssertFalse(aperture.exists)
         toggle.tap()
         XCTAssertEqual(toggle.value as? String, "1")
