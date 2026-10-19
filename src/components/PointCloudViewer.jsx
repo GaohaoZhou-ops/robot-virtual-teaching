@@ -7361,36 +7361,6 @@ export default function PointCloudViewer({
             <strong data-axis-code>X</strong>
             <span data-axis-label>前进 / 后退</span>
           </div>
-          {robotControlActive && (
-            <aside className="robot-chassis-control-readout" role="status" aria-label="底盘控制提示" aria-live="polite">
-              <div className="robot-chassis-control-readout__header">
-                <Move3D size={14} aria-hidden="true" />
-                <strong>底盘控制已启用</strong>
-                <span>键盘操作</span>
-                <button
-                  type="button"
-                  aria-label={robotParkingGhost?.editing ? '取消停车点修改' : '退出底盘控制'}
-                  title={robotParkingGhost?.editing ? '取消停车点修改并退出控制 · Esc' : '退出底盘控制 · Esc'}
-                  onClick={() => {
-                    if (robotParkingGhost?.editing) {
-                      updateRobotKeyboardControl(false, true);
-                      onCancelTeachingPreviewEditRef.current?.();
-                    } else {
-                      setRobotControlMode(false);
-                    }
-                  }}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-              <div className="robot-chassis-control-readout__keys">
-                <span data-axis="x"><b>X</b><kbd>W / S</kbd>前后</span>
-                <span data-axis="y"><b>Y</b><kbd>A / D</kbd>横移</span>
-                <span data-axis="yaw"><RotateCcw size={11} /><kbd>← / →</kbd>转向</span>
-                <span data-axis="z" data-locked={robotHeightLockActive}><b>Z</b><kbd>↑ / ↓</kbd>{robotHeightLockActive ? '高度已锁定' : '升降'}</span>
-              </div>
-            </aside>
-          )}
           {robotParkingGhostVisible && robotParkingGhostMetrics && (
             <aside
               className="robot-parking-ghost-readout"
