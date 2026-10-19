@@ -152,6 +152,8 @@ export default function Inspector({
   onSelectTeachingParkingPoint,
   onCaptureTeachingPoint,
   onSolveMobileTask,
+  onSaveMobileTask,
+  mobileSaveDisabledReason,
   onUpdateRobotJointValue,
   onToggleRobotJointLock,
   onUnlockAllRobotJoints,
@@ -749,6 +751,8 @@ export default function Inspector({
               onSelectParkingPoint={onSelectTeachingParkingPoint}
               onCapturePoint={onCaptureTeachingPoint}
               onSolveMobileTask={onSolveMobileTask}
+              onSaveMobileTask={onSaveMobileTask}
+              mobileSaveDisabledReason={mobileSaveDisabledReason}
             />
           </div>
         )}

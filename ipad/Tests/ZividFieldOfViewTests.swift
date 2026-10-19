@@ -46,6 +46,26 @@ enum ZividFieldOfViewTests {
         // Vendor footprint at focus, allowing for rounded nominal angles.
         near(1400 * tan(ZividFieldOfView.horizontalDegrees * .pi / 360), 754, "vendor focus width", tolerance: 1)
         near(1400 * tan(ZividFieldOfView.verticalDegrees * .pi / 360), 449, "vendor focus height", tolerance: 1)
+        let lens = ZividFieldOfView.projectionMatrix
+        for depth: Float in [ZividFieldOfView.near, 0.7, ZividFieldOfView.far] {
+            for x: Float in [-1, 1] {
+                for y: Float in [-1, 1] {
+                    let clip = lens * SIMD4(x * depth * ZividFieldOfView.tangentX,
+                                            y * depth * ZividFieldOfView.tangentY, -depth, 1)
+                    near(CGFloat(clip.x / clip.w), CGFloat(x), "M70 horizontal image edge")
+                    near(CGFloat(clip.y / clip.w), CGFloat(y), "M70 vertical image edge")
+                    if depth == ZividFieldOfView.near { near(CGFloat(clip.z / clip.w), -1, "near clipping plane") }
+                    if depth == ZividFieldOfView.far { near(CGFloat(clip.z / clip.w), 1, "far clipping plane") }
+                }
+            }
+        }
+        for size in [CGSize(width: 800, height: 600), CGSize(width: 600, height: 800), CGSize(width: 1200, height: 400)] {
+            let frame = ZividFieldOfView.fittedFrame(in: size)
+            near(frame.width / frame.height, 1944 / 1200, "M70 raster aspect survives screen rotation")
+            near(frame.midX, size.width / 2, "centered horizontal letterbox")
+            near(frame.midY, size.height / 2, "centered vertical letterbox")
+            precondition(frame.width <= size.width && frame.height <= size.height)
+        }
         let narrow = simd_float3x3(columns: (SIMD3(2500, 0, 0), SIMD3(0, 2500, 0), SIMD3(960, 720, 1)))
         let clipped = ZividFieldOfView.project(intrinsics: narrow, resolution: resolution,
             displayTransform: .identity, displaySize: resolution)!

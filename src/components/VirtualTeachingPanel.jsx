@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mobileDeviceLabel } from '../lib/ipadProtocol.js';
 import MobileTeachingPoseList from './MobileTeachingPoseList.jsx';
+import MobileTeachingSaveAction from './MobileTeachingSaveAction.jsx';
 import {
   Bot,
   Camera,
@@ -130,6 +131,8 @@ export default function VirtualTeachingPanel({
   onExportTeachingData,
   onOpenCapturePage,
   onSolveMobileTask,
+  onSaveMobileTask,
+  mobileSaveDisabledReason,
   teachingDevice = 'desktop',
   teachingSources = [],
   onTeachingSourceChange,
@@ -517,6 +520,9 @@ export default function VirtualTeachingPanel({
               </button>}
             </div>
           </header>
+
+          {activeTask?.mobileCapture && <MobileTeachingSaveAction task={activeTask} tasks={robotTasks}
+            onSave={onSaveMobileTask} disabledReason={mobileSaveDisabledReason} />}
 
           {tasks.length > 0 ? (
             <div className="teaching-capture-tree" role="tree" aria-label="虚拟示教任务停车点层级">

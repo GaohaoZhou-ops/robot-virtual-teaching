@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { mobileDeviceLabel } from '../lib/ipadProtocol.js';
 import { mobileSamplePosition } from '../lib/ipadCaptureDisplay.js';
+import MobileTeachingSaveAction from './MobileTeachingSaveAction.jsx';
 import './IPadTeaching.css';
 
-export default function IPadCaptureDetails({ task, onSolve }) {
+export default function IPadCaptureDetails({ task, tasks, onSolve, onSave, saveDisabledReason }) {
   const [page, setPage] = useState(0);
   const capture = task.mobileCapture, samples = capture.samples;
   const device = mobileDeviceLabel(capture), vision = capture.device.platform === 'visionOS';
@@ -19,6 +20,7 @@ export default function IPadCaptureDetails({ task, onSolve }) {
     <button onClick={download}>导出 {device} 示教 JSON</button>
     {onSolve && <button onClick={() => onSolve(task.id)}>计算机器人姿态</button>}
     {task.mobileSolve && <p>上次计算：{task.mobileSolve.feasibleCount} / {task.mobileSolve.rows.length} 个姿态可达</p>}
+    <MobileTeachingSaveAction task={task} tasks={tasks} onSave={onSave} disabledReason={saveDisabledReason} />
     <div className="ipad-samples"><table><thead><tr><th>序号</th><th>名称</th><th>X / m</th><th>Y / m</th><th>Z / m</th></tr></thead><tbody>{samples.slice(currentPage * 100, (currentPage + 1) * 100).map((sample, index) => {
       const position = mobileSamplePosition(sample, task);
       return <tr key={sample.id}><td>{currentPage * 100 + index + 1}</td><td>{sample.name || 'Pose'}</td><td>{position.x.toFixed(4)}</td><td>{position.y.toFixed(4)}</td><td>{position.z.toFixed(4)}</td></tr>;

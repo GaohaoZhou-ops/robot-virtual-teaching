@@ -58,8 +58,11 @@ actor ProjectStore {
             try manager.removeItem(at: url)
         }
     }
-    func continueTeaching(_ project: LocalProject) throws -> LocalProject {
+    func continueTeaching(_ project: LocalProject, removingSampleIDs: Set<String> = []) throws -> LocalProject {
         guard project.result.completedAt != nil else { throw TeachingError("当前项目仍是草稿，可直接继续示教") }
+        guard removingSampleIDs.isSubset(of: Set(project.result.samples.map(\.id))) else {
+            throw TeachingError("所选 Pose 已变化，请重新选择")
+        }
         let source = try file(project.id, ext: "atls")
         let identity = try ModelFileIdentity.read(from: source)
         guard project.result.sessionId == project.id,
@@ -69,11 +72,13 @@ actor ProjectStore {
             throw TeachingError("本地模型与完成结果不匹配，无法创建补录草稿")
         }
         // Completed results are immutable on the desktop and deduplicated by ID.
-        // Keep the original project and create a separate draft with all its Poses.
+        // Keep the original project. Filtering the copy before saving makes a
+        // batch edit atomic: no partially edited draft can appear after failure.
         let id = UUID().uuidString
         var result = project.result
         result.id = UUID().uuidString; result.sessionId = id
         result.createdAt = timestamp(); result.completedAt = nil
+        result.samples.removeAll { removingSampleIDs.contains($0.id) }
         let draft = LocalProject(serverURL: project.serverURL,
             session: PairedSession(id: id, deviceToken: "", manifest: project.session.manifest), result: result,
             displaySettings: project.displaySettings ?? ModelDisplaySettings().forOpening())

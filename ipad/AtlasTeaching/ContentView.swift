@@ -482,13 +482,46 @@ private struct LANAddressFields: View {
     }
 }
 
-private struct TeachingResultSyncView: View {
-    private enum Method: String, CaseIterable {
-        case scan = "扫码", wifi = "Wi-Fi", airDrop = "AirDrop 导出"
+private enum ResultSyncMethod: String, CaseIterable {
+    case scan = "扫码", wifi = "Wi-Fi", airDrop = "AirDrop 导出"
+}
+
+// Give the native segmented control a taller visible track, not just a taller
+// SwiftUI container around its standard-height appearance.
+private struct ResultSyncMethodPicker: UIViewRepresentable {
+    @Binding var selection: ResultSyncMethod
+
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+    func makeUIView(context: Context) -> UISegmentedControl {
+        let control = UISegmentedControl(items: ResultSyncMethod.allCases.map(\.rawValue))
+        control.accessibilityLabel = "同步方式"
+        control.accessibilityIdentifier = "result-sync-method"
+        control.addTarget(context.coordinator, action: #selector(Coordinator.selectMethod(_:)), for: .valueChanged)
+        return control
     }
+    func updateUIView(_ control: UISegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        control.selectedSegmentIndex = ResultSyncMethod.allCases.firstIndex(of: selection) ?? 0
+        control.isEnabled = context.environment.isEnabled
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? uiView.intrinsicContentSize.width,
+               height: proposal.height ?? uiView.intrinsicContentSize.height)
+    }
+    final class Coordinator: NSObject {
+        var selection: Binding<ResultSyncMethod>
+        init(selection: Binding<ResultSyncMethod>) { self.selection = selection }
+        @objc func selectMethod(_ control: UISegmentedControl) {
+            guard ResultSyncMethod.allCases.indices.contains(control.selectedSegmentIndex) else { return }
+            selection.wrappedValue = ResultSyncMethod.allCases[control.selectedSegmentIndex]
+        }
+    }
+}
+
+private struct TeachingResultSyncView: View {
     @EnvironmentObject private var session: TeachingSession
     @Environment(\.dismiss) private var dismiss
-    @State private var method: Method = .scan
+    @State private var method: ResultSyncMethod = .scan
     @State private var scanning = false
     @State private var scannedCode: PairingQRCode?
     @State private var resultShare: TeachingResultShareItem?
@@ -502,13 +535,8 @@ private struct TeachingResultSyncView: View {
                         Text("已完成 · \(session.current?.result.samples.count ?? 0) 个 Pose")
                             .font(.callout).foregroundStyle(.secondary)
                     }
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("选择同步方式").font(.headline)
-                        Picker("同步方式", selection: $method) {
-                            ForEach(Method.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }.pickerStyle(.segmented).disabled(session.busy)
-                            .accessibilityIdentifier("result-sync-method")
-                    }
+                    ResultSyncMethodPicker(selection: $method)
+                        .frame(height: 44).disabled(session.busy)
                     Group {
                         switch method {
                         case .scan: scanContent
@@ -614,7 +642,7 @@ struct TeachingView: View {
     @State private var resultSyncOpen = false
     @State private var displaySettingsOpen = false
     @State private var levelVisible = true
-    @State private var zividFieldOfViewEnabled = false
+    @State private var zividFieldOfViewEnabled = true
     @State private var tiltControlsOpen = false
     @State private var sidebarCollapsed = false
     @State private var nearbyPoseConfirmation: NearbyPoseConfirmation?
@@ -1154,6 +1182,7 @@ struct PoseReviewView: View {
     @State private var showsModelOrigin = false
     @State private var overviewExpanded = false
     @State private var poseEditorHeight: CGFloat = 0
+    @State private var previewToolbarHeight: CGFloat = 0
     @StateObject private var previewPreparation = PosePreviewPreparation()
     @FocusState private var poseNameFocused: Bool
     let geometry: ModelGeometry
@@ -1168,7 +1197,7 @@ struct PoseReviewView: View {
                 if viewport.size.width >= 1000 && viewport.size.width > viewport.size.height {
                     HStack(spacing: 0) {
                         VStack(spacing: 0) {
-                            poseList
+                            poseList(headerHeight: previewToolbarHeight)
                             poseEditorPanel(maximumHeight: min(290, viewport.size.height * 0.45))
                         }.frame(width: 280)
                         Divider()
@@ -1180,13 +1209,13 @@ struct PoseReviewView: View {
                         Divider()
                         if viewport.size.width >= 600 {
                             HStack(alignment: .top, spacing: 0) {
-                                poseList.frame(width: viewport.size.width * 0.38)
+                                poseList().frame(width: viewport.size.width * 0.38)
                                 Divider()
                                 poseEditorPanel(maximumHeight: max(0, viewport.size.height - max(180, viewport.size.height * 0.62) - 1))
                             }
                         } else {
                             VStack(spacing: 0) {
-                                poseList
+                                poseList()
                                 poseEditorPanel(maximumHeight: min(190, viewport.size.height * 0.3))
                             }
                         }
@@ -1216,15 +1245,32 @@ struct PoseReviewView: View {
             }
     }
 
-    private var poseList: some View {
+    private func poseList(headerHeight: CGFloat = 0) -> some View {
         VStack(spacing: 0) {
+            HStack {
+                Text("\(samples.count) 个 Pose").font(.subheadline.weight(.medium))
+                    .accessibilityIdentifier("pose-review-count")
+                Spacer(minLength: 8)
+                Button {
+                    poseNameFocused = false
+                    if selectingForDeletion { endDeletionSelection() }
+                    else { deletionIDs = []; selectingForDeletion = true }
+                } label: {
+                    Text(selectingForDeletion ? "取消" : "多选")
+                        .font(.subheadline.weight(.medium)).padding(.vertical, 5)
+                }.buttonStyle(.bordered).tint(accent)
+                    .disabled(samples.isEmpty || session.busy)
+                    .accessibilityIdentifier(selectingForDeletion ? "cancel-pose-selection" : "select-poses")
+            }.padding(.horizontal, 16).padding(.vertical, 12)
+                .frame(minHeight: headerHeight)
+            Divider()
             if selectingForDeletion {
                 HStack {
                     Button {
                         deletionIDs = allPosesSelected ? [] : Set(samples.map(\.id))
                     } label: {
                         Label("全选", systemImage: allPosesSelected ? "checkmark.square.fill" : deletionIDs.isEmpty ? "square" : "minus.square.fill")
-                    }.accessibilityIdentifier("select-all-poses")
+                    }.disabled(session.busy).accessibilityIdentifier("select-all-poses")
                         .accessibilityValue(allPosesSelected ? "已全选" : deletionIDs.isEmpty ? "未选择" : "部分选择")
                     Spacer()
                     Text("已选 \(deletionIDs.count)/\(samples.count)").font(.caption).foregroundStyle(.secondary)
@@ -1234,12 +1280,8 @@ struct PoseReviewView: View {
                 Divider()
             }
             List {
-                Section {
-                    ForEach(samples) { sample in
-                        poseRow(sample)
-                    }
-                } header: {
-                    Text("\(samples.count) 个 Pose").accessibilityIdentifier("pose-review-count")
+                ForEach(samples) { sample in
+                    poseRow(sample)
                 }
             }.listStyle(.plain).scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("pose-review-list")
@@ -1270,6 +1312,7 @@ struct PoseReviewView: View {
                 Spacer(minLength: 0)
             }.padding(.vertical, 5).contentShape(Rectangle())
         }.listRowBackground(highlighted ? accent.opacity(0.12) : Color.clear)
+            .disabled(session.busy)
             .accessibilityIdentifier("review-pose-\(sample.id)")
             .accessibilityValue(selectingForDeletion ? (deletionIDs.contains(sample.id) ? "已勾选" : "未勾选") : "")
             .accessibilityAddTraits(highlighted ? .isSelected : [])
@@ -1282,7 +1325,7 @@ struct PoseReviewView: View {
             }
     }
 
-    private var posePreview: some View {
+    private var previewToolbar: some View {
         VStack(spacing: 0) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
@@ -1302,12 +1345,19 @@ struct PoseReviewView: View {
                 Text(renderer.error).font(.caption).foregroundStyle(.orange)
                     .padding(.horizontal, 12).padding(.bottom, 8)
             }
+        }
+        // Match the sidebar header to this toolbar even when its controls wrap.
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewToolbarHeight = $0 }
+    }
+
+    private var posePreview: some View {
+        VStack(spacing: 0) {
+            previewToolbar
             Divider()
             if let selected {
-                let aspect = selected.previewAspect ?? (4.0 / 3.0)
                 let ready = previewPreparation.sampleID == selected.id
                 GeometryReader { area in
-                    let recordedAspect = CGFloat(aspect.isFinite && aspect > 0 ? aspect : 4.0 / 3.0)
+                    let recordedAspect = ZividFieldOfView.nativeAspect
                     let expanded = overviewExpanded && previewMode == .interactive
                     let width = expanded ? area.size.width : min(area.size.width, area.size.height * recordedAspect)
                     let height = expanded ? area.size.height : width / recordedAspect
@@ -1439,14 +1489,26 @@ struct PoseReviewView: View {
                 Text("选择要删除的 Pose").font(.headline)
                 Text("勾选列表中的 Pose，或使用全选。点击 Pose 可同时查看对应视角。")
                     .font(.caption).foregroundStyle(.secondary)
+                if completed {
+                    Text("删除后生成可编辑副本，原完成结果保留。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("completed-pose-edit-note")
+                }
                 Button("删除所选（\(deletionIDs.count)）", role: .destructive) {
-                    deletePoses(deletionIDs)
-                    endDeletionSelection()
+                    let ids = deletionIDs
+                    Task {
+                        if await session.deleteSelectedSamples(ids) {
+                            if let id = selectedID, ids.contains(id) {
+                                selectedID = samples.first?.id; poseName = samples.first?.name ?? ""
+                            }
+                            endDeletionSelection()
+                        }
+                    }
                 }.buttonStyle(.borderedProminent).tint(.red)
                     .disabled(deletionIDs.isEmpty || session.busy)
                     .accessibilityIdentifier("delete-selected-poses")
-                Button("取消多选") { endDeletionSelection() }.buttonStyle(.bordered)
-                    .accessibilityIdentifier("cancel-pose-selection")
+                if session.busy { ProgressView("正在保存…").font(.caption) }
+                if !session.error.isEmpty { Text(session.error).font(.caption).foregroundStyle(.orange) }
             }.frame(maxWidth: .infinity, alignment: .leading)
         } else if let selected {
             VStack(alignment: .leading, spacing: 14) {
@@ -1458,24 +1520,22 @@ struct PoseReviewView: View {
                         .multilineTextAlignment(.trailing)
                 }
                 let p = selected.cameraPose.position
+                if previewMode == .image {
+                    Text("拍摄参数 · Zivid 2 M70 · 1944 × 1200\n视野 56.6° × 35.6° · 工作距离 0.30–1.30 m")
+                        .font(.caption).foregroundStyle(accent)
+                        .accessibilityIdentifier("pose-camera-profile")
+                }
                 Text("X \(p.x, specifier: "%.4f") m\nY \(p.y, specifier: "%.4f") m\nZ \(p.z, specifier: "%.4f") m")
                     .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
                 if !completed {
                     TextField("Pose 名称", text: $poseName).textFieldStyle(.roundedBorder)
                         .focused($poseNameFocused)
                         .accessibilityIdentifier("review-pose-name")
-                    HStack {
-                        Button("保存名称") { session.renameSample(selected.id, name: poseName); poseNameFocused = false }
-                            .accessibilityIdentifier("save-pose-name")
-                        Spacer()
-                        Button("删除", role: .destructive) {
-                            poseNameFocused = false
-                            deletionIDs = []; selectingForDeletion = true
-                        }.accessibilityIdentifier("delete-review-pose")
-                    }.buttonStyle(.bordered)
+                    Button("保存名称") { session.renameSample(selected.id, name: poseName); poseNameFocused = false }
+                        .buttonStyle(.bordered).accessibilityIdentifier("save-pose-name")
                 }
                 if completed {
-                    Text("本次示教已完成，Pose 已锁定。")
+                    Text("本次示教已完成。可通过上方「多选」在副本中批量删除。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if !session.error.isEmpty { Text(session.error).font(.caption).foregroundStyle(.orange) }

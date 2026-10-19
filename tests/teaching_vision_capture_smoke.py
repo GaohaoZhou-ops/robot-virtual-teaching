@@ -48,7 +48,10 @@ def run():
     console_errors = []
     failed_responses = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(
+            headless=True,
+            executable_path=os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE") or None,
+        )
         page = browser.new_page(viewport={"width": 1500, "height": 940})
         page.set_default_timeout(180_000)
         page.on("pageerror", lambda error: page_errors.append(str(error)))

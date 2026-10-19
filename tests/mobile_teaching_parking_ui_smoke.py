@@ -103,7 +103,9 @@ def run():
                 assert abs(applied[name] - value) < 1e-5
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             page.screenshot(path=str(ARTIFACTS / 'multiple-parking-results.png'), full_page=True)
-            dialog.get_by_role('button', name='保存可达姿态', exact=True).click()
+            dialog.get_by_role('button', name='关闭姿态计算', exact=True).click()
+            topbar_action(page, name='打开示教数据管理页').click()
+            page.get_by_role('region', name='设备姿态保存').get_by_role('button', name='保存可达姿态', exact=True).click()
             config = await_saved(page, lambda c: len(c['project']['virtualTeaching']['tasks']) == 2)
             solved = config['project']['virtualTeaching']['tasks'][1]
             assert len(solved['parkingPoints']) == 3

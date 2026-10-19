@@ -591,6 +591,9 @@ export default function App() {
   const activeCollapsedPanel = isIndependentTeachingSpace ? null : collapsedPanel;
   const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
   const activeTeachingTask = teachingTasks.find((task) => task.id === activeTeachingTaskId);
+  const mobileSaveDisabledReason = sessionState.status !== 'ready' ? '请等待当前工程就绪。'
+    : robotLoadState.status !== 'loaded' ? '请先加载计算时使用的机器人。'
+      : ['running', 'pausing', 'paused'].includes(mobileComputation?.status) ? '姿态计算尚未结束，请等待完成或取消后保存。' : '';
   const teachingDevice = activeTeachingTask?.mobileCapture ? mobileDeviceKey(activeTeachingTask.mobileCapture) : 'desktop';
   const teachingSource = teachingDevice === 'desktop' ? 'desktop' : 'mobile';
   const desktopTeachingTasks = useMemo(() => teachingTasks.filter((task) => !task.mobileCapture), [teachingTasks]);
@@ -4906,10 +4909,11 @@ export default function App() {
   };
 
   const saveMobileTeachingSolutions = (taskId, report) => {
+    if (mobileSaveDisabledReason) throw new Error(mobileSaveDisabledReason);
     const { current, task } = mobileSolveContext(taskId, report);
-    dismissMobileTeaching();
     const existing = current.teachingTasks.find((item) => item.id === report.savedTaskId);
     const solved = existing || normalizeTeachingTasks([buildMobileSolvedTask(task, report, current.selectedRobot, createId('mobile-solved'))])[0];
+    dismissMobileTeaching();
     if (!existing) {
       const next = [...current.teachingTasks.map((item) => item.id === taskId ? { ...item, mobileSolve: { ...report, savedTaskId: solved.id } } : item), solved];
       latestWorkspaceRef.current = { ...current, teachingTasks: next };
@@ -4919,7 +4923,15 @@ export default function App() {
     setActiveTeachingParkingPointId(solved.parkingPoints[0]?.id || null);
     setMobileSolveTaskId(null);
     navigateAppPage(APP_PAGE_WORKBENCH);
-    notify(`已保存 ${solved.parkingPoints.reduce((count, parking) => count + parking.poses.length, 0)} 个可达姿态、${solved.parkingPoints.length} 个停车点，可继续预览和编辑`, 'success');
+    notify(existing ? '已打开已保存的机器人示教任务' : `已保存 ${solved.parkingPoints.reduce((count, parking) => count + parking.poses.length, 0)} 个可达姿态、${solved.parkingPoints.length} 个停车点，可在“示教数据”中查看`, 'success');
+  };
+
+  const saveMobileTeachingTask = (taskId) => {
+    try {
+      const report = latestWorkspaceRef.current.teachingTasks.find((task) => task.id === taskId)?.mobileSolve;
+      if (!report) throw new Error('请先完成机器人姿态计算');
+      saveMobileTeachingSolutions(taskId, report);
+    } catch (error) { notify(error.message, 'error'); }
   };
 
   const importIPadTeaching = async (result, ticket) => {
@@ -5496,6 +5508,8 @@ export default function App() {
           onSelectTeachingParkingPoint={previewTeachingParkingPoint}
           onCaptureTeachingPoint={captureTeachingPoint}
           onSolveMobileTask={openMobileTeachingSolve}
+          onSaveMobileTask={saveMobileTeachingTask}
+          mobileSaveDisabledReason={mobileSaveDisabledReason}
           onUpdateRobotJointValue={updateRobotJointValue}
           onToggleRobotJointLock={toggleRobotJointLock}
           onUnlockAllRobotJoints={unlockAllRobotJoints}
@@ -5663,6 +5677,8 @@ export default function App() {
           canExportTeachingData={Boolean(mapData || selectedRobot || teachingTasks.length || jointPoses.length || waypoints.length)}
           onExportAbxTeaching={teachingSpaceMode === 'map' ? openAbxTeachingExport : undefined}
           onSolveMobileTask={openMobileTeachingSolve}
+          onSaveMobileTask={saveMobileTeachingTask}
+          mobileSaveDisabledReason={mobileSaveDisabledReason}
         />
 
         {loadState.loading && (
@@ -5690,6 +5706,7 @@ export default function App() {
     />}
     {abxExportSnapshot && <AbxTeachingExportDialog snapshot={abxExportSnapshot} onClose={() => setAbxExportSnapshot(null)} />}
     <MobileTeachingComputeDock computation={mobileComputation} inWorkbench={appPage === APP_PAGE_WORKBENCH}
+      onSave={saveMobileTeachingTask} saveDisabledReason={mobileSaveDisabledReason}
       onPause={pauseMobileTeaching} onResume={resumeMobileTeaching} onCancel={cancelMobileTeaching}
       onRestart={restartMobileTeaching} onDismiss={dismissMobileTeaching}
       onConfigure={() => openMobileTeachingSolve(mobileComputation.taskId)} onPreview={previewMobileTeaching}

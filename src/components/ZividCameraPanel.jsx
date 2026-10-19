@@ -17,25 +17,14 @@ import {
   X,
 } from 'lucide-react';
 import CameraTeachingControls from './CameraTeachingControls.jsx';
+import { ZIVID_M70_PROFILE, ZividM70Camera } from '../lib/zividCamera.js';
+export { ZIVID_M70_PROFILE } from '../lib/zividCamera.js';
 import {
   createUniformMeshIndex,
   MESH_RENDER_QUALITY_OPTIONS,
   prepareMapGeometryTopology,
   resolveMeshRenderQuality,
 } from '../lib/mapGeometry.js';
-
-export const ZIVID_M70_PROFILE = Object.freeze({
-  model: 'Zivid 2 M70',
-  nativeWidth: 1944,
-  nativeHeight: 1200,
-  near: 0.3,
-  focus: 0.7,
-  far: 1.3,
-  horizontalFov: 56.6,
-  verticalFov: 35.6,
-  focusWidthMm: 754,
-  focusHeightMm: 449,
-});
 
 const CAMERA_POINT_BUDGET = 360_000;
 const MAX_DIGITAL_ZOOM = 24;
@@ -950,12 +939,7 @@ const renderTeachingCaptureImages = (
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x02080b);
-    const camera = new THREE.PerspectiveCamera(
-      ZIVID_M70_PROFILE.verticalFov,
-      TEACHING_CAPTURE_WIDTH / TEACHING_CAPTURE_HEIGHT,
-      ZIVID_M70_PROFILE.near,
-      ZIVID_M70_PROFILE.far,
-    );
+    const camera = new ZividM70Camera();
     camera.position.set(pose.position.x, pose.position.y, pose.position.z);
     camera.quaternion
       .set(
@@ -2195,12 +2179,7 @@ export default function ZividCameraPanel({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x02080b);
-    const camera = new THREE.PerspectiveCamera(
-      ZIVID_M70_PROFILE.verticalFov,
-      1,
-      ZIVID_M70_PROFILE.near,
-      ZIVID_M70_PROFILE.far,
-    );
+    const camera = new ZividM70Camera();
     camera.matrixAutoUpdate = true;
     const surfaceAmbientLight = new THREE.HemisphereLight(0xe8fbff, 0x081115, 1.35);
     const surfaceHeadLight = new THREE.DirectionalLight(0xffffff, 1.7);
@@ -2272,7 +2251,6 @@ export default function ZividCameraPanel({
       width = Math.max(1, mount.clientWidth);
       height = Math.max(1, mount.clientHeight);
       renderer.setSize(width, height, false);
-      camera.aspect = width / height;
       camera.updateProjectionMatrix();
       depthMaterial.uniforms.uPointSize.value = (expanded ? 2.3 : 1.85)
         * renderer.getPixelRatio();
@@ -2335,7 +2313,6 @@ export default function ZividCameraPanel({
         MAX_DIGITAL_ZOOM,
       );
       camera.clearViewOffset();
-      camera.aspect = width / height;
       if (currentZoom > 1.0001) {
         const fullWidth = Math.max(width, Math.round(width * currentZoom));
         const fullHeight = Math.max(height, Math.round(height * currentZoom));
@@ -2373,6 +2350,7 @@ export default function ZividCameraPanel({
       renderer.domElement.dataset.cameraSide = activeSide;
       renderer.domElement.dataset.opticalFrame = pose?.frameName || '';
       renderer.domElement.dataset.digitalZoom = currentZoom.toFixed(2);
+      renderer.domElement.dataset.projection = camera.projectionMatrix.elements.join(',');
       renderer.domElement.dataset.panX = Number(currentView.pan.x || 0).toFixed(4);
       renderer.domElement.dataset.panY = Number(currentView.pan.y || 0).toFixed(4);
       if (contextAvailable) {

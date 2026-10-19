@@ -67,6 +67,30 @@ import simd
         do { _ = try await store.exportResult(draft); preconditionFailure("continuation exported before completion") }
         catch let error as TeachingError { precondition(error.message.contains("请先完成")) }
 
+        var batchSource = sourceForContinuation
+        for index in 2...4 {
+            var sample = batchSource.result.samples[0]
+            sample.id = UUID().uuidString; sample.name = "Pose 00\(index)"
+            batchSource.result.samples.append(sample)
+        }
+        let removed: Set<String> = [batchSource.result.samples[0].id, batchSource.result.samples[2].id]
+        let edited = try await store.continueTeaching(batchSource, removingSampleIDs: removed)
+        let expected = try encoder.encode(batchSource.result.samples.filter { !removed.contains($0.id) })
+        let actual = try encoder.encode(edited.result.samples)
+        precondition(expected == actual, "batch deletion retains every field and order of unselected Poses")
+        precondition(edited.result.id != batchSource.result.id && edited.id != batchSource.id)
+        precondition(edited.result.completedAt == nil && edited.syncedAt == nil && edited.requiresResultPairing,
+                     "an edit copy cannot overwrite the frozen desktop result")
+        let editedAgain = try await store.projects().first { $0.id == edited.id }
+        let reloadedSamples = try encoder.encode(editedAgain!.result.samples)
+        precondition(reloadedSamples == expected, "the whole batch persists before the edit is returned")
+        let emptied = try await store.continueTeaching(batchSource, removingSampleIDs: Set(batchSource.result.samples.map(\.id)))
+        precondition(emptied.result.samples.isEmpty && emptied.result.completedAt == nil)
+        do {
+            _ = try await store.continueTeaching(batchSource, removingSampleIDs: [UUID().uuidString])
+            preconditionFailure("a stale selection created an edit copy")
+        } catch let error as TeachingError { precondition(error.message.contains("重新选择")) }
+
         var changedModel = model; changedModel[model.count - 1] ^= 1
         try await store.saveModel(changedModel, id: id)
         do { _ = try await store.exportResult(project); preconditionFailure("changed model exported") }
@@ -86,7 +110,7 @@ import simd
         catch let error as TeachingError { precondition(error.message.contains("模拟演练")) }
         let savedAfter = try Data(contentsOf: directory.appendingPathComponent(id).appendingPathExtension("json"))
         let projects = try await store.projects()
-        precondition(saved == savedAfter && projects.count == 2 && projects.allSatisfy { $0.syncedAt == nil },
+        precondition(saved == savedAfter && projects.count == 4 && projects.allSatisfy { $0.syncedAt == nil },
             "export/continuation leave the original frozen result intact, and failed continuation creates no project")
         let finalData = try Data(contentsOf: url)
         precondition(finalData == data, "failed exports retain the previous shareable file")

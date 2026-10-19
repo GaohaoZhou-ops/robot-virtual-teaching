@@ -63,6 +63,7 @@ def run():
             first_run = dock.get_attribute('data-compute-run')
             page.wait_for_function("Number(document.querySelector('.mobile-compute-dock')?.dataset.previewCount) >= 2")
             expect(dock).to_have_attribute('data-compute-status', 'running')
+            expect(dock.get_by_role('button', name='保存可达姿态', exact=True)).to_have_count(0)
             expect(canvas).to_have_attribute('data-parking-ghost-state', 'visible')
             expect(canvas).to_have_attribute('data-parking-ghost-kind', 'mobile-solve')
             expect(canvas).to_have_attribute('data-parking-ghost-opacity', '0.24')
@@ -148,9 +149,21 @@ def run():
             page.screenshot(path=str(ARTIFACTS / 'background-completed-1280.png'), full_page=True)
             assert dock.evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
 
+            # Saving from the completed dock must create the task and its
+            # parking points without reopening the configuration dialog.
+            dock.get_by_role('button', name='保存可达姿态', exact=True).click()
+            expect(dock).to_have_count(0)
+            saved = await_saved(page, lambda c: len(c['project']['virtualTeaching']['tasks']) == 2)
+            saved_tasks = saved['project']['virtualTeaching']['tasks']
+            report = saved_tasks[0]['mobileSolve']
+            assert report['savedTaskId'] == saved_tasks[1]['id']
+            assert len(saved_tasks[1]['parkingPoints']) == 1
+            assert sum(len(point['poses']) for point in saved_tasks[1]['parkingPoints']) == 14
+            page.get_by_role('button', name='查看来源采样', exact=True).click()
+
             # A cancelled recalculation preserves the previous complete report,
             # but changed settings may not be used to apply that old report.
-            dock.get_by_role('button', name='查看结果', exact=True).click()
+            page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             dialog.get_by_role('spinbutton', name='X 位置容差 (cm)').fill('6')
             dialog.get_by_role('button', name='重新计算', exact=True).click()
             dock.get_by_role('button', name='暂停姿态计算', exact=True).click()
@@ -165,7 +178,7 @@ def run():
             dock.get_by_role('button', name='计算配置', exact=True).click()
             expect(dialog.get_by_role('spinbutton', name='X 位置容差 (cm)')).to_have_value('6')
             expect(dialog.get_by_role('button', name='应用左臂解', exact=True)).to_be_disabled()
-            expect(dialog.get_by_role('button', name='保存可达姿态', exact=True)).to_be_disabled()
+            expect(dialog.get_by_role('button', name='查看已保存任务', exact=True)).to_be_disabled()
             dialog.get_by_role('button', name='关闭姿态计算').click()
             dock.get_by_role('button', name='关闭计算进度', exact=True).click()
             expect(dock).to_have_count(0)

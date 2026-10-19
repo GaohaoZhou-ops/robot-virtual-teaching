@@ -1,6 +1,7 @@
 from topbar_tools_helpers import topbar_action
 
 import os
+import math
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -68,6 +69,9 @@ def run():
                 box = camera.get_by_label("M70 相机画面交互区", exact=True).bounding_box()
                 assert box["height"] > 100
                 assert abs(box["width"] / box["height"] - 1944 / 1200) < 0.01
+                projection = vector_attribute(camera.locator(".zivid-camera-canvas"), "data-projection")
+                assert abs(2 * math.degrees(math.atan(1 / projection[0])) - 56.6) < 0.0001
+                assert abs(2 * math.degrees(math.atan(1 / projection[5])) - 35.6) < 0.0001
             assert page.locator('.inspector-scroll[data-page-scroll="camera"]').evaluate(
                 "element => element.scrollHeight <= element.clientHeight"
             )
@@ -305,6 +309,8 @@ def run():
         assert dialog.locator(".zivid-camera-panel").get_attribute("data-camera-side") == "left"
         page.keyboard.press("Escape")
         dialog.wait_for(state="detached")
+        panel.wait_for(state="visible")
+        right_panel.wait_for(state="visible")
         assert panel.is_visible() and right_panel.is_visible()
         assert page.locator(".zivid-camera-panel").count() == 2
 

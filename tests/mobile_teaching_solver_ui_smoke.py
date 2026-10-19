@@ -71,6 +71,7 @@ def run():
             sample.click()
             expect(canvas).to_have_attribute('data-mobile-selected-sample', original_capture['samples'][0]['id'])
             expect(page.get_by_label('采样 Pose 详情', exact=True)).to_contain_text('待计算')
+            expect(page.get_by_role('region', name='设备姿态保存')).to_have_count(0)
             expect(canvas).to_have_attribute('data-synchronized-focus-state', 'settled')
             page.screenshot(path=str(ARTIFACTS / 'sampling-poses.png'), full_page=True)
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
@@ -94,6 +95,8 @@ def run():
             expect(dialog).to_have_count(0)
             dock = page.get_by_role('region', name='设备姿态后台计算')
             expect(dock).to_have_attribute('data-compute-status', 'completed', timeout=120000)
+            expect(dock.get_by_role('button', name='保存可达姿态', exact=True)).to_be_enabled()
+            expect(dock).to_contain_text('可达姿态待保存')
             expect(canvas).to_have_attribute('data-parking-ghost-state', 'visible')
             expect(canvas).to_have_attribute('data-parking-ghost-kind', 'mobile-solve')
             expect(canvas).to_have_attribute('data-parking-ghost-opacity', '0.24')
@@ -120,12 +123,22 @@ def run():
             actual = [float(n) for n in canvas.get_attribute('data-zivid-left-optical-position').split(',')]
             for a, t in zip(actual, archive['result']['samples'][0]['cameraPose']['position'].values()):
                 assert abs(a - t) <= .050001, (actual, t)
-            page.get_by_role('button', name='计算机器人姿态', exact=True).click()
-            dialog.get_by_role('button', name='保存可达姿态', exact=True).click()
+            # A completed report must remain directly saveable after its dock
+            # has closed and the page has restored the unsaved calculation.
+            page.reload(wait_until='networkidle')
+            ready(page)
+            expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
+            save_panel = page.get_by_role('region', name='设备姿态保存')
+            expect(sample).to_contain_text('可达 · 待保存')
+            expect(save_panel).to_contain_text('保存后将生成停车点和对应机器人姿态')
+            save_panel.get_by_role('button', name='保存可达姿态', exact=True).click()
             expect(dialog).to_have_count(0)
             config = await_saved(page, lambda c: len(c['project']['virtualTeaching']['tasks']) == 2)
             tasks = config['project']['virtualTeaching']['tasks']
             assert tasks[0]['mobileCapture'] == original_capture
+            assert tasks[0]['mobileSolve']['savedTaskId'] == tasks[1]['id']
+            assert len(tasks[1]['parkingPoints']) == 1
+            assert len(tasks[1]['parkingPoints'][0]['poses']) == 1, 'unreachable samples must not be saved'
             assert tasks[1]['parkingPoints'][0]['poses'][0]['mobileSampleId'] == original_capture['samples'][0]['id']
             assert tasks[1]['parkingPoints'][0]['poses'][0]['opticalTargets']['left']['position'] == archive['result']['samples'][0]['cameraPose']['position']
             expect(sources.get_by_role('button', name='机器人示教', exact=True)).to_have_attribute('aria-pressed', 'true')
@@ -171,9 +184,7 @@ def run():
             assert dialog.locator('.mobile-solve-dialog').evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
             dialog.get_by_role('button', name='关闭姿态计算').click()
             topbar_action(page, name='打开示教数据管理页').click()
-            page.get_by_role('button', name='计算机器人姿态', exact=True).click()
-            expect(dialog.locator('.mobile-solve-results-heading')).to_contain_text('1 / 2 可达')
-            dialog.get_by_role('button', name='查看已保存任务').click()
+            page.get_by_role('region', name='设备姿态保存').get_by_role('button', name='查看已保存任务', exact=True).click()
             config = await_saved(page, lambda c: c['ui'].get('activeTeachingTaskId') == tasks[1]['id'])
             assert len(config['project']['virtualTeaching']['tasks']) == 2, 'saving twice must not duplicate the output task'
             topbar_action(page, name='打开示教数据管理页').click()
@@ -191,7 +202,7 @@ def run():
             assert not errors, errors
         finally:
             browser.close()
-    print('Mobile solve UI: sample selection, real URDF IK, report navigation, linked robot refinement, reload, cancellation, idempotent save and ZIP export passed.')
+    print('Mobile solve UI: real URDF IK, persistent save action after reload, linked robot refinement, data-page saved-task navigation, cancellation, idempotent save and ZIP export passed.')
 
 
 if __name__ == '__main__':
