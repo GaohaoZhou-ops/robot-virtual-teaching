@@ -689,6 +689,90 @@ final class AtlasTeachingUITests: XCTestCase {
         view.stop()
     }
 
+    func testPoseImageExcludesCoverageWhileGlobalModelKeepsIt() throws {
+        let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
+        func makeGeometry() -> SCNGeometry {
+            let geometry = SCNPlane(width: 4, height: 3)
+            let material = SCNMaterial(); material.lightingModel = .constant
+            material.diffuse.contents = UIColor.lightGray; material.isDoubleSided = true
+            geometry.materials = [material]
+            return geometry
+        }
+        var geometry = makeGeometry()
+        var sample = TeachingSample(segmentId: "image-coverage-isolation", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        var matrix = try XCTUnwrap(TeachingCoveragePose(sample.cameraPose)).cameraFromModel
+        let frames = try XCTUnwrap(device.makeBuffer(bytes: &matrix, length: MemoryLayout<simd_float4x4>.stride, options: .storageModeShared))
+        let values = [Float](repeating: 1, count: TeachingCoverageProfile.columns * TeachingCoverageProfile.rows)
+        let depths = try XCTUnwrap(values.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) })
+        let footprint = TeachingCoverageSnapshot(frames: frames, depths: depths, frameCount: 1)
+        let baseline = PosePreviewSurface(); baseline.frame = CGRect(x: 0, y: 0, width: 400, height: 300)
+        defer { baseline.stop() }
+        baseline.update(rendered: geometry, sample: sample, mode: .image, resetRevision: 0)
+        baseline.layoutIfNeeded()
+        let originalImage = try XCTUnwrap(baseline.imageView.image)
+        let originalPNG = try XCTUnwrap(originalImage.pngData())
+
+        func centerPixel(_ image: UIImage) throws -> [UInt8] {
+            let cg = try XCTUnwrap(image.cgImage)
+            var pixel = [UInt8](repeating: 0, count: 4)
+            try pixel.withUnsafeMutableBytes { raw in
+                let context = try XCTUnwrap(CGContext(data: raw.baseAddress, width: 1, height: 1,
+                    bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(cg, in: CGRect(x: -cg.width / 2, y: -cg.height / 2, width: cg.width, height: cg.height))
+            }
+            return pixel
+        }
+        func render(_ geometry: SCNGeometry) -> UIImage {
+            let scene = SCNScene(); scene.rootNode.addChildNode(SCNNode(geometry: geometry))
+            let camera = SCNNode(); camera.camera = SCNCamera(); camera.position.z = 1
+            camera.camera?.zNear = 0.01; camera.camera?.zFar = 1000
+            scene.rootNode.addChildNode(camera)
+            let renderer = SCNRenderer(device: device, options: nil)
+            renderer.scene = scene; renderer.pointOfView = camera
+            return renderer.snapshot(atTime: 0, with: CGSize(width: 400, height: 300), antialiasingMode: .multisampling4X)
+        }
+
+        // Open a fresh preview with coverage already attached, as in the real review page.
+        XCTAssertEqual(try centerPixel(render(geometry)), try centerPixel(originalImage))
+        TeachingCoverageRenderer.apply(footprint, opacity: 0.8, to: geometry.firstMaterial!)
+        let view = PosePreviewSurface(); view.frame = baseline.frame
+        defer { view.stop() }
+        func update(_ mode: PosePreviewMode = .image) {
+            view.update(rendered: geometry, overview: geometry, footprint: footprint,
+                        sample: sample, mode: mode, resetRevision: 0)
+            view.layoutIfNeeded()
+        }
+        update()
+        XCTAssertEqual(view.imageView.image?.pngData(), originalPNG, "2D must preserve original colors when live coverage is enabled")
+        let livePixel = try centerPixel(render(geometry))
+        let globalPixel = try centerPixel(render(XCTUnwrap(view.overviewObject.geometry)))
+        XCTAssertGreaterThan(Int(livePixel[1]), Int(livePixel[0]) + 30, "opening 2D must preserve live model coverage")
+        XCTAssertGreaterThan(Int(globalPixel[1]), Int(globalPixel[0]) + 30, "the global 3D overview keeps the selected Pose highlight")
+        XCTAssertTrue(geometry.firstMaterial?.value(forKey: "atlasCoverageFrames") as? MTLBuffer === frames)
+
+        // Force new snapshots after material changes and Pose selection; cached images can hide a shared-material leak.
+        for opacity: Float in [0, 0.25, 1] {
+            TeachingCoverageRenderer.apply(footprint, opacity: opacity, to: geometry.firstMaterial!)
+            sample.id = UUID().uuidString
+            update(.interactive); view.setCameraPoseVisible(true); view.setOverviewExpanded(true)
+            update()
+            XCTAssertEqual(view.imageView.image?.pngData(), originalPNG, "coverage changes and 3D overlays cannot tint 2D")
+        }
+        geometry = makeGeometry()
+        TeachingCoverageRenderer.apply(footprint, opacity: 1, to: geometry.firstMaterial!)
+        update()
+        XCTAssertEqual(view.imageView.image?.pngData(), originalPNG, "replacement display geometry must also use original colors")
+        view.imageScrollView.setZoomScale(2.5, animated: false)
+        view.scrollViewDidEndZooming(view.imageScrollView, with: view.imageView, atScale: 2.5)
+        XCTAssertEqual(try centerPixel(XCTUnwrap(view.imageView.image)), try centerPixel(originalImage),
+                       "higher-resolution 2D rerenders must stay free of coverage tint")
+        let shot = XCTAttachment(image: try XCTUnwrap(view.imageView.image))
+        shot.name = "Original-color 2D image with coverage enabled"; shot.lifetime = .keepAlways; add(shot)
+    }
+
     func testPoseImageZoomPanRestoreAndResize() throws {
         var geometry: SCNGeometry = SCNBox(width: 1, height: 0.8, length: 0.6, chamferRadius: 0)
         var sample = TeachingSample(segmentId: "image-detail", kind: "keyframe",

@@ -350,7 +350,11 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let footprintChanged = footprintFrames !== footprint?.frames
         overviewFootprint = footprint
         if geometryChanged {
-            sourceGeometry = rendered; recordedObject.geometry = rendered; snapshotDirty = true
+            sourceGeometry = rendered
+            // The recorded camera image shows original surface colors. Live
+            // coverage changes must stay on the global model, including on rerender.
+            recordedObject.geometry = rendered.map(Self.copyForInspection)
+            snapshotDirty = true
         }
         if geometryChanged || footprintChanged {
             footprintFrames = footprint?.frames
