@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -8,7 +9,7 @@ from playwright.sync_api import expect, sync_playwright
 from export_separation_ui_smoke import CHROME, ROOT, load_project
 
 
-def make_fixtures(directory, mode='map'):
+def make_fixtures(directory, mode='map', extra_links=()):
     subprocess.run(['node', '--input-type=module', '-e', '''
       import { writeFile } from 'node:fs/promises';
       import { teachingTransferFixture } from './tests/teaching_transfer_helpers.mjs';
@@ -19,7 +20,7 @@ def make_fixtures(directory, mode='map'):
         const geometry = '<geometry><box size="0.2 0.2 0.2"/></geometry>';
         fixture.map.portableRobotPackage.files[0].bytes = new TextEncoder().encode(
           '<robot name="distance_fixture"><link name="base_link"/>' +
-          [['left_L1', 0.6], ['right_L1', -0.6], ['torso_link', 0]].map(([name, y]) =>
+          [['left_L1', 0.6], ['right_L1', -0.6], ['torso_link', 0]].concat(JSON.parse(process.argv[3])).map(([name, y]) =>
             `<link name="${name}"><visual>${geometry}</visual><collision>${geometry}</collision></link>` +
             `<joint name="${name}_mount" type="fixed"><parent link="base_link"/><child link="${name}"/>` +
             `<origin xyz="0 ${y} 1"/></joint>`).join('') + '</robot>');
@@ -43,7 +44,7 @@ def make_fixtures(directory, mode='map'):
         });
         await writeFile(`${process.argv[1]}/${state}.zip`, archive.bytes);
       }
-    ''', str(directory), mode], cwd=ROOT, check=True)
+    ''', str(directory), mode, json.dumps(extra_links)], cwd=ROOT, check=True)
 
 
 def run():

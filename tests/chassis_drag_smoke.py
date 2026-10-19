@@ -60,7 +60,7 @@ def double_click_chassis(page, canvas):
     expect(canvas).to_have_attribute("data-chassis-drag-mode", "idle")
     expect(canvas).to_be_focused()
     expect(canvas).to_have_attribute("data-chassis-control-guide-visible", "true")
-    expect(page.get_by_label("底盘控制提示", exact=True)).to_be_visible()
+    expect(page.get_by_label("底盘控制提示", exact=True)).to_have_count(0)
 
 
 def enter_chassis_drag(page, canvas):
@@ -109,7 +109,7 @@ def run():
         )
         page.wait_for_timeout(250)
         hud = page.get_by_label("底盘控制提示", exact=True)
-        expect(hud.get_by_text("底盘控制已启用", exact=True)).to_be_visible()
+        expect(hud).to_have_count(0)
         expect(canvas).to_have_attribute("data-chassis-control-guide-visible", "true")
 
         # Turn off keyboard control to test the canvas shortcut independently.
@@ -137,13 +137,12 @@ def run():
         assert float(canvas.get_attribute("data-chassis-control-guide-screen-length")) == 72
         double_click_chassis(page, canvas)
 
-        # Height locking is reflected in both the guide and its key legend.
+        # Height locking is reflected in the guide and blocks vertical movement.
         was_locked = canvas.get_attribute("data-robot-height-locked") == "true"
         if not was_locked:
             viewer_tool(page, name="锁定机器人高度").click()
             page.get_by_role("button", name="视图工具", exact=True).click()
         expect(canvas).to_have_attribute("data-chassis-control-guide-height-locked", "true")
-        expect(hud.locator('[data-axis="z"]')).to_contain_text("高度已锁定")
         z_before = read_pose(canvas)["z"]
         page.keyboard.press("ArrowUp")
         assert read_pose(canvas)["z"] == z_before
@@ -179,20 +178,21 @@ def run():
         expect(canvas).to_have_attribute("data-chassis-control-guide-visible", "false")
         expect(hud).to_have_count(0)
 
-        # The visible close button and Escape both release keyboard control.
+        # Escape releases keyboard control both at rest and during movement.
         double_click_chassis(page, canvas)
-        before_close = read_pose(canvas)
-        camera_before_close = read_camera(canvas)
-        hud.get_by_role("button", name="退出底盘控制", exact=True).click()
+        before_escape = read_pose(canvas)
+        camera_before_escape = read_camera(canvas)
+        page.keyboard.press("Escape")
         expect(hud).to_have_count(0)
+        expect(canvas).to_have_attribute("data-robot-control-enabled", "false")
         expect(canvas).to_have_attribute("data-chassis-control-guide-visible", "false")
-        assert read_pose(canvas) == before_close
-        assert read_camera(canvas) == camera_before_close
+        assert read_pose(canvas) == before_escape
+        assert read_camera(canvas) == camera_before_escape
         double_click_chassis(page, canvas)
         page.keyboard.down("w")
         page.wait_for_function(
             "x => Math.abs(Number(document.querySelector('.three-canvas').dataset.robotX) - x) > 0.01",
-            arg=before_close["x"],
+            arg=before_escape["x"],
         )
         page.keyboard.press("Escape")
         expect(hud).to_have_count(0)
@@ -215,7 +215,7 @@ def run():
         expect(canvas).to_have_attribute("data-end-effector-control-state", "idle")
         page.screenshot(path="/tmp/atlas-chassis-double-click-control.png", full_page=True)
         page.set_viewport_size({"width": 980, "height": 640})
-        expect(hud).to_be_visible()
+        expect(hud).to_have_count(0)
         page.wait_for_function(
             """() => {
               const canvas = document.querySelector('.three-canvas');
@@ -231,15 +231,9 @@ def run():
               await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
             }"""
         )
-        assert hud.get_by_role("button", name="退出底盘控制", exact=True).evaluate(
-            """button => {
-              const box = button.getBoundingClientRect();
-              return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
-            }"""
-        )
         page.screenshot(path="/tmp/atlas-chassis-double-click-control-compact.png", full_page=True)
         page.set_viewport_size({"width": 1440, "height": 900})
-        print("double-click showed moving direction axes, yaw ring and keyboard UI; zoom, height lock, close and Escape passed", flush=True)
+        print("chassis popup absent; direction axes, yaw ring, zoom, height lock, toolbar toggle and Escape passed", flush=True)
 
         # Plane dragging remains available from the explicit toolbar control.
         enter_chassis_drag(page, canvas)
