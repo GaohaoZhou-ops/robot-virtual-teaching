@@ -33,6 +33,7 @@
 .mobile-solve-results-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .mobile-solve-results-heading h3 { margin: 0; font-size: 14px; }
 .mobile-solve-results-heading > span { color: #74dac1; font: 12px Menlo, monospace; }
+.mobile-solve-results > .mobile-solve-help { margin: -8px 0 14px; }
 .mobile-solve-empty { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 18px; min-height: 360px; text-align: center; color: #668795; }
 .mobile-solve-empty strong { color: #b8ccd6; font-size: 15px; }
 .mobile-solve-empty p { max-width: 310px; margin: 0; font-size: 12px; line-height: 1.8; }
@@ -60,6 +61,8 @@
 .mobile-solve-error-grid span { font-size: 9px; color: #6c8997; }
 .mobile-solve-error-grid .is-exceeded b { color: #f4b36a; }
 .mobile-solve-detail article > p { font-size: 11px; color: #c5a16e; line-height: 1.6; }
+.mobile-solve-detail article > .mobile-solve-parking-pose { color: #8ea8b6; }
+.mobile-solve-detail article > .mobile-solve-collision-pass { color: #77dab3; }
 .mobile-solve-detail article footer { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; }
 .mobile-solve-detail article footer small { margin-right: auto; font-size: 10px; color: #8ea8b6; }
 .mobile-solve-notice { color: #dfb676; font-size: 11px; line-height: 1.6; }

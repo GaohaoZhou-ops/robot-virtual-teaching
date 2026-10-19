@@ -55,6 +55,8 @@ def run():
             page.get_by_role('button', name='关闭设备示教窗口').click()
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             dialog = page.get_by_role('dialog', name='计算机器人姿态', exact=True)
+            dialog.get_by_role('combobox', name='停车点策略').select_option('fixed')
+            dialog.get_by_role('checkbox', name='碰撞筛选').uncheck()
             dialog.get_by_role('button', name='开始计算', exact=True).click()
             expect(dialog).to_have_count(0)
             dock = page.get_by_role('region', name='设备姿态后台计算')

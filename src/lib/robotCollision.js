@@ -82,21 +82,21 @@ const warningMaterialForMesh = (mesh, material) => (
   Array.isArray(mesh.material) ? mesh.material.map(() => material) : material
 );
 
-const collectRobotCollisionMeshes = (robot) => {
+const collectRobotCollisionMeshes = (robot, includeChassis = false) => {
   const excludedLinks = new Set();
   const visualMeshes = new Map();
   const collisionMeshes = new Map();
   const jointByLink = new Map();
 
   robot?.traverse((object) => {
-    if (object.userData?.urdfType === 'link' && isExcludedRobotCollisionLink(object.name)) {
+    if (!includeChassis && object.userData?.urdfType === 'link' && isExcludedRobotCollisionLink(object.name)) {
       excludedLinks.add(object.name);
     }
     if (!object.isMesh || !object.geometry?.getAttribute?.('position')) return;
 
     const link = findOwningLink(object, robot);
     const linkName = link?.name || robot?.name || 'robot';
-    if (isExcludedRobotCollisionLink(linkName)) {
+    if (!includeChassis && isExcludedRobotCollisionLink(linkName)) {
       excludedLinks.add(linkName);
       return;
     }
@@ -131,15 +131,15 @@ export function getRobotCollisionJointOptions(robot) {
   return [...options.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function collectRobotCollisionProxies(robot, ignoredJointNames = []) {
-  const { excludedLinks, visualMeshes, collisionMeshes, jointByLink } = collectRobotCollisionMeshes(robot);
+export function collectRobotCollisionProxies(robot, ignoredJointNames = [], { includeChassis = false, highlights = true } = {}) {
+  const { excludedLinks, visualMeshes, collisionMeshes, jointByLink } = collectRobotCollisionMeshes(robot, includeChassis);
   const ignoredJoints = new Set(normalizeIgnoredCollisionJoints(ignoredJointNames));
   const ignoredLinks = [];
   const proxies = [];
   const monitoredLinks = new Set();
   const highlightEntries = [];
-  const redMaterial = createWarningMaterial(RED_WARNING_COLOR);
-  const yellowMaterial = createWarningMaterial(YELLOW_WARNING_COLOR);
+  const redMaterial = highlights ? createWarningMaterial(RED_WARNING_COLOR) : null;
+  const yellowMaterial = highlights ? createWarningMaterial(YELLOW_WARNING_COLOR) : null;
   let proxyIndex = 0;
 
   const linkNames = new Set([...visualMeshes.keys(), ...collisionMeshes.keys()]);
@@ -175,7 +175,7 @@ export function collectRobotCollisionProxies(robot, ignoredJointNames = []) {
       });
     });
 
-    fallbackVisualMeshes.forEach((mesh) => {
+    (highlights ? fallbackVisualMeshes : []).forEach((mesh) => {
       highlightEntries.push({
         linkName,
         mesh,
@@ -201,7 +201,7 @@ export function collectRobotCollisionProxies(robot, ignoredJointNames = []) {
     visualFallbackProxyCount: proxies.filter(
       (proxy) => proxy.source === 'visual-fallback',
     ).length,
-    warningMaterials: [redMaterial, yellowMaterial],
+    warningMaterials: [redMaterial, yellowMaterial].filter(Boolean),
   };
 }
 

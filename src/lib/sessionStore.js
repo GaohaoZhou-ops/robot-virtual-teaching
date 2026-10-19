@@ -19,6 +19,45 @@ const ALL_WORKSPACE_KEYS = [
 
 let databasePromise = null;
 
+const MAP_BUFFER_FIELDS = ['positionBuffer', 'colorBuffer', 'indexBuffer'];
+const MAX_INLINE_MAP_BYTES = 64 * 1024 * 1024;
+
+const binaryByteLength = (value) => value instanceof ArrayBuffer || ArrayBuffer.isView(value)
+  ? value.byteLength : 0;
+
+const packMapRecord = (record) => {
+  const files = record?.portableRobotPackage?.files || [];
+  const byteLength = MAP_BUFFER_FIELDS.reduce((sum, key) => sum + binaryByteLength(record?.[key]), 0)
+    + files.reduce((sum, file) => sum + binaryByteLength(file.bytes), 0);
+  if (byteLength <= MAX_INLINE_MAP_BYTES) return record;
+  // Large maps plus bundled robot meshes can exceed IndexedDB's per-value
+  // serialization limit. Blobs store the binary payload outside that value.
+  const packed = { ...record };
+  for (const key of MAP_BUFFER_FIELDS) {
+    if (binaryByteLength(record[key])) packed[key] = new Blob([record[key]]);
+  }
+  if (record.portableRobotPackage) {
+    packed.portableRobotPackage = { ...record.portableRobotPackage,
+      files: files.map((file) => ({ ...file, bytes: binaryByteLength(file.bytes)
+        ? new Blob([file.bytes], { type: file.mimeType || 'application/octet-stream' }) : file.bytes })) };
+  }
+  return packed;
+};
+
+const unpackMapRecord = async (record) => {
+  if (!record) return null;
+  const unpacked = { ...record };
+  await Promise.all(MAP_BUFFER_FIELDS.map(async (key) => {
+    if (record[key] instanceof Blob) unpacked[key] = await record[key].arrayBuffer();
+  }));
+  if (record.portableRobotPackage) {
+    unpacked.portableRobotPackage = { ...record.portableRobotPackage,
+      files: await Promise.all(record.portableRobotPackage.files.map(async (file) => ({ ...file,
+        bytes: file.bytes instanceof Blob ? await file.bytes.arrayBuffer() : file.bytes }))) };
+  }
+  return unpacked;
+};
+
 const browserStorage = () => {
   try {
     return globalThis.localStorage || null;
@@ -79,7 +118,7 @@ const requestResult = (request) =>
 const transactionComplete = (transaction) =>
   new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error('本地存储事务失败'));
+    transaction.onerror = (event) => reject(event.target?.error || transaction.error || new Error('本地存储事务失败'));
     transaction.onabort = () => reject(transaction.error || new Error('本地存储事务已取消'));
   });
 
@@ -475,7 +514,7 @@ export async function prepareWorkspaceSession(sessionId) {
 
   return {
     restarted: false,
-    map,
+    map: await unpackMapRecord(map),
     config,
     activeMode,
     workspaceSlots: workspaceIndex.modes,
@@ -607,7 +646,7 @@ export async function saveWorkspaceMap(sessionId, mapId, name, mapCache, mode = 
     null,
     replacesMap ? null : previousSummary,
   );
-  store.put(mapRecord);
+  store.put(packMapRecord(mapRecord));
   if (replacesMap) store.delete(workspaceConfigKey(workspaceMode));
   store.delete('map');
   store.delete('config');
@@ -698,7 +737,7 @@ export async function loadWorkspaceSnapshot(sessionId, mode) {
   if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
   if ((map && map.sessionId !== sessionId) || (config && config.sessionId !== sessionId)
     || (map && config && config.mapId !== map.mapId)) throw new Error('工程缓存不完整，请重新加载工程');
-  return { mode: workspaceMode, map: map || null, config: config || null };
+  return { mode: workspaceMode, map: await unpackMapRecord(map), config: config || null };
 }
 
 // Geometry, configuration, the reverse link and the active mode commit together.
@@ -734,7 +773,7 @@ export async function commitWorkspaceTransfer(sessionId, source, target, result)
     const map = { ...result.map, key: workspaceMapKey(target.mode), sessionId, savedAt };
     const config = { key: workspaceConfigKey(target.mode), sessionId, savedAt,
       mapId: map.mapId, teachingSpaceMode: target.mode, config: result.config };
-    store.put(map);
+    store.put(packMapRecord(map));
     store.put(config);
     const modes = { ...index.modes, [target.mode]: summarizeWorkspace(target.mode, map, config) };
     if (result.sourceConfig) {
