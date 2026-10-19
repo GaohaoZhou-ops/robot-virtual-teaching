@@ -59,6 +59,21 @@ xcuserdata/
 *.dSYM.zip
 *.bcsymbolmap
 
+# ZIP copies of local build trees and DerivedData, including dated snapshots.
+# Scope archives to output roots so source/tool archives and fixtures stay visible.
+/build.zip
+/build-*.zip
+/ipad/build.zip
+/ipad/build-*.zip
+/vision/build.zip
+/vision/build-*.zip
+/DerivedData.zip
+/DerivedData-*.zip
+/ipad/DerivedData.zip
+/ipad/DerivedData-*.zip
+/vision/DerivedData.zip
+/vision/DerivedData-*.zip
+
 # Exported iPad / Vision Pro app containers and Xcode diagnostics
 # Containers can include local models, poses, and pairing credentials.
 *.xcappdata/
@@ -448,6 +463,9 @@ env/
 .atlas-route.pid
 .atlas-route.log
 .atlas-cache/
+# Packed local transfer caches include downloaded models and pairing state.
+/.atlas-cache.zip
+/.atlas-cache-*.zip
 AtlasModelThumbnails/
 *.log
 *.log.[0-9]*

@@ -9,6 +9,9 @@ struct VisionIPv4AddressField: UIViewRepresentable {
     var onSubmit: () -> Void
 
     func makeUIView(context: Context) -> VisionIPv4AddressInput { VisionIPv4AddressInput() }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: VisionIPv4AddressInput, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 440, height: proposal.height ?? 64)
+    }
     func updateUIView(_ view: VisionIPv4AddressInput, context: Context) {
         view.onChange = { host = $0; error = "" }
         view.onReject = { error = $0 }
@@ -37,11 +40,12 @@ final class VisionIPv4AddressInput: UITextField, UITextFieldDelegate {
     private var skipSeparator = false
     private var applyingReplacement = false
     private let accent = UIColor.systemCyan
+    private let cellSpacing: CGFloat = 16
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         delegate = self
-        font = .monospacedSystemFont(ofSize: 27, weight: .medium)
+        font = .monospacedSystemFont(ofSize: 29, weight: .medium)
         textColor = .clear; tintColor = .clear; borderStyle = .none
         keyboardType = .decimalPad; returnKeyType = .next
         autocorrectionType = .no; spellCheckingType = .no; smartInsertDeleteType = .no
@@ -74,7 +78,7 @@ final class VisionIPv4AddressInput: UITextField, UITextFieldDelegate {
     override var intrinsicContentSize: CGSize { CGSize(width: 440, height: 64) }
     override func layoutSubviews() {
         super.layoutSubviews()
-        let gap: CGFloat = 24, width = max(0, (bounds.width - gap * 3) / 4)
+        let gap = cellSpacing, width = max(0, (bounds.width - gap * 3) / 4)
         for (index, cell) in cells.enumerated() {
             cell.frame = CGRect(x: CGFloat(index) * (width + gap), y: 0, width: width, height: bounds.height)
             bringSubviewToFront(cell)
@@ -84,7 +88,7 @@ final class VisionIPv4AddressInput: UITextField, UITextFieldDelegate {
     override func caretRect(for position: UITextPosition) -> CGRect { .zero }
     override func selectionRects(for range: UITextRange) -> [UITextSelectionRect] { [] }
     override func closestPosition(to point: CGPoint) -> UITextPosition? {
-        selectCell(min(3, max(0, Int(point.x / max((bounds.width + 24) / 4, 1)))))
+        selectCell(min(3, max(0, Int(point.x / max((bounds.width + cellSpacing) / 4, 1)))))
         return endOfDocument
     }
     func selectCell(_ index: Int) {
