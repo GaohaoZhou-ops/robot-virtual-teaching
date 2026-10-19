@@ -37,12 +37,11 @@ export default function IPadPairingQRCode({ device = 'ipad', ticket, address, di
         <li>选择这台电脑，输入下方 4 位配对码，点击「配对并检查模型」。</li>
         <li>确认同步模型，预览后进入空间示教。</li>
       </ol> : <p>iPad 首页扫码接收物体；已有示教结果时，点击「扫码同步到电脑」扫描此码。</p>}
-      <small>电脑与采集设备需连接同一局域网。</small>
       <div className="ipad-qr__manual"><div><strong className="ipad-code">{ticket.pairingCode}</strong></div>
         <button aria-label="复制配对码" disabled={disabled || expired} onClick={onCopy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>
       </div>
       <small>有效期至 {new Date(ticket.pairingExpiresAt).toLocaleTimeString()} · {ticket.status === 'paired' ? '仅限已配对设备' : '仅限一台采集设备'}</small>
-      <div role="status">{expired ? '配对码已过期，请点击下方「更新配对码」。'
+      <div role="status">{expired ? `配对码已过期，请点击下方「${vision ? '更新配对码' : '刷新二维码'}」。`
         : !address ? '请连接局域网后重试。' : disabled ? '正在更新配对信息…' : !vision && !image && !error ? '正在生成二维码…' : ''}</div>
       {error && <><p className="ipad-error" role="alert">{error}</p><button disabled={disabled} onClick={() => setRetry((value) => value + 1)}><RefreshCw size={14} />重新生成二维码</button></>}
     </div>

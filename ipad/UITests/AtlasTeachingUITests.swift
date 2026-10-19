@@ -7,11 +7,46 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    func testLocalProjectDeleteImmediatelyAfterSwipe() throws {
+        guard let id = ProcessInfo.processInfo.environment["ATLAS_SWIPE_TAP_FIXTURE_ID"], UUID(uuidString: id) != nil else {
+            throw XCTSkip("Provide a disposable local project for rapid swipe/tap checks")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let row = app.buttons["local-project-\(id)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            for index in 0..<6 {
+                for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+                let frame = row.frame
+                let origin = app.coordinate(withNormalizedOffset: .zero)
+                let start = origin.withOffset(CGVector(dx: frame.maxX - 120, dy: frame.midY))
+                let end = start.withOffset(CGVector(dx: index % 2 == 0 ? -72 : -220, dy: 0))
+                let tap = origin.withOffset(CGVector(dx: frame.maxX - 44,
+                    dy: frame.midY + CGFloat(index % 3 - 1) * frame.height * 0.25))
+                // Precompute the tap coordinate: no element queries, sleeps or
+                // waits for the button/scroll animation between these events.
+                start.press(forDuration: 0.03, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+                tap.tap()
+                let cancel = app.buttons["cancel-delete-local-project"].firstMatch
+                XCTAssertTrue(cancel.waitForExistence(timeout: 3), "Immediate delete tap \(index), orientation \(orientation.rawValue): \(app.debugDescription)")
+                if index == 0 {
+                    let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                    shot.name = "Immediate swipe delete confirmation - \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+                }
+                cancel.tap()
+                XCTAssertTrue(row.exists, "cancel preserves the fixture")
+            }
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
+    }
+
     func testLocalProjectSwipeDeletionStaysOnIPad() throws {
         continueAfterFailure = false
         let ids = (ProcessInfo.processInfo.environment["ATLAS_DISPOSABLE_DELETE_IDS"] ?? "").split(separator: ",").map(String.init)
-        guard ids.count == 2, ids.allSatisfy({ UUID(uuidString: $0) != nil }) else {
-            throw XCTSkip("Provide two disposable local projects; this test deletes only those fixtures")
+        guard (1...2).contains(ids.count), ids.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+            throw XCTSkip("Provide one or two disposable local projects; this test deletes only those fixtures")
         }
         let protectedIDs = (ProcessInfo.processInfo.environment["ATLAS_DELETE_PROTECTED_IDS"] ?? "").split(separator: ",").map(String.init)
         let app = XCUIApplication(); app.launch()
@@ -21,14 +56,17 @@ final class AtlasTeachingUITests: XCTestCase {
             row.swipeLeft()
         }
         for (index, id) in ids.enumerated() {
-            XCUIDevice.shared.orientation = index == 0 ? .landscapeLeft : .portrait
+            XCUIDevice.shared.orientation = index == 0 && ids.count > 1 ? .landscapeLeft : .portrait
             let row = app.buttons["local-project-\(id)"]
             XCTAssertTrue(row.waitForExistence(timeout: 15))
             reveal(row)
             let action = app.buttons["swipe-delete-local-project-\(id)"]
             XCTAssertTrue(action.waitForExistence(timeout: 5), app.debugDescription)
             XCTAssertTrue(action.isHittable, "swiping reveals a tappable delete action")
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.18)).tap()
+            // Use the page's outside margin. The enlarged QR button now occupies
+            // the old fixed "whitespace" coordinate in portrait orientation.
+            app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: 8, dy: app.windows.firstMatch.frame.midY)).tap()
             XCTAssertFalse(action.isHittable, "tapping page whitespace closes the action")
             XCTAssertTrue(row.exists)
             reveal(row)
@@ -49,7 +87,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertFalse(action.isHittable, "swiping back closes the action")
             reveal(row)
             XCTAssertTrue(action.waitForExistence(timeout: 5))
-            if index == 0 {
+            if index == 0 && ids.count > 1 {
                 let sibling = app.buttons["local-project-\(ids[1])"]
                 reveal(sibling)
                 XCTAssertTrue(app.buttons["swipe-delete-local-project-\(ids[1])"].isHittable)
@@ -79,7 +117,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
             for protectedID in protectedIDs { XCTAssertTrue(app.buttons["local-project-\(protectedID)"].exists) }
-            if index == 0 { XCTAssertTrue(app.buttons["local-project-\(ids[1])"].exists) }
+            if index == 0 && ids.count > 1 { XCTAssertTrue(app.buttons["local-project-\(ids[1])"].exists) }
             app.terminate(); app.launch()
             XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 15))
             XCTAssertFalse(row.exists, "deleted projects stay removed after relaunch")
@@ -1722,14 +1760,12 @@ final class AtlasTeachingUITests: XCTestCase {
         let fields = (0..<4).map { app.textFields["server-address-octet-\($0)"] }
         XCTAssertTrue(fields[0].waitForExistence(timeout: 15))
         XCTAssertEqual(ipv4Address(in: app), "192.168.100.7")
-        let code = app.textFields["pairing-code"], receive = app.buttons["receive-model"]
-        code.tap(); code.typeText("Q7Z2")
         fields[0].tap(); fields[0].typeText("10.")
         fields[1].typeText("256")
         XCTAssertEqual(fields[1].value as? String, "25", "reject the digit that would make an octet exceed 255")
         XCTAssertTrue(app.staticTexts["server-address-error"].exists)
         fields[1].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 2))
-        XCTAssertFalse(receive.isEnabled, "an empty octet makes the address incomplete")
+        XCTAssertEqual(fields[1].value as? String, "", "an empty octet remains incomplete")
         fields[1].typeText(XCUIKeyboardKey.delete.rawValue)
         XCTAssertEqual(fields[0].value as? String, "1", "backspace from an empty cell edits the preceding octet")
         fields[0].typeText("92")
@@ -1737,12 +1773,10 @@ final class AtlasTeachingUITests: XCTestCase {
         fields[2].typeText("0.")
         fields[3].typeText("255")
         XCTAssertEqual(ipv4Address(in: app), "192.168.0.255", "three digits advance once; the following dot must not skip an octet")
-        XCTAssertTrue(receive.isEnabled)
         fields[3].typeText("6")
         XCTAssertEqual(fields[3].value as? String, "255", "a fourth digit cannot change the valid octet")
         fields[3].typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 3)); fields[3].typeText("0")
         XCTAssertEqual(ipv4Address(in: app), "192.168.0.0")
-        XCTAssertTrue(receive.isEnabled, "zero is a valid octet")
         XCTAssertEqual(app.textFields["server-port"].value as? String, "22001", "octet editing preserves the port")
         app.buttons["完成"].tap()
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -1811,15 +1845,15 @@ final class AtlasTeachingUITests: XCTestCase {
             return frame.height > frame.width
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 10), .completed)
-        code.tap(); code.typeText("Q7Z2")
+        code.tap(); code.typeText("Q7Z")
         app.buttons["scan-pairing-code"].tap()
         XCTAssertTrue(cancel.waitForExistence(timeout: 10))
         cancel.tap()
         XCTAssertTrue(code.waitForExistence(timeout: 5))
-        XCTAssertEqual(code.value as? String, "Q7Z2")
+        XCTAssertEqual(code.value as? String, "Q7Z")
         XCTAssertEqual(ipv4Address(in: app), "192.168.100.7")
         XCTAssertEqual(app.textFields["server-port"].value as? String, "21990")
-        XCTAssertTrue(app.buttons["receive-model"].isEnabled)
+        XCTAssertTrue(code.isEnabled)
         XCTAssertFalse(app.buttons["capture-pose"].exists)
         XCUIDevice.shared.orientation = .landscapeLeft
     }
@@ -1835,14 +1869,14 @@ final class AtlasTeachingUITests: XCTestCase {
         app.launch()
         let code = app.textFields["pairing-code"]
         XCTAssertTrue(code.waitForExistence(timeout: 15))
-        code.tap(); code.typeText("Q7Z2")
+        code.tap(); code.typeText("Q7Z")
         let service = app.buttons["discovered-service-\(serverID)"]
         XCTAssertTrue(service.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertEqual(ipv4Address(in: app), "192.168.100.7", "search never overwrites a manually entered address")
         service.tap()
         XCTAssertNotEqual(ipv4Address(in: app), "192.168.100.7")
-        XCTAssertEqual(code.value as? String, "Q7Z2", "selection keeps the pairing code")
-        XCTAssertTrue(app.buttons["receive-model"].isEnabled)
+        XCTAssertEqual(code.value as? String, "Q7Z", "selection keeps the partially entered pairing code")
+        XCTAssertTrue(code.isEnabled)
         XCTAssertFalse(app.buttons["capture-pose"].exists, "discovery never pairs or opens a teaching session")
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "Discovered LAN teaching server, pairing still required"; screenshot.lifetime = .keepAlways; add(screenshot)
@@ -1852,29 +1886,31 @@ final class AtlasTeachingUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication()
         XCUIDevice.shared.orientation = .landscapeLeft
-        app.launchArguments = ["-serverAddress", "http://192.168.0.233:21990"]
+        app.launchArguments = ["-serverAddress", ""]
         app.launch()
-        let code = app.textFields["pairing-code"], receive = app.buttons["receive-model"]
+        let code = app.textFields["pairing-code"]
         XCTAssertTrue(code.waitForExistence(timeout: 15))
-        XCTAssertFalse(receive.isEnabled)
+        XCTAssertFalse(app.buttons["receive-model"].exists)
         code.tap(); code.typeText("q7z")
         XCTAssertEqual(code.value as? String, "Q7Z")
-        XCTAssertFalse(receive.isEnabled, "three characters are incomplete")
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "three characters are incomplete")
         code.typeText("2")
         XCTAssertEqual(code.value as? String, "Q7Z2")
-        XCTAssertTrue(receive.isEnabled, "uppercase letters beyond F are supported")
+        XCTAssertTrue(app.staticTexts["请先选择服务器或填写有效地址与端口"].exists)
         let filled = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         filled.name = "Four filled pairing code cells"; filled.lifetime = .keepAlways; add(filled)
         code.typeText("9")
-        XCTAssertFalse(receive.isEnabled, "do not truncate a pasted longer code into a different valid code")
+        XCTAssertEqual(code.value as? String, "Q7Z29", "do not truncate a longer code into a different valid code")
+        XCTAssertTrue(app.staticTexts["请输入 4 位字母或数字"].exists)
         code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5))
-        code.typeText("1234"); XCTAssertTrue(receive.isEnabled, "digits-only codes are supported")
+        code.typeText("1234"); XCTAssertEqual(code.value as? String, "1234")
         code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
-        code.typeText("wxyz"); XCTAssertEqual(code.value as? String, "WXYZ"); XCTAssertTrue(receive.isEnabled)
+        code.typeText("wxyz"); XCTAssertEqual(code.value as? String, "WXYZ")
         code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
-        code.typeText("12-4"); XCTAssertFalse(receive.isEnabled, "punctuation is rejected")
+        code.typeText("12-4"); XCTAssertTrue(app.staticTexts["请输入 4 位字母或数字"].exists, "punctuation is rejected")
         code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
-        XCTAssertFalse(app.buttons["capture-pose"].exists, "input validation never pairs by itself")
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "a code alone cannot connect without a server address")
+        XCTAssertFalse(app.buttons["capture-pose"].exists)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Four-character alphanumeric pairing input"; shot.lifetime = .keepAlways; add(shot)
     }
@@ -1889,17 +1925,14 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(host.waitForExistence(timeout: 15))
         XCTAssertEqual(ipv4Address(in: app), "192.168.100.7")
         XCTAssertEqual(port.value as? String, "21990")
-        app.textFields["pairing-code"].tap(); app.textFields["pairing-code"].typeText("Q7Z2")
-        let receive = app.buttons["receive-model"]
-        XCTAssertTrue(receive.isEnabled)
         port.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
         port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5)); port.typeText("22001")
         XCTAssertEqual(ipv4Address(in: app), "192.168.100.7", "editing the port keeps the IPv4 address")
-        XCTAssertEqual(port.value as? String, "22001"); XCTAssertTrue(receive.isEnabled)
+        XCTAssertEqual(port.value as? String, "22001")
         port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5)); port.typeText("65536")
-        XCTAssertFalse(receive.isEnabled)
+        XCTAssertEqual(port.value as? String, "65536")
         port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5))
-        XCTAssertTrue(receive.isEnabled, "a blank port uses 21990")
+        XCTAssertEqual(port.value as? String, "21990", "a blank port displays the default placeholder")
         port.typeText("21990\n")
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "IPv4 address and default port"; screenshot.lifetime = .keepAlways; add(screenshot)
@@ -1953,12 +1986,97 @@ final class AtlasTeachingUITests: XCTestCase {
                 XCTAssertLessThanOrEqual(window.maxX - left.maxX, 32)
             }
             XCTAssertLessThanOrEqual(left.minX - window.minX, 32)
-            XCTAssertTrue(window.contains(app.buttons["receive-model"].frame))
+            let scan = app.buttons["scan-pairing-code"]
+            XCTAssertFalse(app.buttons["receive-model"].exists)
+            XCTAssertTrue(window.contains(scan.frame))
+            XCTAssertEqual(scan.frame.width, left.width - 48, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(scan.frame.height, 44)
+            XCTAssertTrue(app.staticTexts["方式一"].exists)
+            XCTAssertTrue(app.staticTexts["方式二"].exists)
+            XCTAssertEqual(app.buttons["discover-services"].label, "搜索服务器")
+            XCTAssertGreaterThan(app.staticTexts["手动连接"].frame.minY, scan.frame.maxY)
+            XCTAssertTrue(window.contains(app.textFields["pairing-code"].frame))
             print("Library window: \(window), pairing panel: \(left), project panel: \(right)")
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = orientation.isLandscape ? "Full-width library landscape" : "Full-width library portrait"
             screenshot.lifetime = .keepAlways; add(screenshot)
         }
+        XCUIDevice.shared.orientation = .landscapeLeft
+    }
+
+    func testModelTransferProgressAndRetry() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let address = environment["ATLAS_PROGRESS_ADDRESS"],
+              let pairingCode = environment["ATLAS_PROGRESS_CODE"],
+              let fixtureID = environment["ATLAS_PROGRESS_SESSION"], UUID(uuidString: fixtureID) != nil else {
+            throw XCTSkip("Run tests/ipad_transfer_progress_fixture.mjs for a disposable, throttled transfer")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launchArguments = ["-serverAddress", address]; app.launch()
+        let code = app.textFields["pairing-code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        let fixture = app.buttons["local-project-\(fixtureID)"]
+        func removeFixture() {
+            XCTAssertTrue(fixture.label.contains("进度验证（临时）"), "only remove the dedicated transfer fixture")
+            for _ in 0..<8 where !fixture.isHittable { app.swipeUp() }
+            fixture.swipeLeft()
+            app.buttons["swipe-delete-local-project-\(fixtureID)"].firstMatch.tap()
+            app.buttons["confirm-delete-local-project"].firstMatch.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: fixture)], timeout: 10), .completed)
+        }
+        if fixture.exists { removeFixture() }
+        code.tap(); code.typeText("ABCDE")
+        XCTAssertEqual(code.value as? String, "ABCDE")
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "a longer code must not submit its first four characters")
+        code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5))
+        code.typeText("12-4")
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "invalid characters do not start a connection")
+        code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
+        code.typeText(String(pairingCode.prefix(3)))
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "an incomplete code does not connect")
+        code.typeText(String(pairingCode.suffix(1)))
+        let stage = app.staticTexts["model-transfer-stage"]
+        XCTAssertTrue(stage.waitForExistence(timeout: 5))
+        XCTAssertEqual(stage.label, "正在连接电脑并配对")
+        XCTAssertFalse(app.buttons["scan-pairing-code"].isEnabled)
+        func snapshot(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        snapshot("Pairing progress on physical iPad")
+        let failure = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "测试下载失败，请重试")).firstMatch
+        XCTAssertTrue(failure.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(stage.exists)
+        let retry = app.buttons["retry-pairing"]
+        XCTAssertTrue(retry.isEnabled); XCTAssertTrue(app.buttons["scan-pairing-code"].isEnabled)
+        retry.tap()
+        let percent = app.staticTexts["model-download-percent"]
+        XCTAssertTrue(percent.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertFalse(failure.exists, "retry clears the old error")
+        func percentage() -> Int { Int(percent.label.replacingOccurrences(of: "%", with: "")) ?? -1 }
+        let initial = percentage()
+        XCTAssertGreaterThanOrEqual(initial, 0); XCTAssertLessThan(initial, 100)
+        XCTAssertTrue(app.staticTexts["model-download-bytes"].label.contains(" / "))
+        let advancing = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            percent.exists && percentage() > initial && percentage() < 100
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [advancing], timeout: 15), .completed)
+        snapshot("Live download percentage and bytes - landscape")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(percent.frame), "progress stays visible after rotation")
+        snapshot("Live download percentage and bytes - portrait")
+        let capture = app.buttons["capture-pose"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 90), app.debugDescription)
+        XCTAssertFalse(stage.exists)
+        app.buttons["本地项目"].tap()
+        XCTAssertTrue(fixture.waitForExistence(timeout: 15))
+        app.terminate(); app.launch()
+        XCTAssertTrue(fixture.waitForExistence(timeout: 15)); fixture.tap()
+        XCTAssertTrue(capture.waitForExistence(timeout: 30), "completed transfer persists locally")
+        app.buttons["本地项目"].tap()
+        removeFixture()
         XCUIDevice.shared.orientation = .landscapeLeft
     }
 
@@ -2445,7 +2563,6 @@ final class AtlasTeachingUITests: XCTestCase {
         } else {
             let code = app.textFields["pairing-code"]
             code.tap(); code.typeText(pairingCode)
-            app.buttons["receive-model"].tap()
         }
         let capture = app.buttons["capture-pose"]
         let deadline = Date().addingTimeInterval(120)
@@ -2453,9 +2570,9 @@ final class AtlasTeachingUITests: XCTestCase {
         while !capture.exists && Date() < deadline {
             allowPermissions()
             if app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "接收失败：")).firstMatch.exists,
-               app.buttons["receive-model"].isEnabled {
+               app.buttons["retry-pairing"].isEnabled {
                 if retriedAfterPermission { break }
-                retriedAfterPermission = true; app.buttons["receive-model"].tap()
+                retriedAfterPermission = true; app.buttons["retry-pairing"].tap()
             }
             RunLoop.current.run(until: Date().addingTimeInterval(1))
         }
@@ -2564,7 +2681,6 @@ final class AtlasTeachingUITests: XCTestCase {
         if let current = port.value as? String, current != port.placeholderValue { port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: current.count)) }
         port.typeText("21990\n")
         let code = app.textFields["pairing-code"]; code.tap(); code.typeText(ticket["pairingCode"] as! String)
-        app.buttons["receive-model"].tap()
         let capture = app.buttons["capture-pose"]
         XCTAssertTrue(capture.waitForExistence(timeout: 20))
         XCTAssertFalse(capture.isEnabled, "Simulator must not pretend to provide LiDAR poses")

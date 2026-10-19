@@ -92,9 +92,81 @@ struct PairingQRCode: Decodable {
     }
 }
 
-private final class NoRedirects: NSObject, URLSessionTaskDelegate {
+struct ModelDownloadProgress: Sendable {
+    let receivedBytes: Int64
+    let totalBytes: Int64
+    var fractionCompleted: Double { min(1, max(0, Double(receivedBytes) / Double(max(1, totalBytes)))) }
+}
+
+private class NoRedirects: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+}
+
+// URLSession invokes these callbacks on its serial delegate queue. Limit UI
+// updates to ten per second without buffering the model in memory as it arrives.
+private final class ModelDownloadDelegate: NoRedirects, URLSessionDownloadDelegate, @unchecked Sendable {
+    let expectedBytes: Int64
+    let onProgress: @Sendable (ModelDownloadProgress) -> Void
+    private var lastUpdate = -Double.infinity
+    private let lock = NSLock()
+    private var task: URLSessionDownloadTask?
+    private var cancelled = false
+    private var continuation: CheckedContinuation<(Data, URLResponse), Error>?
+    // Only accessed on URLSession's serial delegate queue.
+    private var downloaded: Result<(Data, URLResponse), Error>?
+
+    init(expectedBytes: Int64, onProgress: @escaping @Sendable (ModelDownloadProgress) -> Void) {
+        self.expectedBytes = expectedBytes; self.onProgress = onProgress
+    }
+    func download(_ request: URLRequest, configuration: URLSessionConfiguration) async throws -> (Data, URLResponse) {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                self.continuation = continuation
+                let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+                let task = session.downloadTask(with: request)
+                self.task = task
+                let cancelled = self.cancelled
+                lock.unlock()
+                if cancelled { task.cancel() }
+                task.resume()
+            }
+        } onCancel: {
+            self.lock.lock()
+            self.cancelled = true
+            let task = self.task
+            self.lock.unlock()
+            task?.cancel()
+        }
+    }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+                    totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+        guard let response = downloadTask.response as? HTTPURLResponse, (200...299).contains(response.statusCode) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastUpdate >= 0.1 || totalBytesWritten >= expectedBytes else { return }
+        lastUpdate = now
+        // The paired manifest also supplies a total for chunked HTTP responses.
+        onProgress(ModelDownloadProgress(receivedBytes: totalBytesWritten, totalBytes: expectedBytes))
+    }
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        downloaded = Result {
+            guard let response = downloadTask.response else { throw TeachingError("局域网服务未返回有效响应") }
+            let size = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= maximumModelBytes else { throw TeachingError("物体超过 移动端传输上限（192 MiB）") }
+            // URLSession removes its temporary file after this callback returns.
+            return (try Data(contentsOf: location), response)
+        }
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil; self.task = nil
+        lock.unlock()
+        defer { session.finishTasksAndInvalidate() }
+        if let error { continuation?.resume(throwing: error) }
+        else { continuation?.resume(with: downloaded ?? .failure(TeachingError("模型下载未完成，请重试"))) }
+    }
 }
 
 struct LANClient {
@@ -177,13 +249,18 @@ struct LANClient {
         if let qr, paired.id != qr.sessionId { throw TeachingError("接收任务与二维码不匹配，请重新扫描") }
         return paired
     }
-    func download(_ paired: PairedSession) async throws -> Data {
+    func download(_ paired: PairedSession, onProgress: @escaping @Sendable (ModelDownloadProgress) -> Void = { _ in }) async throws -> Data {
         guard UUID(uuidString: paired.id) != nil else { throw TeachingError("配对任务标识无效") }
-        let (url, response) = try await Self.session.download(for: request("sessions/\(paired.id)/model", token: paired.deviceToken))
-        defer { try? FileManager.default.removeItem(at: url) }
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= maximumModelBytes else { throw TeachingError("物体超过 移动端传输上限（192 MiB）") }
-        let data = try Data(contentsOf: url); try check(response, data: data); return data
+        guard (48...maximumModelBytes).contains(paired.manifest.byteLength) else { throw TeachingError("模型清单或文件大小无效") }
+        let total = Int64(paired.manifest.byteLength)
+        onProgress(ModelDownloadProgress(receivedBytes: 0, totalBytes: total))
+        let delegate = ModelDownloadDelegate(expectedBytes: total, onProgress: onProgress)
+        let (data, response) = try await delegate.download(request("sessions/\(paired.id)/model", token: paired.deviceToken), configuration: Self.session.configuration)
+        try check(response, data: data)
+        guard data.count == paired.manifest.byteLength else { throw TeachingError("模型文件不完整，请重新下载") }
+        try Task.checkCancellation()
+        onProgress(ModelDownloadProgress(receivedBytes: Int64(data.count), totalBytes: total))
+        return data
     }
     func modelThumbnail(_ paired: PairedSession) async throws -> Data {
         guard UUID(uuidString: paired.id) != nil else { throw TeachingError("配对任务标识无效") }

@@ -2,6 +2,13 @@ import Foundation
 import CryptoKit
 import simd
 
+private final class DownloadProgressRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [ModelDownloadProgress] = []
+    func record(_ value: ModelDownloadProgress) { lock.lock(); defer { lock.unlock() }; values.append(value) }
+    var snapshot: [ModelDownloadProgress] { lock.lock(); defer { lock.unlock() }; return values }
+}
+
 @main struct NetworkTests {
     static func main() async throws {
         let args = CommandLine.arguments
@@ -62,6 +69,32 @@ import simd
         let paired = try await client.pair(code: " " + creation.pairingCode.lowercased() + " ", deviceID: UUID().uuidString, name: "Native Swift Test")
         let downloaded = try await client.download(paired)
         precondition(downloaded == model, "native model download")
+        for mode in ["known-length", "chunked"] {
+            var transfer = paired; transfer.deviceToken = "download-test-\(mode)"
+            let recorder = DownloadProgressRecorder()
+            let received = try await client.download(transfer) { recorder.record($0) }
+            precondition(received == model, "progress must not change downloaded bytes")
+            let updates = recorder.snapshot
+            precondition(updates.first?.receivedBytes == 0 && updates.last?.receivedBytes == Int64(model.count))
+            precondition(updates.contains { $0.receivedBytes > 0 && $0.receivedBytes < model.count }, "report progress before completion")
+            precondition(updates.allSatisfy { $0.totalBytes == model.count && (0...1).contains($0.fractionCompleted) })
+            precondition(zip(updates, updates.dropFirst()).allSatisfy { $0.receivedBytes <= $1.receivedBytes }, "progress cannot move backwards")
+        }
+        for (mode, message) in [("unauthorized", "下载凭据无效"), ("truncated", "模型文件不完整"), ("redirect", "局域网服务未返回有效响应")] {
+            var transfer = paired; transfer.deviceToken = "download-test-\(mode)"
+            let recorder = DownloadProgressRecorder()
+            do { _ = try await client.download(transfer) { recorder.record($0) }; preconditionFailure("invalid download succeeded") }
+            catch let error as TeachingError { precondition(error.message.contains(message), error.message) }
+            precondition(recorder.snapshot.allSatisfy { $0.fractionCompleted < 1 }, "failed transfers cannot report completion")
+        }
+        let cancelledTransfer = PairedSession(id: paired.id, deviceToken: "download-test-chunked", manifest: paired.manifest)
+        let recorder = DownloadProgressRecorder()
+        let task = Task { try await client.download(cancelledTransfer) { recorder.record($0) } }
+        try await Task.sleep(for: .milliseconds(180)); task.cancel()
+        do { _ = try await task.value; preconditionFailure("cancelled transfer succeeded") }
+        catch { precondition(error is CancellationError || (error as? URLError)?.code == .cancelled) }
+        precondition(recorder.snapshot.last!.fractionCompleted < 1)
+        print("Streaming download progress, manifest totals, HTTP errors, truncated files, redirect rejection and cancellation passed.")
         let store = ProjectStore(directory: storeURL)
         var result = TeachingResult(sessionId: paired.id, modelHash: manifest.modelHash)
         let calibration = Calibration(worldFromModel: TeachingCoordinates.zUpToAR.elements, referencePoint: Point3(SIMD3.zero), yawDegrees: 0)

@@ -13,8 +13,27 @@ const directory = await mkdtemp(path.join(tmpdir(), 'atlas-native-ipad-'));
 const serverDirectory = path.join(directory, 'server');
 const middleware = createIPadTeachingService({ directory: serverDirectory });
 const syncRequests = [];
+let downloadFixture;
+let redirectedDownloads = 0;
 const server = createServer((req, res) => {
   const action = req.url.split('/').at(-1);
+  const downloadMode = req.headers.authorization?.match(/^Bearer download-test-(.+)$/)?.[1];
+  if (req.url === '/redirected-model') { redirectedDownloads++; res.end(downloadFixture); return; }
+  if (req.method === 'GET' && action === 'model' && downloadMode) {
+    if (downloadMode === 'unauthorized') { res.writeHead(401); res.end(JSON.stringify({ error: '下载凭据无效' })); return; }
+    if (downloadMode === 'redirect') { res.writeHead(302, { Location: '/redirected-model' }); res.end(); return; }
+    const data = downloadMode === 'truncated' ? downloadFixture.subarray(0, downloadFixture.length / 2) : downloadFixture;
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream',
+      ...(downloadMode === 'known-length' ? { 'Content-Length': data.length } : {}) });
+    let offset = 0;
+    const timer = setInterval(() => {
+      const end = Math.min(offset + 64 * 1024, data.length);
+      res.write(data.subarray(offset, end)); offset = end;
+      if (offset === data.length) { clearInterval(timer); res.end(); }
+    }, 40);
+    res.on('close', () => clearInterval(timer));
+    return;
+  }
   if (req.method === 'POST' && ['verify-model', 'result'].includes(action)) {
     res.on('finish', () => syncRequests.push(`${action}:${res.statusCode}`));
   }
@@ -59,10 +78,12 @@ try {
   const positions = new Float32Array(70_003 * 3); positions.set([0, 0, 0, 1, 0, 0, 0, 1, 0]);
   const geometry = new BufferGeometry(); geometry.setAttribute('position', new Float32BufferAttribute(positions, 3)); geometry.setIndex([0, 1, 2]);
   const { buffer, manifest } = await packIPadModel({ geometry, name: 'native-test.ply', mapId: 'native-test', sourceHash: 'native-test' });
+  downloadFixture = Buffer.from(buffer);
   const fixture = path.join(directory, 'fixture');
   await writeFile(`${fixture}.atls`, new Uint8Array(buffer)); await writeFile(`${fixture}.json`, JSON.stringify(manifest));
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   await run(binary, [`http://127.0.0.1:${server.address().port}`, fixture, path.join(directory, 'device'), serverDirectory]);
+  assert.equal(redirectedDownloads, 0, 'adding a download delegate must preserve redirect rejection');
   assert.deepEqual(syncRequests, ['verify-model:409', 'verify-model:409', 'verify-model:200', 'result:200', 'verify-model:200', 'result:200'],
     'local failures send nothing; remote mismatches never send poses; every upload and retry verifies first');
 } finally { await new Promise((resolve) => server.close(resolve)); await rm(directory, { recursive: true, force: true }); }

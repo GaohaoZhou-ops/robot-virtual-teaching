@@ -11,6 +11,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   const vision = device === 'vision';
   const DeviceIcon = vision ? Glasses : Tablet;
   const pairingInfo = vision ? '配对信息' : '配对二维码';
+  const refreshPairingLabel = vision ? '更新配对码' : '刷新二维码';
   const [tickets, setTickets] = useState(() => readDeviceTickets(device));
   const [ticket, setTicket] = useState(() => {
     const saved = readDeviceTickets(device);
@@ -132,11 +133,11 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   };
   const receive = () => perform('正在校验地图并接收示教结果…', () => receiveTicket(ticket));
   const renewTicket = async (selectedTicket) => {
-    setBusy('更新配对码…');
+    setBusy(`正在${refreshPairingLabel}…`);
     const next = await ipadRequest(`/sessions/${selectedTicket.id}/renew`, { token: selectedTicket.ownerToken, method: 'POST' });
     update({ ...selectedTicket, ...next });
   };
-  const renew = () => perform('更新配对码…', () => renewTicket(ticket));
+  const renew = () => perform(`正在${refreshPairingLabel}…`, () => renewTicket(ticket));
   const importFile = (file) => {
     if (!file) return;
     return perform('正在校验模型并导入结果文件…', async () => {
@@ -164,7 +165,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   return <div className="ipad-modal" onKeyDown={keyDown}>
     <section className="ipad-dialog" role="dialog" aria-modal={modelMismatch ? undefined : true} aria-labelledby="ipad-title" ref={dialog} tabIndex={-1} inert={modelMismatch ? '' : undefined} data-sync-entry={initialAction}>
       <header><span className="ipad-mark"><DeviceIcon size={25} /></span><div><small>{vision ? 'ATLAS / SPATIAL TEACHING' : 'ATLAS / ON DEVICE'}</small><h2 id="ipad-title">{vision ? 'Vision Pro 空间示教' : 'iPad 示教'}</h2></div><button aria-label="关闭设备示教窗口" disabled={!!busy} onClick={onClose}><X size={18} /></button></header>
-      <div className="ipad-dialog__body">
+      <div className="ipad-dialog__body ipad-dialog__body--transfer">
         <div className="ipad-model"><span>独立示教物体</span><strong>{mapData.name}</strong></div>
         {!vision && <section className="ipad-result-file" aria-label="AirDrop 或文件接收"
           onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
@@ -174,14 +175,11 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
             if (event.dataTransfer.files.length !== 1) { setFileReceipt(''); setError('请一次导入一个示教结果文件'); return; }
             importFile(event.dataTransfer.files[0]);
           }}>
-          <div className="ipad-result-file__heading"><FileUp size={20} aria-hidden="true"/><div>
-            <h3>接收已完成的示教</h3><span>AirDrop / Type-C 文件传输</span>
-          </div></div>
+          <div className="ipad-result-file__heading"><FileUp size={20} aria-hidden="true"/><h3>接收已完成的示教</h3></div>
           <p>在 iPad 点击「AirDrop / 导出结果」，发送到这台 Mac。将收到的结果文件拖到这里，或点击导入；也可选择从 Finder 拷贝的文件。</p>
           <input ref={resultInput} type="file" hidden disabled={!!busy} accept=".json,application/json" data-ipad-result-input="true"
             onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; importFile(file); }}/>
           <button className="ipad-primary" disabled={!!busy} onClick={() => resultInput.current?.click()}><FileUp size={15}/>导入结果文件</button>
-          <small>无需重新配对；导入时核对当前模型，保留已有示教任务。</small>
           {fileReceipt && <p className="ipad-result-file__receipt" role="status">{fileReceipt}</p>}
         </section>}
         {lanVisible && <>
@@ -199,7 +197,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
         <div className="ipad-connection"><Wifi size={17}/><div>{addresses.length ? <select id="ipad-lan-address" aria-label="电脑局域网地址" value={address} disabled={!!busy} onChange={(event) => setAddress(event.target.value)}>{addresses.map((item) => <option key={item}>{item}</option>)}</select> : <p>尚未发现局域网地址，请连接 Wi-Fi 或以太网后重新打开。</p>}</div></div>
         {tickets.length > 0 && <label className="ipad-history">传输任务<select disabled={!!busy} value={ticket?.id || ''} onChange={(e) => { setTicket(tickets.find((item) => item.id === e.target.value)); setError(''); }}><option value="" disabled>选择任务</option>{tickets.map((item) => <option key={item.id} value={item.id}>{item.manifest.name} · {new Date(item.createdAt).toLocaleString()} · {statusText[item.status]}</option>)}</select></label>}
         {ticket && (!['ready', 'preparing'].includes(ticket.status) || legacyCode) && <div className={`ipad-pairing is-${ticket.status}`} data-ipad-status={ticket.status}>
-          <div><span>{statusText[ticket.status]}</span>{ticket.status === 'ready' && <p>此任务使用旧版配对码，请点击「更新配对码」生成 4 位码。</p>}
+          <div><span>{statusText[ticket.status]}</span>{ticket.status === 'ready' && <p>此任务使用旧版配对码，请点击「{refreshPairingLabel}」生成 4 位码。</p>}
             {ticket.status === 'paired' && <p>{ticket.deviceName} 已配对；{vision ? '示教完成后在设备端同步，再点击「检查完成状态」。' : '示教完成后可扫描上方二维码同步结果。'}若要更换采集设备，请点击「新建传输」。</p>}
             {['completed', 'imported'].includes(ticket.status) && <p>{ticket.sampleCount} 个 Pose · {ticket.status === 'imported' ? '已经加入示教数据，可在三维场景查看 Pose。' : '接收后保存为独立的设备示教任务。'}</p>}
             <small>{ticket.manifest.vertices.toLocaleString()} 个顶点{ticket.manifest.indices > 0 ? ` · ${(ticket.manifest.indices / 3).toLocaleString()} 个三角面` : ''} · {(ticket.manifest.byteLength / 1048576).toFixed(1)} MiB{ticket.manifest.sampled ? ' · 旧版抽样点云；新建传输可携带完整网格' : ' · 设备可在本机调节点云密度与 Mesh 质量'}</small>
@@ -211,7 +209,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
       <footer><span role="status">{busy}</span><div>
         {lanVisible ? <>
         {ticket && <button disabled={!!busy} onClick={refresh}><RefreshCw size={14}/>检查完成状态</button>}
-        {canShowQR && <button disabled={!!busy} onClick={renew}>更新配对码</button>}
+        {canShowQR && <button disabled={!!busy} onClick={renew}><RefreshCw size={14}/>{refreshPairingLabel}</button>}
         {['completed', 'imported'].includes(ticket?.status) ? <button className="ipad-primary" disabled={!!busy} onClick={receive}><ArrowDownToLine size={15}/>{ticket.status === 'imported' ? '再次接收（去重）' : '接收示教结果'}</button> : null}
         {preparationPending && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare()}><RefreshCw size={15}/>{vision ? busy ? '正在准备配对信息…' : '重试准备配对信息' : busy ? '正在准备二维码…' : '重试生成二维码'}</button>}
         {ticket && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare(true)}><DeviceIcon size={15}/>新建传输</button>}
