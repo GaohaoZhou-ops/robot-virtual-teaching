@@ -14,28 +14,34 @@ struct ContentView: View {
     @State private var projectToDelete: LocalProject?
     @State private var revealedProjectID: String?
     @State private var deleteActionFrames: [String: CGRect] = [:]
+    @State private var libraryHeaderHeight: CGFloat = 0
     var body: some View {
         GeometryReader { viewport in
         Group {
             if let project = session.current, let geometry = session.geometry {
                 TeachingView(projectID: project.id, geometry: geometry)
-            } else { library }
+            } else { library(bottomSafeArea: viewport.safeAreaInsets.bottom) }
         }.frame(width: viewport.size.width, height: viewport.size.height)
         }.tint(accent).task { await session.reload() }
     }
-    private var library: some View {
+    private func library(bottomSafeArea: CGFloat) -> some View {
         GeometryReader { viewport in
             let wide = viewport.size.width >= 1000 && viewport.size.width > viewport.size.height
             let padding: CGFloat = viewport.size.width >= 700 ? 28 : 20
-            let panelHeight: CGFloat = wide ? max(360, viewport.size.height - 208) : 0
+            // Include the home-indicator safe area in the page's bottom margin.
+            let bottomPadding = max(0, padding - bottomSafeArea)
+            let panelHeight = wide ? max(0, viewport.size.height - padding - bottomPadding - libraryHeaderHeight - 24) : 0
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    libraryHeader
-                    if !ARController.supported {
-                        Label("空间定位需要配备 LiDAR 的 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
-                            .font(.callout).foregroundStyle(.orange).padding().frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 24) {
+                        libraryHeader
+                        if !ARController.supported {
+                            Label("空间定位需要配备 LiDAR 的 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
+                                .font(.callout).foregroundStyle(.orange).padding().frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                        }
                     }
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { libraryHeaderHeight = $0 }
                     if wide {
                         HStack(alignment: .top, spacing: 24) {
                             pairingPanel(minHeight: panelHeight).frame(width: min(420, viewport.size.width * 0.35))
@@ -43,11 +49,11 @@ struct ContentView: View {
                         }
                     } else {
                         pairingPanel(minHeight: 0).fixedSize(horizontal: false, vertical: true)
-                        localProjectsPanel(minHeight: 0).fixedSize(horizontal: false, vertical: true)
+                        localProjectsPanel(minHeight: 0)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(padding)
+                .padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
                 .frame(minHeight: viewport.size.height, alignment: .topLeading)
                 .accessibilityElement(children: .contain).accessibilityIdentifier("library-content")
             }

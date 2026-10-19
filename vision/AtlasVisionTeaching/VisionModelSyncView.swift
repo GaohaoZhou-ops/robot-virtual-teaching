@@ -6,21 +6,26 @@ struct VisionModelFileInfo: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(manifest.name).font(.title3.bold()).lineLimit(2)
-            HStack(spacing: 24) {
-                Label(ByteCountFormatter.string(fromByteCount: Int64(manifest.byteLength), countStyle: .file), systemImage: "doc")
-                Text("\(manifest.vertices.formatted()) 个顶点")
-                if manifest.indices > 0 { Text("\((manifest.indices / 3).formatted()) 个三角面") }
-                else { Text("点云") }
-            }.font(.callout).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 24) { statistics }
+                VStack(alignment: .leading, spacing: 10) { statistics }
+            }.font(.body).foregroundStyle(.secondary)
             if let bounds = manifest.bounds {
                 let size = bounds.max.simd - bounds.min.simd
                 Text(String(format: "尺寸 %.2f × %.2f × %.2f m", size.x, size.y, size.z))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.body).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("model-file-info")
+    }
+
+    @ViewBuilder private var statistics: some View {
+        Label(ByteCountFormatter.string(fromByteCount: Int64(manifest.byteLength), countStyle: .file), systemImage: "doc")
+        Text("\(manifest.vertices.formatted()) 个顶点")
+        if manifest.indices > 0 { Text("\((manifest.indices / 3).formatted()) 个三角面") }
+        else { Text("点云") }
     }
 }
 
@@ -42,7 +47,7 @@ struct VisionModelSyncView: View {
                             .accessibilityIdentifier("pending-model-thumbnail")
                     } else if !pending.previewError.isEmpty {
                         VStack(spacing: 20) {
-                            Text(pending.previewError).font(.callout)
+                            Text(pending.previewError).font(.body)
                             Button("重试预览") { Task { await session.loadPendingPreview() } }
                                 .accessibilityIdentifier("retry-model-preview")
                         }.padding(24)
@@ -74,6 +79,7 @@ struct VisionModelSyncView: View {
             }.disabled(session.busy)
         }
         .padding(32).frame(width: 760)
+        .font(.title3)
         .controlSize(.extraLarge)
         .interactiveDismissDisabled(session.busy)
         .task(id: session.pendingModel?.id) { await session.loadPendingPreview() }

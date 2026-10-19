@@ -26,7 +26,7 @@ final class VisionPairingCodeInput: UITextField, UITextFieldDelegate {
     override init(frame: CGRect) {
         super.init(frame: frame)
         delegate = self
-        font = .monospacedSystemFont(ofSize: 30, weight: .semibold)
+        font = .monospacedSystemFont(ofSize: 32, weight: .semibold)
         textColor = .clear; tintColor = .clear; borderStyle = .none
         keyboardType = .asciiCapable; textContentType = .oneTimeCode
         autocapitalizationType = .allCharacters
