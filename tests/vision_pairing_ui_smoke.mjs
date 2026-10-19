@@ -20,9 +20,8 @@ const middleware = createIPadTeachingService({ directory });
 const stats = { downloads: 0, previews: 0 };
 let fixtures;
 const server = createServer((req, res) => {
-  if (['/__test/screenshot', '/__test/screenshot-preview', '/__test/screenshot-preview-zoomed'].includes(req.url)) {
-    const filename = req.url.endsWith('zoomed') ? 'model-preview-zoomed.png'
-      : req.url.endsWith('screenshot-preview') ? 'model-preview.png' : 'model-sync-dialog.png';
+  if (['/__test/screenshot', '/__test/screenshot-preview'].includes(req.url)) {
+    const filename = req.url.endsWith('screenshot-preview') ? 'model-preview.png' : 'model-sync-dialog.png';
     execFileSync('xcrun', ['simctl', 'io', simulator, 'screenshot', path.join(artifacts, filename)], { stdio: 'ignore' });
     res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{}'); return;
   }

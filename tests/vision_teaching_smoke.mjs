@@ -35,7 +35,8 @@ try {
   const binary = path.join(directory, 'vision-native');
   await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift', 'ipad/AtlasTeaching/LANClient.swift',
     'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/AtlasTeaching/ModelGeometry.swift', 'vision/AtlasVisionTeaching/VisionPoseMath.swift',
-    'vision/AtlasVisionTeaching/VisionMeshData.swift', 'vision/Tests/VisionCoreTests.swift', '-o', binary]);
+    'vision/AtlasVisionTeaching/VisionMeshData.swift', 'vision/AtlasVisionTeaching/VisionPreviewPose.swift',
+    'vision/Tests/VisionCoreTests.swift', '-o', binary]);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const resultFile = path.join(directory, 'result.json');
   await run(binary, [`http://127.0.0.1:${server.address().port}`, fixture, path.join(directory, 'device'), resultFile]);
