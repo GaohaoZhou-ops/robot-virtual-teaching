@@ -1246,7 +1246,7 @@ struct PoseReviewView: View {
         HStack(spacing: 6) {
             ForEach(PosePreviewMode.allCases) { mode in
                 Button { poseNameFocused = false; previewMode = mode } label: {
-                    Label(mode == .interactive ? "3D 点云 / 模型" : "2D 图像",
+                    Label(mode == .interactive ? "3D模型" : "2D 图像",
                           systemImage: mode == .interactive ? "cube.transparent" : "photo")
                         .font(.subheadline.weight(.medium)).padding(.vertical, 5)
                 }.buttonStyle(.bordered).tint(previewMode == mode ? accent : .secondary)
