@@ -55,7 +55,7 @@ struct PairingScannerView: View {
         }
     }
     private var cameraHelp: String {
-        let fallback = purpose == .syncResult ? "可返回使用局域网同步或 AirDrop。" : "可返回使用四位配对码。"
+        let fallback = purpose == .syncResult ? "可返回「同步数据」切换至 Wi-Fi 或 AirDrop 导出。" : "可返回使用四位配对码。"
         if !DataScannerViewController.isSupported { return "当前设备不支持相机扫码，" + fallback }
         if permission == .denied { return "请允许相机访问，以扫描电脑上的配对二维码。" }
         if permission == .restricted { return "相机访问受到系统限制，" + fallback }
@@ -119,7 +119,7 @@ private struct PairingCamera: UIViewControllerRepresentable {
         }
         func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
             scanner.stopScanning()
-            parent.onError("相机扫码已中断，请重试或返回使用四位配对码。")
+            parent.onError("相机扫码已中断，请重试或返回选择其他连接方式。")
         }
     }
 }

@@ -176,7 +176,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
             importFile(event.dataTransfer.files[0]);
           }}>
           <div className="ipad-result-file__heading"><FileUp size={20} aria-hidden="true"/><h3>接收已完成的示教</h3></div>
-          <p>在 iPad 点击「AirDrop / 导出结果」，发送到这台 Mac。将收到的结果文件拖到这里，或点击导入；也可选择从 Finder 拷贝的文件。</p>
+          <p>在 iPad 点击「同步数据」，选择「AirDrop 导出」并分享至这台 Mac。将收到的结果文件拖到这里，或点击导入；也可选择从 Finder 拷贝的文件。</p>
           <input ref={resultInput} type="file" hidden disabled={!!busy} accept=".json,application/json" data-ipad-result-input="true"
             onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; importFile(file); }}/>
           <button className="ipad-primary" disabled={!!busy} onClick={() => resultInput.current?.click()}><FileUp size={15}/>导入结果文件</button>

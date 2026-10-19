@@ -306,6 +306,7 @@ playwright/.auth/
 /atlas-clean-build-*/
 /ipad/atlas-native-ipad-*/
 /ipad/atlas-clean-build-*/
+/tests/atlas-native-ipad-*/
 # Includes atlas-clean-build-scripts-* from the build-entry regression test.
 /tests/atlas-clean-build-*/
 /vision/atlas-clean-build-*/
@@ -367,6 +368,18 @@ playwright/.auth/
 /ipad/atlas-pairing-code-*/
 /ipad/atlas-pairing-qr-*/
 /ipad/atlas-discovery-*/
+/tests/atlas-pairing-code-*/
+/tests/atlas-pairing-qr-*/
+/tests/atlas-discovery-*/
+
+# iPad transfer-progress and desktop model-consistency checks create temporary
+# model/result stores. Keep them local when TMPDIR points into these directories.
+/atlas-transfer-progress-*/
+/tests/atlas-transfer-progress-*/
+/ipad/atlas-transfer-progress-*/
+/atlas-model-consistency-*/
+/tests/atlas-model-consistency-*/
+/ipad/atlas-model-consistency-*/
 
 # Model-preview and Vision Pro pairing UI tests also create isolated LAN stores.
 # Scope these prefixes to output locations; preserve similarly named fixtures.
