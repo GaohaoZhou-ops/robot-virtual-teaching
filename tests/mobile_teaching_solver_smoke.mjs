@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { DEFAULT_MOBILE_SOLVE_OPTIONS, buildMobileSolvedTask, measureMobileTarget, mobileSampleTarget, solveMobileTeaching, validateMobileSolveOptions } from '../src/lib/mobileTeachingSolver.js';
+import { DEFAULT_MOBILE_SOLVE_OPTIONS, buildMobileSolvedTask, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport, solveMobileTeaching, validateMobileSolveOptions } from '../src/lib/mobileTeachingSolver.js';
+import { mobileSolutionMapPose } from '../src/lib/mobileTeachingParking.js';
 import { readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
 import { normalizeTeachingTasks } from '../src/lib/io.js';
 import { transformTeachingTasks } from '../src/lib/teachingTransfer.js';
@@ -36,7 +37,8 @@ const task = { id: 'task', name: 'Test', coordinateFrame: 'virtual_origin', map:
   mobileCapture: { protocol: 'atlas-ipad-teaching/1', id: 'capture', sessionId: 'session', modelHash: 'a'.repeat(64),
     coordinateFrame: 'virtual_origin', createdAt: '2026-10-17T03:00:00Z', completedAt: '2026-10-17T03:00:00Z', device: { model: 'iPad', lidar: true },
     calibrations: [{ id: 'segment', worldFromModel: new THREE.Matrix4().toArray() }], samples: [capture({ x: 0.75, y: 0.2, z: 0.4 })] } };
-const run = (options = {}, overrides = {}) => solveMobileTeaching({ robot, task, mapPose: zero, options: { targetFrame: 'tool', ...options }, ...overrides });
+const run = (options = {}, overrides = {}) => solveMobileTeaching({ robot, task, mapPose: zero,
+  options: { targetFrame: 'tool', parkingMode: 'fixed', checkCollisions: false, allowTorsoHeight: false, ...options }, ...overrides });
 const original = readRobotJointValues(robot);
 const result = await run();
 assert.equal(result.feasibleCount, 1);
@@ -64,6 +66,8 @@ assert.ok(Math.abs(measureMobileTarget(frame, target, DEFAULT_MOBILE_SOLVE_OPTIO
 for (const value of ['', NaN, Infinity, -1, 0]) assert.throws(() => validateMobileSolveOptions({ positionTolerance: { x: value, y: 0.05, z: 0.05 } }));
 assert.equal(DEFAULT_MOBILE_SOLVE_OPTIONS.positionTolerance.x, 0.05);
 assert.equal(DEFAULT_MOBILE_SOLVE_OPTIONS.rotationTolerance.roll, 5);
+assert.equal(DEFAULT_MOBILE_SOLVE_OPTIONS.allowTorsoHeight, true);
+assert.throws(() => validateMobileSolveOptions({ allowTorsoHeight: true, lockChestVertical: false }), /前胸垂直/);
 
 const transform = new THREE.Matrix4().makeRotationZ(Math.PI / 2).setPosition(2, 3, 1);
 const moved = mobileSampleTarget(task.mobileCapture.samples[0], { ...task, mobileTransform: transform.toArray() });
@@ -159,4 +163,42 @@ const progressive = await calculation;
 assert.deepEqual(emitted, progressive.rows);
 assert.deepEqual(emitted.map((row) => row.feasible), [true, false, true]);
 assert.deepEqual(progressEvents.at(-1), { completed: 3, total: 3, name: 'Pose 001', feasibleCount: 2 });
+
+// Distributed captures require different chassis poses. Saved/normalized poses
+// must reproduce the FK at their own parking point, not at the run's origin.
+const distributed = structuredClone(task);
+distributed.mobileCapture.samples = [0.3, 4, 4.1, -3].map((x, i) => ({ ...capture({ x, y: 0, z: 0.4 }), id: `parking-${i}` }));
+const multi = await run({ parkingMode: 'auto', armMode: 'left' }, { task: distributed });
+assert.equal(multi.feasibleCount, 4);
+assert.ok(multi.parkingCount > 1);
+assert.deepEqual(multi.rows[1].mapPose, multi.rows[2].mapPose, 'nearby targets reuse a suitable parking pose');
+const multiSaved = buildMobileSolvedTask(distributed, multi, {}, 'multi');
+assert.equal(multiSaved.parkingPoints.length, multi.parkingCount);
+assert.deepEqual(multiSaved.parkingPoints.flatMap((p) => p.poses.map((pose) => pose.mobileSampleId)), distributed.mobileCapture.samples.map((s) => s.id));
+for (const row of multi.rows) {
+  const mapPose = mobileSolutionMapPose(multi, row);
+  const savedParking = multiSaved.parkingPoints.find((p) => p.poses.some((pose) => pose.mobileSampleId === row.sampleId));
+  assert.deepEqual(savedParking.mapPose.position, mapPose.position);
+  const fkRobot = model(), fkLayer = new THREE.Group(); fkLayer.add(fkRobot);
+  fkLayer.position.set(...['x', 'y', 'z'].map((axis) => mapPose.position[axis]));
+  fkLayer.rotation.set(...['roll', 'pitch', 'yaw'].map((axis) => THREE.MathUtils.degToRad(mapPose.rpy[axis])), 'XYZ');
+  const { applyRobotJointValues } = await import('../src/lib/robotLoader.js');
+  applyRobotJointValues(fkRobot, row.solutions.left.jointValues); fkLayer.updateMatrixWorld(true);
+  assert.ok(measureMobileTarget(fkRobot.getObjectByName('tool_left'), mobileSampleTarget(distributed.mobileCapture.samples.find((s) => s.id === row.sampleId), distributed), multi.options).withinTolerance);
+}
+assert.deepEqual(normalizeMobileSolveReport(multi), multi);
+const corruptedParking = structuredClone(multi); corruptedParking.rows[0].solutions.left.mapPose.position.x = NaN;
+assert.equal(normalizeMobileSolveReport(corruptedParking), null);
+const perPose = await run({ parkingMode: 'per-pose', armMode: 'left' }, { task: distributed });
+assert.equal(perPose.feasibleCount, 4);
+assert.equal(buildMobileSolvedTask(distributed, perPose, {}, 'per-pose').parkingPoints.length, 4);
+assert.equal((await run({ parkingMode: 'fixed', armMode: 'left' }, { task: distributed })).feasibleCount, 1);
+const legacy = structuredClone(result); legacy.version = 1; delete legacy.options.parkingMode; delete legacy.options.checkCollisions;
+for (const row of legacy.rows) { delete row.mapPose; for (const solution of Object.values(row.solutions)) delete solution.mapPose; }
+assert.equal(normalizeMobileSolveReport(legacy).options.parkingMode, 'fixed');
+assert.equal(normalizeMobileSolveReport(legacy).options.checkCollisions, false);
+assert.deepEqual(mobileSolutionMapPose(legacy, legacy.rows[0]), zero);
+assert.equal(DEFAULT_MOBILE_SOLVE_OPTIONS.parkingMode, 'auto');
+assert.equal(DEFAULT_MOBILE_SOLVE_OPTIONS.checkCollisions, true);
+assert.throws(() => validateMobileSolveOptions({ parkingMode: 'unknown' }));
 console.log('Mobile retargeting: tolerances, FK/IK, limits, locks, transforms, cancellation, persistence, worker snapshot and paused progressive results passed.');

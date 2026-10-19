@@ -1,6 +1,6 @@
 import { serializeMobileTeachingRobot } from './mobileTeachingKinematics.js';
 
-export function solveMobileTeachingInWorker({ robot, task, mapPose, options, lockedJointNames,
+export function solveMobileTeachingInWorker({ robot, task, mapPose, environment, options, lockedJointNames,
   signal, onProgress, onSample, onControl, onStatus }) {
   if (!robot) throw new Error('请先加载机器人模型');
   if (signal?.aborted) return Promise.reject(new DOMException('计算已取消', 'AbortError'));
@@ -34,12 +34,12 @@ export function solveMobileTeachingInWorker({ robot, task, mapPose, options, loc
         resume: () => { if (!finished) worker.postMessage({ type: 'resume' }); },
       });
       worker.postMessage({ type: 'solve', request: {
-        robot: serializeMobileTeachingRobot(robot), mapPose, options, lockedJointNames,
+        robot: serializeMobileTeachingRobot(robot, { includeCollision: options?.checkCollisions !== false }), mapPose, environment, options, lockedJointNames,
         task: { id: task.id, coordinateFrame: task.coordinateFrame, mobileTransform: task.mobileTransform,
           mobileCapture: { id: task.mobileCapture.id, samples: task.mobileCapture.samples.map((sample) => ({
             id: sample.id, name: sample.name, kind: sample.kind, capturedAt: sample.capturedAt, cameraPose: sample.cameraPose,
           })) } },
-      } });
+      } }, [environment?.positions?.buffer, environment?.indices?.buffer].filter(Boolean));
     } catch (error) { finish(error); }
   });
 }

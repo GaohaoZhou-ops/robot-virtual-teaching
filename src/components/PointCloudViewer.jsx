@@ -2217,11 +2217,14 @@ export default function PointCloudViewer({
     if (!onMobileTeachingSolverChange) return undefined;
     onMobileTeachingSolverChange((request) => {
       if (robotLoadStateRef.current?.status !== 'loaded') throw new Error('机器人模型尚未就绪');
+      const geometry = mapData?.geometry;
+      const environment = request.options.checkCollisions ? { positions: packCollisionPositions(geometry?.getAttribute('position')),
+        indices: packCollisionIndices(geometry?.getIndex()), kind: mapData?.faceCount > 0 ? 'mesh' : 'points' } : undefined;
       return solveMobileTeachingInWorker({ ...request, robot: loadedRobotRef.current,
-        mapPose: robotPoseRef.current, lockedJointNames: lockedRobotJointNamesRef.current });
+        mapPose: robotPoseRef.current, lockedJointNames: lockedRobotJointNamesRef.current, environment });
     });
     return () => onMobileTeachingSolverChange(null);
-  }, [onMobileTeachingSolverChange]);
+  }, [onMobileTeachingSolverChange, mapData?.geometry, mapData?.faceCount]);
 
   const currentEndEffectorLockModes = () =>
     endEffectorLockModes(lockedEndEffectorsRef.current);

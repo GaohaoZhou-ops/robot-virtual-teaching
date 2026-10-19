@@ -506,6 +506,9 @@ Desktop.ini
 # Locally recovered/exported projects may contain hundreds of MB of map data
 # Scope the recovery workspace to the root, preserving nested fixture inputs.
 /recovered-projects/
+# Packed copies of the recovery workspace contain the same local project data.
+/recovered-projects.zip
+/recovered-projects-*.zip
 *.atlas-project/
 *.atlas-project.zip
 
@@ -514,6 +517,9 @@ Desktop.ini
 atlas-project-*.[zZ][iI][pP]
 atlas-teaching-*.json
 *.atlas-teaching.json
+# Pose-solver diagnostic downloads include source captures and full joint values.
+# Fixture exceptions below keep deliberate regression inputs trackable.
+mobile-solve-*.json
 # Unpacked default project exports in local output locations.
 /atlas-project-*/
 /tests/atlas-project-*/

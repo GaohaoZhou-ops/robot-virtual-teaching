@@ -48,7 +48,8 @@ import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
 import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
-import { buildMobileSolvedTask, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
+import { buildMobileSolvedTask, MOBILE_SOLVE_VERSION, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
+import { mobileSolutionMapPose } from './lib/mobileTeachingParking.js';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceKey, mobileDeviceLabel } from './lib/ipadProtocol.js';
@@ -4817,7 +4818,7 @@ export default function App() {
           onSample: ({ row, mapPose }) => {
             if (!isCurrent() || !row.feasible) return;
             const preview = { kind: 'mobile-solve', taskId, taskName: task.name, revision: `${run.id}:${row.sampleId}`,
-              parkingPointId: run.id, parkingPointName: '计算停车点', poseId: row.sampleId, poseName: row.name,
+              parkingPointId: `${run.id}:${row.parkingId || row.sampleId}`, parkingPointName: `计算停车点 ${row.parkingId?.replace('parking-', 'P') || ''}`, poseId: row.sampleId, poseName: row.name,
               side: row.selectedSide, targetPose: mapPose, sourceName: '计算预览',
               jointValues: row.solutions[row.selectedSide].jointValues };
             run.previews.push(preview);
@@ -4828,6 +4829,7 @@ export default function App() {
           },
         });
         if (!isCurrent()) return;
+        if (result.version !== MOBILE_SOLVE_VERSION) throw new Error('后台求解器版本已过期，本次未更新报告。请刷新页面后重新计算');
         const latest = latestWorkspaceRef.current;
         if (run.map !== latest.mapData || run.robot !== latest.selectedRobot || run.workspaceId !== sessionIdRef.current
           || latest.teachingTasks.find((item) => item.id === taskId)?.mobileCapture !== run.sourceCapture) return;
@@ -4895,7 +4897,7 @@ export default function App() {
     stopTeachingTaskPlayback(false);
     setRobotControlEnabled(false);
     setRobotParkingGhost(null);
-    setRobotPose(normalizeRobotPose(report.mapPose));
+    setRobotPose(mobileSolutionMapPose(report, row, side));
     setRobotJointValues(normalizeRobotJointValues(solution.jointValues));
     setShowRobotModel(true);
     setMobileSolveTaskId(null);
@@ -4917,7 +4919,7 @@ export default function App() {
     setActiveTeachingParkingPointId(solved.parkingPoints[0]?.id || null);
     setMobileSolveTaskId(null);
     navigateAppPage(APP_PAGE_WORKBENCH);
-    notify(`已保存 ${solved.parkingPoints[0]?.poses.length || 0} 个可达姿态，可在独立示教中预览和继续编辑`, 'success');
+    notify(`已保存 ${solved.parkingPoints.reduce((count, parking) => count + parking.poses.length, 0)} 个可达姿态、${solved.parkingPoints.length} 个停车点，可继续预览和编辑`, 'success');
   };
 
   const importIPadTeaching = async (result, ticket) => {
@@ -5698,7 +5700,9 @@ export default function App() {
       initialSampleId={mobileSolveSampleId}
       key={mobileSolveTaskId} task={teachingTasks.find((task) => task.id === mobileSolveTaskId)} robot={selectedRobot} robotPose={robotPose}
       initialOptions={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.options : undefined}
-      running={['running', 'pausing', 'paused'].includes(mobileComputation?.status)}
+      running={mobileComputation?.taskId === mobileSolveTaskId && ['running', 'pausing', 'paused'].includes(mobileComputation?.status)}
+      computationStatus={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.status : null}
+      computationError={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.error : ''}
       ready={mobileTeachingSolverReady && robotLoadState.status === 'loaded' && sessionState.status === 'ready'}
       onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
       onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} />}
