@@ -7,6 +7,7 @@ import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { ZIVID_M70_PROFILE } from './zividCamera.js';
 import { withoutTemporaryMapNavigation } from './teachingNavigation.js';
+import { abxNodeLabel, abxNodeName } from './abxRoute.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -550,9 +551,11 @@ export function normalizeProject(payload) {
     const pose = point.pose || point.position || point;
     const xzy = Array.isArray(point.xzy) ? point.xzy : [];
     const rpy = Array.isArray(point.rpy) ? point.rpy : [];
+    const name = String(point.name || point.label || `P${String(index + 1).padStart(2, '0')}`);
     return {
       id: String(point.id || createId('wp')),
-      name: String(point.name || point.label || `P${String(index + 1).padStart(2, '0')}`),
+      name: Number.isInteger(point.abx?.nodeId)
+        ? abxNodeName(point.abx.nodeId, abxNodeLabel(point.abx.nodeId, name)) : name,
       pose: {
         x: numberOr(pose.x, numberOr(xzy[0])),
         y: numberOr(pose.y, numberOr(xzy[2])),

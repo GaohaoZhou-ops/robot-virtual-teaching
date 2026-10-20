@@ -28,8 +28,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
         const robotPackage = needsRobot
           ? await readAbxRobotPackage(snapshot.robot, snapshot.robotPackage, { signal: controller.signal }) : null;
         const archive = await buildAbxTeachingArchive(snapshot.payload, { robotPackage });
-        const navigation = JSON.parse(new TextDecoder().decode(archive.files['navigation.json']));
-        if (!controller.signal.aborted) setResult({ ...archive, navigation });
+        if (!controller.signal.aborted) setResult(archive);
       } catch (reason) { if (!controller.signal.aborted) setError(reason.message); }
     })();
     return () => { controller.abort(); previous?.focus?.(); };
@@ -45,7 +44,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
   };
   const targets = result ? [
     ...result.navigation.tasks.flatMap((task) => task.sequence.filter((step) => step.type === 'route_navigation')
-      .map((step) => ({ name: `${task.name} / ${step.nodeId}${step.beforePoseSeq ? ` → Pose ${step.beforePoseSeq}` : ` · 步骤 ${step.seq}`}`, target: step.target }))),
+      .map((step) => ({ nodeId: step.nodeId, name: `${task.name} / ${step.stationName || step.nodeId}${step.beforePoseSeq ? ` → Pose ${step.beforePoseSeq}` : ` · 步骤 ${step.seq}`}`, target: step.target }))),
   ] : [];
   const stamp = snapshot.payload.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
   return createPortal(<div className="abx-export-modal" onKeyDown={keyDown}>
@@ -55,20 +54,20 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
       <div className="abx-export-body">
         <p className="abx-export-map">当前地图 <strong>{snapshot.payload.map?.fileName || '未命名地图'}</strong><span>MAP · 米 / 弧度</span></p>
         <div className="abx-export-notice" role="note">
-          <strong>任务、机器人 Pose 与路网导航一起导入</strong>
-          <p>在大脑“示教任务 → 导入”选择此 ZIP，无需解压。执行前请在机器人路网管理中核对连线、定位地图并切换使用导入的路网；执行任务时将按示教顺序导航并执行 Pose。</p>
+          <strong>380B 平地巡检格式 · 任务导入包</strong>
+          <p>在大脑“示教任务 → 导入”选择此 ZIP。导航步骤使用机器人当前路网的站点编号，包内不携带路网。请核对并启用对应路网；新增或修改的路网需通过“导出机器人路径”单独导入。</p>
         </div>
         {!result && !error && <p className="abx-export-loading" role="status"><LoaderCircle className="is-spinning" size={16} />正在校验机器人姿态与导航坐标…</p>}
         {error && <p className="abx-export-error" role="alert">{error}</p>}
         {result && <>
-          <dl className="abx-export-counts"><div><dt>示教任务</dt><dd>{result.summary.taskCount}</dd></div><div><dt>机器人 Pose</dt><dd>{result.summary.poseCount}</dd></div><div><dt>路网节点</dt><dd>{result.summary.nodeCount}</dd></div><div><dt>导航步骤</dt><dd>{result.summary.navigationCount}</dd></div></dl>
-          <p className="abx-export-description">保留任务、停车点和 Pose 顺序，关节转换为弧度。路网包含 {result.summary.edgeCount} 条有向连线，地图坐标使用 X / Y / Yaw。新建路网的定位场景由机器人绑定；导入路网保留原绑定。</p>
+          <dl className="abx-export-counts"><div><dt>示教任务</dt><dd>{result.summary.taskCount}</dd></div><div><dt>机器人 Pose</dt><dd>{result.summary.poseCount}</dd></div><div><dt>导航目标</dt><dd>{new Set(targets.map((point) => point.nodeId)).size}</dd></div><div><dt>导航步骤</dt><dd>{result.summary.navigationCount}</dd></div></dl>
+          <p className="abx-export-description">保留任务、停车点和步骤顺序，关节转换为弧度。已导入路网时，停车点使用原始 N 编号与名称，导航沿用该站点的坐标和朝向；未匹配的停车点会提示修正。ZIP 包含 manifest.json、README.txt 和 tasks/ 下的任务文件。下方坐标仅供核对，可单独下载导航清单。</p>
           {result.summary.warnings.length > 0 && <ul className="abx-export-description" aria-label="路网导出提示">{result.summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-          {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target[key] == null ? '—' : point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
+          {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target?.[key] == null ? '—' : point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.some((point) => !point.target) && <p>“—” 表示原任务仅包含站点编号，未提供对应地图坐标。</p>}{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
         </>}
       </div>
       <footer><span role="status">{downloaded ? '已下载 · 在大脑示教任务页面导入 ZIP' : '导出本地文件'}</span><div>
-        <button type="button" disabled={!result} onClick={() => download(new Blob([result.files['navigation.json']], { type: 'application/json' }), `robot-navigation-${stamp}.json`)}>下载导航清单</button>
+        <button type="button" disabled={!result} onClick={() => download(new Blob([result.navigationBytes], { type: 'application/json' }), `robot-navigation-${stamp}.json`)}>下载导航清单</button>
         <button type="button" className="abx-export-primary" disabled={!result} onClick={() => { download(result.blob, `robot-teaching-${stamp}.zip`); setDownloaded(true); }}><Download size={14} />下载机器人导入包</button>
       </div></footer>
     </section>

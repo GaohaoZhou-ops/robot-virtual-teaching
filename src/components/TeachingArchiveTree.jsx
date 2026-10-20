@@ -2,6 +2,8 @@ import { mobileDeviceLabel } from '../lib/ipadProtocol.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ArrowDown,
+  ArrowUp,
   Bot,
   Camera,
   ChevronDown,
@@ -12,6 +14,7 @@ import {
   Folder,
   FolderOpen,
   GitMerge,
+  ListPlus,
   ListTree,
   MapPin,
   Maximize2,
@@ -28,6 +31,9 @@ import {
 import ParkingPointMergeDialog from './ParkingPointMergeDialog.jsx';
 import ParkingPointServerDialog from './ParkingPointServerDialog.jsx';
 import TeachingParkingMap from './TeachingParkingMap.jsx';
+import TeachingInsertActionDialog from './TeachingInsertActionDialog.jsx';
+import { teachingActionPresets } from '../lib/teachingPresetInsertion.js';
+import { teachingPoseMoveReason } from '../lib/teachingPoseOrder.js';
 
 const formatCapturedAt = (value) => {
   const date = new Date(value);
@@ -93,6 +99,7 @@ const selectionExists = (tasks, selection) => {
 
 export default function TeachingArchiveTree({
   tasks = [],
+  jointPoses = [],
   teachingSpaceMode = 'map',
   activeTaskId,
   activeParkingPointId,
@@ -113,6 +120,8 @@ export default function TeachingArchiveTree({
   onRenamePoint,
   onDeletePoint,
   onApplyPoint,
+  onInsertPreset,
+  onMovePoint,
   onPlayTask,
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
@@ -146,6 +155,7 @@ export default function TeachingArchiveTree({
   ));
   const [nameDraft, setNameDraft] = useState('');
   const [visionPreview, setVisionPreview] = useState(null);
+  const [insertActionTarget, setInsertActionTarget] = useState(null);
   const [mergeDialog, setMergeDialog] = useState(null);
   const [serverMergeTaskId, setServerMergeTaskId] = useState(null);
   const mergeAnalysisRevisionRef = useRef(0);
@@ -161,6 +171,9 @@ export default function TeachingArchiveTree({
     (pose) => pose.id === selection?.poseId,
   ) || null;
   const selectedEntity = selectedPoint || selectedParkingPoint || selectedTask;
+  const moveReasons = useMemo(() => Object.fromEntries(['up', 'down'].map((direction) => [
+    direction, teachingPoseMoveReason(selectedTask, selectedParkingPoint?.id, selectedPoint?.id, direction),
+  ])), [selectedTask, selectedParkingPoint?.id, selectedPoint?.id]);
   const selectedCoordinateFrame = selectedTask?.coordinateFrame
     || mapData?.coordinateFrame
     || 'map';
@@ -194,6 +207,9 @@ export default function TeachingArchiveTree({
     && mapData?.sourceHash
   );
   const exportPacking = projectExportState?.status === 'packing';
+  const insertTask = tasks.find((task) => task.id === insertActionTarget?.taskId);
+  const insertParking = insertTask?.parkingPoints.find((point) => point.id === insertActionTarget?.parkingPointId);
+  const insertPose = insertParking?.poses.find((pose) => pose.id === insertActionTarget?.poseId);
 
   const jointEntries = useMemo(
     () => Object.entries(selectedPoint?.fullBodyJoints?.values || {})
@@ -643,6 +659,25 @@ export default function TeachingArchiveTree({
             <span><strong>示教数据树</strong><small>TASK / STOP / POSE</small></span>
           </div>
           <span>{tasks.length} 任务 · {totalParkingPoints} 停车点 · {totalPoses} 姿态</span>
+          {selection?.type === 'pose' && selectedPoint && (
+            <>
+              <button type="button" className="teaching-tree-insert-action"
+                onClick={() => setInsertActionTarget({ ...selection })}>
+                <ListPlus size={13} />插入动作
+              </button>
+              {[
+                ['up', '上移', ArrowUp],
+                ['down', '下移', ArrowDown],
+              ].map(([direction, label, Icon]) => (
+                <button type="button" key={direction}
+                  disabled={Boolean(moveReasons[direction])}
+                  title={moveReasons[direction] || `在当前停车点内${label}姿态`}
+                  onClick={() => onMovePoint(selectedTask.id, selectedParkingPoint.id, selectedPoint.id, direction)}>
+                  <Icon size={13} />{label}
+                </button>
+              ))}
+            </>
+          )}
           <button type="button" onClick={onOpenCapturePage}>继续示教</button>
           {onImportTeachingData && <button type="button" onClick={onImportTeachingData}
             disabled={teachingImportDisabled} aria-label="导入机器人示教">导入机器人示教</button>}
@@ -697,7 +732,7 @@ export default function TeachingArchiveTree({
                   {selectedTask?.abx && <div className="abx-native-notice" role="note">
                     <p>机器人原生任务 · {selectedTask.abx.header.point_count} 步骤。
                       导航、拍照、等待、并行和轨迹记录按原顺序保存并导出；虚拟回放仅显示独立关节 Pose。
-                      可修改名称和关节，步骤结构请在机器人端调整后重新导入。</p>
+                      可修改名称和关节，也可选中姿态后插入预设动作或调整姿态顺序。</p>
                     {(selectedParkingPoint?.abx?.located === false || selectedPoint?.abx?.located === false)
                       && <p>此记录缺少 map 定位，坐标不可用于导航或底盘恢复。</p>}
                     {selection?.type === 'task' && <details><summary>查看原生步骤顺序</summary>
@@ -997,6 +1032,23 @@ export default function TeachingArchiveTree({
           </section>
         </div>
       </section>
+
+      {insertPose && (
+        <TeachingInsertActionDialog
+          task={insertTask}
+          parkingPoint={insertParking}
+          pose={insertPose}
+          presets={teachingActionPresets(jointPoses, insertTask.robot)}
+          onClose={() => setInsertActionTarget(null)}
+          onConfirm={({ presetId, position }) => {
+            const point = onInsertPreset(insertTask.id, insertParking.id, insertPose.id, presetId, position);
+            setSelection({ type: 'pose', taskId: insertTask.id, parkingPointId: insertParking.id, poseId: point.id });
+            setNameDraft(point.name);
+            onSelectionChange?.({ type: 'pose', task: insertTask, parkingPoint: insertParking, pose: point });
+            setInsertActionTarget(null);
+          }}
+        />
+      )}
 
       {mergeDialog && (
         <ParkingPointMergeDialog

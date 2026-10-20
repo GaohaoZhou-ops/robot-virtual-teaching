@@ -1,0 +1,121 @@
+.teaching-tree-toolbar > .teaching-tree-insert-action,
+.teaching-insert-dialog .teaching-insert-dialog__confirm {
+  border-color: #e7b94b;
+  color: #251c08;
+  background: #e7b94b;
+  font-weight: 650;
+}
+.teaching-tree-toolbar > .teaching-tree-insert-action:hover:not(:disabled),
+.teaching-insert-dialog .teaching-insert-dialog__confirm:hover:not(:disabled) {
+  border-color: #f4ce6b;
+  color: #251c08;
+  background: #f4ce6b;
+}
+.teaching-tree-toolbar > .teaching-tree-insert-action:focus-visible {
+  outline: 2px solid #ffe6a4;
+  outline-offset: 3px;
+}
+.teaching-insert-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #020b10c9;
+  backdrop-filter: blur(7px);
+}
+.teaching-insert-dialog {
+  width: min(480px, 100%);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+  border: 1px solid #455044;
+  border-radius: 12px;
+  color: #c9d5d3;
+  background: #0c191d;
+  box-shadow: 0 24px 90px #0008;
+}
+.teaching-insert-dialog > header {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 21px 24px;
+  border-bottom: 1px solid #8ab1b322;
+}
+.teaching-insert-dialog__icon { color: #e7b94b; }
+.teaching-insert-dialog header small { color: #84968c; font: 9px "SFMono-Regular", Menlo, monospace; letter-spacing: .1em; }
+.teaching-insert-dialog h2 { margin: 5px 0 0; font-size: 19px; font-weight: 600; }
+.teaching-insert-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 13px;
+  border: 1px solid #8ab1b338;
+  border-radius: 5px;
+  color: #a7b9b5;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+.teaching-insert-dialog header button { margin-left: auto; padding: 7px; border-color: transparent; }
+.teaching-insert-dialog button:hover { background: #ffffff08; color: #e1e9e6; }
+.teaching-insert-dialog button:disabled { opacity: .35; cursor: not-allowed; }
+.teaching-insert-dialog :is(button, select, input):focus-visible { outline: 2px solid #e7b94b; outline-offset: 3px; }
+.teaching-insert-dialog__body { padding: 22px 24px; }
+.teaching-insert-dialog__target {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 7px 12px;
+  margin-bottom: 23px;
+  padding-left: 12px;
+  border-left: 2px solid #e7b94b66;
+  font-size: 12px;
+}
+.teaching-insert-dialog__target > span { grid-row: span 2; color: #8a9e9b; }
+.teaching-insert-dialog__target small { color: #8a9e9b; overflow-wrap: anywhere; line-height: 1.5; }
+.teaching-insert-dialog__target strong { font-weight: 550; overflow-wrap: anywhere; }
+.teaching-insert-dialog__preset { display: grid; gap: 9px; font-size: 12px; }
+.teaching-insert-dialog select {
+  width: 100%;
+  min-width: 0;
+  height: 39px;
+  padding: 0 10px;
+  border: 1px solid #8ab1b33b;
+  border-radius: 5px;
+  color: #d5dfdc;
+  background: #071216;
+  font: inherit;
+}
+.teaching-insert-dialog__hint, .teaching-insert-dialog__empty { margin: 9px 0 21px; color: #889e99; font-size: 11px; line-height: 1.8; }
+.teaching-insert-dialog fieldset { margin: 0; padding: 0; border: 0; }
+.teaching-insert-dialog legend { margin-bottom: 10px; padding: 0; font-size: 12px; }
+.teaching-insert-dialog__positions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.teaching-insert-dialog__positions label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid #8ab1b32a;
+  border-radius: 5px;
+  color: #8a9e9b;
+  cursor: pointer;
+  font-size: 12px;
+}
+.teaching-insert-dialog__positions label.is-selected { border-color: #e7b94b85; background: #e7b94b0b; color: #f1cc70; }
+.teaching-insert-dialog input { margin: 0; accent-color: #e7b94b; }
+.teaching-insert-dialog fieldset:disabled { opacity: .4; }
+.teaching-insert-dialog__sequence { margin-top: 21px; padding: 13px; background: #061216; border-radius: 5px; }
+.teaching-insert-dialog__sequence > span { display: block; margin-bottom: 10px; color: #6f8883; font-size: 10px; }
+.teaching-insert-dialog__sequence > div { display: flex; align-items: center; gap: 10px; padding: 7px 0; color: #8da49e; font-size: 12px; }
+.teaching-insert-dialog__sequence i { font: 10px "SFMono-Regular", Menlo, monospace; opacity: .6; }
+.teaching-insert-dialog__sequence strong { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.teaching-insert-dialog__sequence small { flex: 0 0 auto; font-size: 10px; opacity: .65; }
+.teaching-insert-dialog__sequence > .is-inserted { color: #edc76c; }
+.teaching-insert-dialog__error { margin: 16px 0 0; color: #f3a791; font-size: 12px; line-height: 1.6; }
+.teaching-insert-dialog footer { display: flex; justify-content: flex-end; gap: 9px; padding: 15px 24px; border-top: 1px solid #8ab1b322; }
+@media (max-width: 600px) {
+  .teaching-insert-modal { padding: 12px; }
+  .teaching-insert-dialog { max-height: calc(100dvh - 24px); }
+}

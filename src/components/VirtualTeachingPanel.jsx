@@ -1202,7 +1202,7 @@ export default function VirtualTeachingPanel({
               </span>
               <span className="teaching-task-parking-option__copy">
                 <strong>添加当前位置为停车点</strong>
-                <small>记录机器人当前 {coordinateFrameLabel} XYZ / RPY，建立停车点 P01</small>
+                <small>记录机器人当前 {coordinateFrameLabel} XYZ / RPY，在路网站点时沿用对应编号与名称</small>
               </span>
               <span className="teaching-task-parking-option__state" aria-hidden="true">
                 {includeCurrentParkingPoint ? '已选择' : '可选'}

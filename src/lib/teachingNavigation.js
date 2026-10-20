@@ -20,6 +20,22 @@ export const parkingWaypointPose = (mapPose) => ({
   ...mapPose.rpy,
 });
 
+// A robot route may repeat labels across work areas. Reuse its full imported
+// N-number/name at the current position, including on temporary local copies.
+export function teachingParkingName(waypoints, pose, fallback, selectedId) {
+  const position = pose.position || pose, rpy = pose.rpy || pose;
+  const candidates = waypoints.filter((point) => point.source !== TEACHING_WAYPOINT_SOURCE
+    && Math.hypot(point.pose.x - position.x, point.pose.y - position.y) <= 1e-4);
+  const selected = candidates.find((point) => point.id === selectedId);
+  if (selected) return selected.name;
+  if (candidates.length === 1) return candidates[0].name;
+  const aligned = candidates.filter((point) => {
+    const delta = (point.pose.yaw - rpy.yaw) * Math.PI / 180;
+    return Math.abs(Math.atan2(Math.sin(delta), Math.cos(delta))) <= 1e-6;
+  });
+  return aligned.length === 1 ? aligned[0].name : fallback;
+}
+
 export function buildTeachingWaypoints(storedWaypoints, tasks, { mapData, coordinateFrame } = {}) {
   const parkingById = new Map();
   for (const task of tasks) {

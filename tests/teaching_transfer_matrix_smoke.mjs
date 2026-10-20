@@ -4,7 +4,7 @@ import { Matrix4, Vector3 } from 'three';
 import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
 import { normalizeProject } from '../src/lib/io.js';
 import {
-  extractTeachingWorkspace, identityTransferPose, parseTransferMatrix, placeTeachingWorkspace,
+  boundTeachingTransform, extractTeachingWorkspace, identityTransferPose, parseTransferMatrix, placeTeachingWorkspace,
   transferMatrix, transformTeachingPose, writeBackTeachingWorkspace,
 } from '../src/lib/teachingTransfer.js';
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
@@ -67,6 +67,20 @@ assert.deepEqual([...mergedPositions.slice(0, 18)], [...new Float32Array(target.
 assert.deepEqual([...mergedPositions.slice(18, 21)], [-16, 8, 1.5]);
 assert.deepEqual({ source, target }, originals);
 
+// Return to an already-bound independent workspace: the same transform must
+// apply once to the original local data, regardless of the map robot's pose.
+const bound = boundTeachingTransform(source.map, null, placed.map, project.workspace.transfer);
+assert.deepEqual(bound, localToMap);
+const placedAgain = await placeTeachingWorkspace(source, transferSnapshot(placed), { localToMap: bound });
+vector(placedAgain.config.project.robot.origin.position, [-16, 8, 1.5]);
+assert.deepEqual(source, originals.source);
+bound.position.x = 100;
+assert.deepEqual(project.workspace.transfer.localToMap, localToMap, 'preview edits must not mutate the binding');
+assert.equal(boundTeachingTransform({ ...source.map, sourceHash: 'different-model' },
+  null, placed.map, project.workspace.transfer), null, 'a different model must not inherit the old alignment');
+assert.deepEqual(boundTeachingTransform({ ...source.map, mapId: 'reopened-model' },
+  null, placed.map, project.workspace.transfer), localToMap, 'the same model can have a new cache ID');
+
 // The rounded sample remains a rigid transform throughout placement, extraction and archive reload.
 const samplePlaced = await placeTeachingWorkspace(source, target, { localToMap: samplePose });
 const raw = new Matrix4().set(...sampleText.trim().split(/\s+/).map(Number));
@@ -79,6 +93,9 @@ const restored = await readProjectArchive(archive.bytes);
 assert.deepEqual(normalizeProject(restored.payload).workspace.transfer.localToMap, samplePose);
 const extracted = await extractTeachingWorkspace(target, { bounds: target.map.bounds, localToMap: samplePose });
 const local = normalizeProject(extracted.config.project);
+assert.deepEqual(boundTeachingTransform(extracted.map, local.workspace.transfer, target.map, null), samplePose);
+assert.equal(boundTeachingTransform(extracted.map, local.workspace.transfer,
+  { ...target.map, sourceHash: 'different-target' }, null), null);
 vector(new Vector3(...Object.values(local.robot.origin.position)).applyMatrix4(sample), [10, 20, 1]);
 const returned = await writeBackTeachingWorkspace(transferSnapshot(extracted), target);
 vector(returned.config.project.robot.origin.position, [10, 20, 1]);
