@@ -461,6 +461,17 @@ export function setRobotVisualBounds(target, robot) {
   return bounds;
 }
 
+export const ROBOT_GROUND_CLEARANCE = 0.001;
+
+// Call after applying the base pose and restored joint values, before attaching
+// interaction helpers. Keep the robot's local frames and geometry untouched.
+export function robotGroundLift(robot) {
+  const bounds = setRobotVisualBounds(new THREE.Box3(), robot);
+  if (bounds.isEmpty() || !Number.isFinite(bounds.min.z)) return 0;
+  const lift = ROBOT_GROUND_CLEARANCE - bounds.min.z;
+  return lift > 1e-9 ? lift : 0;
+}
+
 async function loadUrdfRobot(descriptor, signal, onProgress) {
   const [source, manifest] = await Promise.all([
     fetchText(descriptor.url, signal, 'URDF'),

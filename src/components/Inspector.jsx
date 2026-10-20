@@ -9,9 +9,11 @@ import {
   CircleGauge,
   FolderOpen,
   MoveHorizontal,
+  Navigation,
   PanelRightClose,
   PanelRightOpen,
   Route,
+  RefreshCw,
   Ruler,
   ScanLine,
   ScanSearch,
@@ -21,6 +23,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { calculatePathDistances } from '../lib/pathMetrics.js';
+import { TEMPORARY_MAP_ROUTE_SOURCE } from '../lib/teachingNavigation.js';
 import FloatingRobotJointPanel from './FloatingRobotJointPanel.jsx';
 import VirtualTeachingPanel from './VirtualTeachingPanel.jsx';
 import ZividCameraPanel from './ZividCameraPanel.jsx';
@@ -142,8 +145,14 @@ export default function Inspector({
   onImportRoute,
   routeImportDisabled = false,
   routeImportBusy = false,
+  onSyncMapRoute,
+  mapRouteSync,
+  mapRouteSyncBusy = false,
+  mapRouteSyncDisabled = false,
   onSelectWaypoint,
   onSearchWaypoint,
+  onMoveToWaypoint,
+  waypointMoveDisabled = false,
   onSelectEdge,
   onClearSelection,
   onUpdateWaypoint,
@@ -182,6 +191,7 @@ export default function Inspector({
   const selectedEdge = edges.find((edge) => edge.id === selectedEdgeId);
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
   const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
+  const hasTemporaryMapRoute = waypoints.some((point) => point.source === TEMPORARY_MAP_ROUTE_SOURCE);
   const pointById = useMemo(() => new Map(waypoints.map((point) => [point.id, point])), [waypoints]);
   const activeTeachingTask = teachingTasks.find((task) => task.id === activeTeachingTaskId)
     || teachingTasks[0]
@@ -414,6 +424,31 @@ export default function Inspector({
             id="inspector-page-navigation"
             aria-labelledby="inspector-tab-navigation"
           >
+            {isIndependentTeachingSpace && (
+              <section className="map-route-sync" aria-label="地图路径同步" aria-busy={mapRouteSyncBusy}>
+                <div className="map-route-sync__heading">
+                  <strong><Route size={14} />地图路径同步</strong>
+                  <button
+                    type="button"
+                    className="inspector-route-import"
+                    disabled={!mapRouteSync?.available || mapRouteSyncDisabled || mapRouteSyncBusy || !onSyncMapRoute}
+                    onClick={onSyncMapRoute}
+                    title="按已建立的转换关系，将地图绝对路径转换到独立模型坐标系"
+                  >
+                    <RefreshCw size={12} />
+                    {mapRouteSyncBusy ? '同步中…' : hasTemporaryMapRoute ? '重新同步地图路径' : '同步地图路径'}
+                  </button>
+                </div>
+                <p role="status">
+                  {mapRouteSync?.available
+                    ? hasTemporaryMapRoute
+                      ? '已转换到 VIRTUAL_ORIGIN；重新同步会替换临时副本。'
+                      : `地图中有 ${mapRouteSync.pointCount} 个导航点，可转换到当前独立模型。`
+                    : mapRouteSync?.reason}
+                </p>
+                <small>同步后，切回或刷新会自动恢复；临时路径不写回地图。</small>
+              </section>
+            )}
             <section className={`connectivity-card ${validation.status}`}>
               <div className="connectivity-card__icon"><ValidationIcon size={18} /></div>
               <div className="connectivity-card__copy">
@@ -469,9 +504,23 @@ export default function Inspector({
           <section className="property-editor">
             <div className="property-editor__title">
               <div className="point-glyph"><span /></div>
-              <div>
+              <div className="waypoint-title">
                 <span className="eyebrow">{selectedWaypoint.teachingTaskId ? 'TEACHING / PARKING POINT' : 'WAYPOINT / 3D POSE'}</span>
-                <h3>{selectedWaypoint.name}</h3>
+                <div className="waypoint-title__row">
+                  <h3 title={selectedWaypoint.name}>{selectedWaypoint.name}</h3>
+                  <button
+                    type="button"
+                    className="inspector-route-import waypoint-move-button"
+                    disabled={!robot || robotLoadState?.status !== 'loaded' || waypointMoveDisabled || !onMoveToWaypoint}
+                    title={!robot || robotLoadState?.status !== 'loaded'
+                      ? '请先加载机器人模型'
+                      : waypointMoveDisabled ? '请等待当前加载或采集完成'
+                        : '移动到该导航点的 X/Y 并对齐底盘朝向，保持当前 Z 高度'}
+                    onClick={() => onMoveToWaypoint(selectedWaypoint.id)}
+                  >
+                    <Navigation size={12} />运动到该点
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -482,7 +531,7 @@ export default function Inspector({
             />
 
             <div className="field-section-heading">
-              <span>原始三维坐标</span>
+              <span>{selectedWaypoint.source === TEMPORARY_MAP_ROUTE_SOURCE ? '独立模型坐标 · 临时' : '原始三维坐标'}</span>
               <small>XYZ · meter</small>
             </div>
             <div className="field-grid three">
@@ -503,7 +552,9 @@ export default function Inspector({
 
             <div className="capture-note">
               <CrosshairMark />
-              {selectedWaypoint.teachingTaskId ? (
+              {selectedWaypoint.source === TEMPORARY_MAP_ROUTE_SOURCE ? (
+                <span>由地图绝对路径计算得到。修改仅影响当前临时副本，重新同步将恢复地图路径的转换结果。</span>
+              ) : selectedWaypoint.teachingTaskId ? (
                 <span>关联示教任务「{selectedWaypoint.teachingTaskName}」。名称和位置与停车点同步，位置修改也会同步到所属姿态。</span>
               ) : selectedWaypoint.source === 'robot-current-pose' ? (
                 <span>XYZ 与 RPY 取自机器人当前 {coordinateFrameLabel} 位姿；导出时同时写入 <code>pose</code>、<code>xzy</code> 与 <code>rpy</code>。</span>

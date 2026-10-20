@@ -71,6 +71,14 @@ def exercise(browser, mode):
         rect = canvas.bounding_box()
         return rect['x'] + rect['width'] / 2, rect['y'] + rect['height'] / 2
 
+    def wheel(delta):
+        previous = camera()['effective']
+        page.mouse.wheel(0, delta)
+        page.wait_for_function("""({canvas, previous, direction}) =>
+          (Number(canvas.dataset.effectiveCameraDistance) - previous) * direction > 0
+        """, arg={'canvas': canvas.element_handle(), 'previous': previous,
+                  'direction': 1 if delta > 0 else -1})
+
     def drag(button='left', dx=80, dy=40):
         x, y = center()
         page.mouse.move(x, y)
@@ -145,14 +153,25 @@ def exercise(browser, mode):
     before = camera(); drag(dx=80, dy=0)
     assert length(vector_delta(before['position'], camera()['position'])) > 0.01
 
+    # Continue far beyond the old six-radius cap, then recover the same view.
+    before = camera()
+    page.mouse.move(*center())
+    for _ in range(20):
+        wheel(160)
+    assert camera()['effective'] > before['effective'] * 100
+    for _ in range(20):
+        wheel(-160)
+    assert math.isclose(camera()['effective'], before['effective'], rel_tol=1e-6)
+
     # Same wheel direction and normal-scale response; deep zoom retains pan.
     before = camera(); page.mouse.move(*center()); page.mouse.wheel(0, -100)
     page.wait_for_timeout(100)
     ratio = camera()['effective'] / before['effective']
     assert 0.82 < ratio < 0.85, (mode, ratio)
-    for _ in range(45):
-        page.mouse.wheel(0, -500)
-        page.wait_for_timeout(20)
+    for _ in range(80):
+        wheel(-160)
+        if canvas.get_attribute('data-zoom-stage') == 'optical':
+            break
     expect(canvas).to_have_attribute('data-zoom-stage', 'optical')
     offsets = [float(canvas.get_attribute(f'data-precision-pan-{a}')) for a in 'xy']
     drag('right')
@@ -177,7 +196,7 @@ def exercise(browser, mode):
         page.keyboard.up('Shift')
         page.screenshot(path='/tmp/model-editor-unified-navigation.png')
     assert not errors, errors
-    print(f'{mode}: rotation sensitivity, right/Shift/mode pan, mid-drag Shift, pointer recovery, wheel and deep-zoom pan passed')
+    print(f'{mode}: rotation/pan, uncapped zoom-out and return, wheel sensitivity and optical zoom passed')
     context.close()
     return angle
 

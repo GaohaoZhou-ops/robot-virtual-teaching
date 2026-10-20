@@ -26,12 +26,16 @@ export function createViewportNavigation(camera, controls, initialRadius) {
   const canvas = controls.domElement;
   const projectionPan = { x: 0, y: 0 };
   let radius, detailDollyFloor, minimumEffectiveDistance;
+  let referenceSphere = null;
+  // Include display-only ground in clipping without changing the model's
+  // framing, wheel sensitivity or close-up precision.
+  const setReferenceSphere = (sphere) => { referenceSphere = sphere?.clone() || null; };
   const setRadius = (value) => {
     radius = Math.max(value, 1);
     detailDollyFloor = Math.max(radius * DETAIL_DOLLY_FLOOR_RATIO, 1e-7);
     minimumEffectiveDistance = detailDollyFloor / MAX_OPTICAL_ZOOM;
     controls.minDistance = detailDollyFloor;
-    controls.maxDistance = radius * 6;
+    controls.maxDistance = Infinity;
   };
   setRadius(initialRadius);
 
@@ -45,7 +49,8 @@ export function createViewportNavigation(camera, controls, initialRadius) {
     const distance = offset.length();
     if (!distance) return false;
     const effectiveDistance = distance / Math.max(camera.zoom, 1);
-    const nextEffectiveDistance = THREE.MathUtils.clamp(effectiveDistance * factor, minimumEffectiveDistance, controls.maxDistance);
+    const nextEffectiveDistance = Math.max(effectiveDistance * factor, minimumEffectiveDistance);
+    if (!Number.isFinite(nextEffectiveDistance)) return false;
     const nextDistance = Math.max(nextEffectiveDistance, detailDollyFloor);
     camera.position.copy(controls.target).addScaledVector(offset.normalize(), nextDistance);
     camera.zoom = Math.min(MAX_OPTICAL_ZOOM, nextDistance / nextEffectiveDistance);
@@ -62,12 +67,19 @@ export function createViewportNavigation(camera, controls, initialRadius) {
     const distance = camera.position.distanceTo(controls.target);
     const opticalZoom = Math.max(camera.zoom, 1);
     const effectiveDistance = distance / opticalZoom;
-    const near = Math.max(Math.max(radius * 1e-10, 1e-10), Math.min(Math.max(radius / 2000, 0.01), distance / 1000));
-    const far = Math.max(radius * 8, distance + radius * 4);
+    const near = Math.max(
+      radius * 1e-10, 1e-10,
+      Math.min(Math.max(radius / 2000, 0.01), distance / 1000),
+      distance / 10000,
+    );
+    const far = Math.max(
+      radius * 8, distance * 1.25 + radius * 4,
+      referenceSphere ? camera.position.distanceTo(referenceSphere.center) + referenceSphere.radius : 0,
+    );
     if (camera.near !== near || camera.far !== far) {
       camera.near = near; camera.far = far; camera.updateProjectionMatrix();
     }
-    return { distance, opticalZoom, effectiveDistance, near };
+    return { distance, opticalZoom, effectiveDistance, near, far };
   };
 
   const applyProjectionPan = () => {
@@ -113,5 +125,5 @@ export function createViewportNavigation(camera, controls, initialRadius) {
     return canvas.dataset.panImplementation;
   };
 
-  return { setRadius, projectionPan, applyProjectionPan, getPanMetrics, needsPrecisionPanForDistance, panByPixels, zoomBoostForDistance, applyZoomFactor, applyWheelDelta, syncClipping };
+  return { setRadius, setReferenceSphere, projectionPan, applyProjectionPan, getPanMetrics, needsPrecisionPanForDistance, panByPixels, zoomBoostForDistance, applyZoomFactor, applyWheelDelta, syncClipping };
 }
