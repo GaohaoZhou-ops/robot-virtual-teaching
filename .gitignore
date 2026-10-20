@@ -172,6 +172,16 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Grouped SpaceMouse calibration and viewer-toolbar diagnostics, including
+# packed copies. Root/tests scopes keep source assets and fixtures trackable.
+/atlas-spacemouse-*/
+/tests/atlas-spacemouse-*/
+/atlas-spacemouse-*.[zZ][iI][pP]
+/tests/atlas-spacemouse-*.[zZ][iI][pP]
+/atlas-viewer-tools-*/
+/tests/atlas-viewer-tools-*/
+/atlas-viewer-tools-*.[zZ][iI][pP]
+/tests/atlas-viewer-tools-*.[zZ][iI][pP]
 # Model-editor smoke-test captures copied from /tmp for local inspection.
 /model-editor-*.png
 /tests/model-editor-*.png

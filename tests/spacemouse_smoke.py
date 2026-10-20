@@ -12,6 +12,7 @@ from viewer_tools_helpers import viewer_tool
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
 ROOT = Path(__file__).resolve().parents[1]
+CHROME = Path(os.environ.get("CHROME_EXECUTABLE", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
 COUPLED_MOTIONS = {
     "x": [210, 46, -31, 28, 17, -14],
     "y": [35, 225, 42, -19, 31, 16],
@@ -205,7 +206,8 @@ def hold_vector(page, vector, duration_ms=240, interval_ms=30):
 def run():
     errors = []
     with sync_playwright() as playwright:
-      browser = playwright.chromium.launch(headless=True)
+      browser = playwright.chromium.launch(
+          headless=True, **({"executable_path": str(CHROME)} if CHROME.exists() else {}))
       context = browser.new_context(viewport={"width": 1600, "height": 960})
       context.add_init_script(MOCK_WEBHID)
       page = context.new_page()
@@ -230,6 +232,7 @@ def run():
       calibration.wait_for()
       assert calibration.get_attribute("data-calibration-stage") == "intro"
       assert calibration.get_attribute("data-auto-advance-ms") == "500"
+      assert calibration.get_attribute("data-capture-duration-ms") == "2000"
       page.wait_for_timeout(260)
       page.screenshot(path="/tmp/atlas-spacemouse-calibration-intro.png", full_page=True)
       page.get_by_role("button", name="开始 14 项标定").click()
@@ -259,6 +262,9 @@ def run():
 
       # Returning from step two re-arms the prior button capture and cancels
       # the active step without clearing the rest of the calibration draft.
+      page.wait_for_function(
+          "document.querySelector('.spacemouse-control')?.dataset.spacemousePointerGuard === 'idle'"
+      )
       previous_step.click()
       page.wait_for_function(
           """document.querySelector('.spacemouse-calibration')?.dataset.calibrationStep === '1'
@@ -282,6 +288,27 @@ def run():
           """document.querySelector('.spacemouse-calibration')?.dataset.calibrationStep === '3'
             && document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage === 'armed'"""
       )
+
+      # Retrying or going back during a recording must cancel its deadline.
+      # The abandoned capture must not finish against a newly armed step.
+      for action, expected_step in [("重新采集", "3"), ("返回上一步", "2")]:
+          sample_motion(page, COUPLED_MOTIONS["x"])
+          emit_vector(page, [0, 0, 0, 0, 0, 0])
+          page.wait_for_timeout(400)
+          page.get_by_role("button", name=action, exact=True).click()
+          assert calibration.get_attribute("data-calibration-stage") == "armed"
+          assert calibration.get_attribute("data-calibration-step") == expected_step
+          page.wait_for_timeout(2100)
+          assert calibration.get_attribute("data-calibration-stage") == "armed"
+          assert calibration.locator(".spacemouse-capture-progress__check").count() == 0
+          if expected_step == "2":
+              press_control_button(page, 2)
+              page.wait_for_function(
+                  """document.querySelector('.spacemouse-calibration')?.dataset.calibrationStep === '3'
+                    && document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage === 'armed'"""
+              )
+          else:
+              assert calibration.get_by_role("progressbar").get_attribute("aria-valuenow") == "0"
 
       captures = [
           (COUPLED_MOTIONS["x"], "+X", "前进"),
@@ -310,38 +337,64 @@ def run():
           page.wait_for_function(
               "document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage === 'sampling'"
           )
-          auto_advance_started = page.evaluate("performance.now()")
+          capture_state = calibration.locator(".spacemouse-capture-state")
+          ring = calibration.get_by_role("progressbar", name="方向录制进度")
+          started_at = float(capture_state.get_attribute("data-capture-started-at"))
+          assert 0 <= int(ring.get_attribute("aria-valuenow")) < 100
+          assert calibration.locator(".spacemouse-capture-progress__check").count() == 0
           if index == 0:
-              capture_state = calibration.locator(".spacemouse-capture-state")
               assert capture_state.get_attribute("data-capture-strategy") == (
                   "outbound-peak-envelope-v1"
               )
+              page.wait_for_timeout(550)
+              progress = int(ring.get_attribute("aria-valuenow"))
+              assert 20 < progress < 85, progress
+              page.screenshot(path="/tmp/atlas-spacemouse-recording-progress.png", full_page=True)
 
               # A realistic release crosses center with a strong, unrelated
-              # multi-axis spring-back. The peak envelope must freeze before
-              # this vector and exclude it from the semantic fingerprint.
+              # multi-axis spring-back before two seconds. Freeze the outbound
+              # fingerprint, but keep the full recording timer running.
               rebound = scaled_vector(COUPLED_MOTIONS["yaw"], -0.92)
               emit_split_vector(page, rebound)
               page.wait_for_function(
-                  "document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage === 'returning'"
+                  "Number(document.querySelector('.spacemouse-capture-state')?.dataset.releaseSamplesIgnored) >= 1"
               )
               assert int(capture_state.get_attribute("data-peak-sample-count")) >= 1
-              assert int(capture_state.get_attribute("data-release-samples-ignored")) >= 1
-              assert "PEAK LOCKED" in capture_state.inner_text()
-
-              # Crossing center starts a settle window before the frozen peak
-              # is committed; the prior rebound remains excluded.
               emit_vector(page, [0, 0, 0, 0, 0, 0])
+              page.wait_for_timeout(200)
+              assert calibration.get_attribute("data-calibration-stage") == "sampling"
+              assert calibration.locator(".spacemouse-capture-progress__check").count() == 0
               page.wait_for_function(
                   """['settling', 'captured'].includes(
                     document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage
                   )"""
               )
           else:
+              # No release is needed to complete recording: the timer locks
+              # the direction even while the controller remains deflected.
+              page.wait_for_function(
+                  "document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage === 'returning'"
+              )
+              assert 1950 <= page.evaluate("performance.now()") - started_at < 2600
+              assert ring.get_attribute("aria-valuenow") == "100"
+              assert calibration.locator(".spacemouse-capture-progress__check").is_visible()
+              if index == 1:
+                  assert "录制完成，请松手回中" in capture_state.inner_text()
+                  check = calibration.locator(".spacemouse-capture-progress__check path")
+                  assert check.evaluate("el => getComputedStyle(el).animationName") == "spacemouse-capture-check"
+                  page.wait_for_timeout(700)
+                  assert calibration.get_attribute("data-calibration-step") == "4"
+                  # A large late vector must never overwrite this direction.
+                  emit_vector(page, scaled_vector(COUPLED_MOTIONS["yaw"], 4))
+                  page.wait_for_timeout(40)
+                  page.screenshot(path="/tmp/atlas-spacemouse-recording-complete.png", full_page=True)
               emit_vector(page, [0, 0, 0, 0, 0, 0])
           page.wait_for_function(
               "document.querySelector('.spacemouse-calibration')?.dataset.calibrationStage === 'captured'"
           )
+          auto_advance_started = page.evaluate("performance.now()")
+          assert page.evaluate("performance.now()") - started_at >= 2000
+          assert ring.get_attribute("aria-valuenow") == "100"
           if index == 0:
               assert int(capture_state.get_attribute("data-active-axis-count")) >= 2
               assert "融合" in capture_state.inner_text()
@@ -380,6 +433,10 @@ def run():
       )
       assert stored_profile["mappings"]["x"]["positive"]["ignoredReleaseSamples"] >= 1
       assert len(stored_profile["mappings"]["x"]["positive"]["activeAxes"]) >= 2
+      for directions in stored_profile["mappings"].values():
+          assert all(capture["recordingDurationMs"] == 2000 for capture in directions.values())
+      negative_x = stored_profile["mappings"]["x"]["negative"]["vector"]
+      assert negative_x["x"] < -190 and abs(negative_x["rz"]) < 20, negative_x
       for control_index, control_axis in enumerate(
           ["x", "y", "z", "roll", "pitch", "yaw"]
       ):
@@ -396,6 +453,7 @@ def run():
           )
           assert decoded[control_index] > 0.85
           assert leakage < 0.08
+      print("spacemouse_two_second_recording_progress_checkmark_and_release_isolation=ok", flush=True)
       page.get_by_role("button", name="进入 3D 场景").click()
       assert control.get_attribute("data-spacemouse-calibrated") == "true"
       assert control.get_attribute("data-spacemouse-calibration-model") == "coupled-6d-ridge-v1"
@@ -476,6 +534,20 @@ def run():
       protected_toggle = viewer_tool(page, name="隐藏3D路径点")
       protected_toggle_box = protected_toggle.bounding_box()
       assert protected_toggle_box is not None
+      # Earlier trusted clicks can hit a headless-browser permission denial.
+      # Let the controller's two-second retry cooldown expire before testing
+      # a fresh Pointer Lock request.
+      page.wait_for_timeout(2100)
+      # Permission denial can return to idle before slow browser round trips
+      # read it. Observe the transition, not just the brief current state.
+      page.evaluate("""() => {
+        const control = document.querySelector('.spacemouse-control');
+        window.__pointerLockStates = [];
+        window.__pointerLockObserver = new MutationObserver(() =>
+          window.__pointerLockStates.push(control.dataset.spacemousePointerLock));
+        window.__pointerLockObserver.observe(control,
+          {attributes: true, attributeFilter: ['data-spacemouse-pointer-lock']});
+      }""")
       page.evaluate("window.__spaceMouseMock.emitButtons(2)")
       page.mouse.click(
           protected_toggle_box["x"] + protected_toggle_box["width"] / 2,
@@ -494,10 +566,9 @@ def run():
           "element => element.classList.contains('is-spacemouse-pointer-guarded')"
       )
       page.wait_for_function(
-          """() => ['locked', 'unavailable'].includes(
-            document.querySelector('.spacemouse-control')?.dataset.spacemousePointerLock
-          )"""
+          "() => window.__pointerLockStates.some(state => ['locked', 'primed', 'unavailable'].includes(state))"
       )
+      page.evaluate("window.__pointerLockObserver.disconnect()")
       pointer_lock_state = control.get_attribute("data-spacemouse-pointer-lock")
       if pointer_lock_state == "locked":
           assert page.evaluate(
