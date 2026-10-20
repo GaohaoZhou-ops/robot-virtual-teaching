@@ -17,6 +17,19 @@
 .mobile-solve-model { clear: both; display: grid; gap: 5px; margin-bottom: 22px; padding-left: 12px; border-left: 2px solid #59dbe8; }
 .mobile-solve-model span, .mobile-solve-model small { font-size: 11px; color: #8fa2ad; }
 .mobile-solve-model strong { font-size: 13px; overflow-wrap: anywhere; }
+.mobile-solve-model .robot-picker { margin: 8px 0; min-width: 0; }
+.mobile-solve-model .robot-picker__trigger { width: 100%; }
+.mobile-solve-model .robot-picker__menu { box-sizing: border-box; margin-top: 8px; overflow: auto; animation: none; }
+.mobile-solve-model .robot-picker__menu::before { display: none; }
+.mobile-solve-model .robot-picker__trigger > i { font-size: 10px; }
+.mobile-solve-model .robot-picker__heading { min-height: 0; padding: 10px; }
+.mobile-solve-model .robot-picker__heading small { font-size: 8px; }
+.mobile-solve-model .robot-picker__option { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 7px; padding: 8px; width: 100%; text-align: left; }
+.mobile-solve-model .robot-picker__model-icon { width: 24px; height: 24px; }
+.mobile-solve-model .robot-picker__model-copy strong { font-size: 11px; }
+.mobile-solve-model .robot-picker__model-copy small { font-size: 9px; }
+.mobile-solve-model .robot-picker__option > svg { display: none; }
+.mobile-solve-model .robot-picker__footer { display: none; }
 .mobile-solve-tolerances h3 { display: flex; justify-content: space-between; margin: 17px 0 9px; font-size: 12px; font-weight: 500; }
 .mobile-solve-tolerances h3 small { color: #7b95a1; font-weight: 400; }
 .mobile-solve-tolerances > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -29,6 +42,9 @@
 .mobile-solve-checks input { accent-color: #59dbe8; margin: 2px 0 0; }
 .mobile-solve-checks span { display: grid; gap: 5px; }
 .mobile-solve-checks small { color: #839ba8; font-size: 10px; line-height: 1.5; }
+.mobile-solve-checks .mobile-solve-clearance { align-items: center; justify-content: space-between; }
+.mobile-solve-clearance input { box-sizing: border-box; width: 82px; padding: 9px 8px; border: 1px solid #30434f; border-radius: 5px; color: #e0edf2; background: #0c151c; font-size: 13px; }
+.mobile-solve-clearance input:disabled { opacity: .4; }
 .mobile-solve-results { min-width: 0; padding: 22px 24px; }
 .mobile-solve-results-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .mobile-solve-results-heading h3 { margin: 0; font-size: 14px; }
@@ -69,7 +85,7 @@
 .mobile-solve-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; border-top: 1px solid #2b3b45; }
 .mobile-solve-footer p { margin: 3px 0; color: #8ba3af; font-size: 10px; line-height: 1.7; }
 .mobile-solve-footer [role="alert"] { color: #ffbc8b; }
-.mobile-solve-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.mobile-solve-actions { display: flex; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
 .mobile-solve-dialog button.is-primary { background: #59dbe8; border-color: #59dbe8; color: #10262d; font-weight: 600; }
 .mobile-solve-dialog button.is-primary:hover:not(:disabled) { color: #10262d; background: #8de8f0; }
 .mobile-solve-pages { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 10px; font-size: 11px; }

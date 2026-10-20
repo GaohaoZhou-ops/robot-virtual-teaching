@@ -427,6 +427,25 @@ playwright/.auth/
 /tests/atlas-vision-pairing-ui-*/
 /vision/atlas-vision-pairing-ui-*/
 
+# Automatic pairing tests store LAN sessions, model payloads and a compiled
+# Swift test executable here when TMPDIR is inside the repository. Keep both
+# the temporary workspace and packed diagnostic copies out of Git.
+/atlas-vision-pairing-autofill-*/
+/tests/atlas-vision-pairing-autofill-*/
+/ipad/atlas-vision-pairing-autofill-*/
+/vision/atlas-vision-pairing-autofill-*/
+/atlas-vision-pairing-autofill-*.zip
+/tests/atlas-vision-pairing-autofill-*.zip
+/ipad/atlas-vision-pairing-autofill-*.zip
+/vision/atlas-vision-pairing-autofill-*.zip
+
+# Desktop solver-readiness tests also create temporary LAN session stores.
+# Deliberate regression fixtures under tests/fixtures/ remain trackable.
+/atlas-solve-readiness-*/
+/tests/atlas-solve-readiness-*/
+/atlas-solve-readiness-*.zip
+/tests/atlas-solve-readiness-*.zip
+
 # ABX contract-test source copies, temporary imports and UI captures
 /atlas-abx-export-*/
 /atlas-abx-reference-*/

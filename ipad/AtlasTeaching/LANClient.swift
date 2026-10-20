@@ -64,6 +64,15 @@ struct LANServiceInfo: Decodable {
     let port: Int
 }
 
+struct VisionPairingOffer: Decodable, Identifiable {
+    let sessionId: String
+    let name: String
+    let code: String
+    let expiresAt: Double
+    var id: String { sessionId }
+    var isExpired: Bool { expiresAt <= Date().timeIntervalSince1970 * 1000 }
+}
+
 struct PairingQRCode: Decodable {
     let `protocol`: String
     let address: String
@@ -228,6 +237,36 @@ struct LANClient {
             throw TeachingError("不是兼容的 Atlas 示教服务")
         }
         return info
+    }
+    func visionPairingOffers(serverID: String) async throws -> [VisionPairingOffer] {
+        var request = request("vision-pairing")
+        request.timeoutInterval = 5
+        let (bytes, response) = try await Self.session.bytes(for: request)
+        if (response as? HTTPURLResponse)?.statusCode == 404 {
+            throw TeachingError("电脑服务尚不支持自动填码，请更新电脑服务或手动输入配对码。")
+        }
+        guard (response as? HTTPURLResponse)?.statusCode == 200, response.expectedContentLength <= 32_768 else {
+            throw TeachingError("暂时无法获取配对码，请确认电脑配对窗口已打开，再重试。")
+        }
+        var data = Data()
+        for try await byte in bytes {
+            try Task.checkCancellation()
+            guard data.count < 32_768 else { throw TeachingError("电脑返回的配对信息过大") }
+            data.append(byte)
+        }
+        struct Response: Decodable {
+            let `protocol`: String
+            let serverId: String
+            let offers: [VisionPairingOffer]
+        }
+        let result = try JSONDecoder().decode(Response.self, from: data)
+        guard result.protocol == teachingProtocol, result.serverId == serverID, UUID(uuidString: serverID) != nil,
+              result.offers.count <= 16, Set(result.offers.map(\.id)).count == result.offers.count,
+              result.offers.allSatisfy({ UUID(uuidString: $0.id) != nil && PairingCode.isValid($0.code)
+                  && !$0.name.isEmpty && $0.name.count <= 240 && $0.expiresAt.isFinite }) else {
+            throw TeachingError("配对信息与所选电脑不匹配，请重新检测电脑。")
+        }
+        return result.offers.filter { !$0.isExpired }
     }
     func pair(code: String, deviceID: String, name: String, qr: PairingQRCode? = nil) async throws -> PairedSession {
         let code = PairingCode.normalize(code)

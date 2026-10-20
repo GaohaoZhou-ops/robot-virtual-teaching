@@ -210,6 +210,7 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         }
         let app = XCUIApplication()
         app.launchArguments = ["-serverAddress", "http://192.168.100.7:23456"]
+        let automaticCode = environment["ATLAS_DISCOVERY_CODE"] ?? ""
         app.launch()
         let field = app.textFields["server-address"]
         XCTAssertTrue(field.waitForExistence(timeout: 15))
@@ -221,7 +222,6 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertTrue(selected.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertNotEqual(field.value as? String, "192.168.100.7")
         XCTAssertTrue(app.staticTexts["discovery-status"].label.contains("已填入"))
-        XCTAssertEqual(app.textFields["pairing-code"].value as? String, "Q7Z2")
 
         let server = app.buttons["discovered-service-\(serverID)"]
         XCTAssertTrue(server.waitForExistence(timeout: 20))
@@ -229,6 +229,11 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         expectValue(host, in: field)
         expectValue(String(port), in: app.textFields["server-port"])
         XCTAssertEqual(server.value as? String, "已填入")
+        XCTAssertTrue(app.buttons["retry-pairing-code"].waitForExistence(timeout: 10))
+        expectValue(automaticCode, in: app.textFields["pairing-code"])
+        for (index, character) in automaticCode.enumerated() {
+            XCTAssertEqual(app.buttons["pairing-code-cell-\(index)"].value as? String, String(character))
+        }
 
         if let otherID = environment["ATLAS_DISCOVERY_OTHER_ID"],
            let otherAddress = environment["ATLAS_DISCOVERY_OTHER_ADDRESS"],
@@ -247,6 +252,9 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertNotEqual(server.value as? String, "已填入")
         server.tap()
         expectValue(host, in: field)
+        XCTAssertTrue(app.buttons["retry-pairing-code"].waitForExistence(timeout: 10))
+        expectValue(automaticCode, in: app.textFields["pairing-code"])
+        if automaticCode.isEmpty { app.buttons["pairing-code-cell-0"].tap(); app.typeText("Q7Z2\n") }
         XCTAssertTrue(app.buttons["pair-model"].isEnabled)
         XCTAssertFalse(app.buttons["toggle-space"].exists, "discovery cannot pair or open a model")
     }

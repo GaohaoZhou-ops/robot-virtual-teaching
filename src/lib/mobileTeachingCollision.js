@@ -21,6 +21,55 @@ const adjacent = (left, right) => {
     && Number.isFinite(longer.jointSpacing?.[common + 1]) && longer.jointSpacing[common + 1] < 1e-6;
 };
 
+// Projection gaps along unit separating axes are lower bounds on Euclidean
+// box separation. Taking the largest of the 15 OBB SAT gaps remains
+// conservative, including edge/corner cases; never report it as mesh distance.
+function obbSignedSeparation(a, b, cap = Infinity) {
+  const aa = a.rotation.elements, bb = b.rotation.elements;
+  const dx = b.center.x - a.center.x, dy = b.center.y - a.center.y, dz = b.center.z - a.center.z;
+  let gap = -Infinity;
+  const project = (x, y, z) => {
+    const length = Math.hypot(x, y, z);
+    if (length < 1e-10) return;
+    x /= length; y /= length; z /= length;
+    const radius = (axes, half) => Math.abs(x * axes[0] + y * axes[1] + z * axes[2]) * half.x
+      + Math.abs(x * axes[3] + y * axes[4] + z * axes[5]) * half.y
+      + Math.abs(x * axes[6] + y * axes[7] + z * axes[8]) * half.z;
+    gap = Math.max(gap, Math.abs(dx * x + dy * y + dz * z) - radius(aa, a.halfSize) - radius(bb, b.halfSize));
+  };
+  for (const axes of [aa, bb]) for (let i = 0; i < 9; i += 3) {
+    project(axes[i], axes[i + 1], axes[i + 2]);
+    if (gap >= cap) return cap;
+  }
+  for (let i = 0; i < 9; i += 3) for (let j = 0; j < 9; j += 3) {
+    project(aa[i + 1] * bb[j + 2] - aa[i + 2] * bb[j + 1],
+      aa[i + 2] * bb[j] - aa[i] * bb[j + 2], aa[i] * bb[j + 1] - aa[i + 1] * bb[j]);
+    if (gap >= cap) return cap;
+  }
+  return gap;
+}
+
+export const obbSeparationLowerBound = (a, b, cap = Infinity) => Math.max(0, obbSignedSeparation(a, b, cap));
+
+function armJointBranches(robot) {
+  const chains = Object.fromEntries(['left', 'right'].map((side) => {
+    const chain = [];
+    const frame = robot.getObjectByName(`tool_${side}`) || robot.getObjectByName(`zivid_${side}_optical_frame`);
+    for (let node = frame; node && node !== robot; node = node.parent) {
+      chain.push(node);
+    }
+    return [side, chain];
+  }));
+  // Branches are inferred from kinematics, not collision-mesh naming. A
+  // shared torso joint belongs to the body, including when it moves in IK.
+  return Object.fromEntries(['left', 'right'].map((side) => {
+    const other = chains[side === 'left' ? 'right' : 'left'];
+    const branch = chains[side].filter((node) => !other.includes(node));
+    return [side, { root: branch.at(-1), joints: new Set(branch
+      .filter((node) => ['revolute', 'continuous', 'prismatic'].includes(node.userData.jointType)).map((node) => node.name)) }];
+  }));
+}
+
 async function buildEnvironmentIndex(environment, checkpoint) {
   const positions = environment?.positions, indices = environment?.indices;
   if (!positions?.length || positions.length % 3) throw new Error('碰撞筛选缺少当前工件几何，请重新加载工件');
@@ -123,13 +172,20 @@ async function buildEnvironmentIndex(environment, checkpoint) {
   return { intersects, encloses, kind: mesh ? 'mesh' : 'points', count };
 }
 
-export async function createMobileCollisionChecker(robot, environment, checkpoint = async () => {}) {
+export async function createMobileCollisionChecker(robot, environment, checkpoint = async () => {}, { armBodyClearance = 0 } = {}) {
   const proxies = [];
+  const branches = armJointBranches(robot);
   robot.traverse((node) => {
     const data = node.userData.mobileCollision;
     if (!data) return;
     const center = new THREE.Vector3().fromArray(data.center), half = new THREE.Vector3().fromArray(data.halfSize);
-    proxies.push({ node, ...data, localBox: new THREE.Box3(center.clone().sub(half), center.clone().add(half)),
+    const armSide = ['left', 'right'].find((side) => data.chain.some((name) => branches[side].joints.has(name))) || null;
+    let mountSide = null;
+    if (!armSide) for (let parent = node; parent && parent !== robot; parent = parent.parent) {
+      mountSide ||= ['left', 'right'].find((side) => branches[side].root === parent) || null;
+    }
+    const armDepth = armSide ? data.chain.filter((name) => branches[armSide].joints.has(name)).length : 0;
+    proxies.push({ node, ...data, armSide, mountSide, armDepth, localBox: new THREE.Box3(center.clone().sub(half), center.clone().add(half)),
       localObb: new OBB(center, half), obb: new OBB(), worldBox: new THREE.Box3(), inverse: new THREE.Matrix4() });
   });
   if (!proxies.length) throw new Error('机器人缺少碰撞检测体，请重新加载模型或关闭碰撞筛选');
@@ -138,14 +194,59 @@ export async function createMobileCollisionChecker(robot, environment, checkpoin
   for (let i = 0; i < proxies.length; i += 1) for (let j = 0; j < i; j += 1) {
     if (proxies[i].linkName !== proxies[j].linkName && !adjacent(proxies[i], proxies[j])) pairs.push([proxies[i], proxies[j]]);
   }
-  const check = () => {
+  const bodyPairs = pairs.filter(([a, b]) => {
+    if (Boolean(a.armSide) === Boolean(b.armSide)) return false;
+    const [arm, body] = a.armSide ? [a, b] : [b, a];
+    // The first two shoulder housings sit directly beside their own mount
+    // and its supporting chest link (BOTX's boxes can be only ~13 mm apart).
+    // A 50 mm buffer is physically impossible there. Exempt only those
+    // structural pairs from the buffer, not intersection checks, other body
+    // links, the upper-arm span, elbows, wrists or mounted cameras.
+    const supportingLink = body.jointLink && arm.chain.length - body.chain.length === arm.armDepth
+      && body.chain.every((name, i) => arm.chain[i] === name);
+    const shoulderHousing = arm.jointLink && arm.armDepth <= 2 && arm.chain.slice(-arm.armDepth)
+      .every((name) => ['revolute', 'continuous'].includes(robot.getObjectByName(name)?.userData.jointType));
+    return !(shoulderHousing && (body.mountSide === arm.armSide || supportingLink));
+  });
+  if (armBodyClearance > 0 && (!bodyPairs.length || ['left', 'right'].some((side) => branches[side].joints.size
+    && !bodyPairs.some(([a, b]) => a.armSide === side || b.armSide === side)))) {
+    throw new Error('机器人缺少可识别的机械臂与躯干检测体，无法检查躯干间距');
+  }
+  const updateBoxes = () => {
     robot.parent.updateMatrixWorld(true);
-    const selfPairs = [], environmentLinks = new Set(), groundLinks = new Set();
     for (const proxy of proxies) {
       proxy.obb.copy(proxy.localObb).applyMatrix4(proxy.node.matrixWorld);
-      // OBB.applyMatrix4 transforms the axes/size but only translates its centre.
-      // URDF collision mesh centres are usually offset from their link origin.
+      // OBB.applyMatrix4 does not rotate an offset local centre.
       proxy.obb.center.copy(proxy.localObb.center).applyMatrix4(proxy.node.matrixWorld);
+    }
+  };
+  const measureClearance = (cap = Infinity) => {
+    let minimum = Infinity, limitingPair = null;
+    const bySide = { left: null, right: null };
+    for (const [a, b] of bodyPairs) {
+      const side = a.armSide || b.armSide;
+      const distance = obbSeparationLowerBound(a.obb, b.obb, Math.min(cap, bySide[side] ?? Infinity));
+      if (bySide[side] === null || distance < bySide[side]) bySide[side] = distance;
+      if (distance < minimum) { minimum = distance; limitingPair = [a.linkName, b.linkName]; }
+    }
+    return { checked: bodyPairs.length > 0, method: 'obb-separation-lower-bound', required: armBodyClearance,
+      minimum: Number.isFinite(minimum) ? minimum : null, bySide, limitingPair,
+      clear: armBodyClearance === 0 || (bodyPairs.length > 0 && Number.isFinite(minimum) && minimum + 1e-9 >= armBodyClearance) };
+  };
+  const measureArmBodyClearance = (cap) => { updateBoxes(); return measureClearance(cap); };
+  const measurePostureClearance = (cap) => {
+    updateBoxes();
+    const clearance = measureClearance(cap);
+    // Signed SAT separation supplies a recovery gradient for intersecting
+    // housings too. The torso buffer never exempts them from self collision.
+    let selfSeparation = 0.001;
+    for (const [a, b] of pairs) selfSeparation = Math.min(selfSeparation, obbSignedSeparation(a.obb, b.obb, selfSeparation));
+    return { ...clearance, selfSeparation };
+  };
+  const check = () => {
+    updateBoxes();
+    const selfPairs = [], environmentLinks = new Set(), groundLinks = new Set();
+    for (const proxy of proxies) {
       proxy.worldBox.copy(proxy.localBox).applyMatrix4(proxy.node.matrixWorld).expandByScalar(CONTACT_MARGIN);
       proxy.inverse.copy(proxy.node.matrixWorld).invert();
       const scale = proxy.node.getWorldScale(new THREE.Vector3());
@@ -159,9 +260,11 @@ export async function createMobileCollisionChecker(robot, environment, checkpoin
     for (const [a, b] of pairs) {
       if (a.worldBox.intersectsBox(b.worldBox) && a.obb.intersectsOBB(b.obb)) selfPairs.push([a.linkName, b.linkName]);
     }
+    const clearance = measureClearance();
     return { checked: true, method: 'conservative-obb', environment: index.kind,
-      clear: !selfPairs.length && !environmentLinks.size && !groundLinks.size,
-      selfPairs, environmentLinks: [...environmentLinks], groundLinks: [...groundLinks] };
+      clear: !selfPairs.length && !environmentLinks.size && !groundLinks.size && clearance.clear,
+      selfPairs, environmentLinks: [...environmentLinks], groundLinks: [...groundLinks], armBodyClearance: clearance };
   };
-  return { check, proxyCount: proxies.length, environmentKind: index.kind, environmentCount: index.count };
+  return { check, measureArmBodyClearance, measurePostureClearance,
+    proxyCount: proxies.length, environmentKind: index.kind, environmentCount: index.count };
 }

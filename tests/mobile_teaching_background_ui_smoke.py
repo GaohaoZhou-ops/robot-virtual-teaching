@@ -2,6 +2,7 @@ from topbar_tools_helpers import topbar_action
 
 import copy
 import json
+import re
 import time
 
 from playwright.sync_api import expect, sync_playwright
@@ -143,7 +144,7 @@ def run():
             report = config['project']['virtualTeaching']['tasks'][0]['mobileSolve']
             assert len(report['rows']) == 36
             assert report['feasibleCount'] == 14
-            assert canvas.get_attribute('data-parking-ghost-pose-id') == 'progress-pose-33'
+            assert canvas.get_attribute('data-parking-ghost-pose-id') == [row for row in report['rows'] if row['feasible']][-1]['sampleId']
             assert canvas.get_attribute('data-robot-joint-values') == live_joints
             page.set_viewport_size({'width': 1280, 'height': 800})
             page.screenshot(path=str(ARTIFACTS / 'background-completed-1280.png'), full_page=True)
@@ -158,7 +159,7 @@ def run():
             report = saved_tasks[0]['mobileSolve']
             assert report['savedTaskId'] == saved_tasks[1]['id']
             assert len(saved_tasks[1]['parkingPoints']) == 1
-            assert sum(len(point['poses']) for point in saved_tasks[1]['parkingPoints']) == 14
+            assert sum(len(point['poses']) for point in saved_tasks[1]['parkingPoints']) == report['motionCount']
             page.get_by_role('button', name='查看来源采样', exact=True).click()
 
             # A cancelled recalculation preserves the previous complete report,
@@ -177,7 +178,7 @@ def run():
             assert workspace(page)['project']['virtualTeaching']['tasks'][0]['mobileSolve'] == report
             dock.get_by_role('button', name='计算配置', exact=True).click()
             expect(dialog.get_by_role('spinbutton', name='X 位置容差 (cm)')).to_have_value('6')
-            expect(dialog.get_by_role('button', name='应用左臂解', exact=True)).to_be_disabled()
+            expect(dialog.get_by_role('button', name=re.compile(r'^应用(?:左臂|右臂|双臂)解$')).first).to_be_disabled()
             expect(dialog.get_by_role('button', name='查看已保存任务', exact=True)).to_be_disabled()
             dialog.get_by_role('button', name='关闭姿态计算').click()
             dock.get_by_role('button', name='关闭计算进度', exact=True).click()

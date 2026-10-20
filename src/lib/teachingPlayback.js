@@ -160,9 +160,12 @@ export function buildTeachingTaskTrajectory({
   );
   const firstParkingPoint = parkingPoints.find((point) => point.poses?.length);
   const firstPose = ordered(firstParkingPoint?.poses)[0];
-  // Playback begins at the first recording, independent of the live robot.
-  const initialRobotPose = normalizePose(firstPose?.mapPose || firstParkingPoint?.mapPose);
-  const initialJointValues = normalizeJoints(firstPose?.fullBodyJoints?.values);
+  // Computed motions include their original full-body start state, so even a
+  // single simultaneous pair visibly moves both arms to its first targets.
+  // Manually recorded and older tasks continue to begin at their first pose.
+  const solvedStart = task?.mobileSolveSource?.solverVersion >= 5 ? task.mobileSolveSource : null;
+  const initialRobotPose = normalizePose(solvedStart?.initialMapPose || firstPose?.mapPose || firstParkingPoint?.mapPose);
+  const initialJointValues = normalizeJoints(solvedStart?.initialJointValues || firstPose?.fullBodyJoints?.values);
   let currentPose = initialRobotPose;
   let currentJoints = initialJointValues;
   let poseOrdinal = 0;

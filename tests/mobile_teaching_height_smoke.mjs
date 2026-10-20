@@ -88,7 +88,7 @@ const pitchedParking = { position: { x: 20, y: 20, z: 0 }, rpy: { roll: 0, pitch
 const parkingTask = { ...task, mobileCapture: { id: 'pitched-parking', samples: [0, 7, 9].map((index) => ({
   id: `parking-${index}`, kind: 'keyframe', cameraPose: fixture.targets[index],
 })) } };
-for (const candidate of mobileParkingCandidates(mobileSampleTarget(parkingTask.mobileCapture.samples[0], parkingTask), pitchedParking, null, 'auto')) {
+for (const candidate of mobileParkingCandidates(mobileSampleTarget(parkingTask.mobileCapture.samples[0], parkingTask), pitchedParking, null, 'auto', { refineClearance: true })) {
   const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(
     ...['roll', 'pitch', 'yaw'].map((axis) => THREE.MathUtils.degToRad(candidate.rpy[axis])), 'XYZ',
   ));
@@ -117,7 +117,7 @@ const capture = await solveMobileTeaching({ robot, task: captureTask,
   mapPose: { position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 } },
   lockedJointNames: [...bodyNames, 'waist_yaw_J'], environment: far });
 assert.equal(capture.feasibleCount, 16, capture.rows.filter((r) => !r.feasible).map((r) => r.reason).join('\n'));
-const checker = await createMobileCollisionChecker(fk, far);
+const checker = await createMobileCollisionChecker(fk, far, undefined, capture.options);
 for (const row of capture.rows) {
   for (const [side, solution] of Object.entries(row.solutions)) {
     if (!solution.feasible) continue;

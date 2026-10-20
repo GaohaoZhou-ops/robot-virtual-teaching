@@ -55,13 +55,22 @@ def run():
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             dialog = page.get_by_role('dialog', name='计算机器人姿态', exact=True)
             expect(dialog.get_by_role('checkbox', name='碰撞筛选')).to_be_checked()
+            clearance = dialog.get_by_role('spinbutton', name='躯干避让间距 (cm)', exact=True)
+            expect(clearance).to_have_value('5')
+            clearance.fill('31')
+            expect(dialog.get_by_role('button', name='开始计算', exact=True)).to_be_disabled()
+            clearance.fill('5')
+            dialog.get_by_role('checkbox', name='碰撞筛选').uncheck()
+            expect(clearance).to_be_disabled()
+            dialog.get_by_role('checkbox', name='碰撞筛选').check()
+            expect(clearance).to_be_enabled()
             expect(dialog.get_by_role('checkbox', name='自动调节胸部高度')).to_be_checked()
             expect(dialog.get_by_role('checkbox', name='前胸垂直锁定')).to_be_checked()
             expect(dialog.get_by_role('checkbox', name='前胸垂直锁定')).to_be_disabled()
             dialog.get_by_role('combobox', name='停车点策略').select_option('per-pose')
             dialog.get_by_role('button', name='开始计算', exact=True).click()
             dock = page.get_by_role('region', name='设备姿态后台计算')
-            expect(dock).to_have_attribute('data-compute-status', 'completed', timeout=120000)
+            expect(dock).to_have_attribute('data-compute-status', 'completed', timeout=240000)
             config = await_saved(page, lambda c: c['project']['virtualTeaching']['tasks'][0].get('mobileSolve'))
             report = config['project']['virtualTeaching']['tasks'][0]['mobileSolve']
             assert report['feasibleCount'] == 3, report['rows']
@@ -69,12 +78,16 @@ def run():
             assert report['collisionScreening']['enabled']
             assert report['collisionScreening']['environmentKind'] == 'points'
             assert report['options']['allowTorsoHeight']
+            assert report['options']['armBodyClearance'] == 0.05
             assert state(canvas)['joints'] == initial_joints, 'the worker must leave the live tilted robot alone'
             for row in reversed(report['rows']):
                 expected_pose = pose_values(row['mapPose'])
                 actual = [float(v) for v in canvas.get_attribute('data-parking-ghost-target-pose').split(',')]
                 assert all(abs(a - b) < 1e-6 for a, b in zip(actual, expected_pose)), (actual, expected_pose)
                 assert row['solutions'][row['selectedSide']]['collision']['clear']
+                margin = row['solutions'][row['selectedSide']]['collision']['armBodyClearance']
+                assert margin['checked'] and margin['clear'] and margin['minimum'] >= 0.05
+                assert all(value >= 0.05 for value in margin['bySide'].values())
                 assert row['solutions'][row['selectedSide']]['chestTilt'] <= 0.25
                 assert row['mapPose']['position']['z'] == 0
                 if row != report['rows'][0]:
@@ -84,6 +97,8 @@ def run():
             expect(dialog.locator('.mobile-solve-results-heading')).to_contain_text('3 个停车点')
             expect(dialog).to_contain_text('胸部坐标系距支撑平面')
             expect(dialog).to_contain_text('本报告自动升降已开启')
+            expect(dialog).to_contain_text('躯干间距保守下界')
+            expect(dialog).to_contain_text('要求 ≥ 5.00 cm')
             with page.expect_download() as report_download:
                 dialog.get_by_role('button', name='导出计算报告', exact=True).click()
             diagnosis = json.loads(Path(report_download.value.path()).read_text())
@@ -130,10 +145,10 @@ def run():
                 start_project_download(page)
             exported = read_exported_project(download.value)['virtualTeaching']['tasks']
             assert exported[1]['parkingPoints'] == solved['parkingPoints']
-            # Old reports remain readable. Both versions must request a new
-            # height solve; version 1 also enables parking/collision screening.
+            # v3 preserves its height setting while requesting new assignment.
+            # Earlier versions request height control; v1 also enables parking.
             await_saved(page, lambda c: len(c['project']['virtualTeaching']['tasks']) == 2)
-            for version in [2, 1]:
+            for version in [5, 4, 3, 2, 1]:
                 page.evaluate('''async (version) => {
               const db=await new Promise((resolve,reject)=>{
                 const r=indexedDB.open('atlas-route-studio',1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
@@ -143,7 +158,8 @@ def run():
                 const r=store.get('workspace-config:independent');
                 r.onsuccess=()=>{
                   const record=r.result,report=record.config.project.virtualTeaching.tasks[0].mobileSolve;
-                  report.version=version;delete report.options.allowTorsoHeight;
+                  report.version=version;
+                  if(version>=3)report.options.allowTorsoHeight=false;else delete report.options.allowTorsoHeight;
                   if(version===1){
                     delete report.options.parkingMode;delete report.options.checkCollisions;
                     delete report.collisionScreening;delete report.parkingCount;
@@ -159,9 +175,20 @@ def run():
                 ready(page)
                 page.get_by_role('group', name='示教来源', exact=True).get_by_role('button', name='iPad 示教', exact=True).click()
                 page.get_by_role('button', name='计算机器人姿态', exact=True).click()
-                expect(dialog.get_by_role('checkbox', name='自动调节胸部高度')).to_be_checked()
-                expect(dialog.get_by_role('checkbox', name='前胸垂直锁定')).to_be_disabled()
-                expect(dialog).to_contain_text('已有报告未使用自动胸部升降')
+                if version < 4:
+                    expect(dialog).to_contain_text('已有报告尚未采用双臂分工与停车点覆盖优化')
+                if version < 5:
+                    expect(dialog).to_contain_text('重新计算可在同一停车点生成双臂同步动作')
+                expect(dialog).to_contain_text('已有报告未检查躯干避让间距')
+                expect(dialog.get_by_role('spinbutton', name='躯干避让间距 (cm)', exact=True)).to_have_value('5')
+                if version >= 3:
+                    expect(dialog.get_by_role('checkbox', name='自动调节胸部高度')).not_to_be_checked()
+                    expect(dialog.get_by_role('checkbox', name='前胸垂直锁定')).to_be_enabled()
+                    expect(dialog).not_to_contain_text('已有报告未使用自动胸部升降')
+                else:
+                    expect(dialog.get_by_role('checkbox', name='自动调节胸部高度')).to_be_checked()
+                    expect(dialog.get_by_role('checkbox', name='前胸垂直锁定')).to_be_disabled()
+                    expect(dialog).to_contain_text('已有报告未使用自动胸部升降')
                 expect(dialog).to_contain_text('本报告自动升降未开启')
                 if version == 1:
                     expect(dialog.get_by_role('combobox', name='停车点策略')).to_have_value('auto')
@@ -187,7 +214,7 @@ def run():
             assert not errors, errors
         finally:
             browser.close()
-    print('Multi-parking/height UI: tilted torso, upright collision-screened worker results, each ghost/apply base and joints, save, playback targets, reload, legacy v1/v2 and ZIP export passed.')
+    print('Multi-parking/height UI: torso clearance setting/report, tilted torso, upright collision-screened worker results, each ghost/apply base and joints, save, playback targets, reload, legacy v1-v5 and ZIP export passed.')
 
 
 if __name__ == '__main__':

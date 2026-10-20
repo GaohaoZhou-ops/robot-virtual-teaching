@@ -6,7 +6,7 @@ import './MobileTeachingComputeDock.css';
 const labels = { running: '正在计算', pausing: '正在暂停', paused: '计算已暂停', completed: '计算完成', cancelled: '计算已取消', error: '计算未完成' };
 
 export default function MobileTeachingComputeDock({ computation, inWorkbench, onPause, onResume, onCancel, onRestart,
-  onConfigure, onPreview, onFollowLatest, onFocusPreview, onDismiss, onSave, saveDisabledReason = '' }) {
+  onConfigure, onPreview, onFollowLatest, onFocusPreview, onDismiss, onSave, onPlay, saveDisabledReason = '' }) {
   const [collapsed, setCollapsed] = useState(false);
   if (!computation) return null;
   const { status, completed, total, feasibleCount, previewIndex, previewCount, preview } = computation;
@@ -28,15 +28,18 @@ export default function MobileTeachingComputeDock({ computation, inWorkbench, on
     {!collapsed && <div className="mobile-compute-dock__body">
       <div className="mobile-compute-dock__counts"><span>已计算 <b>{completed} / {total}</b></span><span>可达 <b>{feasibleCount}</b></span><span>未通过 <b>{completed - feasibleCount}</b></span></div>
       <p className="mobile-compute-dock__current">{status === 'cancelled' ? '本轮预览已清除，已保存结果保留。'
-        : status === 'completed' ? feasibleCount ? '计算完成，可达姿态待保存。点击“保存可达姿态”生成停车点和机器人姿态，加入“示教数据”。' : '未找到可达姿态，可调整停车位置或计算配置。'
-          : status === 'error' ? computation.error : `${status === 'paused' ? '停在' : '求解'} ${computation.name || '准备运动学模型'}${computation.side ? ` · ${computation.side === 'left' ? '左臂' : '右臂'}` : ''}`}</p>
+        : status === 'completed' ? feasibleCount ? '计算完成，可达姿态待保存。点击“动态预览”播放本次结果，或“保存可达姿态”加入“示教数据”。' : '未找到可达姿态，暂无法动态预览，可调整停车位置或计算配置。'
+          : status === 'error' ? computation.error : `${status === 'paused' ? '停在' : '求解'} ${computation.name || '准备运动学模型'}${computation.side ? ` · ${computation.side === 'both' ? '双臂同步' : computation.side === 'left' ? '左臂' : '右臂'}` : ''}`}</p>
       {previewCount > 0 && <div className="mobile-compute-dock__preview">
         <div><span>姿态虚影</span><button type="button" aria-pressed={computation.followLatest} onClick={() => onFollowLatest(!computation.followLatest)}>跟随最新</button><button type="button" className="mobile-compute-icon" aria-label="定位计算姿态虚影" disabled={!preview} onClick={onFocusPreview}><Crosshair size={13} /></button></div>
         <nav aria-label="已计算姿态预览"><button type="button" aria-label="上一个计算姿态" disabled={previewIndex <= 0} onClick={() => onPreview(previewIndex - 1)}><ChevronLeft size={14} /></button>
-          <strong title={preview?.poseName}>{preview ? `${preview.poseName} · ${preview.side === 'left' ? '左臂' : '右臂'}` : '虚影已隐藏'}</strong><small>{previewIndex + 1} / {previewCount}</small>
+          <strong title={preview?.poseName}>{preview ? `${preview.poseName} · ${preview.side === 'both' ? '双臂同步' : preview.side === 'left' ? '左臂' : '右臂'}` : '虚影已隐藏'}</strong><small>{previewIndex + 1} / {previewCount}</small>
           <button type="button" aria-label="下一个计算姿态" disabled={previewIndex >= previewCount - 1} onClick={() => onPreview(previewIndex + 1)}><ChevronRight size={14} /></button></nav>
       </div>}
       <div className="mobile-compute-dock__controls">
+        {status === 'completed' && <button type="button" className="is-primary mobile-compute-dock__play"
+          disabled={!feasibleCount || !!saveDisabledReason} title={!feasibleCount ? '本次计算没有可达姿态' : saveDisabledReason || '按停车点和姿态顺序播放本次计算结果'}
+          onClick={() => onPlay(computation.taskId)}><Play size={13} />动态预览</button>}
         {status === 'completed' && feasibleCount > 0 && onSave && <button type="button" className="is-primary mobile-compute-dock__save" disabled={!!saveDisabledReason} title={saveDisabledReason || undefined} onClick={() => onSave(computation.taskId)}><Save size={13} />保存可达姿态</button>}
         {active && <button type="button" className="is-primary" disabled={status === 'pausing'} onClick={status === 'paused' ? onResume : onPause} aria-label={status === 'paused' ? '继续姿态计算' : '暂停姿态计算'}>
           {status === 'paused' ? <Play size={13} /> : <Pause size={13} />}{status === 'paused' ? '继续' : status === 'pausing' ? '暂停中' : '暂停'}</button>}

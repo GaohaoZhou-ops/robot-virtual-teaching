@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
 import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
 import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { solveMobileTeaching, buildMobileSolvedTask, mobileSampleTarget, measureMobileTarget } from '../src/lib/mobileTeachingSolver.js';
+import { solveMobileTeaching, buildMobileSolvedTask, mobileSampleTarget, measureMobileTarget, mobileMotionGroups } from '../src/lib/mobileTeachingSolver.js';
 import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
 import { normalizeTeachingTasks } from '../src/lib/io.js';
 import { buildTeachingTaskTrajectory } from '../src/lib/teachingPlayback.js';
@@ -18,15 +18,18 @@ const task = { id: 'botx-capture', name: 'Distributed capture', coordinateFrame:
 const before = structuredClone(task);
 const report = await solveMobileTeaching({ robot, task, mapPose: zero, environment: far, lockedJointNames: locked, options: { allowTorsoHeight: false } });
 assert.equal(report.feasibleCount, 16, report.rows.filter((r) => !r.feasible).map((r) => `${r.name}: ${r.reason}`).join('\n'));
-assert.ok(report.parkingCount > 1);
+assert.ok(report.parkingCount > 1 && report.parkingCount < fixture.targets.length,
+  `Retain shared stops when comfortable, but allow more than the old 8 cramped stops: ${report.parkingCount}`);
 assert.deepEqual(task, before);
 assert.deepEqual(readRobotJointValues(robot), baseline);
 const fk = restoreMobileTeachingRobot(fixture.robot), layer = new THREE.Group(); layer.add(fk);
-const checker = await createMobileCollisionChecker(fk, far);
-let switches = 0, previousSide;
+const checker = await createMobileCollisionChecker(fk, far, undefined, report.options);
+const clearances = [];
+const parkingSides = new Map();
 for (const row of report.rows) {
-  if (previousSide && previousSide !== row.selectedSide) switches += 1;
-  previousSide = row.selectedSide;
+  if (!parkingSides.has(row.parkingId)) parkingSides.set(row.parkingId, new Set());
+  parkingSides.get(row.parkingId).add(row.selectedSide);
+  assert.ok(['left', 'right'].includes(row.selectedSide) && row.solutions[row.selectedSide].feasible, 'each sample assigns one executing camera');
   for (const [side, solution] of Object.entries(row.solutions)) {
     if (!solution.feasible) continue;
     assert.equal(solution.collision.clear, true);
@@ -36,7 +39,12 @@ for (const row of report.rows) {
     applyRobotJointValues(fk, solution.jointValues); layer.updateMatrixWorld(true);
     for (const name of locked) assert.equal(solution.jointValues[name], baseline[name]);
     assert.ok(measureMobileTarget(fk.getObjectByName(`zivid_${side}_optical_frame`), mobileSampleTarget(task.mobileCapture.samples.find((s) => s.id === row.sampleId), task), report.options).withinTolerance);
-    assert.equal(checker.check().clear, true, `${row.name} ${side}`);
+    const checked = checker.check();
+    assert.equal(checked.clear, true, `${row.name} ${side}`);
+    assert.ok(checked.armBodyClearance.minimum >= report.options.armBodyClearance - 1e-9,
+      `${row.name}: both arms, including the idle one, must clear the torso`);
+    assert.ok(Math.abs(checked.armBodyClearance.minimum - solution.collision.armBodyClearance.minimum) < 1e-8);
+    if (side === row.selectedSide) clearances.push(checked.armBodyClearance.minimum);
     fk.traverse((node) => {
       if (!['revolute', 'prismatic'].includes(node.userData.jointType)) return;
       const { jointValue, jointLimit } = node.userData;
@@ -44,16 +52,29 @@ for (const row of report.rows) {
     });
   }
 }
-assert.ok(switches <= 2, `Unnecessary arm switches: ${switches}`);
+const sharedStops = [...parkingSides.values()].filter((sides) => sides.size === 2).length;
+assert.ok(sharedStops >= 2, 'both arms should still share comfortable stops');
+assert.ok(clearances.reduce((sum, value) => sum + value, 0) / clearances.length > 0.07,
+  'seek comfort beyond merely scraping through the 5 cm hard minimum');
 const saved = buildMobileSolvedTask(task, report, {}, 'botx-solved');
 assert.equal(saved.parkingPoints.length, report.parkingCount);
 const normalized = normalizeTeachingTasks([saved])[0];
 assert.deepEqual(normalized.parkingPoints.map((p) => p.mapPose), saved.parkingPoints.map((p) => p.mapPose));
-assert.deepEqual(normalized.parkingPoints.flatMap((p) => p.poses.map((pose) => pose.mobileSampleId)), task.mobileCapture.samples.map((s) => s.id));
+const savedIds = normalized.parkingPoints.flatMap((p) => p.poses.flatMap((pose) => pose.mobileSampleIds || [pose.mobileSampleId]));
+assert.deepEqual(savedIds, report.rows.map((row) => row.sampleId), 'playback follows the planned shooting order');
+assert.deepEqual([...savedIds].sort(), task.mobileCapture.samples.map((s) => s.id).sort(), 'each source sample is covered exactly once');
 const trajectory = buildTeachingTaskTrajectory({ task: normalized });
 const holds = trajectory.segments.filter((segment) => segment.phase === 'hold');
-assert.equal(holds.length, 16);
-for (const [i, segment] of holds.entries()) assert.deepEqual(segment.toPose, report.rows[i].mapPose, 'playback holds use each solved chassis pose');
+assert.ok(report.dualMotionCount >= 1, 'compatible left/right targets should produce simultaneous motions');
+assert.equal(holds.length, report.motionCount);
+assert.equal(report.motionCount + report.dualMotionCount, 16, 'two samples per dual motion, one per single motion');
+for (const [i, segment] of holds.entries()) {
+  const members = mobileMotionGroups(report)[i];
+  for (const row of members) {
+    assert.deepEqual(segment.toPose, row.mapPose, 'playback holds use each solved chassis pose');
+    assert.deepEqual(segment.toJointValues, row.solutions[row.selectedSide].jointValues, 'both targets use the same joint state');
+  }
+}
 
 // A reachable FK target must be rejected when the robot is inside an obstacle,
 // and the rejected row must never become a saved robot pose.
@@ -87,4 +108,4 @@ for (const [i, known] of fixture.knownReachable.entries()) {
       positionTolerance: { x: 0.01, y: 0.01, z: 0.01 }, rotationTolerance: { roll: 1, pitch: 1, yaw: 1 } } });
   assert.equal(hard.feasibleCount, 1, `Known reachable ${known.side} target ${i}`);
 }
-console.log(`BOTX regression: 16/16 targets, ${report.parkingCount} parking points, ${switches} arm switches; independent FK, collision, limits, persistence and tight-tolerance targets passed.`);
+console.log(`BOTX regression: 16/16 targets, ${report.parkingCount} parking points, ${report.motionCount} motions (${report.dualMotionCount} simultaneous), minimum torso buffer ${(Math.min(...clearances) * 100).toFixed(2)} cm; independent FK, collision, limits, persistence and tight-tolerance targets passed.`);

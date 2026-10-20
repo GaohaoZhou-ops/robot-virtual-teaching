@@ -66,6 +66,8 @@ export function transformTeachingTasks(tasks, matrix, mode, map) {
   const pose = (value) => transformTeachingPose(value, matrix, frame);
   return tasks.map((task) => ({
     ...task, coordinateFrame: frame,
+    ...(task.mobileSolveSource?.initialMapPose ? { mobileSolveSource: { ...task.mobileSolveSource,
+      initialMapPose: pose(task.mobileSolveSource.initialMapPose) } } : {}),
     ...(task.mobileCapture ? { mobileTransform: matrix.clone().multiply(new Matrix4().fromArray(task.mobileTransform)).toArray(), mobileSolve: null } : {}),
     map: { id: map.mapId, fileName: map.name, sourceHash: map.sourceHash, teachingSpaceMode: mode, coordinateFrame: frame },
     parkingPoints: task.parkingPoints.map((parking) => ({
