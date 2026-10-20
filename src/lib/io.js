@@ -43,7 +43,14 @@ const normalizeWorkspaceTransfer = (value) => {
     || !value.baseline.tasks.every((task) => typeof task?.id === 'string' && typeof task?.name === 'string' && validItems(task.parkingPoints))
     || !validItems(value.baseline.waypoints) || !validItems(value.baseline.edges)
     || (value.baseline.jointPoses != null && !validItems(value.baseline.jointPoses)))) return null;
-  return value;
+  const { previousPlacements, ...transfer } = value;
+  return { ...transfer, ...(value.kind === 'placement' && Array.isArray(previousPlacements)
+    ? { previousPlacements: previousPlacements.flatMap((item) => {
+      if (item?.kind !== 'placement') return [];
+      const { previousPlacements: earlier, ...placement } = item;
+      const normalized = normalizeWorkspaceTransfer(placement);
+      return normalized ? [normalized] : [];
+    }) } : {}) };
 };
 
 export const createId = (prefix) =>
@@ -826,6 +833,7 @@ export function buildExport({
       mimeType: mapData?.mimeType || 'application/octet-stream',
       loadedAt: mapData?.loadedAt || null,
       sourceKind: mapData?.sourceKind || null,
+      ...(mapData?.teachingGroupId ? { teachingGroupId: mapData.teachingGroupId } : {}),
       pointCount: mapData?.pointCount || 0,
       faceCount: mapData?.faceCount || 0,
       bounds: mapData?.bounds || null,

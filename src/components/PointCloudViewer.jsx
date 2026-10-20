@@ -1404,6 +1404,7 @@ const createRosAxisLabel = (text, color, worldHeight) => {
     transparent: true,
     depthTest: false,
     depthWrite: false,
+    fog: false,
   });
   const sprite = new THREE.Sprite(material);
   sprite.scale.set(worldHeight, worldHeight, 1);
@@ -1437,6 +1438,29 @@ const createRosAxisArrow = (direction, color, length, shaftRadius) => {
   head.renderOrder = 18;
   group.add(shaft, head);
   group.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
+  return group;
+};
+
+const createCoordinateOrigin = (axisLength) => {
+  const group = new THREE.Group();
+  group.userData.baseAxisLength = axisLength;
+  const shaftRadius = axisLength * 0.025;
+  [
+    { name: 'X', direction: new THREE.Vector3(1, 0, 0), color: '#f0443e' },
+    { name: 'Y', direction: new THREE.Vector3(0, 1, 0), color: '#38c75a' },
+    { name: 'Z', direction: new THREE.Vector3(0, 0, 1), color: '#3c82f6' },
+  ].forEach(({ name, direction, color }) => {
+    const arrow = createRosAxisArrow(direction, color, axisLength, shaftRadius);
+    const label = createRosAxisLabel(name, color, axisLength * 0.16);
+    label.position.copy(direction).multiplyScalar(axisLength * 1.09);
+    group.add(arrow, label);
+  });
+  const joint = new THREE.Mesh(
+    new THREE.SphereGeometry(shaftRadius * 1.55, 14, 10),
+    new THREE.MeshBasicMaterial({ color: 0xe9edf0, depthTest: false, depthWrite: false, fog: false }),
+  );
+  joint.renderOrder = 19;
+  group.add(joint);
   return group;
 };
 
@@ -1491,6 +1515,7 @@ const createChassisControlGuide = () => {
 
 export default function PointCloudViewer({
   mapData,
+  mapOriginPose = null,
   displaySettingsContainer,
   heightRange,
   showSlice = true,
@@ -1564,6 +1589,8 @@ export default function PointCloudViewer({
   const routeGroupRef = useRef(null);
   const waypointGroupRef = useRef(null);
   const waypointNameElementsRef = useRef(new Map());
+  const mapOriginGroupRef = useRef(null);
+  const mapOriginLabelRef = useRef(null);
   const visionCoverageGroupRef = useRef(null);
   const surfaceCoverageProjectionRef = useRef(null);
   const visionCoverageRenderingEnabledRef = useRef(true);
@@ -3440,6 +3467,14 @@ export default function PointCloudViewer({
     // Dolly toward the target first, then continue optically before floating-point
     // precision can collapse camera.position onto controls.target.
     const syncDetailView = () => {
+      if (independentTeachingSpace) {
+        const mapOrigin = mapOriginGroupRef.current;
+        navigation.setReferenceSphere(new THREE.Sphere(new THREE.Vector3(), Math.max(
+          referencePlane.userData.size / Math.SQRT2,
+          mapOrigin ? mapOrigin.position.length()
+            + mapOrigin.userData.baseAxisLength * mapOrigin.scale.x * 1.5 : 0,
+        )));
+      }
       const { distance, opticalZoom, effectiveDistance, near: nextNear } = navigation.syncClipping();
       const normalizedDistance = Math.max(effectiveDistance / (radius * 0.35), 1e-24);
       const pointSizeScale = Math.min(1, Math.max(normalizedDistance ** 0.82, 2e-5));
@@ -3589,54 +3624,8 @@ export default function PointCloudViewer({
     ].join(',');
     scene.add(referencePlane);
 
-    const originGroup = new THREE.Group();
+    const originGroup = createCoordinateOrigin(THREE.MathUtils.clamp(radius * 0.14, 1, 8));
     originGroup.name = 'ros-rviz-coordinate-origin';
-    originGroup.position.set(0, 0, 0);
-    const axisLength = THREE.MathUtils.clamp(radius * 0.14, 1, 8);
-    originGroup.userData.baseAxisLength = axisLength;
-    const shaftRadius = axisLength * 0.025;
-    const rosAxisColors = {
-      x: { hex: 0xf0443e, css: '#f0443e' },
-      y: { hex: 0x38c75a, css: '#38c75a' },
-      z: { hex: 0x3c82f6, css: '#3c82f6' },
-    };
-    const xAxis = createRosAxisArrow(
-      new THREE.Vector3(1, 0, 0),
-      rosAxisColors.x.hex,
-      axisLength,
-      shaftRadius,
-    );
-    const yAxis = createRosAxisArrow(
-      new THREE.Vector3(0, 1, 0),
-      rosAxisColors.y.hex,
-      axisLength,
-      shaftRadius,
-    );
-    const zAxis = createRosAxisArrow(
-      new THREE.Vector3(0, 0, 1),
-      rosAxisColors.z.hex,
-      axisLength,
-      shaftRadius,
-    );
-    const originJoint = new THREE.Mesh(
-      new THREE.SphereGeometry(shaftRadius * 1.55, 14, 10),
-      new THREE.MeshBasicMaterial({
-        color: 0xe9edf0,
-        depthTest: false,
-        depthWrite: false,
-        fog: false,
-      }),
-    );
-    originJoint.renderOrder = 19;
-
-    const labelSize = axisLength * 0.16;
-    const xLabel = createRosAxisLabel('X', rosAxisColors.x.css, labelSize);
-    xLabel.position.set(axisLength * 1.09, 0, 0);
-    const yLabel = createRosAxisLabel('Y', rosAxisColors.y.css, labelSize);
-    yLabel.position.set(0, axisLength * 1.09, 0);
-    const zLabel = createRosAxisLabel('Z', rosAxisColors.z.css, labelSize);
-    zLabel.position.set(0, 0, axisLength * 1.09);
-    originGroup.add(xAxis, yAxis, zAxis, originJoint, xLabel, yLabel, zLabel);
     scene.add(originGroup);
     renderer.domElement.dataset.coordinateOrigin = '0,0,0';
     renderer.domElement.dataset.coordinateOriginStyle = 'ros-rviz';
@@ -3841,6 +3830,7 @@ export default function PointCloudViewer({
       apply: applyCameraView,
       capture: captureCameraView,
       reset: resetCameraView,
+      refreshClipping: syncDetailView,
     };
     const restoredCameraView = normalizeCameraView(initialViewRef.current);
     if (restoredCameraView) {
@@ -5229,6 +5219,22 @@ export default function PointCloudViewer({
         ).toFixed(2);
       }
 
+      const mapOrigin = mapOriginGroupRef.current;
+      if (mapOrigin) {
+        originCameraPosition.copy(mapOrigin.position).applyMatrix4(camera.matrixWorldInverse);
+        const depth = -originCameraPosition.z;
+        if (depth > 1e-9) {
+          const naturalPixels = mapOrigin.userData.baseAxisLength * camera.zoom * focalPixels / depth;
+          const scale = THREE.MathUtils.clamp(
+            ROS_AXIS_SCREEN_LENGTH / Math.max(naturalPixels, 1e-30), 1e-30, 1e30,
+          );
+          if (mapOrigin.scale.x !== scale) {
+            mapOrigin.scale.setScalar(scale);
+            syncDetailView();
+          }
+        }
+      }
+
       if (waypointGroup.visible && waypointGroup.children.length) {
         let smallestDiameter = Number.POSITIVE_INFINITY;
         let largestDiameter = 0;
@@ -5274,6 +5280,21 @@ export default function PointCloudViewer({
       // with zoom. This overlay never participates in route/robot picking.
       const labelWidth = renderer.domElement.clientWidth;
       const labelHeight = renderer.domElement.clientHeight;
+      const mapOriginLabel = mapOriginLabelRef.current;
+      if (mapOrigin && mapOriginLabel) {
+        waypointNamePosition.copy(mapOrigin.position).project(camera);
+        const visible = originCameraPosition.z < 0
+          && Math.abs(waypointNamePosition.x) <= 1
+          && Math.abs(waypointNamePosition.y) <= 1
+          && Math.abs(waypointNamePosition.z) <= 1;
+        mapOriginLabel.style.visibility = visible ? 'visible' : 'hidden';
+        renderer.domElement.dataset.mapOriginScreenVisible = String(visible);
+        if (visible) {
+          const x = (waypointNamePosition.x + 1) * labelWidth / 2;
+          const y = (1 - waypointNamePosition.y) * labelHeight / 2;
+          mapOriginLabel.style.transform = `translate(${x}px, ${y}px) translate(-50%, 18px)`;
+        }
+      }
       waypointNameElementsRef.current.forEach(({ element, pose }) => {
         waypointNamePosition.set(pose.x, pose.y, pose.z);
         waypointCameraPosition.copy(waypointNamePosition).applyMatrix4(camera.matrixWorldInverse);
@@ -5404,6 +5425,31 @@ export default function PointCloudViewer({
       if (meshMaterialRef.current === meshMaterial) meshMaterialRef.current = null;
     };
   }, [mapData?.geometry, mapData?.teachingSpaceMode, viewportCanvasRef]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const canvas = controlsRef.current?.domElement;
+    if (!scene || !canvas || teachingSpaceMode !== 'independent' || !mapOriginPose) return undefined;
+    const radius = Math.max(mapData.geometry.boundingSphere.radius, 1);
+    const group = createCoordinateOrigin(THREE.MathUtils.clamp(radius * 0.14, 1, 8));
+    group.name = 'absolute-map-origin';
+    group.position.set(mapOriginPose.position.x, mapOriginPose.position.y, mapOriginPose.position.z);
+    group.rotation.set(...['roll', 'pitch', 'yaw'].map((axis) => THREE.MathUtils.degToRad(mapOriginPose.rpy[axis])), 'ZYX');
+    scene.add(group);
+    mapOriginGroupRef.current = group;
+    canvas.dataset.mapOriginPosition = JSON.stringify(group.position.toArray());
+    canvas.dataset.mapOriginQuaternion = JSON.stringify(group.quaternion.toArray());
+    viewActionsRef.current?.refreshClipping?.();
+    return () => {
+      scene.remove(group);
+      disposeObject(group);
+      if (mapOriginGroupRef.current === group) mapOriginGroupRef.current = null;
+      delete canvas.dataset.mapOriginPosition;
+      delete canvas.dataset.mapOriginQuaternion;
+      delete canvas.dataset.mapOriginScreenVisible;
+      viewActionsRef.current?.refreshClipping?.();
+    };
+  }, [mapData?.geometry, teachingSpaceMode, mapOriginPose, viewportCanvasRef]);
 
   useEffect(() => {
     if (!sceneRef.current) return undefined;
@@ -7277,6 +7323,33 @@ export default function PointCloudViewer({
     controls.update();
   };
 
+  const focusMapOrigin = () => {
+    const controls = controlsRef.current;
+    const camera = cameraRef.current;
+    const mapOrigin = mapOriginGroupRef.current;
+    if (!controls || !camera || !mapOrigin || !mapData?.geometry?.boundingBox) return;
+    if (focusAnimationRef.current) {
+      cancelAnimationFrame(focusAnimationRef.current);
+      focusAnimationRef.current = null;
+    }
+    // Frame both coordinate origins and the independent model without moving
+    // any source geometry or changing the default/reset view.
+    const sphere = mapData.geometry.boundingBox.clone()
+      .expandByPoint(new THREE.Vector3()).expandByPoint(mapOrigin.position)
+      .getBoundingSphere(new THREE.Sphere());
+    const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+    const limitingHalfFov = Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect));
+    const distance = Math.max(sphere.radius, 1) / Math.sin(limitingHalfFov) * 1.3;
+    const direction = camera.position.clone().sub(controls.target);
+    if (direction.lengthSq() < 1e-12) direction.set(-0.55, -0.8, 0.42);
+    precisionPanRef.current?.clear?.();
+    camera.zoom = 1;
+    camera.updateProjectionMatrix();
+    controls.target.copy(sphere.center);
+    camera.position.copy(sphere.center).addScaledVector(direction.normalize(), distance);
+    controls.update();
+  };
+
   const focusRobot = () => {
     const controls = controlsRef.current;
     const camera = cameraRef.current;
@@ -7419,6 +7492,11 @@ export default function PointCloudViewer({
       )}
       {mapData?.geometry && (
         <>
+          {teachingSpaceMode === 'independent' && mapOriginPose && (
+            <div className="coordinate-reference-layer" role="group" aria-label="地图坐标原点参考">
+              <span ref={mapOriginLabelRef} className="map-origin-label">地图原点 · (0, 0, 0)</span>
+            </div>
+          )}
           {showWaypointNames && (
             <div className="waypoint-name-layer" role="group" aria-label="3D停车点名称">
               {waypoints.map((point) => (
@@ -7625,7 +7703,7 @@ export default function PointCloudViewer({
                   onClick={() => setShowDistanceWarnings((current) => !current)}
                 >
                   {showDistanceWarnings ? <Eye size={12} /> : <EyeOff size={12} />}
-                  {showDistanceWarnings ? '显示' : '隐藏'}
+                  <span>{showDistanceWarnings ? '显示' : '隐藏'}</span>
                 </button>
               </div>
               <RobotCollisionJointSettings
@@ -7665,6 +7743,11 @@ export default function PointCloudViewer({
                 <button type="button" onClick={focusOrigin} title="将三维视图中心定位到坐标原点">
                   <Crosshair size={13} /> 原点
                 </button>
+                {teachingSpaceMode === 'independent' && mapOriginPose && (
+                  <button type="button" onClick={focusMapOrigin} title="查看地图原点与独立模型的相对位置">
+                    <Crosshair size={13} /> 地图原点
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={resetView}
@@ -7797,7 +7880,6 @@ export default function PointCloudViewer({
                 >
                   <i aria-hidden="true" />
                   <span>{colorModeMeta.label}</span>
-                  <RotateCcw size={11} />
                 </button>
               </div>
               <div className="viewer-display-settings__waypoint-names">
@@ -7811,7 +7893,7 @@ export default function PointCloudViewer({
                   onClick={() => onShowWaypointNamesChange?.(!showWaypointNames)}
                 >
                   {showWaypointNames ? <Eye size={12} /> : <EyeOff size={12} />}
-                  {showWaypointNames ? '显示' : '隐藏'}
+                  <span>{showWaypointNames ? '显示' : '隐藏'}</span>
                 </button>
               </div>
               {showVisionCoverageControls && <>
@@ -7828,7 +7910,7 @@ export default function PointCloudViewer({
                     onClick={() => setVisionCoverageRenderingEnabled((current) => !current)}
                   >
                     {visionCoverageRenderingEnabled ? <Eye size={12} /> : <EyeOff size={12} />}
-                    {visionCoverageRenderingEnabled ? '显示' : '隐藏'}
+                    <span>{visionCoverageRenderingEnabled ? '显示' : '隐藏'}</span>
                   </button>
                 </div>
                 <label className="viewer-display-settings__opacity">

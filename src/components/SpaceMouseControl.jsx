@@ -1793,7 +1793,11 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
 
             {calibration.stage === 'complete' && (
               <div className="spacemouse-calibration__result">
-                <Check size={30} />
+                <svg className="spacemouse-calibration__success-check" width="30" height="30"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m20 6-11 11-5-5" pathLength="1" />
+                </svg>
                 <small>PROFILE READY</small>
                 <h2>你的 SpaceMouse 已就绪</h2>
                 <div><span>XYZ</span><i /><span>RPY</span></div>

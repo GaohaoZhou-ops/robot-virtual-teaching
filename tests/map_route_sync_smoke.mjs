@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { buildExport, normalizeProject } from '../src/lib/io.js';
 import { mapRouteSyncStatus, syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
 import { TEMPORARY_MAP_ROUTE_SOURCE, withoutTemporaryMapNavigation } from '../src/lib/teachingNavigation.js';
-import { extractTeachingWorkspace, placeTeachingWorkspace, transferMatrix } from '../src/lib/teachingTransfer.js';
+import { extractTeachingWorkspace, identityTransferPose, placeTeachingWorkspace, transferMatrix } from '../src/lib/teachingTransfer.js';
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
 
 const local = teachingTransferFixture('independent');
@@ -15,6 +15,14 @@ const original = normalizeProject(placed.config.config.project);
 assert.equal(synced.waypoints.length, original.waypoints.length);
 assert.equal(synced.edges.length, original.edges.length);
 assert.equal(mapRouteSyncStatus(local.map, null, placed.config).available, true);
+
+// The displayed map origin is a full coordinate frame. Transforming it back
+// to the absolute map must produce the identity, including roll/pitch/yaw.
+const restoredOrigin = transferMatrix(localToMap).multiply(transferMatrix(synced.mapOrigin)).elements;
+assert.ok(transferMatrix(identityTransferPose()).elements.every((value, index) =>
+  Math.abs(value - restoredOrigin[index]) < 1e-10));
+assert.notDeepEqual(synced.mapOrigin.position, { x: -12, y: 7, z: -3 },
+  'a rotated frame cannot use just the negated translation');
 
 const pointMatrix = (point) => transferMatrix({ position: point.pose,
   rpy: { roll: point.pose.roll, pitch: point.pose.pitch, yaw: point.pose.yaw } });
@@ -40,8 +48,10 @@ assert.deepEqual(placed.config, before, 'synchronization must never mutate the a
 synced.waypoints[0].pose.x = 999;
 synced.edges[0].limits.maxSpeed = 99;
 synced.edges[0].motion.direction = 'reverse';
+synced.mapOrigin.position.x = 999;
 assert.deepEqual(placed.config, before);
 const repeated = syncMapRouteToIndependent(local.map, null, placed.config);
+assert.notEqual(repeated.mapOrigin.position.x, 999);
 assert.notEqual(repeated.waypoints[0].pose.x, 999);
 assert.equal(repeated.edges[0].limits.maxSpeed, original.edges[0].limits.maxSpeed);
 for (const [index, point] of repeated.waypoints.entries()) {
@@ -73,6 +83,17 @@ const extraction = extracted.config.config.project.workspace.transfer;
 const extractedSync = syncMapRouteToIndependent(extracted.map, extraction, map.config);
 assert.equal(extractedSync.waypoints.length, map.config.config.project.waypoints.length,
   'sync includes the full map route beyond the crop');
+assert.deepEqual(extractedSync.mapOrigin, repeated.mapOrigin);
+
+for (const pose of [identityTransferPose(), {
+  position: { x: 10000, y: -20000, z: 50 }, rpy: { roll: 0, pitch: 0, yaw: 0 },
+}]) {
+  const config = structuredClone(placed.config);
+  config.config.project.workspace.transfer.localToMap = pose;
+  const origin = syncMapRouteToIndependent(local.map, null, config).mapOrigin;
+  for (const axis of ['x', 'y', 'z']) assert.ok(Math.abs(origin.position[axis] + pose.position[axis]) < 1e-10);
+  for (const axis of ['roll', 'pitch', 'yaw']) assert.ok(Math.abs(origin.rpy[axis]) < 1e-10);
+}
 assert.equal(mapRouteSyncStatus(local.map, null, map.config).available, false, 'unrelated cached projects are not sufficient');
 assert.equal(mapRouteSyncStatus({ ...local.map, sourceHash: 'different' }, null, placed.config).available, false);
 assert.equal(mapRouteSyncStatus(local.map, null, null).available, false);
@@ -97,4 +118,4 @@ const linkedSync = syncMapRouteToIndependent(local.map, null, linked);
 assert.equal(linkedSync.waypoints[0].abx, undefined);
 assert.equal(linkedSync.waypoints[0].teachingTaskId, undefined);
 assert.equal(linkedSync.edges[0].abx, undefined);
-console.log('map route sync: inverse XYZ/RPY, graph, repeat sync, isolation, transient exports and both relations passed');
+console.log('map route sync: inverse XYZ/RPY, map origin frame, graph, repeat sync, isolation, transient exports and both relations passed');

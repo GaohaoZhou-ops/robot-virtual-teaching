@@ -43,11 +43,14 @@ export default function ProjectLoadDialog({
   directory,
   workspace,
   recovery,
+  independentHistory,
+  historyDisabled = false,
   busy = false,
   onClose,
   onLoadDefaultDirectory,
   onLoadWorkspace,
   onLoadRecovery,
+  onLoadHistory,
   onChooseDirectory,
   onChooseGuideFile,
 }) {
@@ -213,9 +216,37 @@ export default function ProjectLoadDialog({
             )}
           </section>
 
-          <section className="project-load-alternatives" aria-labelledby="project-load-alternatives-title">
+          {isIndependent && <section className="project-load-history" aria-labelledby="project-load-history-title">
             <header>
               <span>02</span>
+              <div>
+                <small>LOCAL TEACHING HISTORY</small>
+                <strong id="project-load-history-title">独立示教历史</strong>
+              </div>
+            </header>
+            <p>恢复后可继续编辑。当前独立工程会先存入历史，地图中已转换的结果继续保留。</p>
+            {independentHistory?.status === 'loading' ? <p role="status">正在读取历史缓存…</p>
+              : independentHistory?.status === 'error' ? <p role="alert">{independentHistory.error || '无法读取历史缓存'}</p>
+                : independentHistory?.entries?.length ? <ul>
+                  {independentHistory.entries.map((entry) => <li key={entry.historyId}>
+                    <History size={18} />
+                    <div>
+                      <strong title={entry.mapName}>{entry.mapName}</strong>
+                      <span>{entry.activeTaskName || '未命名示教'} · {formatTimestamp(entry.archivedAt)}</span>
+                      <span>{entry.taskCount} 个任务 · {entry.parkingPointCount} 个停车点 · {entry.teachingPoseCount} 组姿态</span>
+                    </div>
+                    <button type="button" disabled={busy || historyDisabled}
+                      aria-label={`恢复独立示教 ${entry.mapName}`}
+                      onClick={() => onLoadHistory?.(entry.historyId)}>
+                      继续示教 <ArrowRight size={14} />
+                    </button>
+                  </li>)}
+                </ul> : <p>暂无历史工程。使用“示教 → 新增独立示教”后，上一组完整工程会保存在这里。</p>}
+          </section>}
+
+          <section className="project-load-alternatives" aria-labelledby="project-load-alternatives-title">
+            <header>
+              <span>{isIndependent ? '03' : '02'}</span>
               <div>
                 <small>OTHER SOURCES</small>
                 <strong id="project-load-alternatives-title">其他加载方式</strong>

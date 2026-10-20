@@ -94,11 +94,21 @@ def run():
                 raised = read_robot_pose(canvas)
                 heights[mode] = raised["z"]
                 page.get_by_role("tab", name="路径与导航", exact=True).click()
+                arrived = page.locator('.waypoint-chips button[aria-current="location"]')
+                expect(arrived).to_have_count(0)
 
                 for index in range(3):
                     if index == 2:
                         viewer_tool(page, name="锁定机器人高度").click()
                         expect(canvas).to_have_attribute("data-robot-height-locked", "true")
+                    page.get_by_label("搜索导航点", exact=True).select_option(f"wp-{index}")
+                    # Browsing another point does not claim the robot arrived there.
+                    page.get_by_role("button", name="返回路径与导航", exact=True).click()
+                    if index:
+                        expect(arrived).to_have_count(1)
+                        expect(arrived).to_have_attribute("data-waypoint-id", f"wp-{index - 1}")
+                    else:
+                        expect(arrived).to_have_count(0)
                     page.get_by_label("搜索导航点", exact=True).select_option(f"wp-{index}")
                     page.get_by_role("button", name="运动到该点", exact=True).click()
                     wait_for_pose(page, {
@@ -109,6 +119,13 @@ def run():
                     # Route Z is intentionally different from the retained base Z.
                     fields = page.locator('.property-editor input[type="number"]')
                     assert float(fields.nth(2).input_value()) == [-4, 0, 3][index]
+                    page.get_by_role("button", name="返回路径与导航", exact=True).click()
+                    expect(arrived).to_have_count(1)
+                    expect(arrived).to_have_attribute("data-waypoint-id", f"wp-{index}")
+                    expect(arrived).to_have_css("color", "rgb(244, 201, 93)")
+                page.get_by_role("button", name="折叠导航点", exact=True).click()
+                page.get_by_role("button", name="展开导航点", exact=True).click()
+                expect(arrived).to_be_visible()
                 page.screenshot(path=f"/tmp/atlas-robot-height-{mode}.png", full_page=True)
                 # Camera focus animation also queues saves. Wait for the
                 # debounced workspace write before exercising a hard reload.
@@ -123,12 +140,27 @@ def run():
                 page.reload(wait_until="networkidle")
                 ready(page, mode)
                 wait_for_pose(page, {"z": heights[mode]})
+                page.get_by_role("tab", name="路径与导航", exact=True).click()
+                expect(arrived).to_have_count(1)
+                expect(arrived).to_have_attribute("data-waypoint-id", "wp-2")
                 assert float(canvas.get_attribute("data-robot-ground-lift")) == 0
                 assert float(canvas.get_attribute("data-robot-loaded-bottom-z")) > 0
 
             topbar_action(page, name="切换到地图示教", exact=True).click()
             ready(page, "map")
             wait_for_pose(page, {"z": heights["map"]})
+            page.get_by_role("tab", name="路径与导航", exact=True).click()
+            expect(arrived).to_have_attribute("data-waypoint-id", "wp-2")
+            # Actual base movement invalidates the marker without editing the route.
+            viewer_tool(page, name="定位机器人模型").click()
+            canvas.focus()
+            page.keyboard.press("w")
+            page.wait_for_function("""() => {
+              const canvas = document.querySelector('.three-canvas');
+              return Math.hypot(Number(canvas.dataset.robotX) - 30, Number(canvas.dataset.robotY) - 20) > 0.01;
+            }""")
+            viewer_tool(page, name="定位机器人模型").click()
+            expect(arrived).to_have_count(0)
             assert float(canvas.get_attribute("data-robot-ground-lift")) == 0
             for mode, original in originals.items():
                 final = snapshot(page, mode)
@@ -140,6 +172,7 @@ def run():
         finally:
             browser.close()
     print("PASS: both workspaces ground loaded robots and retain adjusted Z through navigation/reload/switch")
+    print("PASS: arrival highlighting tracks movement, survives reload/switch, and clears on base movement")
 
 
 if __name__ == "__main__":

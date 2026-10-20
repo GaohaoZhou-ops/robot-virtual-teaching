@@ -47,9 +47,13 @@ export function prepareLinkedProjectImport(workspaces) {
     const opposite = workspaces[mode === 'map' ? 'independent' : 'map'];
     const project = structuredClone(original.config.config.project);
     const transfer = project.workspace.transfer;
-    if (transfer?.sourceMap && (transfer.sourceMap.mapId === opposite.map.mapId
-      || (transfer.sourceMap.sourceHash && transfer.sourceMap.sourceHash === opposite.map.sourceHash))) {
-      transfer.sourceMap.mapId = ids[opposite.mode];
+    for (const relation of [transfer, ...(Array.isArray(transfer?.previousPlacements) ? transfer.previousPlacements : [])]) {
+      const source = relation?.sourceMap;
+      const matches = source?.teachingGroupId || opposite.map.teachingGroupId
+        ? source?.teachingGroupId === opposite.map.teachingGroupId
+        : source?.mapId === opposite.map.mapId
+          || (source?.sourceHash && source.sourceHash === opposite.map.sourceHash);
+      if (source && matches) source.mapId = ids[opposite.mode];
     }
     // A portable import must never reconnect to a previously remembered folder.
     project.workspace.directoryAutosaveSuspended = true;
