@@ -54,6 +54,8 @@ export default function TeachingDataPage({
   onMergeParkingPoints,
   onExportProject,
   onExportTeachingData,
+  onImportTeachingData,
+  teachingImportDisabled,
   canExportTeachingData = false,
   onSolveMobileTask,
   onSaveMobileTask,
@@ -246,6 +248,8 @@ export default function TeachingDataPage({
                 onAnalyzeParkingPointMerge={onAnalyzeParkingPointMerge}
                 onMergeParkingPoints={onMergeParkingPoints}
                 onExportTeachingData={onExportTeachingData}
+                onImportTeachingData={onImportTeachingData}
+                teachingImportDisabled={teachingImportDisabled}
                 canExportTeachingData={canExportTeachingData}
                 onOpenCapturePage={onBack}
                 onSelectionChange={handleArchiveSelection}
@@ -256,7 +260,7 @@ export default function TeachingDataPage({
               onSolve={onSolveMobileTask} onSave={onSaveMobileTask} saveDisabledReason={mobileSaveDisabledReason} /> : <TeachingPoseRobotPreview
               task={archiveSelection?.task || activeTask}
               parkingPoint={archiveSelection?.parkingPoint || null}
-              pose={archiveSelection?.pose || null}
+              pose={archiveSelection?.pose?.abx?.located === false ? null : archiveSelection?.pose || null}
               robot={previewRobot}
               teachingSpaceMode={teachingSpaceMode}
             />}

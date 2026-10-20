@@ -447,12 +447,16 @@ playwright/.auth/
 /tests/atlas-solve-readiness-*.zip
 
 # ABX contract-test source copies, temporary imports and UI captures
+/atlas-abx-exchange-*/
 /atlas-abx-export-*/
 /atlas-abx-reference-*/
 /atlas-abx-ui-*/
+/tests/atlas-abx-exchange-*/
 /tests/atlas-abx-export-*/
 /tests/atlas-abx-reference-*/
 /tests/atlas-abx-ui-*/
+/atlas-abx-exchange-*.[zZ][iI][pP]
+/tests/atlas-abx-exchange-*.[zZ][iI][pP]
 /robot-export-*.png
 /tests/robot-export-*.png
 
@@ -597,7 +601,9 @@ mobile-solve-*.json
 /atlas-project-*/
 /tests/atlas-project-*/
 
-# Exported teaching archives and parking-merge jobs/results
+# Exported robot routes, teaching archives and parking-merge jobs/results
+# Robot route filenames use arbitrary IDs; fixture JSON exceptions follow below.
+*.route.json
 virtual-teaching-*.zip
 virtual-teaching-*.json
 robot-teaching-*.zip

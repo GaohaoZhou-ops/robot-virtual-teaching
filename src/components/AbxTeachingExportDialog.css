@@ -29,4 +29,7 @@
 .abx-export-dialog footer > span { flex: 1; color: var(--muted); font-size: 10px; }
 .abx-export-dialog footer > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .abx-export-dialog .abx-export-primary { background: #14363e; border-color: #59dbe854; color: #a5f0f6; }
+.abx-native-notice { padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.abx-native-notice p { margin: 4px 0; }
+.abx-native-notice ol { max-height: 220px; overflow: auto; padding-left: 24px; }
 @media (max-width: 580px) { .abx-export-modal { padding: 10px; }.abx-export-counts { grid-template-columns: repeat(2, 1fr); }.abx-export-dialog header small { font-size: 8px; letter-spacing: 0; }.abx-export-dialog > header, .abx-export-body, .abx-export-dialog footer { padding-left: 16px; padding-right: 16px; } }
