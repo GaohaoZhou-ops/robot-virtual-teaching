@@ -117,6 +117,8 @@ export default function TeachingArchiveTree({
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
   onExportTeachingData,
+  onImportTeachingData,
+  teachingImportDisabled = false,
   canExportTeachingData = false,
   onOpenCapturePage,
   onSelectionChange,
@@ -204,12 +206,18 @@ export default function TeachingArchiveTree({
   });
 
   useEffect(() => {
+    const imported = tasks.find((task) => task.id === activeTaskId && task.abx && !knownTaskIdsRef.current.has(task.id));
+    if (imported) {
+      setSelection({ type: 'task', taskId: imported.id });
+      onSelectionChange?.({ type: 'task', task: imported, parkingPoint: null, pose: null });
+      return;
+    }
     setSelection((current) => (
       selectionExists(tasks, current)
         ? current
         : getDefaultSelection(tasks, activeTaskId, activeParkingPointId)
     ));
-  }, [activeParkingPointId, activeTaskId, tasks]);
+  }, [activeParkingPointId, activeTaskId, tasks, onSelectionChange]);
 
   useEffect(() => {
     const nextTaskIds = new Set(tasks.map((task) => task.id));
@@ -636,6 +644,8 @@ export default function TeachingArchiveTree({
           </div>
           <span>{tasks.length} 任务 · {totalParkingPoints} 停车点 · {totalPoses} 姿态</span>
           <button type="button" onClick={onOpenCapturePage}>继续示教</button>
+          {onImportTeachingData && <button type="button" onClick={onImportTeachingData}
+            disabled={teachingImportDisabled} aria-label="导入机器人示教">导入机器人示教</button>}
           <button
             type="button"
             aria-label="导出示教数据"
@@ -684,6 +694,18 @@ export default function TeachingArchiveTree({
                 </header>
 
                 <div className={`teaching-tree-detail__body is-${selection?.type || 'empty'}`}>
+                  {selectedTask?.abx && <div className="abx-native-notice" role="note">
+                    <p>机器人原生任务 · {selectedTask.abx.header.point_count} 步骤。
+                      导航、拍照、等待、并行和轨迹记录按原顺序保存并导出；虚拟回放仅显示独立关节 Pose。
+                      可修改名称和关节，步骤结构请在机器人端调整后重新导入。</p>
+                    {(selectedParkingPoint?.abx?.located === false || selectedPoint?.abx?.located === false)
+                      && <p>此记录缺少 map 定位，坐标不可用于导航或底盘恢复。</p>}
+                    {selection?.type === 'task' && <details><summary>查看原生步骤顺序</summary>
+                      <ol>{selectedTask.abx.lines.map((line) => JSON.parse(line)).filter((line) => line.type === 'point').map((point) => (
+                        <li key={point.seq}>{point.label || `步骤 ${point.seq}`} · {point.record.type || '关节 Pose'}</li>
+                      ))}</ol>
+                    </details>}
+                  </div>}
                   <label className="teaching-tree-name-field">
                     <span>{selection?.type === 'task' ? '任务名称' : selection?.type === 'parking' ? '停车点名称' : '姿态名称'}</span>
                     <input
@@ -730,7 +752,7 @@ export default function TeachingArchiveTree({
                           className="teaching-tree-merge-action"
                           aria-label="分析并合并当前任务的近邻停车点"
                           disabled={
-                            selectedTask.parkingPoints?.length < 2
+                            Boolean(selectedTask.abx) || selectedTask.parkingPoints?.length < 2
                             || !contextMatches
                             || !mergePlannerAvailable
                           }
@@ -750,7 +772,7 @@ export default function TeachingArchiveTree({
                           className="teaching-tree-server-merge-action"
                           aria-label="打开合并停车点 Server 导入导出"
                           disabled={
-                            selectedTask.parkingPoints?.length < 2
+                            Boolean(selectedTask.abx) || selectedTask.parkingPoints?.length < 2
                             || !contextMatches
                             || !serverMergeAvailable
                           }
@@ -795,7 +817,7 @@ export default function TeachingArchiveTree({
                           ['PITCH', selectedParkingPoint.mapPose.rpy.pitch, '°'],
                           ['YAW', selectedParkingPoint.mapPose.rpy.yaw, '°'],
                         ].map(([label, value, unit]) => (
-                          <div key={label}><span>{label}</span><strong>{formatValue(value)}</strong><small>{unit}</small></div>
+                          <div key={label}><span>{label}</span><strong>{selectedParkingPoint.abx?.located === false ? '—' : formatValue(value)}</strong><small>{unit}</small></div>
                         ))}
                       </div>
                       <div className="teaching-tree-parking-toolbar">
@@ -812,6 +834,7 @@ export default function TeachingArchiveTree({
                             type="button"
                             className="teaching-tree-danger"
                             aria-label="删除当前停车点"
+                            disabled={Boolean(selectedTask.abx)}
                             onClick={() => {
                               if (window.confirm(`删除 ${selectedParkingPoint.name} 及其 ${selectedParkingPoint.poses?.length || 0} 组机械臂姿态？`)) {
                                 onDeleteParkingPoint(selectedTask.id, selectedParkingPoint.id);
@@ -822,12 +845,12 @@ export default function TeachingArchiveTree({
                           </button>
                         </div>
                       </div>
-                      <TeachingParkingMap
+                      {selectedParkingPoint.abx?.located !== false && <TeachingParkingMap
                         mapData={mapData}
                         heightRange={heightRange}
                         colorMode={colorMode}
                         parkingPoint={selectedParkingPoint}
-                      />
+                      />}
                     </div>
                   )}
 
@@ -855,7 +878,7 @@ export default function TeachingArchiveTree({
                           ['PITCH', selectedPoint.mapPose.rpy.pitch, '°'],
                           ['YAW', selectedPoint.mapPose.rpy.yaw, '°'],
                         ].map(([label, value, unit]) => (
-                          <div key={label}><span>{label}</span><strong>{formatValue(value)}</strong><small>{unit}</small></div>
+                          <div key={label}><span>{label}</span><strong>{selectedPoint.abx?.located === false ? '—' : formatValue(value)}</strong><small>{unit}</small></div>
                         ))}
                       </div>
 
@@ -952,6 +975,7 @@ export default function TeachingArchiveTree({
                           type="button"
                           className="teaching-tree-danger"
                           aria-label="删除当前机械臂姿态"
+                          disabled={Boolean(selectedTask.abx)}
                           onClick={() => {
                             if (window.confirm(`删除机械臂姿态 ${selectedPoint.name}？`)) {
                               onDeletePoint(

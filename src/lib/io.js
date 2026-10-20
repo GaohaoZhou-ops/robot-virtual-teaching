@@ -377,6 +377,7 @@ const normalizeTeachingPoint = (point, pointIndex) => {
     point?.fullBodyJoints || point?.joints || point?.jointValues,
   );
   return {
+    ...(point?.abx ? { abx: structuredClone(point.abx) } : {}),
     id: String(point?.id || createId('teach-pose')),
     name: String(
       point?.name
@@ -411,6 +412,7 @@ const normalizeTeachingParkingPoint = (parkingPoint, parkingIndex) => {
         : [];
   const poses = rawPoses.map(normalizeTeachingPoint);
   return {
+    ...(parkingPoint?.abx ? { abx: structuredClone(parkingPoint.abx) } : {}),
     id: String(parkingPoint?.id || createId('parking-point')),
     name: String(
       parkingPoint?.name
@@ -483,6 +485,7 @@ export function normalizeTeachingTasks(payload) {
         coordinateFrame: String(map.coordinateFrame || task?.coordinateFrame || 'map'),
       },
       parkingPoints,
+      ...(task.abx ? { abx: structuredClone(task.abx) } : {}),
       ...(task.mobileSolveSource && typeof task.mobileSolveSource === 'object' ? { mobileSolveSource: structuredClone(task.mobileSolveSource) } : {}),
       ...(task.mobileCapture ? {
         mobileCapture: validateIPadResult(task.mobileCapture, { modelHash: task.mobileCapture.modelHash }, task.mobileCapture.sessionId),
@@ -523,6 +526,7 @@ export function normalizeJointPoses(payload) {
         relativePath: String(robot.relativePath || robot.path || ''),
       },
       joints,
+      ...(pose?.abx ? { abx: structuredClone(pose.abx) } : {}),
     };
   });
 }
@@ -533,6 +537,10 @@ export function normalizeProject(payload) {
   }
   if (payload.format === TEACHING_DATA_FORMAT) {
     throw new Error('这是轻量示教数据文件，不能作为完整工程加载；请使用工程 ZIP 或工程目录');
+  }
+  if (payload.schema_version === 1 && Array.isArray(payload.nodes)
+    || payload.type === 'abx-teaching-task' || payload.schema === 'abx-teaching-export') {
+    throw new Error('这是机器人交换文件，请使用「导入机器人示教」或「导入机器人路径」');
   }
 
   const rawPoints =
@@ -553,6 +561,7 @@ export function normalizeProject(payload) {
         yaw: numberOr(pose.yaw, numberOr(rpy[2])),
       },
       source: point.source || 'imported',
+      ...(point.abx ? { abx: structuredClone(point.abx) } : {}),
     };
   });
 
@@ -569,6 +578,7 @@ export function normalizeProject(payload) {
         from: String(edge.from ?? edge.source ?? edge.start ?? ''),
         to: String(edge.to ?? edge.target ?? edge.end ?? ''),
         directed: edge.directed !== false,
+        ...(edge.abx ? { abx: structuredClone(edge.abx) } : {}),
         limits: {
           minSpeed: numberOr(limits.minSpeed ?? limits.min_speed, 0.2),
           maxSpeed: numberOr(limits.maxSpeed ?? limits.max_speed, 1),
@@ -694,6 +704,7 @@ export function normalizeProject(payload) {
   return {
     waypoints,
     edges,
+    abxRoutes: structuredClone(payload.abxRoutes || []),
     slice:
       Number.isFinite(minHeight) && Number.isFinite(maxHeight)
         ? [Math.min(minHeight, maxHeight), Math.max(minHeight, maxHeight)]
@@ -731,6 +742,7 @@ export function buildExport({
   heightRange,
   waypoints,
   edges,
+  abxRoutes = [],
   view2d,
   view3d,
   robot,
@@ -757,6 +769,7 @@ export function buildExport({
   const coordinateFrame = teachingCoordinateFrame(normalizedTeachingSpaceMode);
   return {
     schemaVersion: '1.3',
+    ...(abxRoutes.length ? { abxRoutes: structuredClone(abxRoutes) } : {}),
     exportedAt: new Date().toISOString(),
     coordinateSystem: {
       frameId: coordinateFrame,
@@ -907,6 +920,7 @@ export function buildExport({
       xzy: [point.pose.x, point.pose.z, point.pose.y],
       rpy: [point.pose.roll, point.pose.pitch, point.pose.yaw],
       source: point.source || 'point-cloud-slice',
+      ...(point.abx ? { abx: structuredClone(point.abx) } : {}),
     })),
     paths: edges.map((edge) => {
       const distance = calculatePathDistances(
@@ -918,6 +932,7 @@ export function buildExport({
         from: edge.from,
         to: edge.to,
         directed: true,
+        ...(edge.abx ? { abx: structuredClone(edge.abx) } : {}),
         limits: { ...edge.limits },
         motion: {
           direction: edge.motion?.direction === 'reverse' ? 'reverse' : 'forward',
@@ -936,8 +951,8 @@ export function buildExport({
   };
 }
 
-export function downloadJson(payload, filename) {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+export function downloadJson(payload, filename, { compact = false } = {}) {
+  const blob = new Blob([JSON.stringify(payload, null, compact ? undefined : 2)], {
     type: 'application/json',
   });
   const url = URL.createObjectURL(blob);

@@ -23,7 +23,10 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
     const controller = new AbortController();
     (async () => {
       try {
-        const robotPackage = await readAbxRobotPackage(snapshot.robot, snapshot.robotPackage, { signal: controller.signal });
+        const needsRobot = snapshot.payload.virtualTeaching?.tasks?.some((task) => !task.abx
+          && task.parkingPoints?.some((parking) => parking.poses?.length));
+        const robotPackage = needsRobot
+          ? await readAbxRobotPackage(snapshot.robot, snapshot.robotPackage, { signal: controller.signal }) : null;
         const archive = await buildAbxTeachingArchive(snapshot.payload, { robotPackage });
         const navigation = JSON.parse(new TextDecoder().decode(archive.files['navigation.json']));
         if (!controller.signal.aborted) setResult({ ...archive, navigation });
@@ -42,7 +45,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
   };
   const targets = result ? [
     ...result.navigation.tasks.flatMap((task) => task.sequence.filter((step) => step.type === 'route_navigation')
-      .map((step) => ({ name: `${task.name} / ${step.nodeId} → Pose ${step.beforePoseSeq}`, target: step.target }))),
+      .map((step) => ({ name: `${task.name} / ${step.nodeId}${step.beforePoseSeq ? ` → Pose ${step.beforePoseSeq}` : ` · 步骤 ${step.seq}`}`, target: step.target }))),
   ] : [];
   const stamp = snapshot.payload.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
   return createPortal(<div className="abx-export-modal" onKeyDown={keyDown}>
@@ -59,9 +62,9 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
         {error && <p className="abx-export-error" role="alert">{error}</p>}
         {result && <>
           <dl className="abx-export-counts"><div><dt>示教任务</dt><dd>{result.summary.taskCount}</dd></div><div><dt>机器人 Pose</dt><dd>{result.summary.poseCount}</dd></div><div><dt>路网节点</dt><dd>{result.summary.nodeCount}</dd></div><div><dt>导航步骤</dt><dd>{result.summary.navigationCount}</dd></div></dl>
-          <p className="abx-export-description">保留任务、停车点和 Pose 顺序，关节转换为弧度。路网包含 {result.summary.edgeCount} 条有向连线，地图坐标使用 X / Y / Yaw。定位场景名称由机器人切换使用路网时绑定。</p>
+          <p className="abx-export-description">保留任务、停车点和 Pose 顺序，关节转换为弧度。路网包含 {result.summary.edgeCount} 条有向连线，地图坐标使用 X / Y / Yaw。新建路网的定位场景由机器人绑定；导入路网保留原绑定。</p>
           {result.summary.warnings.length > 0 && <ul className="abx-export-description" aria-label="路网导出提示">{result.summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-          {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
+          {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target[key] == null ? '—' : point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
         </>}
       </div>
       <footer><span role="status">{downloaded ? '已下载 · 在大脑示教任务页面导入 ZIP' : '导出本地文件'}</span><div>

@@ -51,6 +51,10 @@ import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.js
 import { buildMobileSolvedTask, MOBILE_SOLVE_VERSION, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
 import { mobileSolutionMapPose } from './lib/mobileTeachingParking.js';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
+import AbxRouteExportDialog from './components/AbxRouteExportDialog.jsx';
+import { abxRobotModel, readAbxRobotPackage } from './lib/abxTeachingExport.js';
+import { abxRouteToProject, buildAbxRouteDocuments, readAbxRoute } from './lib/abxRoute.js';
+import { mergeAbxImport, readAbxTeachingFile } from './lib/abxTeachingImport.js';
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceKey, mobileDeviceLabel } from './lib/ipadProtocol.js';
 import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
@@ -450,6 +454,9 @@ export default function App() {
   const mapInputRef = useRef(null);
   const independentCloudInputRef = useRef(null);
   const pathInputRef = useRef(null);
+  const abxTeachingInputRef = useRef(null);
+  const abxRouteInputRef = useRef(null);
+  const abxImportBusyRef = useRef(false);
   const projectDirectoryInputRef = useRef(null);
   const mapDetailsButtonRef = useRef(null);
   const devicesMenuButtonRef = useRef(null);
@@ -476,6 +483,8 @@ export default function App() {
   const projectExportBusyRef = useRef(false);
   const projectSaveTargetRevisionRef = useRef(0);
   const [abxExportSnapshot, setAbxExportSnapshot] = useState(null);
+  const [abxRouteExport, setAbxRouteExport] = useState(null);
+  const [abxImportBusy, setAbxImportBusy] = useState(false);
   const projectDirectoryRef = useRef(null);
   const projectDirectoryWriteChainRef = useRef(Promise.resolve());
   const projectDirectoryFailureNotifiedRef = useRef(false);
@@ -505,6 +514,7 @@ export default function App() {
   const [heightRangeCollapsed, setHeightRangeCollapsed] = useState(true);
   const [storedWaypoints, setWaypoints] = useState([]);
   const [storedEdges, setEdges] = useState([]);
+  const [abxRoutes, setAbxRoutes] = useState([]);
   const [mode, setMode] = useState('select');
   const [connectionSourceId, setConnectionSourceId] = useState(null);
   const [selectedWaypointId, setSelectedWaypointId] = useState(null);
@@ -602,6 +612,27 @@ export default function App() {
   const teachingDevice = activeTeachingTask?.mobileCapture ? mobileDeviceKey(activeTeachingTask.mobileCapture) : 'desktop';
   const teachingSource = teachingDevice === 'desktop' ? 'desktop' : 'mobile';
   const desktopTeachingTasks = useMemo(() => teachingTasks.filter((task) => !task.mobileCapture), [teachingTasks]);
+  const abxRobotBindingKey = teachingTasks.filter((task) => task.abx
+    && task.robot?.id !== selectedRobot?.id).map((task) => task.id).join('|');
+  useEffect(() => {
+    if (!abxRobotBindingKey || selectedRobot?.format !== 'urdf') return undefined;
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const model = abxRobotModel(await readAbxRobotPackage(selectedRobot, portableRobotPackageRef.current, { signal: controller.signal }));
+        if (controller.signal.aborted) return;
+        const matches = (task) => task.abx?.models?.length === 1 && task.abx.models[0] === model
+          && task.robot?.id !== selectedRobot.id;
+        const matchingIds = new Set(latestWorkspaceRef.current.teachingTasks.filter(matches).map((task) => task.id));
+        const descriptor = { id: selectedRobot.id, relativePath: selectedRobot.relativePath, name: selectedRobot.name };
+        setTeachingTasks((current) => current.map((task) => matches(task)
+          ? { ...task, robot: descriptor } : task));
+        setJointPoses((current) => current.map((pose) => matchingIds.has(pose.abx?.taskId)
+          ? { ...pose, robot: descriptor } : pose));
+      } catch { /* A model that cannot be read remains explicitly unbound. */ }
+    })();
+    return () => controller.abort();
+  }, [abxRobotBindingKey, selectedRobot]);
   const mobileTeachingTasks = useMemo(() => teachingTasks.filter((task) => task.mobileCapture), [teachingTasks]);
   const mobileTasksByDevice = useMemo(() => ({
     ipad: mobileTeachingTasks.filter((task) => mobileDeviceKey(task.mobileCapture) === 'ipad'),
@@ -633,6 +664,7 @@ export default function App() {
   ]), [waypoints, edges]);
 
   latestWorkspaceRef.current = {
+    abxRoutes,
     workspaceTransfer,
     directoryAutosaveSuspended,
     mapData,
@@ -889,6 +921,7 @@ export default function App() {
           heightRange: current.heightRange,
           waypoints: current.waypoints,
           edges: current.edges,
+          abxRoutes: current.abxRoutes,
           view2d: view2dRef.current,
           view3d: view3dRef.current,
           robot: current.selectedRobot,
@@ -1090,6 +1123,7 @@ export default function App() {
         setWorkspaceTransfer(null);
         setDirectoryAutosaveSuspended(false);
         setWaypoints([]);
+        setAbxRoutes([]);
         setEdges([]);
         setSelectedWaypointId(null);
         setSelectedEdgeId(null);
@@ -1467,6 +1501,7 @@ export default function App() {
             const savedValidation = snapshot?.ui?.validation;
 
             setWaypoints(project.waypoints);
+            setAbxRoutes(project.abxRoutes);
             setEdges(project.edges);
             setTeachingTasks(project.teachingTasks);
             setJointPoses(project.jointPoses);
@@ -1549,6 +1584,7 @@ export default function App() {
           restoredTeachingSpaceMode = 'map';
           setCachedWorkspaces({ map: null, independent: null });
           setWaypoints([]);
+          setAbxRoutes([]);
           setEdges([]);
           setHeightRange([0, 1]);
           setPointColorMode('height');
@@ -1693,6 +1729,7 @@ export default function App() {
     robotHeightLocked,
     teachingTasks,
     teachingSpaceMode,
+    abxRoutes,
     activeTeachingTaskId,
     activeTeachingParkingPointId,
     jointPoses,
@@ -2090,6 +2127,7 @@ export default function App() {
           ? clampSlice(suggestedSlice(effectiveMap.positions, importedBounds), importedBounds)
           : heightRange;
       setWaypoints(project.waypoints);
+      setAbxRoutes(project.abxRoutes);
       setEdges(project.edges);
       setTeachingTasks(project.teachingTasks);
       setJointPoses(project.jointPoses);
@@ -2157,6 +2195,7 @@ export default function App() {
             heightRange: importedSlice,
             waypoints: project.waypoints,
             edges: project.edges,
+            abxRoutes: project.abxRoutes,
             view2d: project.view2d,
             view3d: project.view3d,
             robot: importedRobot,
@@ -2807,6 +2846,9 @@ export default function App() {
       notify('请先新建或选择一个示教任务', 'warning');
       return;
     }
+    if (task.abx) {
+      notify('原生任务的停车点顺序已保留；请新建虚拟任务添加停车点', 'warning'); return;
+    }
     if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
       notify('当前地图或机器人与该示教任务不一致，无法记录停车点', 'warning');
       return;
@@ -2883,6 +2925,10 @@ export default function App() {
       setRobotParkingGhost(null);
       return;
     }
+    if (parkingPoint.abx?.located === false || pose?.abx?.located === false) {
+      setRobotParkingGhost(null);
+      notify('该原生记录缺少 map 定位，暂不生成地图虚影', 'warning'); return;
+    }
     if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
       setRobotParkingGhost(null);
       requestSynchronizedFocus('waypoint', id);
@@ -2891,7 +2937,7 @@ export default function App() {
     }
 
     const currentPose = normalizeRobotPose(robotPose);
-    const targetPose = normalizeRobotPose(parkingPoint.mapPose);
+    const targetPose = normalizeRobotPose(pose?.abx ? pose.mapPose : parkingPoint.mapPose);
     const deltaX = targetPose.position.x - currentPose.position.x;
     const deltaY = targetPose.position.y - currentPose.position.y;
     const deltaZ = targetPose.position.z - currentPose.position.z;
@@ -2990,6 +3036,9 @@ export default function App() {
   const deleteTeachingParkingPoint = useCallback((taskId, parkingPointId) => {
     const task = teachingTasks.find((item) => item.id === taskId);
     if (!task) return;
+    if (task.abx) {
+      notify('原生任务的停车点与动作顺序需要在机器人端调整后重新导入', 'warning'); return;
+    }
     const removed = task.parkingPoints?.find((item) => item.id === parkingPointId);
     const remaining = (task.parkingPoints || [])
       .filter((item) => item.id !== parkingPointId)
@@ -3022,6 +3071,10 @@ export default function App() {
     const originalPoint = replacePoseId
       ? selectedParkingPoint?.poses?.find((point) => point.id === replacePoseId)
       : null;
+    if (task.abx && (!replacePoseId || originalPoint?.abx?.located === false)) {
+      notify('原生任务保留机器人动作顺序；请新建虚拟任务添加步骤，缺少定位的原生姿态请在机器人端编辑', 'warning');
+      return;
+    }
     const edit = robotParkingGhostRef.current;
     if (replacePoseId && (
       !originalPoint
@@ -3036,7 +3089,8 @@ export default function App() {
       return;
     }
     if (teachingCaptureBusyRef.current) return;
-    const pose = normalizeRobotPose(replacePoseId ? selectedParkingPoint.mapPose : robotPose);
+    const pose = normalizeRobotPose(replacePoseId
+      ? originalPoint?.abx ? originalPoint.mapPose : selectedParkingPoint.mapPose : robotPose);
     const joints = normalizeRobotJointValues(replacePoseId ? options.jointValues : robotJointValues);
     const timestamp = new Date().toISOString();
     const parkingPoints = task.parkingPoints || [];
@@ -3207,6 +3261,9 @@ export default function App() {
   }, []);
 
   const deleteTeachingPoint = useCallback((taskId, parkingPointId, pointId) => {
+    if (latestWorkspaceRef.current.teachingTasks.find((task) => task.id === taskId)?.abx) {
+      notify('原生任务的动作顺序需要在机器人端调整后重新导入', 'warning'); return;
+    }
     const updatedAt = new Date().toISOString();
     setTeachingTasks((current) => current.map((task) => {
       if (task.id !== taskId) return task;
@@ -3235,6 +3292,9 @@ export default function App() {
       const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
       const point = parkingPoint?.poses?.find((item) => item.id === pointId);
       if (!task || !point) return;
+      if (point.abx?.located === false) {
+        notify('该原生姿态没有 map 定位，不能恢复底盘位置', 'warning'); return;
+      }
       if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
         notify('当前地图或机器人与该机械臂姿态不一致，无法应用', 'warning');
         return;
@@ -3264,6 +3324,7 @@ export default function App() {
     async (taskId, options = {}) => {
       const task = teachingTasks.find((item) => item.id === taskId);
       if (!task) throw new Error('示教任务不存在或已经被删除');
+      if (task.abx) throw new Error('原生任务保留完整动作顺序，不能合并停车点');
       if ((task.parkingPoints?.length || 0) < 2) {
         throw new Error('至少需要两个停车点才能执行近邻聚类');
       }
@@ -3581,6 +3642,7 @@ export default function App() {
   );
 
   const currentExportPayload = () => buildExport({
+    abxRoutes,
     transfer: workspaceTransfer,
     directoryAutosaveSuspended,
     mapData,
@@ -3614,6 +3676,69 @@ export default function App() {
     }
     setAbxExportSnapshot({ payload: currentExportPayload(), robot: selectedRobot,
       robotPackage: portableRobotPackageRef.current });
+  };
+
+  const importAbxFile = async (event, kind) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || abxImportBusyRef.current) return;
+    if (teachingSpaceMode !== 'map' || !mapData) {
+      notify('请先打开地图示教工程，再导入机器人文件', 'warning'); return;
+    }
+    const workspaceMap = mapData;
+    abxImportBusyRef.current = true;
+    setAbxImportBusy(true);
+    try {
+      let imported;
+      if (kind === 'route') {
+        if (file.size > 48 * 1024) throw new Error('路网文件不能超过 48 KiB');
+        imported = abxRouteToProject(readAbxRoute(await file.text()));
+      } else {
+        let model = null;
+        if (selectedRobot?.format === 'urdf') {
+          model = abxRobotModel(await readAbxRobotPackage(selectedRobot, portableRobotPackageRef.current));
+        }
+        imported = await readAbxTeachingFile(file, { robot: selectedRobot, robotModel: model, map: workspaceMap });
+      }
+      const current = latestWorkspaceRef.current;
+      if (current.mapData !== workspaceMap || current.teachingSpaceMode !== 'map') {
+        throw new Error('导入期间工程已切换，请在目标工程重新导入');
+      }
+      const merged = mergeAbxImport(current, imported);
+      const tasks = normalizeTeachingTasks(merged.tasks);
+      const nextTaskId = imported.tasks?.[0]?.id || current.activeTeachingTaskId;
+      const nextParkingId = imported.tasks?.length
+        ? imported.tasks[0].parkingPoints[0]?.id || null : current.activeTeachingParkingPointId;
+      // Persist this committed import immediately. A reload just after the
+      // success notification must not race the normal debounced autosave.
+      latestWorkspaceRef.current = { ...current, abxRoutes: merged.abxRoutes,
+        waypoints: merged.waypoints, edges: merged.edges, teachingTasks: tasks, jointPoses: merged.jointPoses,
+        activeTeachingTaskId: nextTaskId, activeTeachingParkingPointId: nextParkingId, validation: initialValidation };
+      setAbxRoutes(merged.abxRoutes);
+      setWaypoints(merged.waypoints); setEdges(merged.edges);
+      setTeachingTasks(tasks); setJointPoses(merged.jointPoses);
+      setValidation(initialValidation);
+      if (imported.tasks?.length) {
+        setActiveTeachingTaskId(nextTaskId);
+        setActiveTeachingParkingPointId(nextParkingId);
+      }
+      await persistWorkspaceNow();
+      notify(kind === 'route'
+        ? `机器人路径已导入 · ${imported.waypoints.length} 节点 / ${imported.edges.length} 有向边`
+        : `机器人示教已导入 · ${imported.tasks.length} 任务。${imported.warnings.join(' ')}`, 'success');
+    } catch (error) {
+      notify(`机器人${kind === 'route' ? '路径' : '示教'}导入失败：${error.message}`, 'error');
+    } finally {
+      abxImportBusyRef.current = false;
+      setAbxImportBusy(false);
+    }
+  };
+
+  const exportAbxRoutes = async () => {
+    try {
+      const { routes } = await buildAbxRouteDocuments(currentExportPayload());
+      setAbxRouteExport(routes);
+    } catch (error) { notify(`机器人路径导出失败：${error.message}`, 'error'); }
   };
 
   const exportTeachingData = () => {
@@ -4138,8 +4263,12 @@ export default function App() {
   ]);
 
   const startTeachingTaskPlayback = useCallback((taskId) => {
-    startTeachingPlayback(teachingTasks.find((item) => item.id === taskId));
-  }, [startTeachingPlayback, teachingTasks]);
+    const task = teachingTasks.find((item) => item.id === taskId);
+    if (task?.parkingPoints.some((p) => p.abx?.located === false || p.poses.some((pose) => pose.abx?.located === false))) {
+      notify('该原生任务包含未定位的停车点或姿态，不能进行地图回放', 'warning'); return;
+    }
+    startTeachingPlayback(task);
+  }, [startTeachingPlayback, teachingTasks, notify]);
 
   const pauseTeachingTaskPlayback = useCallback(() => {
     const runtime = teachingPlaybackRuntimeRef.current;
@@ -4181,13 +4310,16 @@ export default function App() {
       const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
       const pose = poseId ? parkingPoint?.poses?.find((item) => item.id === poseId) : null;
       if (!task || !parkingPoint || (poseId && !pose)) return;
+      if (parkingPoint.abx?.located === false || pose?.abx?.located === false) {
+        notify('该原生停车点没有 map 定位，不能恢复底盘位置', 'warning'); return;
+      }
       if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
         notify('当前地图或机器人与该停车点不一致，无法应用', 'warning');
         return;
       }
       stopTeachingTaskPlayback(false);
       setRobotControlEnabled(false);
-      setRobotPose(normalizeRobotPose(parkingPoint.mapPose));
+      setRobotPose(normalizeRobotPose(pose?.abx ? pose.mapPose : parkingPoint.mapPose));
       if (pose) setRobotJointValues(normalizeRobotJointValues(pose.fullBodyJoints?.values));
       setActiveTeachingTaskId(task.id);
       setActiveTeachingParkingPointId(parkingPoint.id);
@@ -5040,6 +5172,12 @@ export default function App() {
   return (
     <>
     <input ref={mapInputRef} className="visually-hidden" type="file" accept=".ply" onChange={handleMapFile} />
+    <input ref={abxTeachingInputRef} className="visually-hidden" type="file"
+      accept=".zip,.abxteach.ndjson,.ndjson" aria-label="机器人示教文件"
+      onChange={(event) => importAbxFile(event, 'teaching')} />
+    <input ref={abxRouteInputRef} className="visually-hidden" type="file"
+      accept=".route.json,.json,application/json" aria-label="机器人路径文件"
+      onChange={(event) => importAbxFile(event, 'route')} />
     <input
       ref={independentCloudInputRef}
       className="visually-hidden"
@@ -5164,6 +5302,16 @@ export default function App() {
                 </section>
                 <section className="workbench-menu-section">
                   <p>数据与转换</p>
+                  {!isIndependentTeachingSpace && <>
+                    <button type="button" className="action-button" disabled={!mapData || abxImportBusy || loadState.loading || teachingCaptureState.status === 'capturing'}
+                      onClick={() => abxTeachingInputRef.current?.click()}><FolderOpen size={15} /><span>导入机器人示教</span></button>
+                    <button type="button" className="action-button" disabled={!teachingTasks.length || abxImportBusy}
+                      onClick={openAbxTeachingExport}><Bot size={15} /><span>导出机器人示教</span></button>
+                    <button type="button" className="action-button" disabled={!mapData || abxImportBusy || loadState.loading}
+                      onClick={() => abxRouteInputRef.current?.click()}><FolderOpen size={15} /><span>导入机器人路径</span></button>
+                    <button type="button" className="action-button" disabled={(!waypoints.length && !abxRoutes.length) || abxImportBusy}
+                      onClick={exportAbxRoutes}><Route size={15} /><span>导出机器人路径</span></button>
+                  </>}
                   <button
                     type="button"
                     className="action-button teaching-data-page-link"
@@ -5718,6 +5866,8 @@ export default function App() {
           onMergeParkingPoints={mergeTeachingParkingPoints}
           onExportProject={exportProject}
           onExportTeachingData={exportTeachingData}
+          onImportTeachingData={teachingSpaceMode === 'map' ? () => abxTeachingInputRef.current?.click() : null}
+          teachingImportDisabled={!mapData || abxImportBusy || loadState.loading || teachingCaptureState.status === 'capturing'}
           canExportTeachingData={Boolean(mapData || selectedRobot || teachingTasks.length || jointPoses.length || waypoints.length)}
           onSolveMobileTask={openMobileTeachingSolve}
           onSaveMobileTask={saveMobileTeachingTask}
@@ -5748,6 +5898,7 @@ export default function App() {
       onClose={() => setProjectExportDialog(null)}
     />}
     {abxExportSnapshot && <AbxTeachingExportDialog snapshot={abxExportSnapshot} onClose={() => setAbxExportSnapshot(null)} />}
+    {abxRouteExport && <AbxRouteExportDialog routes={abxRouteExport} onClose={() => setAbxRouteExport(null)} />}
     <MobileTeachingComputeDock computation={mobileComputation} inWorkbench={appPage === APP_PAGE_WORKBENCH}
       onSave={saveMobileTeachingTask} onPlay={playMobileTeachingTask} saveDisabledReason={mobileSaveDisabledReason}
       onPause={pauseMobileTeaching} onResume={resumeMobileTeaching} onCancel={cancelMobileTeaching}

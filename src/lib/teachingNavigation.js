@@ -10,6 +10,9 @@ export const parkingWaypointPose = (mapPose) => ({
 export function buildTeachingWaypoints(storedWaypoints, tasks, { mapData, coordinateFrame } = {}) {
   const parkingById = new Map();
   for (const task of tasks) {
+    // Native route nodes are imported separately. A historical parking
+    // observation (or missing localization) is not a new navigation target.
+    if (task.abx) continue;
     if (coordinateFrame && task.coordinateFrame && task.coordinateFrame !== coordinateFrame) continue;
     if (mapData) {
       const sameMap = task.map?.sourceHash && mapData.sourceHash

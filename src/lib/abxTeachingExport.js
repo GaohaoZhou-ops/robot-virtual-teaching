@@ -1,24 +1,14 @@
 import { sha256Bytes } from './hash.js';
 import { zipSync } from 'fflate';
+import { buildAbxRouteDocuments } from './abxRoute.js';
+import { appendImportedAbxTasks } from './abxTeachingRoundtrip.js';
+import { ABX_VERSION as VERSION, ABX_JOINT_ORDER as JOINT_ORDER, ABX_JOINT_NAMES as JOINT_NAMES } from './abxFormat.js';
 
 // Contract: workspace.zip / ABXBrainSystem, teaching_store.py v23.
-const VERSION = 23;
 const MAX_LINE_BYTES = 12000;
 const NAVIGATION_CHUNK_BYTES = 4096;
 const POSITION_TOLERANCE_M = 1e-6;
 const YAW_TOLERANCE_RAD = 1e-6;
-const JOINT_ORDER = {
-  head: ['yaw', 'pitch'],
-  torso: ['ankle_pitch', 'knee_pitch', 'waist_pitch', 'waist_yaw'],
-  left_arm: Array.from({ length: 7 }, (_, index) => `J${index + 1}`),
-  right_arm: Array.from({ length: 7 }, (_, index) => `J${index + 1}`),
-};
-const JOINT_NAMES = {
-  head: ['head_yaw_J', 'head_pitch_J'],
-  torso: ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J', 'waist_yaw_J'],
-  left_arm: JOINT_ORDER.left_arm.map((name) => `left_${name}`),
-  right_arm: JOINT_ORDER.right_arm.map((name) => `right_${name}`),
-};
 const BODY_JOINTS = new Set(Object.values(JOINT_NAMES).flat());
 const encoder = new TextEncoder();
 const bytes = (value) => encoder.encode(value);
@@ -122,6 +112,23 @@ const navigationLines = (context) => {
 // One shared route keeps all tasks on the same graph. Only source edges are
 // exported: proximity or teaching order is not evidence of a traversable path.
 const createRoute = async (payload, waypoints) => {
+  if (payload.abxRoutes?.length) {
+    const { routes, pointMap } = await buildAbxRouteDocuments(payload);
+    requireExport(routes.length === 1 || !payload.virtualTeaching?.tasks?.length,
+      '包含多个路网时，请分别创建新的虚拟任务；已导入的原生任务可以一起导出');
+    const route = routes[0];
+    for (const point of waypoints) point.nodeId = `N${pointMap.get(point.sourceId).node.id}`;
+    return { route, routes, pathMappings: [], nodeFor(name, target) {
+      const existing = route.nodes.find((node) => sameTarget(node, target));
+      if (existing) return `N${existing.id}`;
+      const used = new Set([...route.nodes, ...route.edges].map((item) => item.id));
+      let id = 1;
+      while (used.has(id)) id += 1;
+      requireExport(route.nodes.length < 256, '地图路网超过 ABX 256 个节点上限');
+      route.nodes.push({ id, label: routeLabel(name), ...target });
+      return `N${id}`;
+    } };
+  }
   const route = { schema_version: 1,
     id: `atlas-${await stableId('atlas-abx-route', payload.map?.sourceHash, payload.map?.fileName)}`,
     name: routeLabel(`地图示教 · ${payload.map?.fileName || '未命名地图'}`),
@@ -156,13 +163,13 @@ const createRoute = async (payload, waypoints) => {
     if (path.directed === false) link(end, start);
     pathMappings.push({ sourceId: path.id, start: `N${start}`, end: `N${end}`, directed: path.directed !== false });
   }
-  return { route, pathMappings, nodeFor(name, target) {
+  return { route, routes: [route], pathMappings, nodeFor(name, target) {
     const existing = route.nodes.find((node) => sameTarget(node, target));
     return existing ? `N${existing.id}` : addNode(name, target);
   } };
 };
 
-const robotModel = (robotPackage) => {
+export const abxRobotModel = (robotPackage) => {
   requireExport(robotPackage?.format === 'urdf', 'ABX 示教导出需要完整 URDF 机器人资源');
   const primary = robotPackage.files?.find((file) => file.path === robotPackage.relativePath);
   requireExport(primary, 'ABX 示教导出缺少机器人 URDF');
@@ -225,7 +232,7 @@ const compileExport = async (payload, robotPackage) => {
     target: freeTarget(point.pose, angleUnit, `导航点 ${point.name || point.id}`),
     sourcePose: point.pose,
   }));
-  const { route, nodeFor, pathMappings } = await createRoute(payload, waypoints);
+  const { route, routes, nodeFor, pathMappings } = await createRoute(payload, waypoints);
   const files = {};
   const exportedAt = payload.exportedAt || new Date().toISOString();
   const tasks = [];
@@ -272,7 +279,7 @@ const compileExport = async (payload, robotPackage) => {
         if (!model) {
           const sourceRobot = task.robot?.relativePath || task.robot?.id;
           requireExport(sourceRobot && sourceRobot === robotPackage?.relativePath, `任务 ${name}的机器人与当前 URDF 不一致`);
-          model = robotModel(robotPackage);
+          model = abxRobotModel(robotPackage);
         }
         const joints = bodyJoints(pose, poseLabel);
         if (!sameTarget(previousTarget, target)) {
@@ -318,7 +325,7 @@ const compileExport = async (payload, robotPackage) => {
   // own stable content ID on import, reusing identical routes across tasks.
   // Reserve room for Python numeric serialization, the imported ID and the
   // measured scene name bound later by the robot's route activation flow.
-  requireExport(bytes(JSON.stringify(route)).length + 2048 <= 48 * 1024, '地图路网超过 ABX 48 KiB 上限（含导入和地图绑定预留），请拆分工程后导出');
+  requireExport(routes.every((doc) => bytes(JSON.stringify(doc)).length + (payload.abxRoutes?.length ? 1 : 2048) <= 48 * 1024), '地图路网超过 ABX 48 KiB 上限（含导入和地图绑定预留），请拆分工程后导出');
   const context = { routes: [route], maps: null, default_route_id: null };
   const chunks = navigationLines(context);
   for (const [index, task] of nativeTasks.entries()) {
@@ -331,7 +338,7 @@ const compileExport = async (payload, robotPackage) => {
     files[`abx/${task.file}`] = bytes(line(header) + body + line(footer));
     const routeFile = `routes/${task.id}/1.route.json`;
     tasks[index].navigation = task.hasNavigation ? { routes: [routeFile], maps: null } : null;
-    if (task.hasNavigation) files[`abx/${routeFile}`] = jsonBytes(route);
+    if (task.hasNavigation) files[`abx/${routeFile}`] = bytes(`${JSON.stringify(route)}\n`);
   }
   const warnings = [];
   if (navigationCount) {
@@ -368,7 +375,7 @@ const compileExport = async (payload, robotPackage) => {
   files['abx/navigation.json'] = jsonBytes({ schema: 'atlas-abx-route-navigation', version: 1,
     exportedAt, mode: 'route', coordinateFrame: 'map', units: { position: 'm', yaw: 'rad' },
     nativeTaskNavigationSupported: true, notice: navigationNotice, warnings,
-    map: payload.map, route, waypoints, tasks: navigationTasks });
+    map: payload.map, route, routes, waypoints, tasks: navigationTasks });
   files['abx/free-navigation.json'] = jsonBytes({ schema: 'atlas-abx-free-navigation-targets', version: 1,
     exportedAt, mode: 'free', coordinateFrame: 'map', units: { position: 'm', yaw: 'rad' },
     nativeTaskNavigationSupported: false, nativeTaskNavigationMode: 'route',
@@ -383,7 +390,8 @@ const compileExport = async (payload, robotPackage) => {
   files['abx/README.txt'] = bytes(instructions.join('\n'));
   return { files, summary: { status: 'ready', navigationMode: 'route', navigationImportSupported: true,
     taskCount: tasks.length, poseCount, waypointCount: waypoints.length, navigationCount,
-    nodeCount: route.nodes.length, edgeCount: route.edges.length, warnings,
+    nodeCount: routes.reduce((sum, doc) => sum + doc.nodes.length, 0),
+    edgeCount: routes.reduce((sum, doc) => sum + doc.edges.length, 0), warnings,
     notice: navigationNotice, manifestFile: 'abx/manifest.json', navigationFile: 'abx/navigation.json' } };
 };
 
@@ -393,9 +401,10 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null } = 
   const mode = payload.teachingSpace?.mode || payload.workspace?.teachingSpaceMode || payload.map?.teachingSpaceMode || 'map';
   if (mode !== 'map') return null;
   try {
-    return await compileExport(payload, robotPackage);
+    const virtualPayload = { ...payload, virtualTeaching: { ...payload.virtualTeaching,
+      tasks: (payload.virtualTeaching?.tasks || []).filter((task) => !task.abx) } };
+    return await appendImportedAbxTasks(await compileExport(virtualPayload, robotPackage), payload);
   } catch (error) {
-    if (!(error instanceof AbxExportError)) throw error;
     const summary = { status: 'blocked', message: error.message };
     return { summary, files: {
       'abx/export-status.json': jsonBytes(summary),
