@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Copy, Glasses, QrCode, RefreshCw } from 'lucide-react';
 import { ipadRequest } from '../lib/ipadTeaching.js';
+import { publishVisionPairingOffer } from '../lib/visionPairingOffer.js';
 
 // The parent keys this component by task, address and code so stale QR images
 // disappear immediately when any pairing detail changes.
@@ -9,11 +10,16 @@ export default function IPadPairingQRCode({ device = 'ipad', ticket, address, di
   const [image, setImage] = useState('');
   const [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
+  const [automaticPairingStatus, setAutomaticPairingStatus] = useState('正在准备自动填码…');
   const [expired, setExpired] = useState(() => Date.now() >= ticket.pairingExpiresAt);
   useEffect(() => {
     const timer = setTimeout(() => setExpired(true), Math.max(0, ticket.pairingExpiresAt - Date.now()));
     return () => clearTimeout(timer);
   }, [ticket.pairingExpiresAt]);
+  useEffect(() => {
+    if (!vision || ticket.status !== 'ready' || expired || !address) return;
+    return publishVisionPairingOffer(ticket, setAutomaticPairingStatus);
+  }, [vision, ticket.id, ticket.ownerToken, ticket.pairingCode, ticket.status, expired, address]);
   useEffect(() => {
     if (vision || expired || !address || disabled) return;
     const controller = new AbortController();
@@ -31,12 +37,13 @@ export default function IPadPairingQRCode({ device = 'ipad', ticket, address, di
     </div>}
     <div className="ipad-qr__instructions">
       <span className="ipad-qr__eyebrow">{vision ? 'CONNECT VISION PRO' : 'SCAN TO CONNECT'}</span>
-      <h3>{vision ? ticket.status === 'paired' ? '在 Vision Pro 完成示教并同步' : '在 Vision Pro 输入配对码' : ticket.status === 'paired' ? '扫描二维码，同步示教结果' : '扫码接收物体或同步结果'}</h3>
+      <h3>{vision ? ticket.status === 'paired' ? '在 Vision Pro 完成示教并同步' : '在 Vision Pro 选择这台电脑' : ticket.status === 'paired' ? '扫描二维码，同步示教结果' : '扫码接收物体或同步结果'}</h3>
       {vision ? <ol className="vision-pairing-steps">
-        <li>打开「Atlas 空间示教」，点击「搜索局域网电脑」。</li>
-        <li>选择这台电脑，输入下方 4 位配对码，点击「配对并检查模型」。</li>
+        <li>打开「Atlas 空间示教」，点击「自动检测局域网服务器」。</li>
+        <li>选择这台电脑，配对码自动填入后点击「配对并检查模型」。多个任务时可点选物体名称。</li>
         <li>确认同步模型，预览后进入空间示教。</li>
       </ol> : <p>iPad 首页扫码接收物体；已有示教结果时，点击「同步数据」，选择「扫码」后扫描此码。</p>}
+      {vision && ticket.status === 'ready' && !expired && <p role="status">{automaticPairingStatus}</p>}
       <div className="ipad-qr__manual"><div><strong className="ipad-code">{ticket.pairingCode}</strong></div>
         <button aria-label="复制配对码" disabled={disabled || expired} onClick={onCopy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>
       </div>

@@ -45,7 +45,9 @@ assert.equal(result.feasibleCount, 1);
 assert.equal(result.rows[0].selectedSide, 'left');
 assert.equal(result.rows[0].solutions.right.feasible, false);
 assert.deepEqual(readRobotJointValues(robot), original, 'calculation must not mutate the live robot');
-assert.equal((await run({ allowSingleArm: false })).feasibleCount, 0);
+const oldOptionsRerun = await run({ allowSingleArm: false });
+assert.equal(oldOptionsRerun.feasibleCount, 1, 'rerunning old options uses the new one-camera objective');
+assert.equal(oldOptionsRerun.options.allowSingleArm, true);
 assert.equal((await run({ armMode: 'right' })).feasibleCount, 0);
 const lockNames = Object.keys(original);
 assert.equal((await run({}, { lockedJointNames: lockNames })).feasibleCount, 0);
@@ -191,6 +193,7 @@ const corruptedParking = structuredClone(multi); corruptedParking.rows[0].soluti
 assert.equal(normalizeMobileSolveReport(corruptedParking), null);
 const perPose = await run({ parkingMode: 'per-pose', armMode: 'left' }, { task: distributed });
 assert.equal(perPose.feasibleCount, 4);
+assert.deepEqual(perPose.rows.map((row) => row.sampleId), distributed.mobileCapture.samples.map((sample) => sample.id));
 assert.equal(buildMobileSolvedTask(distributed, perPose, {}, 'per-pose').parkingPoints.length, 4);
 assert.equal((await run({ parkingMode: 'fixed', armMode: 'left' }, { task: distributed })).feasibleCount, 1);
 const legacy = structuredClone(result); legacy.version = 1; delete legacy.options.parkingMode; delete legacy.options.checkCollisions;

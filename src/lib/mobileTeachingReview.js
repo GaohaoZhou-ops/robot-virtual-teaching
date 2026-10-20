@@ -12,8 +12,8 @@ export function mobileRobotPoseLinks(source, tasks) {
   for (const task of candidates) {
     for (const parkingPoint of task.parkingPoints || []) {
       for (const pose of parkingPoint.poses || []) {
-        if (pose.mobileSampleId && !links.has(pose.mobileSampleId)) {
-          links.set(pose.mobileSampleId, { task, parkingPoint, pose });
+        for (const sampleId of pose.mobileSampleIds || [pose.mobileSampleId]) {
+          if (sampleId && !links.has(sampleId)) links.set(sampleId, { task, parkingPoint, pose });
         }
       }
     }

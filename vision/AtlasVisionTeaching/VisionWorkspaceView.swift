@@ -7,6 +7,7 @@ struct VisionWorkspaceView: View {
     @Environment(\.dismissImmersiveSpace) private var dismissSpace
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var discovery = LANServiceDiscovery()
+    @StateObject private var pairingAutofill = VisionPairingAutofill()
     @State private var finishConfirmation = false
     @State private var syncOnFinish = false
     @State private var autofillDiscovery = false
@@ -25,7 +26,10 @@ struct VisionWorkspaceView: View {
     }
     private var discoveryMessage: String {
         if let selected = discovery.servers.first(where: { $0.address == session.serverAddress }) {
-            return "已填入 \(selected.name) 的地址和端口。" + (discovery.servers.count > 1 ? "可选择下方其他电脑切换。" : "请输入电脑上的配对码。")
+            return "已填入 \(selected.name) 的地址和端口。" + (discovery.servers.count > 1 ? "可选择下方其他电脑切换。" : "配对码将从电脑配对窗口自动获取。")
+        }
+        if hasSearched && !discovery.isSearching && discovery.servers.isEmpty && discovery.message.isEmpty {
+            return "未找到局域网服务器。请确认电脑已启动示教服务，两台设备连接同一 Wi-Fi，再点重新检测；也可手动填写下方地址。"
         }
         return discovery.message
     }
@@ -45,10 +49,14 @@ struct VisionWorkspaceView: View {
     private var observedContent: some View {
         windowContent
         .task { await session.reload() }
-        .onChange(of: session.pendingModel?.id) { _, id in modelSyncPresented = id != nil }
+        .onChange(of: session.pendingModel?.id) { _, id in
+            modelSyncPresented = id != nil
+            if id != nil { pairingAutofill.stop() }
+        }
         .sheet(isPresented: $modelSyncPresented) { VisionModelSyncView().environmentObject(session) }
         .onChange(of: session.current?.id) { _, _ in
             discovery.stop(); autofillDiscovery = false
+            pairingAutofill.reset()
             showingModelPreview = true
             addressReplacementID = UUID(); addressError = ""; portFocused = false
             if let model = session.geometry, let current = session.current {
@@ -59,7 +67,12 @@ struct VisionWorkspaceView: View {
             if autofillDiscovery, session.current == nil, let server = discovery.servers.first { selectServer(server) }
         }
         .onChange(of: discovery.isSearching) { _, searching in if !searching { autofillDiscovery = false } }
-        .onChange(of: portFocused) { _, focused in if focused { autofillDiscovery = false } }
+        .onChange(of: portFocused) { _, focused in
+            if focused { autofillDiscovery = false; pairingAutofill.addressChanged() }
+        }
+        .onChange(of: session.serverAddress) { _, address in
+            if let server = pairingAutofill.server, server.address != address { pairingAutofill.addressChanged() }
+        }
         .onChange(of: sampleIDs) { _, _ in spatial.refreshMarkers(session.current?.result.samples ?? []) }
         .onChange(of: spatial.quality) { _, _ in if let model = session.geometry { spatial.render(model) } }
         .onChange(of: spatial.displayMode) { _, _ in if let model = session.geometry { spatial.render(model) } }
@@ -68,13 +81,14 @@ struct VisionWorkspaceView: View {
     var body: some View {
         observedContent
         .onChange(of: scenePhase) { _, phase in
+            if phase == .active { pairingAutofill.validateExpiration() }
             if phase == .background {
                 session.backgroundSave(); spatial.stop()
                 if !spaceClosed { spatial.spaceState = .closing; Task { await dismissSpace() } }
             }
         }
         .onDisappear {
-            discovery.stop(); session.backgroundSave()
+            discovery.stop(); pairingAutofill.stop(); session.backgroundSave()
             if !spaceClosed { spatial.stop(); spatial.spaceState = .closing; Task { await dismissSpace() } }
         }
         .confirmationDialog("完成后将锁定当前 Pose，可以稍后重试同步。", isPresented: $finishConfirmation, titleVisibility: .visible) {
@@ -279,66 +293,112 @@ struct VisionWorkspaceView: View {
                     .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.cyan.opacity(0.18)))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("局域网配对").font(.body).foregroundStyle(.cyan)
-                    Text("手动连接").font(.title3.weight(.medium))
+                    Text("局域网配对").font(.title3.weight(.medium)).foregroundStyle(.cyan)
+                    Text("自动查找电脑，免输地址和端口").font(.body).foregroundStyle(.secondary)
                 }
             }
+            discoveryPanel
             Text("在电脑端打开「设备 → Vision Pro」配对窗口，两台设备连接同一局域网。")
                 .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             addressFields
             VStack(alignment: .leading, spacing: 12) {
-                Text("4 位配对码 · 大写字母或数字").font(.body).foregroundStyle(.secondary)
-                VisionPairingCodeField(code: $session.code).frame(maxWidth: .infinity).frame(height: 68)
+                Text("4 位配对码 · 选择电脑后自动填入").font(.body).foregroundStyle(.secondary)
+                VisionPairingCodeField(code: Binding(get: { pairingAutofill.code }, set: { pairingAutofill.edit($0) }),
+                                       replacementID: pairingAutofill.replacementID, onEdit: { pairingAutofill.beginEditing() })
+                    .frame(maxWidth: .infinity).frame(height: 68)
+                pairingCodeStatus
             }
-            VStack(alignment: .leading, spacing: 12) {
-                Button {
-                    portFocused = false; addressReplacementID = UUID(); addressError = ""
-                    hasSearched = true; autofillDiscovery = true; discovery.start()
-                } label: {
-                    HStack(spacing: 12) {
-                        Label("搜索局域网电脑", systemImage: "network")
-                        if discovery.isSearching { ProgressView().controlSize(.small) }
-                    }.frame(maxWidth: .infinity).padding(.vertical, 4)
-                }
-                .disabled(discovery.isSearching || session.busy)
-                .accessibilityIdentifier("discover-teaching-server")
-                ForEach(discovery.servers) { server in
-                    let selected = server.address == session.serverAddress
-                    Button { selectServer(server) } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: "desktopcomputer").foregroundStyle(.cyan)
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(server.name).lineLimit(2)
-                                Text(LANAddressInput(address: server.address).displayAddress)
-                                    .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan) }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .disabled(session.busy)
-                    .accessibilityIdentifier("discovered-service-\(server.id)")
-                    .accessibilityValue(selected ? "已填入" : "未选择")
-                }
-                if hasSearched {
-                    Text(discoveryMessage).font(.body).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("discovery-status")
-                }
-            }
-            Button { discovery.stop(); Task { await session.pair(confirmNewModel: true) } } label: {
+            Button {
+                discovery.stop(); pairingAutofill.validateExpiration()
+                guard PairingCode.isValid(pairingAutofill.code) else { return }
+                session.code = pairingAutofill.code; pairingAutofill.stop()
+                Task { await session.pair(confirmNewModel: true) }
+            } label: {
                 Label("配对并检查模型", systemImage: "checkmark.shield")
                     .frame(maxWidth: .infinity).padding(.vertical, 4)
             }
             .buttonStyle(.borderedProminent).tint(.cyan)
-            .disabled(session.busy || !canUseAddress || !PairingCode.isValid(session.code))
+            .disabled(session.busy || pairingAutofill.isLoading || !canUseAddress || !PairingCode.isValid(pairingAutofill.code))
             .accessibilityIdentifier("pair-model")
         }.disabled(session.busy)
+    }
+
+    private var pairingCodeStatus: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if pairingAutofill.isLoading { ProgressView().controlSize(.small) }
+            if !pairingAutofill.message.isEmpty {
+                Text(pairingAutofill.message).font(.body).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("pairing-autofill-status")
+            }
+            if pairingAutofill.offers.count > 1 {
+                ForEach(pairingAutofill.offers) { offer in
+                    Button { pairingAutofill.select(offer) } label: {
+                        HStack {
+                            Label(offer.name, systemImage: "cube.transparent").lineLimit(2)
+                            Spacer(minLength: 0)
+                            if pairingAutofill.selected?.id == offer.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan) }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .accessibilityIdentifier("pairing-offer-\(offer.id)")
+                }
+            }
+            if let server = pairingAutofill.server, server.address == session.serverAddress, !pairingAutofill.isLoading {
+                Button("重新获取配对码") { pairingAutofill.load(from: server) }
+                    .accessibilityIdentifier("retry-pairing-code")
+            }
+        }
+    }
+
+    private var discoveryPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                portFocused = false; addressReplacementID = UUID(); addressError = ""
+                pairingAutofill.reset()
+                hasSearched = true; autofillDiscovery = true; discovery.start()
+            } label: {
+                HStack(spacing: 12) {
+                    if discovery.isSearching {
+                        ProgressView().controlSize(.small)
+                        Text("正在检测局域网服务器…")
+                    } else {
+                        Label(hasSearched ? "重新检测局域网服务器" : "自动检测局域网服务器", systemImage: "network")
+                    }
+                }.frame(maxWidth: .infinity).padding(.vertical, 4)
+            }
+            .buttonStyle(.bordered).tint(.cyan)
+            .disabled(discovery.isSearching || session.busy)
+            .accessibilityIdentifier("discover-teaching-server")
+            .accessibilityHint("自动查找同一局域网内的示教服务器，并填入电脑地址和端口")
+            if hasSearched {
+                Text(discoveryMessage).font(.body).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("discovery-status")
+            }
+            ForEach(discovery.servers) { server in
+                let selected = server.address == session.serverAddress
+                Button { selectServer(server) } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "desktopcomputer").foregroundStyle(.cyan)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(server.name).lineLimit(2)
+                            Text(LANAddressInput(address: server.address).displayAddress)
+                                .font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan) }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(session.busy)
+                .accessibilityIdentifier("discovered-service-\(server.id)")
+                .accessibilityValue(selected ? "已填入" : "未选择")
+            }
+        }
     }
 
     private func selectServer(_ server: DiscoveredTeachingServer) {
         autofillDiscovery = false; portFocused = false
         session.serverAddress = server.address
         addressReplacementID = UUID(); addressError = ""
+        pairingAutofill.load(from: server)
     }
 
     private var addressFields: some View {
@@ -348,7 +408,7 @@ struct VisionWorkspaceView: View {
                     Text("电脑 IPv4 地址").font(.body).foregroundStyle(.secondary)
                     VisionIPv4AddressField(host: $session.serverConnection.host, error: $addressError,
                                            replacementID: addressReplacementID,
-                                           onEdit: { autofillDiscovery = false }, onSubmit: { portFocused = true })
+                                           onEdit: { autofillDiscovery = false; pairingAutofill.addressChanged() }, onSubmit: { portFocused = true })
                         .frame(maxWidth: .infinity).frame(height: 68)
                 }.frame(minWidth: 300, maxWidth: 440)
                 VStack(alignment: .leading, spacing: 12) {

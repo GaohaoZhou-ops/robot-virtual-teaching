@@ -397,6 +397,7 @@ const normalizeTeachingPoint = (point, pointIndex) => {
     ),
     replanningHistory: normalizeTeachingReplanningHistory(point?.replanningHistory),
     ...(typeof point?.mobileSampleId === 'string' ? { mobileSampleId: point.mobileSampleId } : {}),
+    ...(Array.isArray(point?.mobileSampleIds) ? { mobileSampleIds: [...new Set(point.mobileSampleIds.filter((id) => typeof id === 'string' && id))] } : {}),
   };
 };
 

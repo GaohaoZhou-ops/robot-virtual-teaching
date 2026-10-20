@@ -18,7 +18,7 @@
     "test:ipad": "node tests/ipad_teaching_smoke.mjs && node tests/ipad_pairing_codes_smoke.mjs",
     "test:ipad:native": "node tests/ipad_native_lan_smoke.mjs",
     "test:ipad:file": "node tests/ipad_result_file_smoke.mjs",
-    "test:mobile-solve": "node tests/mobile_teaching_solver_smoke.mjs && node tests/mobile_teaching_collision_smoke.mjs && node tests/mobile_teaching_botx_smoke.mjs && node tests/mobile_teaching_height_smoke.mjs",
+    "test:mobile-solve": "node tests/mobile_teaching_solver_smoke.mjs && node tests/mobile_teaching_assignment_smoke.mjs && node tests/mobile_teaching_parallel_smoke.mjs && node tests/mobile_teaching_collision_smoke.mjs && node tests/mobile_teaching_clearance_smoke.mjs && node tests/mobile_teaching_botx_smoke.mjs && node tests/mobile_teaching_height_smoke.mjs",
     "test:ipad:qr": "node tests/ipad_qr_pairing_smoke.mjs",
     "test:transfer": "node tests/teaching_transfer_smoke.mjs && node tests/teaching_transfer_preview_smoke.mjs",
     "test:collision-backends": "node tests/isaac_collision_backend_smoke.mjs",
@@ -29,7 +29,8 @@
     "service:stop": "./scripts/stop.sh",
     "test:ipad:discovery": "node tests/ipad_discovery_smoke.mjs",
     "test:vision": "node tests/model_thumbnail_smoke.mjs && node tests/vision_teaching_smoke.mjs",
-    "test:vision:pairing-ui": "node tests/vision_pairing_ui_smoke.mjs"
+    "test:vision:pairing-ui": "node tests/vision_pairing_ui_smoke.mjs",
+    "test:vision:autofill": "node tests/vision_pairing_autofill_smoke.mjs"
   },
   "dependencies": {
     "bonjour-service": "^1.4.4",

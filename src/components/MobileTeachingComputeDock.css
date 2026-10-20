@@ -23,7 +23,7 @@
 .mobile-compute-dock__current { min-height: 17px; margin: 10px 0 12px; line-height: 1.65; font-size: 10px; color: #88a7b2; overflow-wrap: anywhere; }
 .mobile-compute-dock__controls { display: flex; gap: 6px; flex-wrap: wrap; }
 .mobile-compute-dock__controls button { flex: 1; }
-.mobile-compute-dock__controls .mobile-compute-dock__save { flex-basis: 100%; }
+.mobile-compute-dock__controls .mobile-compute-dock__save, .mobile-compute-dock__controls .mobile-compute-dock__play { flex-basis: calc(50% - 3px); }
 .mobile-compute-dock__preview { margin-bottom: 12px; padding: 9px; border: 1px solid #63e6ee20; border-radius: 5px; background: #63e6ee04; }
 .mobile-compute-dock__preview > div { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; font-size: 10px; color: #83a8b5; }
 .mobile-compute-dock__preview > div > span { margin-right: auto; }

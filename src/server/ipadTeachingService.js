@@ -36,6 +36,12 @@ async function readBody(req, limit, asJSON = true) {
 
 export function createIPadTeachingService({ directory, serverId = randomUUID(), serverName = hostname().replace(/\.local$/i, '').slice(0, 120), generatePairingCode = randomPairingCode, getAddresses = lanAddresses }) {
   const locks = new Map(), attempts = new Map();
+  // Only an open, owner-authorized Vision Pro pairing window publishes a code.
+  // Keep these short leases in memory; session files continue storing hashes only.
+  const visionPairingOffers = new Map();
+  const pruneVisionOffers = () => {
+    for (const [id, offer] of visionPairingOffers) if (offer.leaseExpiresAt <= Date.now()) visionPairingOffers.delete(id);
+  };
   async function serialized(id, run) {
     const previous = locks.get(id) || Promise.resolve();
     const operation = previous.catch(() => {}).then(run);
@@ -107,15 +113,29 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         const addresses = getAddresses(port);
         return json(res, 200, { protocol: IPAD_PROTOCOL, serverId, serverName, port, addresses, maxModelBytes: MAX_MODEL_BYTES });
       }
+      if (route === '/vision-pairing' && req.method === 'GET') {
+        pruneVisionOffers();
+        const offers = new Map();
+        for (const offer of visionPairingOffers.values()) {
+          if (!offer.code) continue;
+          const session = await load(offer.sessionId);
+          if (session.status !== 'ready' || session.deviceId || Date.now() >= session.pairingExpiresAt
+            || !equal(session.pairingCodeHash, hash(offer.code))) continue;
+          offers.set(session.id, { sessionId: session.id, name: session.manifest.name.slice(0, 240),
+            code: offer.code, expiresAt: session.pairingExpiresAt });
+        }
+        return json(res, 200, { protocol: IPAD_PROTOCOL, serverId, offers: [...offers.values()].slice(0, 16) });
+      }
       if (route === '/sessions' && req.method === 'POST') {
-        const { manifest } = await readBody(req, 16384);
+        const { manifest, targetDevice = 'ipad' } = await readBody(req, 16384);
+        if (!['ipad', 'vision'].includes(targetDevice)) fail(400, '采集设备类型无效');
         if (manifest?.protocol !== IPAD_PROTOCOL || manifest.coordinateFrame !== 'virtual_origin'
           || manifest.distanceUnit !== 'meter' || manifest.verticalAxis !== 'Z'
           || !/^[a-f0-9]{64}$/.test(manifest.modelHash) || typeof manifest.name !== 'string'
           || !Number.isInteger(manifest.byteLength) || manifest.byteLength < 48 || manifest.byteLength > MAX_MODEL_BYTES) fail(400, '独立示教物体清单无效');
         return await withNewPairingCode(async (pairingCode) => {
           const id = randomUUID(), ownerToken = secret();
-          const session = { id, manifest, status: 'preparing', createdAt: new Date().toISOString(),
+          const session = { id, manifest, targetDevice, status: 'preparing', createdAt: new Date().toISOString(),
             ownerTokenHash: hash(ownerToken), pairingCodeHash: hash(pairingCode),
             pairingExpiresAt: Date.now() + 15 * 60 * 1000 };
           await mkdir(path.join(directory, id), { mode: 0o700 });
@@ -167,7 +187,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         }
         fail(404, '找不到配对码，请确认电脑地址与配对码');
       }
-      const match = /^\/sessions\/([a-f0-9-]{36})(?:\/(model|thumbnail|verify-model|result|imported|renew|pairing-qr))?$/.exec(route);
+      const match = /^\/sessions\/([a-f0-9-]{36})(?:\/(model|thumbnail|verify-model|result|imported|renew|pairing-qr|vision-pairing))?$/.exec(route);
       if (!match) fail(404, '接口不存在');
       const [, id, action] = match;
       await serialized(id, async () => {
@@ -175,6 +195,27 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         const role = (['model', 'thumbnail'].includes(action) && req.method === 'GET')
           || (['verify-model', 'result'].includes(action) && req.method === 'POST') ? 'device' : 'owner';
         authorize(req, session, role);
+        if (action === 'vision-pairing' && ['POST', 'DELETE'].includes(req.method)) {
+          const { publisherId, code } = await readBody(req, 4096);
+          if (!/^[a-f0-9-]{36}$/.test(publisherId || '')) fail(400, '配对窗口标识无效');
+          pruneVisionOffers();
+          const previous = visionPairingOffers.get(publisherId);
+          if (previous && previous.sessionId !== id) fail(409, '配对窗口与任务不匹配');
+          if (req.method === 'DELETE') {
+            // A delayed heartbeat cannot reopen a window that was already closed.
+            visionPairingOffers.set(publisherId, { sessionId: id, code: null, leaseExpiresAt: Date.now() + 45_000 });
+            return json(res, 200, { published: false });
+          }
+          if (previous && !previous.code) fail(409, '配对窗口已关闭');
+          if (session.targetDevice && session.targetDevice !== 'vision') fail(409, '请从 Vision Pro 配对窗口连接');
+          if (session.status !== 'ready' || session.deviceId) fail(409, '此任务已配对或尚未准备好，请在电脑上新建传输');
+          if (Date.now() >= session.pairingExpiresAt) fail(410, '配对码已过期，请在电脑更新配对码');
+          if (typeof code !== 'string' || !/^[A-Z0-9]{4}$/.test(code) || !equal(session.pairingCodeHash, hash(code))) {
+            fail(409, '配对码已更新，请使用当前配对窗口');
+          }
+          visionPairingOffers.set(publisherId, { sessionId: id, code, leaseExpiresAt: Date.now() + 45_000 });
+          return json(res, 200, { published: true });
+        }
         if (!action && req.method === 'GET') return json(res, 200, publicSession(session));
         if (!action && req.method === 'DELETE') {
           session.status = 'cancelled'; await save(session); return json(res, 200, { status: 'cancelled' });

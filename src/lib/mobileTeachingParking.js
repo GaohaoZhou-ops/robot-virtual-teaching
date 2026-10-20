@@ -8,7 +8,7 @@ export function mobileSolutionMapPose(report, row, side = row?.selectedSide) {
   return normalizeRobotPose(row?.solutions?.[side]?.mapPose || row?.mapPose || report.mapPose);
 }
 
-export function mobileParkingCandidates(target, initialPose, previousPose, mode) {
+export function mobileParkingCandidates(target, initialPose, previousPose, mode, { refineClearance = false } = {}) {
   const initial = normalizeRobotPose(initialPose), poses = [], keys = new Set();
   const initialQuaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(
     ...['roll', 'pitch', 'yaw'].map((axis) => THREE.MathUtils.degToRad(initial.rpy[axis])), 'XYZ',
@@ -33,6 +33,20 @@ export function mobileParkingCandidates(target, initialPose, previousPose, mode)
   };
   if (mode === 'fixed') return [initial];
   if (mode === 'auto') { if (previousPose) add(normalizeRobotPose(previousPose)); add(initial); }
+  if (refineClearance && mode === 'auto') {
+    const reference = normalizeRobotPose(previousPose || initial);
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(...['roll', 'pitch', 'yaw']
+      .map((axis) => THREE.MathUtils.degToRad(reference.rpy[axis])), 'XYZ'));
+    const direction = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+    const heading = Math.atan2(direction.y, direction.x), x = Math.cos(heading), y = Math.sin(heading);
+    // Small chassis adjustments can free an elbow without abandoning the
+    // workpiece or changing the support height / world-up tilt convention.
+    for (const [back, lateral, turn] of [[0.2, 0, 0], [0, 0.2, 0], [0, -0.2, 0], [0.15, 0, 20], [0.15, 0, -20]]) {
+      add({ position: { x: reference.position.x - back * x - lateral * y,
+        y: reference.position.y - back * y + lateral * x, z: initial.position.z },
+      rpy: orientationAtHeading(heading + THREE.MathUtils.degToRad(turn)) });
+    }
+  }
   const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(target.quaternion).setZ(0);
   if (forward.lengthSq() < 1e-6) forward.set(Math.cos(initialHeading), Math.sin(initialHeading), 0);
   forward.normalize();
@@ -45,6 +59,7 @@ export function mobileParkingCandidates(target, initialPose, previousPose, mode)
     [0.5, 0, 30], [0.5, 0, -30], [0.8, 0, 0],
     [0.65, 0.3, 30], [0.65, -0.3, -30],
     [0.4, 0, 60], [0.4, 0, -60], [0.3, 0, 180],
+    ...(refineClearance ? [[0.65, 0.4, 0], [0.65, -0.4, 0], [0.8, 0.25, 20], [0.8, -0.25, -20], [1, 0, 0]] : []),
   ]) {
     const angle = heading + THREE.MathUtils.degToRad(yawOffset), x = Math.cos(angle), y = Math.sin(angle);
     add({ position: { x: target.position.x - distance * x - lateral * y,

@@ -65,6 +65,7 @@ export function buildTeachingDataExport(project) {
         mapPose: pose(parking.mapPose, taskFrame),
         poses: (parking.poses || []).map((point, pointIndex) => ({
           ...fields(point, ['id', 'name', 'capturedAt', 'mobileSampleId']),
+          ...(Array.isArray(point.mobileSampleIds) ? { mobileSampleIds: [...point.mobileSampleIds] } : {}),
           sequence: pointIndex + 1,
           mapPose: pose(point.mapPose, taskFrame),
           fullBodyJoints: joints(point.fullBodyJoints),

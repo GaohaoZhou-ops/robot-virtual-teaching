@@ -3,11 +3,14 @@ import UIKit
 
 struct VisionPairingCodeField: UIViewRepresentable {
     @Binding var code: String
+    var replacementID: UUID? = nil
+    var onEdit: () -> Void = {}
 
     func makeUIView(context: Context) -> VisionPairingCodeInput { VisionPairingCodeInput() }
     func updateUIView(_ view: VisionPairingCodeInput, context: Context) {
         view.onChange = { code = $0 }
-        view.setCode(code)
+        view.onEdit = onEdit
+        view.setCode(code, replacementID: replacementID)
         if view.isEnabled != context.environment.isEnabled { view.isEnabled = context.environment.isEnabled }
         view.alpha = view.isEnabled ? 1 : 0.5
     }
@@ -17,9 +20,11 @@ struct VisionPairingCodeField: UIViewRepresentable {
 // first responders between characters on visionOS can drop rapid keystrokes.
 final class VisionPairingCodeInput: UITextField, UITextFieldDelegate {
     var onChange: (String) -> Void = { _ in }
+    var onEdit: () -> Void = {}
     private(set) var characters = Array(repeating: "", count: 4)
     private let cells = (0..<4).map { _ in UIButton(type: .system) }
     private var appliedCode = ""
+    private var appliedReplacementID: UUID?
     private var activeIndex = 0
     private let accent = UIColor.systemCyan
 
@@ -77,7 +82,11 @@ final class VisionPairingCodeInput: UITextField, UITextFieldDelegate {
     @objc private func selectCellButton(_ sender: UIButton) {
         selectCell(sender.tag); becomeFirstResponder(); updateCursor(); refreshCells()
     }
-    func setCode(_ code: String) {
+    func setCode(_ code: String, replacementID: UUID? = nil) {
+        if replacementID != appliedReplacementID {
+            appliedReplacementID = replacementID
+            resignFirstResponder()
+        }
         // The native edit transaction owns the value while the keyboard is
         // active; a delayed SwiftUI snapshot must not overwrite newer input.
         guard !isFirstResponder, code != appliedCode else { return }
@@ -110,7 +119,7 @@ final class VisionPairingCodeInput: UITextField, UITextFieldDelegate {
         if characters[activeIndex].isEmpty && activeIndex > 0 { activeIndex -= 1 }
         characters[activeIndex] = ""; publish()
     }
-    func textFieldDidBeginEditing(_ field: UITextField) { refreshCells() }
+    func textFieldDidBeginEditing(_ field: UITextField) { onEdit(); refreshCells() }
     func textFieldDidEndEditing(_ field: UITextField) { refreshCells() }
     func textFieldShouldReturn(_ field: UITextField) -> Bool { resignFirstResponder(); return false }
     func textField(_ field: UITextField, shouldChangeCharactersIn range: NSRange, replacementString replacement: String) -> Bool {

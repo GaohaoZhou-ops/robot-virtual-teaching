@@ -81,7 +81,8 @@ def run():
             for axis in ['ROLL', 'PITCH', 'YAW']:
                 expect(dialog.get_by_role('spinbutton', name=f'{axis} 角度容差 (°)')).to_have_value('5')
             expect(dialog.get_by_role('checkbox', name='前胸垂直锁定')).to_be_checked()
-            expect(dialog.get_by_role('checkbox', name='允许仅单臂可达')).to_be_checked()
+            expect(dialog.get_by_role('combobox', name='参与求解机械臂')).to_have_value('both')
+            expect(dialog).to_contain_text('每个姿态只分配给一侧')
             expect(dialog.get_by_role('combobox', name='停车点策略')).to_have_value('auto')
             expect(dialog.get_by_role('checkbox', name='碰撞筛选')).to_be_checked()
             # Preserve this test's fixed-base FK/editing contract. Distributed

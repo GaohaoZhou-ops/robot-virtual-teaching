@@ -13,14 +13,14 @@ const plain = (v) => Object.fromEntries(XYZ.map((axis) => [axis, v[axis]]));
 const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 const abort = (signal) => { if (signal?.aborted) throw new DOMException('计算已取消', 'AbortError'); };
 const TORSO_PITCH_JOINTS = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J'];
-export const MOBILE_SOLVE_VERSION = 3;
+export const MOBILE_SOLVE_VERSION = 6;
 
 export const DEFAULT_MOBILE_SOLVE_OPTIONS = Object.freeze({
   positionTolerance: Object.freeze({ x: 0.05, y: 0.05, z: 0.05 }),
   rotationTolerance: Object.freeze({ roll: 5, pitch: 5, yaw: 5 }),
   targetFrame: 'optical', armMode: 'both', allowSingleArm: true,
   allowTorsoHeight: true, lockChestVertical: true, respectJointLocks: true, keyframesOnly: true,
-  parkingMode: 'auto', checkCollisions: true,
+  parkingMode: 'auto', checkCollisions: true, armBodyClearance: 0.05,
 });
 
 export function validateMobileSolveOptions(value = {}) {
@@ -37,6 +37,9 @@ export function validateMobileSolveOptions(value = {}) {
   }
   if (!['optical', 'tool'].includes(options.targetFrame) || !['both', 'left', 'right'].includes(options.armMode)) throw new Error('末端或机械臂配置无效');
   if (!['auto', 'per-pose', 'fixed'].includes(options.parkingMode)) throw new Error('停车点策略无效');
+  const clearance = options.armBodyClearance === '' || options.armBodyClearance == null ? NaN : Number(options.armBodyClearance);
+  if (!Number.isFinite(clearance) || clearance < 0 || clearance > 0.3) throw new Error('机械臂与躯干的最小间距必须在 0–30 cm 之间');
+  options.armBodyClearance = clearance;
   for (const key of ['allowSingleArm', 'allowTorsoHeight', 'lockChestVertical', 'respectJointLocks', 'keyframesOnly', 'checkCollisions']) {
     if (typeof options[key] !== 'boolean') throw new Error('计算开关配置无效');
   }
@@ -49,12 +52,13 @@ export function mobileReportSolveOptions(report) {
     ...(report.version === 1 ? { parkingMode: 'fixed', checkCollisions: false } : {}),
     ...report.options,
     // Reports predating height control must not inherit the new default.
-    ...(report.version < MOBILE_SOLVE_VERSION ? { allowTorsoHeight: false } : {}),
+    ...(report.version < 3 ? { allowTorsoHeight: false } : {}),
+    ...(report.version < 6 ? { armBodyClearance: 0 } : {}),
   });
 }
 
 export function normalizeMobileSolveReport(value) {
-  if (!value || ![1, 2, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
+  if (!value || ![1, 2, 3, 4, 5, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
   try {
     const options = mobileReportSolveOptions(value);
     const validPose = (pose) => XYZ.every((axis) => Number.isFinite(pose?.position?.[axis]))
@@ -70,10 +74,42 @@ export function normalizeMobileSolveReport(value) {
           || !RPY.every((axis) => Number.isFinite(solution.rotationError?.[axis]))) return null;
         if (value.version >= 2 && (!validPose(solution.mapPose)
           || (options.checkCollisions && solution.feasible && (!solution.collision?.checked || !solution.collision.clear)))) return null;
-        if (value.version >= MOBILE_SOLVE_VERSION && solution.feasible && options.lockChestVertical
+        if (value.version >= 3 && solution.feasible && options.lockChestVertical
           && (!Number.isFinite(solution.chestTilt) || solution.chestTilt < 0 || solution.chestTilt > 0.25 + 1e-7
             || !Number.isFinite(solution.chestHeight))) return null;
+        if (value.version >= 6 && solution.feasible && options.checkCollisions && options.armBodyClearance > 0) {
+          const clearance = solution.collision?.armBodyClearance;
+          if (!clearance?.checked || !clearance.clear || !Number.isFinite(clearance.minimum)
+            || clearance.minimum + 1e-9 < options.armBodyClearance || clearance.required !== options.armBodyClearance
+            || !clearance.bySide || !['left', 'right'].every((side) => clearance.bySide[side] === null
+              || (Number.isFinite(clearance.bySide[side]) && clearance.bySide[side] + 1e-9 >= clearance.minimum))) return null;
+        }
       }
+    }
+    if (value.version >= 5) {
+      const motions = mobileMotionGroups(value), ids = new Set(), sampleIds = new Set();
+      for (const members of motions) {
+        const first = members[0], solution = first.solutions[first.selectedSide];
+        if (typeof first.motionGroupId !== 'string' || !first.motionGroupId || ids.has(first.motionGroupId) || members.length > 2 || !solution?.feasible) return null;
+        ids.add(first.motionGroupId);
+        for (const row of members) {
+          if (sampleIds.has(row.sampleId) || !row.solutions[row.selectedSide]?.feasible
+            || mobileParkingKey(row.mapPose) !== mobileParkingKey(row.solutions[row.selectedSide].mapPose)) return null;
+          sampleIds.add(row.sampleId);
+        }
+        if (members.length === 1 && first.pairedSampleId) return null;
+        if (members.length === 2) {
+          const other = members[1], otherSolution = other.solutions[other.selectedSide];
+          if (options.parkingMode === 'per-pose' || first.selectedSide === other.selectedSide
+            || first.parkingId !== other.parkingId || mobileParkingKey(first.mapPose) !== mobileParkingKey(other.mapPose)
+            || first.pairedSampleId !== other.sampleId || other.pairedSampleId !== first.sampleId
+            || Object.keys(solution.jointValues).length !== Object.keys(otherSolution.jointValues).length
+            || !Object.entries(solution.jointValues).every(([name, joint]) => otherSolution.jointValues[name] === joint)) return null;
+        }
+      }
+      if (sampleIds.size !== value.feasibleCount || sampleIds.size !== value.rows.filter((row) => row.feasible).length
+        || value.motionCount !== motions.length || value.dualMotionCount !== motions.filter((members) => members.length === 2).length
+        || !value.initialJointValues || !Object.values(value.initialJointValues).every(Number.isFinite)) return null;
     }
     return structuredClone({ ...value, options });
   } catch { return null; }
@@ -162,13 +198,20 @@ function seedUprightTorso(robot, chest, joints, start) {
 
 // All computations use a private model. Joint limits are enforced on every
 // update; chest verticality is a world-up constraint, independent of yaw.
-async function solveArm({ controller, chest, target, options, locked, baseline, postureReference, seed, checkpoint, collisionChecker }) {
-  const { robot, frame } = controller;
-  const joints = controller.joints.filter((joint) => !locked.has(joint.name));
+async function solveTargets({ goals, chest, options, locked, baseline, postureReference, seed, checkpoint, collisionChecker }) {
+  const { robot } = goals[0].controller;
+  const avoidBody = Boolean(collisionChecker && options.armBodyClearance > 0);
+  const preferredClearance = options.armBodyClearance + 0.03;
+  const clearanceWeight = 1.5;
+  const constraints = goals.map(({ controller, target }) => ({ frame: controller.frame, target,
+    chain: new Set(controller.joints), inverse: target.quaternion.clone().invert() }));
+  // An idle arm also needs room from the torso. Let its unlocked joints move
+  // away when necessary, while continuity still penalizes needless motion.
+  const clearanceJoints = avoidBody ? ['left', 'right'].flatMap((side) => getRobotEndEffector(robot, side)?.joints || []) : [];
+  const joints = [...new Set([...goals.flatMap(({ controller }) => controller.joints), ...clearanceJoints])].filter((joint) => !locked.has(joint.name));
   const chestJoints = new Set();
   for (let node = chest; node && node !== robot; node = node.parent) chestJoints.add(node);
   const torsoJoints = TORSO_PITCH_JOINTS.map((name) => joints.find((joint) => joint.name === name)).filter(Boolean);
-  const targetInverse = target.quaternion.clone().invert();
   const weights = [...XYZ.map((axis) => 0.05 / options.positionTolerance[axis]),
     ...RPY.map((axis) => 0.24 * 5 / options.rotationTolerance[axis])];
   const postureCost = () => joints.reduce((sum, joint) => {
@@ -185,19 +228,28 @@ async function solveArm({ controller, chest, target, options, locked, baseline, 
   }, 0) / Math.max(1, joints.length);
   const measure = () => {
     robot.parent.updateMatrixWorld(true);
-    const actualPosition = frame.getWorldPosition(new THREE.Vector3());
-    const actualQuaternion = frame.getWorldQuaternion(new THREE.Quaternion());
-    const position = target.position.clone().sub(actualPosition);
-    const rotation = rotationVector(target.quaternion, actualQuaternion).applyQuaternion(targetInverse);
+    const targets = constraints.map(({ frame, target, inverse }) => {
+      const actualPosition = frame.getWorldPosition(new THREE.Vector3());
+      const actualQuaternion = frame.getWorldQuaternion(new THREE.Quaternion());
+      const position = target.position.clone().sub(actualPosition);
+      const rotation = rotationVector(target.quaternion, actualQuaternion).applyQuaternion(inverse);
+      return { ...measureMobileTarget(frame, target, options), actualPosition,
+        error: [...position.toArray(), ...rotation.toArray()].map((n, i) => n * weights[i]) };
+    });
     const up = chest ? new THREE.Vector3(0, 0, 1).applyQuaternion(chest.getWorldQuaternion(new THREE.Quaternion())) : null;
-    const error = [...position.toArray(), ...rotation.toArray()].map((n, i) => n * weights[i]);
+    const error = targets.flatMap((metrics) => metrics.error);
     if (up) error.push(-up.x * 2, -up.y * 2, (1 - up.z) * 2);
-    const metrics = measureMobileTarget(frame, target, options);
+    const clearance = avoidBody ? collisionChecker.measurePostureClearance(preferredClearance) : null;
+    const clearanceErrors = clearance ? ['left', 'right'].map((side) => Math.max(0, preferredClearance - (clearance.bySide[side] ?? preferredClearance))) : [];
+    error.push(...clearanceErrors.map((value) => value * clearanceWeight));
+    if (clearance) error.push(Math.max(0, 0.001 - clearance.selfSeparation) * 3);
     const chestTilt = up ? deg(up.angleTo(new THREE.Vector3(0, 0, 1))) : 0;
     const chestHeight = chest ? chest.getWorldPosition(new THREE.Vector3()).z - robot.parent.position.z : null;
-    const feasible = metrics.withinTolerance && chestTilt <= 0.25;
+    const feasible = targets.every((metrics) => metrics.withinTolerance) && chestTilt <= 0.25;
     const cost = error.reduce((sum, n) => sum + n * n, 0);
-    return { ...metrics, feasible, chestTilt, chestHeight, actualPosition, up, error, cost, score: postureCost() + cost * 0.2 };
+    const comfortCost = clearanceErrors.reduce((sum, value) => sum + (value / 0.03) ** 2, 0) / 2;
+    return { targets, feasible, chestTilt, chestHeight, up, error, cost, clearance,
+      score: postureCost() + comfortCost * 2 + cost * 0.2 };
   };
   let best = null;
   // Continuity seed first, followed by independent, deterministic restarts.
@@ -231,16 +283,33 @@ async function solveArm({ controller, chest, target, options, locked, baseline, 
         && (state.feasible ? state.score < best.score : state.cost < best.cost))) {
         best = { ...state, jointValues: readRobotJointValues(robot) };
       }
-      if (kinematicallyFeasible || !joints.length || iteration === 120) break;
+      if ((kinematicallyFeasible && (!avoidBody || (state.feasible && state.clearance.minimum >= preferredClearance - 0.001)))
+        || !joints.length || iteration === 120) break;
       const columns = joints.map((joint) => {
         const axis = new THREE.Vector3().fromArray(joint.userData.jointAxis || [0, 0, 1])
           .applyQuaternion(joint.getWorldQuaternion(new THREE.Quaternion())).normalize();
         const prismatic = joint.userData.jointType === 'prismatic';
-        const dp = prismatic ? axis.clone() : axis.clone().cross(state.actualPosition.clone().sub(joint.getWorldPosition(new THREE.Vector3())));
-        const dr = prismatic ? new THREE.Vector3() : axis.clone().applyQuaternion(targetInverse);
-        const column = [...dp.toArray(), ...dr.toArray()].map((n, i) => n * weights[i]);
+        const column = constraints.flatMap(({ chain, inverse }, i) => {
+          // Shared torso joints affect both cameras; an arm joint only
+          // contributes to its own camera's six constraint rows.
+          if (!chain.has(joint)) return [0, 0, 0, 0, 0, 0];
+          const dp = prismatic ? axis.clone() : axis.clone().cross(state.targets[i].actualPosition.clone().sub(joint.getWorldPosition(new THREE.Vector3())));
+          const dr = prismatic ? new THREE.Vector3() : axis.clone().applyQuaternion(inverse);
+          return [...dp.toArray(), ...dr.toArray()].map((n, j) => n * weights[j]);
+        });
         if (state.up) column.push(...(chestJoints.has(joint) && !prismatic
           ? axis.clone().cross(state.up).multiplyScalar(2).toArray() : [0, 0, 0]));
+        if (avoidBody) {
+          const before = joint.userData.jointValue, epsilon = prismatic ? 1e-5 : 1e-4;
+          const direction = before + epsilon > (joint.userData.jointLimit?.upper ?? Infinity) ? -1 : 1;
+          setRobotJointValue(joint, before + direction * epsilon);
+          const moved = joint.userData.jointValue - before;
+          const clearance = collisionChecker.measurePostureClearance(preferredClearance);
+          column.push(...['left', 'right'].map((side) => moved && state.clearance.bySide[side] !== null
+            ? ((clearance.bySide[side] ?? preferredClearance) - state.clearance.bySide[side]) / moved * clearanceWeight : 0));
+          column.push(moved ? (clearance.selfSeparation - state.clearance.selfSeparation) / moved * 3 : 0);
+          setRobotJointValue(joint, before);
+        }
         return column;
       });
       const dot = (a, b) => a.reduce((sum, n, i) => sum + n * b[i], 0);
@@ -280,15 +349,19 @@ async function solveArm({ controller, chest, target, options, locked, baseline, 
   const collision = metrics.feasible && collisionChecker ? collisionChecker.check() : null;
   const feasible = metrics.feasible && (!collision || collision.clear);
   const collisionReason = collision && !collision.clear
-    ? [collision.selfPairs.length ? '机器人自身干涉' : '', collision.environmentLinks.length ? '机器人与工件干涉' : '', collision.groundLinks.length ? '机器人低于支撑平面' : ''].filter(Boolean).join('；') : '';
-  return { feasible, frameName: frame.name, positionError: metrics.positionError,
-    rotationError: metrics.rotationError, chestTilt: metrics.chestTilt, chestHeight: metrics.chestHeight, actualPose: metrics.actualPose,
+    ? [collision.selfPairs.length ? '机器人自身干涉' : '', collision.environmentLinks.length ? '机器人与工件干涉' : '', collision.groundLinks.length ? '机器人低于支撑平面' : '',
+      collision.armBodyClearance && !collision.armBodyClearance.clear
+        ? `机械臂与躯干间距不足 ${(options.armBodyClearance * 100).toFixed(1)} cm，可调整停车点或关节锁定` : ''].filter(Boolean).join('；') : '';
+  return metrics.targets.map((target, i) => ({ feasible, frameName: constraints[i].frame.name, positionError: target.positionError,
+    rotationError: target.rotationError, chestTilt: metrics.chestTilt, chestHeight: metrics.chestHeight, actualPose: target.actualPose,
     jointValues: best.jointValues, score: metrics.score, errorCost: metrics.cost,
     collision: collision || { checked: false, clear: false },
     reason: feasible ? '' : collisionReason || (metrics.chestTilt > 0.25
       ? options.allowTorsoHeight ? '前胸未满足垂直约束，请检查底盘倾斜或躯干行程' : '前胸未满足垂直约束，可开启自动调节胸部高度或检查关节锁定'
-      : '当前停车点、关节限位或锁定下未找到容差内解') };
+      : '当前停车点、关节限位或锁定下未找到容差内解') }));
 }
+
+const solveArm = async ({ controller, target, ...rest }) => (await solveTargets({ ...rest, goals: [{ controller, target }] }))[0];
 
 export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, environment, options: rawOptions, lockedJointNames = [], signal, onProgress, onSample, waitIfPaused }) {
   const checkpoint = async () => {
@@ -297,7 +370,9 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     await waitIfPaused?.();
     abort(signal);
   };
-  const options = validateMobileSolveOptions(rawOptions);
+  // Keep the old flag readable in stored reports, but every new calculation
+  // (including reruns from an old report) requires only one camera per target.
+  const options = { ...validateMobileSolveOptions(rawOptions), allowSingleArm: true };
   const samples = (task.mobileCapture?.samples || []).filter((sample) => !options.keyframesOnly || sample.kind === 'keyframe');
   if (!samples.length) throw new Error('没有可计算的采样点，请检查采样范围');
   if (!liveRobot) throw new Error('请先加载机器人模型');
@@ -322,9 +397,8 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     if (!sides.some((side) => controllers[side])) throw new Error(options.targetFrame === 'optical' ? '模型缺少末端相机光学坐标系，可切换为工具末端' : '模型缺少可求解的工具末端');
     const chest = options.lockChestVertical ? robot.getObjectByName('waist_yaw_L') : null;
     if (options.lockChestVertical && !chest) throw new Error('当前模型不支持前胸垂直约束，请关闭此选项');
-    let baseline = readRobotJointValues(robot);
-    const postureReference = baseline;
-    const seeds = { left: baseline, right: baseline };
+    const postureReference = readRobotJointValues(robot);
+    let state = { joints: postureReference, counts: { left: 0, right: 0 } };
     const locked = new Set(options.respectJointLocks ? lockedJointNames : []);
     const heightJoints = TORSO_PITCH_JOINTS.map((name) => robot.getObjectByName(name));
     const heightJointNames = options.allowTorsoHeight && heightJoints.every((joint) => joint?.userData.jointType === 'revolute')
@@ -332,9 +406,13 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     // Explicit automatic height control overrides only these three locks.
     // Other body/arm locks and every URDF joint limit remain in effect.
     heightJointNames.forEach((name) => locked.delete(name));
-    const collisionChecker = options.checkCollisions ? await createMobileCollisionChecker(robot, environment, checkpoint) : null;
+    const collisionChecker = options.checkCollisions ? await createMobileCollisionChecker(robot, environment, checkpoint, options) : null;
+    const refineClearance = Boolean(collisionChecker && options.armBodyClearance > 0);
+    const comfortable = (solution) => !refineClearance
+      || solution.collision?.armBodyClearance?.minimum >= options.armBodyClearance + 0.025;
+    const comfortableResult = (result) => result.feasible && comfortable(result.solutions[result.selectedSide]);
     const rows = [];
-    let feasibleCount = 0, parkingCount = 0, previousPose = null, previousSide = null;
+    let feasibleCount = 0, parkingCount = 0, motionCount = 0, dualMotionCount = 0, previousPose = null;
     const positionInRange = (controller, target) => {
       const root = controller.joints.filter((joint) => !locked.has(joint.name)).at(-1);
       if (!root) return true;
@@ -357,65 +435,232 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
       return root.getWorldPosition(new THREE.Vector3()).distanceTo(target.position)
         <= reach + Math.hypot(...XYZ.map((axis) => options.positionTolerance[axis])) + 1e-8;
     };
-    for (const [index, sample] of samples.entries()) {
-      await checkpoint();
-      onProgress?.({ completed: index, total: samples.length, name: sample.name, feasibleCount });
-      const target = mobileSampleTarget(sample, task);
-      const candidates = mobileParkingCandidates(target, basePose, previousPose, options.parkingMode);
-      let best = null, passingCandidates = 0;
-      for (const [candidateIndex, candidatePose] of candidates.entries()) {
-        const solutions = {};
-        place(candidatePose);
-        for (const side of sides) {
-          await checkpoint();
-          onProgress?.({ completed: index, total: samples.length, name: sample.name, side, feasibleCount,
-            candidate: candidateIndex + 1, candidateCount: candidates.length });
-          const controller = controllers[side];
-          applyRobotJointValues(robot, baseline);
-          const solution = !controller ? { feasible: false, reason: '该机械臂或目标坐标系不存在' }
-            : !positionInRange(controller, target) ? { feasible: false, reason: '目标超出该停车点的机械臂位置范围' }
-              : await solveArm({ controller, chest, target, options, locked, baseline, postureReference, seed: seeds[side], checkpoint, collisionChecker });
-          solutions[side] = { ...solution, mapPose: candidatePose };
-        }
-        const feasibleSides = sides.filter((side) => solutions[side].feasible);
-        const feasible = options.armMode === 'both' && !options.allowSingleArm ? feasibleSides.length === 2 : feasibleSides.length > 0;
-        const sideScore = (side) => solutions[side].score + (previousSide && side !== previousSide ? 0.08 : 0);
-        const selectedSide = feasibleSides.sort((a, b) => sideScore(a) - sideScore(b))[0] || null;
-        const reference = previousPose || basePose;
-        const travel = Math.hypot(candidatePose.position.x - reference.position.x, candidatePose.position.y - reference.position.y);
-        const reused = mobileParkingKey(reference) === mobileParkingKey(candidatePose);
-        const score = selectedSide ? sideScore(selectedSide) + Math.min(travel, 10) * 0.005 + (reused ? 0 : 0.025)
-          : Math.min(...Object.values(solutions).map((solution) => solution.errorCost ?? Infinity));
-        const result = { feasible, selectedSide, solutions, mapPose: candidatePose, score,
-          reason: feasible ? '' : feasibleSides.length ? '仅单臂可达，当前要求左右臂在该停车点分别可达'
-            : [...new Set(Object.values(solutions).map((solution) => solution.reason).filter(Boolean))].join('；') };
-        if (!best || (feasible && !best.feasible) || (feasible === best.feasible && score < best.score)) best = result;
-        if (feasible) {
-          passingCandidates += 1;
-          if ((reused && score < 0.12) || passingCandidates >= 3) break;
-        }
+    const entries = samples.map((sample, sourceIndex) => ({ sample, sourceIndex, target: mobileSampleTarget(sample, task) }));
+    // Assign one camera per target first, then jointly solve compatible pairs
+    // before publishing their whole-body states. Never splice independent IKs.
+    const advance = (current, result) => ({ joints: result.solutions[result.selectedSide].jointValues,
+      counts: { ...current.counts, [result.selectedSide]: current.counts[result.selectedSide] + 1 } });
+    const progress = (entry, extra = {}) => onProgress?.({ completed: rows.length, total: samples.length,
+      name: entry.sample.name, feasibleCount, ...extra });
+    const solveAt = async (entry, pose, current, candidateProgress = {}) => {
+      const { target } = entry, solutions = {};
+      place(pose); applyRobotJointValues(robot, current.joints);
+      // Give the less-used camera at this stop first refusal. For equal loads,
+      // prefer the nearer camera. A failed attempt always falls back to the
+      // other arm, so balanced work is never a reachability requirement.
+      const distance = (side) => controllers[side]?.frame.getWorldPosition(new THREE.Vector3()).distanceTo(target.position) ?? Infinity;
+      const distances = Object.fromEntries(sides.map((side) => [side, distance(side)]));
+      const ordered = [...sides].sort((a, b) => current.counts[a] - current.counts[b] || distances[a] - distances[b]);
+      for (const side of ordered) {
+        await checkpoint(); progress(entry, { side, ...candidateProgress });
+        const controller = controllers[side];
+        applyRobotJointValues(robot, current.joints);
+        const solution = !controller ? { feasible: false, reason: '该机械臂或目标坐标系不存在' }
+          : !positionInRange(controller, target) ? { feasible: false, reason: '目标超出该停车点的机械臂位置范围' }
+            : await solveArm({ controller, chest, target, options, locked, baseline: current.joints,
+              postureReference, seed: current.joints, checkpoint, collisionChecker });
+        solutions[side] = { ...solution, mapPose: pose };
+        if (solution.feasible && comfortable(solution)) break;
       }
+      const feasibleSides = ordered.filter((side) => solutions[side]?.feasible);
+      const selectedSide = feasibleSides.sort((a, b) => solutions[a].score - solutions[b].score)[0] || null;
+      for (const side of sides) if (!solutions[side]) solutions[side] = {
+        feasible: false, skipped: true, mapPose: pose,
+        reason: `此姿态已分配给${selectedSide === 'left' ? '左臂' : '右臂'}，无需另一相机重复到达`,
+      };
+      const feasible = feasibleSides.length > 0;
+      return { feasible, selectedSide, solutions, mapPose: pose,
+        score: selectedSide ? solutions[selectedSide].score : Math.min(...Object.values(solutions).map((solution) => solution.errorCost ?? Infinity)),
+        reason: feasible ? '' : [...new Set(Object.values(solutions).map((solution) => solution.reason).filter(Boolean))].join('；') };
+    };
+    const emit = async (entry, result) => {
       await checkpoint();
-      const row = { sampleId: sample.id, name: sample.name || `Pose ${index + 1}`, capturedAt: sample.capturedAt,
-        ...best, score: Number.isFinite(best.score) ? best.score : null,
+      const { sample, sourceIndex, target } = entry;
+      const row = { sampleId: sample.id, name: sample.name || `Pose ${sourceIndex + 1}`, capturedAt: sample.capturedAt,
+        sourceIndex, ...result, score: Number.isFinite(result.score) ? result.score : null,
         target: { position: plain(target.position), quaternion: { ...plain(target.quaternion), w: target.quaternion.w } } };
       rows.push(row);
       if (row.feasible) {
         feasibleCount += 1;
-        if (!previousPose || options.parkingMode === 'per-pose' || mobileParkingKey(previousPose) !== mobileParkingKey(row.mapPose)) parkingCount += 1;
+        if (!previousPose || options.parkingMode === 'per-pose' || mobileParkingKey(previousPose) !== mobileParkingKey(row.mapPose)) {
+          parkingCount += 1;
+          state = { ...state, counts: { left: 0, right: 0 } };
+        }
         row.parkingId = `parking-${parkingCount}`;
-        previousPose = row.mapPose; previousSide = row.selectedSide;
-        baseline = row.solutions[row.selectedSide].jointValues;
-        for (const side of sides) if (row.solutions[side].feasible) seeds[side] = row.solutions[side].jointValues;
+        previousPose = row.mapPose;
+        state = advance(state, row);
       }
-      onSample?.({ row, mapPose: row.mapPose, index, total: samples.length });
-      onProgress?.({ completed: index + 1, total: samples.length, name: sample.name, feasibleCount });
+      onSample?.({ row, mapPose: row.mapPose, index: rows.length - 1, total: samples.length });
+      progress(entry);
+    };
+    const emitPlan = async (steps) => {
+      const remaining = [...steps];
+      while (remaining.length) {
+        const first = remaining.shift();
+        if (!first.result.feasible) { await emit(first.entry, first.result); continue; }
+        let paired = null;
+        if (sides.length === 2 && options.parkingMode !== 'per-pose') {
+          // Try up to three opposite-arm partners in this bounded batch.
+          // Both six-axis camera goals share the same torso and collision
+          // check. A failed pair leaves both independently feasible targets.
+          const partners = remaining.filter((step) => step.result.feasible
+            && step.result.selectedSide !== first.result.selectedSide
+            && mobileParkingKey(step.result.mapPose) === mobileParkingKey(first.result.mapPose)).slice(0, 3);
+          // A capture may contain an entire left-side sweep before any right
+          // targets. Look beyond the current batch so that capture order alone
+          // cannot force two serial arm sweeps at the same parking point.
+          if (partners.length < 3) {
+            const side = first.result.selectedSide === 'left' ? 'right' : 'left', controller = controllers[side];
+            if (controller) {
+              place(first.result.mapPose);
+              applyRobotJointValues(robot, first.result.solutions[first.result.selectedSide].jointValues);
+              const origin = controller.frame.getWorldPosition(new THREE.Vector3());
+              const candidates = [...pending.values()].filter((entry) => positionInRange(controller, entry.target))
+                .sort((a, b) => a.target.position.distanceToSquared(origin) - b.target.position.distanceToSquared(origin))
+                .slice(0, 3 - partners.length);
+              partners.push(...candidates.map((entry) => ({ entry, result: { selectedSide: side, mapPose: first.result.mapPose,
+                solutions: { [first.result.selectedSide]: { feasible: false, skipped: true, mapPose: first.result.mapPose,
+                  reason: `此姿态由${side === 'left' ? '左臂' : '右臂'}执行，无需另一相机重复到达` } } } })));
+            }
+          }
+          for (const partner of partners) {
+            await checkpoint(); progress(first.entry, { side: 'both' });
+            const members = [first, partner];
+            const goals = members.map((step) => ({ controller: controllers[step.result.selectedSide], target: step.entry.target }));
+            const seed = { ...(partner.result.solutions[partner.result.selectedSide]?.jointValues
+              || first.result.solutions[first.result.selectedSide].jointValues) };
+            const shared = new Set(goals[1].controller.joints);
+            for (const joint of goals[0].controller.joints) if (!shared.has(joint)) {
+              seed[joint.name] = first.result.solutions[first.result.selectedSide].jointValues[joint.name];
+            }
+            place(first.result.mapPose);
+            const solutions = await solveTargets({ goals, chest, options, locked, baseline: state.joints,
+              postureReference, seed, checkpoint, collisionChecker });
+            if (solutions.every((solution) => solution.feasible) && comfortable(solutions[0])) {
+              paired = { partner, members, solutions }; break;
+            }
+          }
+        }
+        const motionGroupId = `motion-${++motionCount}`;
+        if (paired) {
+          dualMotionCount += 1;
+          const partnerIndex = remaining.indexOf(paired.partner);
+          if (partnerIndex >= 0) remaining.splice(partnerIndex, 1);
+          else pending.delete(paired.partner.entry.sourceIndex);
+          for (const [index, step] of paired.members.entries()) {
+            const solution = { ...paired.solutions[index], mapPose: step.result.mapPose };
+            await emit(step.entry, { ...step.result, feasible: true, reason: '', motionGroupId,
+              pairedSampleId: paired.members[1 - index].entry.sample.id,
+              score: solution.score, solutions: { ...step.result.solutions, [step.result.selectedSide]: solution } });
+          }
+        } else await emit(first.entry, { ...first.result, motionGroupId });
+      }
+    };
+    const canReach = (entry) => sides.some((side) => controllers[side] && positionInRange(controllers[side], entry.target));
+    const travel = (pose) => {
+      const reference = previousPose || basePose;
+      return Math.hypot(pose.position.x - reference.position.x, pose.position.y - reference.position.y);
+    };
+    const pending = new Map(entries.map((entry) => [entry.sourceIndex, entry]));
+    while (pending.size) {
+      const anchor = pending.values().next().value;
+      await checkpoint(); progress(anchor);
+      if (options.parkingMode === 'fixed') {
+        const steps = [];
+        let plannedState = state;
+        for (const entry of [...pending.values()].slice(0, 8)) {
+          const result = await solveAt(entry, basePose, plannedState);
+          steps.push({ entry, result }); pending.delete(entry.sourceIndex);
+          if (result.feasible) plannedState = advance(plannedState, result);
+        }
+        await emitPlan(steps); continue;
+      }
+      const auto = options.parkingMode === 'auto';
+      // Bound lookahead to eight nearby samples. Once a comfortable stop is
+      // found, compare up to four feasible candidates (three without the
+      // buffer); otherwise exhaust the finite candidate list. Every accepted
+      // sample must still pass IK and the complete collision checker.
+      const pool = auto ? [anchor, ...[...pending.values()].filter((entry) => entry !== anchor)
+        .sort((a, b) => a.target.position.distanceToSquared(anchor.target.position) - b.target.position.distanceToSquared(anchor.target.position))
+        .slice(0, 7)] : [anchor];
+      let candidates = mobileParkingCandidates(anchor.target, basePose, previousPose, options.parkingMode, { refineClearance });
+      if (auto) {
+        // Include bases between targets, not just bases centred on one camera
+        // pose. This lets opposite arms cover opposite sides of a workpiece.
+        for (const neighbour of pool.slice(1, 3)) {
+          const centre = { position: anchor.target.position.clone().add(neighbour.target.position).multiplyScalar(0.5),
+            quaternion: anchor.target.quaternion };
+          candidates.push(...mobileParkingCandidates(centre, basePose, null, 'per-pose').slice(0, 3));
+        }
+        candidates = [...new Map(candidates.map((pose) => [mobileParkingKey(pose), pose])).values()];
+        candidates = candidates.map((pose, index) => {
+          place(pose); applyRobotJointValues(robot, state.joints);
+          return { pose, index, potential: pool.filter(canReach).length,
+            reused: previousPose && mobileParkingKey(previousPose) === mobileParkingKey(pose) ? 1 : 0 };
+        }).sort((a, b) => b.reused - a.reused || b.potential - a.potential || a.index - b.index).map(({ pose }) => pose);
+      }
+      let bestPlan = null, failure = null, passingCandidates = 0;
+      for (const [candidateIndex, pose] of candidates.entries()) {
+        const sameStop = previousPose && mobileParkingKey(previousPose) === mobileParkingKey(pose);
+        let plannedState = { joints: state.joints, counts: sameStop && auto ? { ...state.counts } : { left: 0, right: 0 } };
+        const candidateProgress = { candidate: candidateIndex + 1, candidateCount: candidates.length };
+        const result = await solveAt(anchor, pose, plannedState, candidateProgress);
+        if (!result.feasible) {
+          if (!failure || result.score < failure.score) failure = result;
+          continue;
+        }
+        const plan = { steps: [{ entry: anchor, result }], attempted: new Map([[anchor.sourceIndex, plannedState.joints]]) };
+        plannedState = advance(plannedState, result);
+        for (const entry of pool.slice(1)) {
+          const next = await solveAt(entry, pose, plannedState, candidateProgress);
+          plan.attempted.set(entry.sourceIndex, plannedState.joints);
+          if (next.feasible && (!auto || comfortableResult(next))) { plan.steps.push({ entry, result: next }); plannedState = advance(plannedState, next); }
+        }
+        plan.shared = Math.min(plannedState.counts.left, plannedState.counts.right);
+        plan.cost = plan.steps.reduce((sum, step) => sum + step.result.score, 0) / plan.steps.length + travel(pose) * 0.005;
+        plan.comfortable = comfortableResult(result);
+        // Reject buffer violations first; prefer room around the torso over
+        // reusing a cramped stop. Within the comfortable band, maximize
+        // coverage, share work, then compare joint effort and base travel.
+        if (!bestPlan || (plan.comfortable && !bestPlan.comfortable)
+          || (plan.comfortable === bestPlan.comfortable && (plan.steps.length > bestPlan.steps.length
+            || (plan.steps.length === bestPlan.steps.length && (plan.shared > bestPlan.shared
+              || (plan.shared === bestPlan.shared && plan.cost < bestPlan.cost)))))) bestPlan = plan;
+        passingCandidates += 1;
+        if (sameStop && auto && plan.comfortable) { bestPlan = plan; break; }
+        if ((passingCandidates >= (refineClearance ? 4 : 3) && bestPlan.comfortable)
+          || (auto && plan.comfortable && plan.steps.length === pool.length && (sides.length === 1 || plan.shared >= Math.floor(pool.length / 2)))) break;
+      }
+      if (!bestPlan) {
+        await emit(anchor, failure); pending.delete(anchor.sourceIndex); continue;
+      }
+      for (const { entry } of bestPlan.steps) pending.delete(entry.sourceIndex);
+      await emitPlan(bestPlan.steps);
+      if (auto) {
+        // Drain other comfortable targets before leaving the selected stop,
+        // including non-adjacent captures. Never rewrite an emitted preview.
+        let batch = [], plannedState = state;
+        for (const entry of pending.values()) {
+          await checkpoint();
+          // A previous failure may become feasible after the other arm or
+          // shared torso moved. Reuse failures only for the same body state.
+          if (bestPlan.attempted.get(entry.sourceIndex) === plannedState.joints) continue;
+          place(previousPose); applyRobotJointValues(robot, plannedState.joints);
+          if (!canReach(entry)) continue;
+          const result = await solveAt(entry, previousPose, plannedState);
+          if (comfortableResult(result)) {
+            batch.push({ entry, result }); plannedState = advance(plannedState, result); pending.delete(entry.sourceIndex);
+          }
+          if (batch.length === 8) { await emitPlan(batch); batch = []; plannedState = state; }
+        }
+        await emitPlan(batch);
+      }
     }
     await checkpoint();
     return { version: MOBILE_SOLVE_VERSION, taskId: task.id, captureId: task.mobileCapture.id, computedAt: new Date().toISOString(),
       coordinateFrame: task.coordinateFrame, mapPose: basePose, options, lockedJointNames: [...locked], rows,
       heightJointNames, initialJointValues: postureReference,
-      sourceCount: task.mobileCapture.samples.length, feasibleCount, parkingCount,
+      sourceCount: task.mobileCapture.samples.length, feasibleCount, parkingCount, motionCount, dualMotionCount,
       collisionScreening: collisionChecker ? { enabled: true, method: 'conservative-obb', proxyCount: collisionChecker.proxyCount,
         environmentKind: collisionChecker.environmentKind, environmentCount: collisionChecker.environmentCount } : { enabled: false } };
   } finally {
@@ -423,11 +668,25 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
   }
 }
 
+// Older reports remain one target per motion. v5 publishes adjacent rows with
+// an explicitly validated shared full-body state for each simultaneous pair.
+export function mobileMotionGroups(report) {
+  const groups = [];
+  for (const row of report.rows) {
+    if (!row.feasible || !row.solutions[row.selectedSide]?.feasible) continue;
+    const previous = groups.at(-1);
+    if (report.version >= 5 && row.motionGroupId && previous?.[0].motionGroupId === row.motionGroupId) previous.push(row);
+    else groups.push([row]);
+  }
+  return groups;
+}
+
 export function buildMobileSolvedTask(source, report, robot, id) {
-  const points = report.rows.filter((row) => row.feasible && row.solutions[row.selectedSide]?.feasible);
-  if (!points.length) throw new Error('没有可保存的可达姿态');
+  const motions = mobileMotionGroups(report);
+  if (!motions.length) throw new Error('没有可保存的可达姿态');
   const parkingPoints = [];
-  for (const [index, row] of points.entries()) {
+  for (const [index, members] of motions.entries()) {
+    const row = members[0];
     const solution = row.solutions[row.selectedSide];
     const mapPose = { ...mobileSolutionMapPose(report, row), frameId: source.coordinateFrame };
     let parking = parkingPoints.at(-1);
@@ -437,16 +696,19 @@ export function buildMobileSolvedTask(source, report, robot, id) {
         createdAt: report.computedAt, updatedAt: report.computedAt, mapPose, poses: [] };
       parkingPoints.push(parking);
     }
-    parking.poses.push({ id: `${id}-pose-${index}`, name: `${row.name} · ${row.selectedSide === 'left' ? '左臂' : '右臂'}`, sequence: parking.poses.length + 1,
+    parking.poses.push({ id: `${id}-pose-${index}`, name: members.length === 2 ? `${members.map((member) => member.name).join(' + ')} · 双臂同步`
+      : `${row.name} · ${row.selectedSide === 'left' ? '左臂' : '右臂'}`, sequence: parking.poses.length + 1,
       capturedAt: row.capturedAt, mapPose, fullBodyJoints: { angularUnit: 'degree', linearUnit: 'meter', values: solution.jointValues },
-      ...(report.options.targetFrame === 'optical' ? { opticalTargets: { [row.selectedSide]: { ...row.target, frameName: solution.frameName, side: row.selectedSide } } } : {}),
-      mobileSampleId: row.sampleId });
+      ...(report.options.targetFrame === 'optical' ? { opticalTargets: Object.fromEntries(members.map((member) => [member.selectedSide,
+        { ...member.target, frameName: member.solutions[member.selectedSide].frameName, side: member.selectedSide }])) } : {}),
+      mobileSampleId: row.sampleId, ...(members.length === 2 ? { mobileSampleIds: members.map((member) => member.sampleId) } : {}) });
   }
   return {
     id, name: `${source.name} · 机器人解`, createdAt: report.computedAt, updatedAt: report.computedAt,
     coordinateFrame: source.coordinateFrame, map: { ...source.map },
     robot: { id: robot.id || robot.relativePath, name: robot.name, relativePath: robot.relativePath },
-    mobileSolveSource: { taskId: source.id, captureId: report.captureId, computedAt: report.computedAt, options: report.options },
+    mobileSolveSource: { taskId: source.id, captureId: report.captureId, computedAt: report.computedAt, options: report.options,
+      ...(report.version >= 5 ? { solverVersion: report.version, initialMapPose: report.mapPose, initialJointValues: report.initialJointValues } : {}) },
     parkingPoints,
   };
 }

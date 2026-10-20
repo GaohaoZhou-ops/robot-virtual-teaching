@@ -98,7 +98,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
           throw new Error('当前物体已改变，请点击「新建传输」重新准备模型。');
         }
       } else {
-        next = { ...await ipadRequest('/sessions', { method: 'POST', body: { manifest } }), targetDevice: device };
+        next = { ...await ipadRequest('/sessions', { method: 'POST', body: { manifest, targetDevice: device } }), targetDevice: device };
         update(next);
       }
       setBusy(`正在准备模型与${pairingInfo}…`);

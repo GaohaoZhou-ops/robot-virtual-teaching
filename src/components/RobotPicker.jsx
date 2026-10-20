@@ -19,7 +19,7 @@ const statusLabel = {
   error: '加载失败',
 };
 
-export default function RobotPicker({ selectedRobot, loadState, onSelect, showRobot = true, onShowRobotChange, visibilityDisabled = false, menuAnchorRef, menuLabel, isActive = true }) {
+export default function RobotPicker({ selectedRobot, loadState, onSelect, showRobot = true, onShowRobotChange, visibilityDisabled = false, menuAnchorRef, menuLabel, isActive = true, inline = false, disabled = false }) {
   const rootRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -28,10 +28,13 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
   const [catalogState, setCatalogState] = useState('idle');
   const [catalogError, setCatalogError] = useState('');
   const requestRevisionRef = useRef(0);
+  const catalogRequestRef = useRef(null);
 
   const refreshCatalog = () => {
     const revision = ++requestRevisionRef.current;
+    catalogRequestRef.current?.abort();
     const controller = new AbortController();
+    catalogRequestRef.current = controller;
     setCatalogState('loading');
     setCatalogError('');
     fetchRobotCatalog(controller.signal)
@@ -45,16 +48,21 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
         setCatalogError(error.message || '无法读取 robots 目录');
         setCatalogState('error');
       });
-    return () => controller.abort();
   };
 
   useEffect(() => {
-    if (!isActive) setOpen(false);
-  }, [isActive]);
+    if (!isActive || disabled) setOpen(false);
+  }, [isActive, disabled]);
 
   useEffect(() => {
-    if (!open || catalogState !== 'idle') return undefined;
-    return refreshCatalog();
+    if (!open) return undefined;
+    if (catalogState !== 'ready') refreshCatalog();
+    return () => {
+      requestRevisionRef.current += 1;
+      catalogRequestRef.current?.abort();
+      catalogRequestRef.current = null;
+      setCatalogState((current) => current === 'loading' ? 'idle' : current);
+    };
   }, [open]);
 
   useEffect(() => {
@@ -80,7 +88,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
   }, [open]);
 
   useLayoutEffect(() => {
-    if (!open) return undefined;
+    if (!open || inline) return undefined;
 
     const updateMenuPosition = () => {
       const trigger = (menuAnchorRef?.current || rootRef.current)?.getBoundingClientRect();
@@ -105,7 +113,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
       window.removeEventListener('resize', updateMenuPosition);
       window.removeEventListener('scroll', updateMenuPosition, true);
     };
-  }, [open, menuAnchorRef]);
+  }, [open, menuAnchorRef, inline]);
 
   const currentStatus = loadState?.status || (selectedRobot ? 'pending' : 'idle');
   const StatusIcon = currentStatus === 'loading'
@@ -120,6 +128,12 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
       ref={rootRef}
       data-robot-picker-state={currentStatus}
       data-selected-robot={selectedRobot?.id || ''}
+      onKeyDown={(event) => {
+        if (inline && open && event.key === 'Escape') {
+          event.preventDefault(); event.stopPropagation(); setOpen(false);
+          rootRef.current?.querySelector('.robot-picker__trigger')?.focus();
+        }
+      }}
     >
       <button
         type="button"
@@ -127,6 +141,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
         aria-label="加载机器人"
         aria-haspopup="dialog"
         aria-expanded={open}
+        disabled={disabled}
         title={selectedRobot ? `${selectedRobot.name} · 位于地图原点` : '从 robots 目录选择机器人模型'}
         onClick={() => setOpen((current) => !current)}
       >
@@ -144,7 +159,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
           ref={menuRef}
           role="dialog"
           aria-label="robots 目录模型"
-          style={menuPosition}
+          style={inline ? { position: 'static', width: '100%', maxHeight: 320 } : menuPosition}
         >
           <div className="robot-picker__heading">
             <div>
@@ -156,7 +171,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
             </button>
           </div>
 
-          <div className="robot-picker__visibility">
+          {onShowRobotChange && <div className="robot-picker__visibility">
             <button type="button" className="robot-visibility-switch" role="switch"
               aria-label="显示机器人" aria-checked={showRobot}
               disabled={visibilityDisabled || !selectedRobot || currentStatus !== 'loaded'}
@@ -164,7 +179,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
               onClick={() => onShowRobotChange?.(!showRobot)}>
               <span>显示机器人</span><span className="robot-visibility-switch__track" aria-hidden="true" />
             </button>
-          </div>
+          </div>}
 
           <div className="robot-picker__list" role="listbox" aria-label="可用机器人模型">
             {catalogState === 'loading' && !catalog.length && (
@@ -198,7 +213,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
                   onClick={() => {
                     onSelect(robot);
                     setOpen(false);
-                    menuAnchorRef?.current?.focus();
+                    (menuAnchorRef?.current || rootRef.current?.querySelector('.robot-picker__trigger'))?.focus();
                   }}
                 >
                   <span className="robot-picker__model-icon"><Bot size={16} /></span>
@@ -218,7 +233,7 @@ export default function RobotPicker({ selectedRobot, loadState, onSelect, showRo
             <strong>XYZ 0 / 0 / 0 · RPY 0 / 0 / 0</strong>
           </div>
         </div>,
-        document.body,
+        inline ? rootRef.current : document.body,
       )}
     </div>
   );
