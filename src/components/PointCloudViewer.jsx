@@ -7364,15 +7364,10 @@ export default function PointCloudViewer({
       : collisionStatusState === 'safe'
         ? `≥${ROBOT_COLLISION_SAFETY_DISTANCE * 1000} mm`
         : '— mm';
-  const progressiveCoveragePlayback = visionCoveragePlaybackSelection.progressive;
-  const progressiveReachedPoseCount = Math.min(
-    visionCoveragePlaybackSelection.playbackPoseCount,
-    visionCoveragePlaybackReachedPoseIds.length,
-  );
-  const showVisionCoverageReadout = teachingSpaceMode === 'independent' && (
+  const showVisionCoverageControls = teachingSpaceMode === 'independent' && (
     visionCoverageStats.frameCount > 0
     || (
-      progressiveCoveragePlayback
+      visionCoveragePlaybackSelection.progressive
       && visionCoveragePlaybackSelection.availableFrameCount > 0
     )
   );
@@ -7741,8 +7736,8 @@ export default function PointCloudViewer({
               <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={showVisionCoverageReadout
-                ? '点云颜色、表面透明度与显示质量'
+              title={showVisionCoverageControls
+                ? '点云颜色、投影渲染、表面透明度与显示质量'
                 : '点云颜色、显示密度与网格质量'}
               icon={SlidersHorizontal}
               isActive={isActive}
@@ -7762,7 +7757,23 @@ export default function PointCloudViewer({
                   <RotateCcw size={11} />
                 </button>
               </div>
-              {showVisionCoverageReadout && (
+              {showVisionCoverageControls && <>
+                <div className="viewer-display-settings__coverage">
+                  <span><Camera size={13} /> 投影渲染</span>
+                  <button
+                    type="button"
+                    className="viewer-display-settings__toggle"
+                    aria-label={visionCoverageRenderingEnabled ? '关闭投影渲染' : '开启投影渲染'}
+                    aria-pressed={visionCoverageRenderingEnabled}
+                    title={visionCoverageRenderingEnabled
+                      ? '隐藏视域体、光学坐标轴和表面染色'
+                      : '显示视域体、光学坐标轴和表面染色'}
+                    onClick={() => setVisionCoverageRenderingEnabled((current) => !current)}
+                  >
+                    {visionCoverageRenderingEnabled ? <Eye size={12} /> : <EyeOff size={12} />}
+                    {visionCoverageRenderingEnabled ? '显示' : '隐藏'}
+                  </button>
+                </div>
                 <label className="viewer-display-settings__opacity">
                   <span>表面透明度</span>
                   <input
@@ -7789,7 +7800,7 @@ export default function PointCloudViewer({
                   />
                   <output>{Math.round(teachingSurfaceTintOpacity * 100)}%</output>
                 </label>
-              )}
+              </>}
               <div
                 className="viewer-resolution-control"
                 role="group"
@@ -7903,74 +7914,6 @@ export default function PointCloudViewer({
                 <span>LOW</span>
                 <i />
                 <span>HIGH</span>
-              </div>
-            </aside>
-          )}
-          {showVisionCoverageReadout && (
-            <aside
-              className={`vision-coverage-readout ${visionCoverageRenderingEnabled ? 'is-rendering' : 'is-paused'} ${progressiveCoveragePlayback ? 'is-progressive' : ''}`}
-              role="group"
-              aria-label="独立示教相机视觉覆盖范围"
-              data-projection-rendering={visionCoverageRenderingEnabled ? 'enabled' : 'disabled'}
-              data-generation-mode={visionCoveragePlaybackSelection.mode}
-              data-playback-status={progressiveCoveragePlayback
-                ? visionCoveragePlaybackStatus
-                : 'idle'}
-              data-playback-reached-pose-count={progressiveReachedPoseCount}
-              data-playback-pose-count={visionCoveragePlaybackSelection.playbackPoseCount}
-              data-available-frame-count={visionCoveragePlaybackSelection.availableFrameCount}
-              data-coverage-pose-count={visionCoverageStats.poseCount}
-              data-coverage-frame-count={visionCoverageStats.frameCount}
-              data-coverage-optical-point-count={visionCoverageStats.opticalPointCount}
-              data-coverage-coordinate-frame-count={visionCoverageStats.coordinateFrameCount}
-              data-coverage-coordinate-axis-count={visionCoverageStats.coordinateAxisCount}
-              data-coverage-cell-count={visionCoverageStats.cellCount}
-              data-surface-tint-state={teachingSurfaceTintStats.status}
-              data-surface-tint-point-count={teachingSurfaceTintStats.coveredPointCount}
-              data-surface-tint-opacity={teachingSurfaceTintOpacity.toFixed(2)}
-            >
-              <span className="vision-coverage-readout__icon"><Camera size={14} /></span>
-              <div className="vision-coverage-readout__copy">
-                <small>
-                  {progressiveCoveragePlayback
-                    ? 'OPTICAL COVERAGE · ARRIVAL REVEAL'
-                    : 'OPTICAL COVERAGE · SURFACE UNION'}
-                </small>
-                <strong>
-                  {progressiveCoveragePlayback ? (
-                    <>
-                      已到达 {progressiveReachedPoseCount}
-                      /{visionCoveragePlaybackSelection.playbackPoseCount} 姿态
-                      {' · '}{visionCoverageStats.frameCount}
-                      /{visionCoveragePlaybackSelection.availableFrameCount} 个视域
-                    </>
-                  ) : (
-                    <>
-                      {visionCoverageStats.poseCount} 组姿态 · {visionCoverageStats.frameCount} 个视域
-                      {' · '}覆盖采样 {teachingSurfaceTintStats.coveredPointCount}
-                    </>
-                  )}
-                </strong>
-              </div>
-              <div className="vision-coverage-readout__controls">
-                <button
-                  type="button"
-                  className={`vision-coverage-readout__toggle ${visionCoverageRenderingEnabled ? 'is-on' : 'is-off'}`}
-                  aria-label={visionCoverageRenderingEnabled ? '关闭投影渲染' : '开启投影渲染'}
-                  aria-pressed={visionCoverageRenderingEnabled}
-                  title={visionCoverageRenderingEnabled
-                    ? '隐藏视域体、光学坐标轴和表面染色'
-                    : '显示视域体、光学坐标轴和表面染色'}
-                  onClick={() => setVisionCoverageRenderingEnabled((current) => !current)}
-                >
-                  {visionCoverageRenderingEnabled ? <Eye size={11} /> : <EyeOff size={11} />}
-                  <span>投影 {visionCoverageRenderingEnabled ? 'ON' : 'OFF'}</span>
-                </button>
-                <span className="vision-coverage-readout__sides" aria-hidden="true">
-                  <i className="is-left" />
-                  <i className="is-right" />
-                  <i className="is-surface" />
-                </span>
               </div>
             </aside>
           )}

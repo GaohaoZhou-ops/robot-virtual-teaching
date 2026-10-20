@@ -280,20 +280,8 @@ def run():
         assert overlap_camera_difference["maximum"] <= 1
         assert overlap_camera_difference["mean"] <= 0.5
 
-        readout = page.get_by_label("独立示教相机视觉覆盖范围", exact=True)
-        assert readout.is_visible()
-        assert readout.get_attribute("data-coverage-pose-count") == "2"
-        assert readout.get_attribute("data-coverage-frame-count") == "4"
-        assert readout.get_attribute("data-coverage-optical-point-count") == "4"
-        assert readout.get_attribute("data-coverage-coordinate-frame-count") == "4"
-        assert readout.get_attribute("data-coverage-coordinate-axis-count") == "12"
-        assert readout.get_attribute("data-surface-tint-state") == "visible"
-        assert readout.get_attribute("data-surface-tint-point-count") == str(
-            first_surface_tint_count
-        )
-        assert readout.get_attribute("data-projection-rendering") == "enabled"
-        assert readout.locator("em").count() == 0
-        assert readout.get_by_role("slider").count() == 0
+        assert page.get_by_label("独立示教相机视觉覆盖范围", exact=True).count() == 0
+        assert page.locator(".vision-coverage-readout").count() == 0
         page.get_by_role("button", name="显示设置", exact=True).click()
         display_settings = page.get_by_role("dialog", name="3D 显示设置", exact=True)
         opacity_slider = display_settings.get_by_role(
@@ -301,7 +289,7 @@ def run():
         )
         assert opacity_slider.input_value() == "5"
         assert display_settings.locator("output").inner_text() == "5%"
-        assert readout.get_attribute("data-surface-tint-opacity") == "0.05"
+        assert canvas.get_attribute("data-teaching-surface-tint-opacity") == "0.05"
         assert overlap_metrics["render_enabled"] == "true"
         assert overlap_metrics["render_state"] == "enabled"
         assert (
@@ -321,7 +309,7 @@ def run():
         )
         assert opacity_slider.input_value() == "35"
         assert display_settings.locator("output").inner_text() == "35%"
-        assert readout.get_attribute("data-surface-tint-opacity") == "0.35"
+        assert canvas.get_attribute("data-teaching-surface-tint-opacity") == "0.35"
         page.screenshot(path="/tmp/atlas-surface-opacity-display-settings.png")
         display_settings.get_by_role("button", name="关闭显示设置").click()
         high_opacity_frame = canvas.screenshot()
@@ -348,7 +336,8 @@ def run():
         display_settings.get_by_role("button", name="关闭显示设置").click()
 
         visible_projection_frame = canvas.screenshot()
-        disable_projection = readout.get_by_role(
+        page.get_by_role("button", name="显示设置", exact=True).click()
+        disable_projection = display_settings.get_by_role(
             "button", name="关闭投影渲染", exact=True
         )
         assert disable_projection.get_attribute("aria-pressed") == "true"
@@ -376,7 +365,8 @@ def run():
             disabled_metrics["optical_pose_signature"]
             == captured_optical_pose_signature
         )
-        assert readout.get_attribute("data-projection-rendering") == "disabled"
+        assert display_settings.get_by_role("button", name="开启投影渲染", exact=True).get_attribute("aria-pressed") == "false"
+        display_settings.get_by_role("button", name="关闭显示设置").click()
         assert (
             canvas.get_attribute("data-teaching-surface-tint-render-enabled")
             == "false"
@@ -393,7 +383,8 @@ def run():
         )
         assert projection_toggle_difference["maximum"] > 10
 
-        enable_projection = readout.get_by_role(
+        page.get_by_role("button", name="显示设置", exact=True).click()
+        enable_projection = display_settings.get_by_role(
             "button", name="开启投影渲染", exact=True
         )
         assert enable_projection.get_attribute("aria-pressed") == "false"
@@ -414,7 +405,8 @@ def run():
             restored_toggle_metrics["optical_pose_signature"]
             == captured_optical_pose_signature
         )
-        assert readout.get_attribute("data-projection-rendering") == "enabled"
+        assert display_settings.get_by_role("button", name="关闭投影渲染", exact=True).get_attribute("aria-pressed") == "true"
+        display_settings.get_by_role("button", name="关闭显示设置").click()
         robot_position_before_move = (
             float(canvas.get_attribute("data-robot-x") or 0),
             float(canvas.get_attribute("data-robot-y") or 0),
@@ -483,8 +475,7 @@ def run():
         assert first_arrival_metrics["optical_points"] == 2
         assert first_arrival_metrics["coordinate_frames"] == 2
         assert first_arrival_metrics["coordinate_axes"] == 6
-        assert readout.get_attribute("data-playback-reached-pose-count") == "1"
-        assert readout.get_attribute("data-available-frame-count") == "4"
+        assert page.locator(".vision-coverage-readout").count() == 0
         for axis, expected in zip(("x", "y", "z"), robot_position_before_move):
             assert abs(float(canvas.get_attribute(f"data-robot-{axis}")) - expected) < 0.001
         page.screenshot(
