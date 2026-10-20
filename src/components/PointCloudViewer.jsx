@@ -7981,6 +7981,7 @@ export default function PointCloudViewer({
             onClose={exitEndEffectorControl}
           /> : <EndEffectorControlPanel
             control={endEffectorControl}
+            viewportRef={mountRef}
             lockModes={endEffectorLockModesState}
             onModeChange={setEndEffectorMode}
             onPoseChange={setEndEffectorPose}

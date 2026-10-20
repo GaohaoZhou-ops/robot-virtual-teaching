@@ -1028,15 +1028,6 @@ code {
   background: rgba(255, 112, 110, 0.025);
 }
 
-.spacemouse-coexist-note {
-  margin: 0;
-  padding: 7px 11px 9px;
-  border-top: 1px solid rgba(137, 177, 179, 0.1);
-  color: #5d7778;
-  font: 6px/1.55 "SFMono-Regular", Menlo, monospace;
-  text-align: center;
-}
-
 .spacemouse-empty-state {
   display: flex;
   flex-direction: column;
@@ -2919,12 +2910,37 @@ code {
   animation: space-ball-panel-in 180ms cubic-bezier(.2,.8,.2,1) both;
 }
 
-.point-cloud-view:has([data-pose-edit-state="editing"]) .end-effector-panel {
+.point-cloud-view:has([data-pose-edit-state="editing"]) .end-effector-panel:not(.is-draggable) {
   top: 48px;
   right: 10px;
   left: auto;
   max-height: calc(100% - 156px);
   overflow: auto;
+}
+
+.end-effector-panel.is-draggable {
+  width: min(374px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.end-effector-panel.is-draggable .end-effector-panel__header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  grid-template-columns: 36px minmax(0, 1fr) 14px 26px;
+  background: #0a1a1e;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.end-effector-panel.is-dragging .end-effector-panel__header { cursor: grabbing; }
+.end-effector-panel__drag-grip { color: var(--muted-2); }
+.end-effector-panel.is-draggable .end-effector-panel__header:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: -2px;
 }
 
 .end-effector-panel.is-limited {
