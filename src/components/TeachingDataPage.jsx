@@ -57,6 +57,7 @@ export default function TeachingDataPage({
   onMergeParkingPoints,
   onExportProject,
   onExportTeachingData,
+  onCopyTeachingNode,
   onImportTeachingData,
   teachingImportDisabled,
   canExportTeachingData = false,
@@ -172,6 +173,10 @@ export default function TeachingDataPage({
           <i>/</i>
           <strong aria-current="page">示教数据</strong>
         </nav>
+        <div className={`teaching-data-page__session is-${sessionState?.status || 'checking'}`}>
+          <ShieldCheck size={12} />
+          <span>{sessionState?.status === 'ready' ? 'SESSION SYNCED' : 'SESSION CHECK'}</span>
+        </div>
         {recovery?.available && (
           <button
             type="button"
@@ -187,10 +192,6 @@ export default function TeachingDataPage({
             </span>
           </button>
         )}
-        <div className={`teaching-data-page__session is-${sessionState?.status || 'checking'}`}>
-          <ShieldCheck size={12} />
-          <span>{sessionState?.status === 'ready' ? 'SESSION SYNCED' : 'SESSION CHECK'}</span>
-        </div>
         <ProjectExportButton
           mapData={mapData}
           exportState={projectExportState}
@@ -254,6 +255,7 @@ export default function TeachingDataPage({
                 onAnalyzeParkingPointMerge={onAnalyzeParkingPointMerge}
                 onMergeParkingPoints={onMergeParkingPoints}
                 onExportTeachingData={onExportTeachingData}
+                onCopyTeachingNode={onCopyTeachingNode}
                 onImportTeachingData={onImportTeachingData}
                 teachingImportDisabled={teachingImportDisabled}
                 canExportTeachingData={canExportTeachingData}

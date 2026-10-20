@@ -200,7 +200,7 @@ def run():
         assert tree.get_attribute("data-active-parking-point") == target_id
         assert canvas.get_attribute("data-synchronized-focus-type") == "robot"
 
-        capture_button = page.get_by_role("button", name="记录当前机械臂姿态", exact=True)
+        capture_button = page.get_by_role("button", name="记录当前姿态", exact=True)
         assert capture_button.is_enabled()
         capture_button.click()
         page.wait_for_function(

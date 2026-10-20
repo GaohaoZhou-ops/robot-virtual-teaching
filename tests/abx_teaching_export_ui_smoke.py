@@ -40,6 +40,7 @@ def seed(page, invalid=False):
     }''', invalid)
     page.goto(BASE_URL + '/teaching-data', wait_until='networkidle')
     page.locator('.loading-curtain').wait_for(state='hidden')
+    page.get_by_role('button', name='选择示教任务 装配任务：中文校验', exact=True).click()
     page.get_by_role('button', name='导出示教数据', exact=True).wait_for()
 
 

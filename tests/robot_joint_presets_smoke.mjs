@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
-  createRobotJointPreset, groupPresetJoints, jointPresetErrors,
+  buildRobotPresetFile, createRobotJointPreset, groupPresetJoints, jointPresetErrors,
   jointValueFromInput, jointValueToInput, presetJointDefinitions, presetMatchesRobot, readRobotPresetFile,
 } from '../src/lib/robotJointPresets.js';
 import { buildExport, normalizeProject } from '../src/lib/io.js';
@@ -106,5 +106,26 @@ assert.throws(() => readRobotPresetFile(sampleText, fullJoints.map((joint) => (
 const importedPose = createRobotJointPreset({ ...imported, id: 'imported-preset', robot });
 assert.equal(importedPose.joints.source, 'robot-preset');
 assert.deepEqual(normalizeProject({ jointPoses: [importedPose] }).jointPoses[0].joints.values, expected);
+const sourceJoints = { angularUnit: 'degree', values: {
+  wheel_LF_J: 420, ...Object.fromEntries(Object.entries(expected).reverse()),
+} };
+const beforeCopy = structuredClone(sourceJoints);
+const copied = buildRobotPresetFile(sourceJoints);
+assert.deepEqual(copied, sample, 'clipboard must match the reference file regardless of joint storage order');
+assert.deepEqual(readRobotPresetFile(JSON.stringify(copied), fullJoints, 'copied.json').values, expected);
+copied.joints.head[0] = 999;
+assert.deepEqual(sourceJoints, beforeCopy, 'copy must not mutate the saved pose');
+const copiedRadians = buildRobotPresetFile({ angularUnit: 'radian', values: Object.fromEntries(
+  Object.entries(expected).map(([name, value]) => [name, value * Math.PI / 180]),
+) });
+for (const [group, entries] of Object.entries(sample.joints)) {
+  entries.forEach((value, index) => assert.ok(Math.abs(copiedRadians.joints[group][index] - value) < 1e-12));
+}
+for (const value of [undefined, null, '12', NaN, Infinity]) {
+  assert.throws(() => buildRobotPresetFile({ ...sourceJoints,
+    values: { ...sourceJoints.values, head_yaw_J: value } }), /head_yaw_J/);
+}
+assert.throws(() => buildRobotPresetFile({ ...sourceJoints, angularUnit: 'unknown' }), /单位/);
 console.log('robot joint presets: units, limits, model binding and project persistence passed');
 console.log('sample preset import: 20-joint mapping, deg/rad, validation and persistence passed');
+console.log('copied preset: reference schema, joint order, radians, missing values and snapshot isolation passed');

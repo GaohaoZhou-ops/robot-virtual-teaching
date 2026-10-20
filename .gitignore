@@ -479,6 +479,13 @@ playwright/.auth/
 /tests/atlas-route-identity-*.[zZ][iI][pP]
 /tests/atlas-insert-action-*.[zZ][iI][pP]
 
+# Clipboard smoke-test downloads when TMPDIR is local, plus packed copies.
+# Root/tests output scopes preserve matching regression fixture directories.
+/atlas-copy-ui-*/
+/tests/atlas-copy-ui-*/
+/atlas-copy-ui-*.[zZ][iI][pP]
+/tests/atlas-copy-ui-*.[zZ][iI][pP]
+
 # Python bytecode, environments, and test caches
 __pycache__/
 *.py[cod]

@@ -27,6 +27,45 @@ const joints = (value) => {
   };
 };
 
+const parkingPointData = (parking, frame, sequence) => ({
+  ...fields(parking, ['id', 'name', 'createdAt', 'updatedAt']),
+  sequence,
+  mapPose: pose(parking.mapPose, frame),
+  poses: (parking.poses || []).map((point, pointIndex) => ({
+    ...fields(point, ['id', 'name', 'capturedAt', 'mobileSampleId']),
+    ...(Array.isArray(point.mobileSampleIds) ? { mobileSampleIds: [...point.mobileSampleIds] } : {}),
+    sequence: pointIndex + 1,
+    mapPose: pose(point.mapPose, frame),
+    fullBodyJoints: joints(point.fullBodyJoints),
+    opticalTargets: Object.fromEntries(['left', 'right'].flatMap((side) => {
+      const target = point.opticalTargets?.[side] || point.cameraCapture?.frames?.[side]?.opticalPose;
+      return target ? [[side, opticalPose(target)]] : [];
+    })),
+  })),
+});
+
+// Temporary clipboard contract; keep it separate from the robot ZIP format.
+export function buildTeachingParkingPointCopy(task, parkingPoint) {
+  const index = task?.parkingPoints?.findIndex((item) => item.id === parkingPoint?.id) ?? -1;
+  if (index < 0) throw new Error('未找到选中的停车点');
+  const frame = task.coordinateFrame || parkingPoint.mapPose?.frameId || 'map';
+  const data = parkingPointData(parkingPoint, frame, index + 1);
+  if (parkingPoint.abx) data.located = parkingPoint.abx.located !== false;
+  data.poses.forEach((point, pointIndex) => {
+    const source = parkingPoint.poses[pointIndex];
+    if (source.abx) point.located = source.abx.located !== false;
+  });
+  return structuredClone({
+    format: 'atlas-route-studio-parking-point',
+    version: 1,
+    task: fields(task, ['id', 'name']),
+    coordinateSystem: { frameId: frame, distanceUnit: 'meter', angleUnit: 'degree', rotationOrder: 'ZYX' },
+    robot: robotIdentity(task.robot),
+    sourceMap: mapIdentity(task.map),
+    parkingPoint: data,
+  });
+}
+
 // Only pose data crosses this boundary. Preview images, point clouds, solver
 // reports and future fields on the project must never inflate an exchange file.
 const mobileCapture = (capture) => ({
@@ -59,22 +98,9 @@ export function buildTeachingDataExport(project) {
       coordinateFrame: taskFrame,
       robot: robotIdentity(task.robot),
       sourceMap: mapIdentity(task.map),
-      parkingPoints: (task.parkingPoints || []).map((parking, parkingIndex) => ({
-        ...fields(parking, ['id', 'name', 'createdAt', 'updatedAt']),
-        sequence: parkingIndex + 1,
-        mapPose: pose(parking.mapPose, taskFrame),
-        poses: (parking.poses || []).map((point, pointIndex) => ({
-          ...fields(point, ['id', 'name', 'capturedAt', 'mobileSampleId']),
-          ...(Array.isArray(point.mobileSampleIds) ? { mobileSampleIds: [...point.mobileSampleIds] } : {}),
-          sequence: pointIndex + 1,
-          mapPose: pose(point.mapPose, taskFrame),
-          fullBodyJoints: joints(point.fullBodyJoints),
-          opticalTargets: Object.fromEntries(['left', 'right'].flatMap((side) => {
-            const target = point.opticalTargets?.[side] || point.cameraCapture?.frames?.[side]?.opticalPose;
-            return target ? [[side, opticalPose(target)]] : [];
-          })),
-        })),
-      })),
+      parkingPoints: (task.parkingPoints || []).map((parking, parkingIndex) => (
+        parkingPointData(parking, taskFrame, parkingIndex + 1)
+      )),
       ...(task.mobileCapture ? {
         mobileCapture: mobileCapture(task.mobileCapture),
         ...(task.mobileTransform ? { mobileTransform: [...task.mobileTransform] } : {}),

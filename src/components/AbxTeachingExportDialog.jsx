@@ -55,7 +55,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
         <p className="abx-export-map">当前地图 <strong>{snapshot.payload.map?.fileName || '未命名地图'}</strong><span>MAP · 米 / 弧度</span></p>
         <div className="abx-export-notice" role="note">
           <strong>380B 平地巡检格式 · 任务导入包</strong>
-          <p>在大脑“示教任务 → 导入”选择此 ZIP。导航步骤使用机器人当前路网的站点编号，包内不携带路网。请核对并启用对应路网；新增或修改的路网需通过“导出机器人路径”单独导入。</p>
+          <p>在大脑“示教任务 → 导入”选择此 ZIP。导航步骤使用机器人当前路网的站点编号，包内不携带路网。请核对并启用对应路网；新增或修改的路网需通过右侧“路径/导航 → 导出路径”单独导入。</p>
         </div>
         {!result && !error && <p className="abx-export-loading" role="status"><LoaderCircle className="is-spinning" size={16} />正在校验机器人姿态与导航坐标…</p>}
         {error && <p className="abx-export-error" role="alert">{error}</p>}

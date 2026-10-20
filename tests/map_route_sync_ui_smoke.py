@@ -10,7 +10,7 @@ from parking_ghost_smoke import wait_for_pose
 
 def navigation(page):
     page.get_by_role("tab", name="路径与导航", exact=True).click()
-    return page.get_by_role("region", name="地图路径同步", exact=True)
+    return page.get_by_role("group", name="路径操作", exact=True)
 
 
 def temporary_options(page):
@@ -27,9 +27,11 @@ def run():
             page.set_default_timeout(30_000)
             page.on("pageerror", lambda error: errors.append(str(error)))
             seed(page, ["map", "independent"], "independent")
-            card = navigation(page)
-            expect(card.get_by_role("button", name="同步地图路径", exact=True)).to_be_disabled()
-            expect(card).to_contain_text("建立转换关系")
+            actions = navigation(page)
+            expect(page.get_by_role("group", name="路径导入导出", exact=True)).to_have_count(0)
+            expect(actions.get_by_role("button", name="同步路径", exact=True)).to_be_disabled()
+            expect(actions.get_by_role("button", name="同步路径", exact=True)).to_have_attribute("title", re.compile("建立转换关系"))
+            expect(page.locator(".map-route-sync, .connectivity-card")).to_have_count(0)
 
             # Establish the relation through the existing placement UI, then
             # load an absolute ABX route after placement, as in the user flow.
@@ -39,11 +41,12 @@ def run():
                 dialog.get_by_label(f"放置 {axis}", exact=True).fill(str(value))
             dialog.get_by_role("button", name="放置并进入地图", exact=True).click()
             ready(page, "map")
-            expect(page.get_by_role("region", name="地图路径同步", exact=True)).to_have_count(0)
+            expect(page.get_by_role("button", name=re.compile("^(同步路径|重新同步)$"))).to_have_count(0)
             route = {"schema_version": 1, "id": "sync-test", "name": "同步测试路径", "scene_name": "absolute-map",
                      "nodes": [{"id": 1, "label": "同步路径 A", "x_m": -15, "y_m": 7, "yaw_rad": 0},
                                {"id": 2, "label": "同步路径 B", "x_m": -15, "y_m": 8, "yaw_rad": None}],
                      "edges": [{"id": 257, "start": 1, "end": 2}]}
+            page.get_by_role("tab", name="路径与导航", exact=True).click()
             with page.expect_file_chooser() as chooser:
                 page.get_by_role("button", name="导入路径", exact=True).click()
             chooser.value.set_files({"name": "sync.route.json", "mimeType": "application/json",
@@ -53,13 +56,18 @@ def run():
             ready(page, "independent")
             absolute_before = snapshot(page, "map")
             local_before = snapshot(page, "independent")
-            card = navigation(page)
-            expect(card.get_by_role("button", name="同步地图路径", exact=True)).to_be_enabled()
-            card.get_by_role("button", name="同步地图路径", exact=True).click()
+            actions = navigation(page)
+            expect(actions.get_by_role("button", name="同步路径", exact=True)).to_be_enabled()
+            actions.get_by_role("button", name="同步路径", exact=True).click()
             count = len(absolute_before["project"]["waypoints"])
             expect(temporary_options(page)).to_have_count(count)
-            expect(card.get_by_role("button", name="重新同步地图路径", exact=True)).to_be_enabled()
-            expect(card).to_contain_text("已转换到 VIRTUAL_ORIGIN")
+            expect(actions.get_by_role("button", name="重新同步", exact=True)).to_be_enabled()
+            expect(actions.get_by_role("button", name="重新同步", exact=True)).to_have_css("color", "rgb(94, 229, 154)")
+            path_test = actions.get_by_role("button", name="路径测试", exact=True)
+            expect(path_test).to_be_enabled()
+            path_test.click()
+            expect(page.get_by_text(re.compile("^检测完成："))).to_be_visible()
+            expect(path_test).to_have_class(re.compile("is-partial"))
             synced_id = next(option.get_attribute("value") for option in temporary_options(page).all()
                              if "N1 · 同步路径 A" in option.inner_text())
             page.get_by_label("搜索导航点", exact=True).select_option(synced_id)
@@ -104,7 +112,7 @@ def run():
             assert local_after.get("abxRoutes") == local_before["project"].get("abxRoutes")
 
             # Repeated sync replaces copies and recomputes from the map.
-            card.get_by_role("button", name="重新同步地图路径", exact=True).click()
+            actions.get_by_role("button", name="重新同步", exact=True).click()
             expect(temporary_options(page)).to_have_count(count)
             synced_id = next(option.get_attribute("value") for option in temporary_options(page).all()
                              if "N1 · 同步路径 A" in option.inner_text())
@@ -112,10 +120,16 @@ def run():
             expect(editor.locator('input[type="number"]').nth(0)).to_have_value("10.00")
             page.set_viewport_size({"width": 1024, "height": 768})
             page.screenshot(path="/tmp/atlas-map-route-sync-compact.png", full_page=True)
-            button = card.get_by_role("button", name="重新同步地图路径", exact=True)
+            button = actions.get_by_role("button", name="重新同步", exact=True)
             expect(button).to_be_in_viewport()
             panel_box = page.locator(".inspector-panel").bounding_box()
             button_box = button.bounding_box()
+            test_box = path_test.bounding_box()
+            assert abs(button_box["y"] - test_box["y"]) < 1
+            assert button_box["height"] == test_box["height"] == 32
+            assert abs(button_box["width"] - test_box["width"]) < 1
+            assert button_box["x"] + button_box["width"] < test_box["x"]
+            assert test_box["x"] + test_box["width"] <= panel_box["x"] + panel_box["width"]
             assert button_box["x"] >= panel_box["x"]
             assert button_box["x"] + button_box["width"] <= panel_box["x"] + panel_box["width"]
             move_box = move_button.bounding_box()
@@ -125,9 +139,9 @@ def run():
             # without requiring another click or persisting local coordinates.
             page.reload(wait_until="networkidle")
             ready(page, "independent")
-            card = navigation(page)
+            actions = navigation(page)
             expect(temporary_options(page)).to_have_count(count)
-            expect(card.get_by_role("button", name="重新同步地图路径", exact=True)).to_be_enabled()
+            expect(actions.get_by_role("button", name="重新同步", exact=True)).to_be_enabled()
             topbar_action(page, name="切换到地图示教", exact=True).click()
             ready(page, "map")
             current_map = snapshot(page, "map")["project"]

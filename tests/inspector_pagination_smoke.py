@@ -104,7 +104,8 @@ def run():
         navigation_tab.click()
         assert inspector.get_attribute("data-active-page") == "navigation"
         assert page.get_by_label("导航点搜索").is_visible()
-        assert page.locator(".connectivity-card").is_visible()
+        assert page.get_by_role("button", name="路径测试", exact=True).is_visible()
+        assert page.locator(".connectivity-card").count() == 0
 
         # The reduced console keeps a standard three-tab keyboard cycle.
         navigation_tab.focus()
@@ -196,7 +197,7 @@ def run():
         assert page.locator(".three-canvas").get_attribute(
             "data-route-persistence-probe"
         ) == "same-scene"
-        page.locator('input[type="file"][accept*=".zip"]').set_input_files(
+        page.locator('input[data-project-guide-input="true"]').set_input_files(
             {"name": download.suggested_filename, "mimeType": "application/zip",
              "buffer": Path(download.path()).read_bytes()}
         )

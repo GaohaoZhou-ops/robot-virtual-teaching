@@ -9,6 +9,7 @@ import {
   ChevronDown,
   ChevronRight,
   Cloud,
+  Copy,
   Download,
   FileText,
   Folder,
@@ -126,6 +127,7 @@ export default function TeachingArchiveTree({
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
   onExportTeachingData,
+  onCopyTeachingNode,
   onImportTeachingData,
   teachingImportDisabled = false,
   canExportTeachingData = false,
@@ -156,6 +158,7 @@ export default function TeachingArchiveTree({
   const [nameDraft, setNameDraft] = useState('');
   const [visionPreview, setVisionPreview] = useState(null);
   const [insertActionTarget, setInsertActionTarget] = useState(null);
+  const [copying, setCopying] = useState(false);
   const [mergeDialog, setMergeDialog] = useState(null);
   const [serverMergeTaskId, setServerMergeTaskId] = useState(null);
   const mergeAnalysisRevisionRef = useRef(0);
@@ -362,6 +365,17 @@ export default function TeachingArchiveTree({
       poseId: pose.id,
     });
     onSelectionChange?.({ type: 'pose', task, parkingPoint, pose });
+  };
+
+  const copySelectedNode = async () => {
+    if (copying || !selectedParkingPoint || !onCopyTeachingNode) return;
+    setCopying(true);
+    try {
+      await onCopyTeachingNode(selectedTask.id, selectedParkingPoint.id,
+        selection?.type === 'pose' ? selectedPoint?.id : undefined);
+    } finally {
+      setCopying(false);
+    }
   };
 
   const commitName = () => {
@@ -679,9 +693,14 @@ export default function TeachingArchiveTree({
             </>
           )}
           <button type="button" onClick={onOpenCapturePage}>继续示教</button>
-          {onImportTeachingData && <button type="button" onClick={onImportTeachingData}
-            disabled={teachingImportDisabled} aria-label="导入机器人示教">导入机器人示教</button>}
-          <button
+          {selection?.type === 'task' && selectedTask && onImportTeachingData && <button
+            type="button"
+            onClick={onImportTeachingData}
+            disabled={teachingImportDisabled}
+            aria-label="导入机器人示教"
+            title="导入为新任务，保留当前任务及其停车点、姿态"
+          >导入机器人示教</button>}
+          {selection?.type === 'task' && selectedTask && <button
             type="button"
             aria-label="导出示教数据"
             onClick={onExportTeachingData}
@@ -691,7 +710,20 @@ export default function TeachingArchiveTree({
               : '导出当前工程全部轻量示教数据 JSON：机器人定位、关节值、停车点、姿态与导航关系'}
           >
             <Download size={11} /> 导出示教数据
-          </button>
+          </button>}
+          {((selection?.type === 'parking' && selectedParkingPoint)
+            || (selection?.type === 'pose' && selectedPoint)) && <button
+            type="button"
+            aria-label={selection.type === 'pose' ? '复制姿态' : '复制停车点'}
+            aria-busy={copying}
+            onClick={copySelectedNode}
+            disabled={copying || !onCopyTeachingNode}
+            title={selection.type === 'pose'
+              ? '按 pre-teaching-pose.json 格式复制头部、躯干和双臂关节角度（deg）'
+              : '复制停车点 JSON：名称、坐标系、底盘位姿和下属姿态'}
+          >
+            <Copy size={11} />{selection.type === 'pose' ? '复制姿态' : '复制停车点'}
+          </button>}
         </header>
         <div className="teaching-tree-workspace">
           <aside className="teaching-tree-pane" aria-label="示教层级树">
@@ -855,37 +887,34 @@ export default function TeachingArchiveTree({
                           <div key={label}><span>{label}</span><strong>{selectedParkingPoint.abx?.located === false ? '—' : formatValue(value)}</strong><small>{unit}</small></div>
                         ))}
                       </div>
-                      <div className="teaching-tree-parking-toolbar">
-                        <p>{selectedParkingPoint.poses?.length || 0} 组机械臂姿态 · {coordinateFrameLabel} 绝对位姿</p>
-                        <div className="teaching-tree-actions">
-                          <button
-                            type="button"
-                            disabled={!contextMatches || !robotReady}
-                            onClick={() => onApplyParkingPoint(selectedTask.id, selectedParkingPoint.id)}
-                          >
-                            <Play size={11} /> 定位到停车点
-                          </button>
-                          <button
-                            type="button"
-                            className="teaching-tree-danger"
-                            aria-label="删除当前停车点"
-                            disabled={Boolean(selectedTask.abx)}
-                            onClick={() => {
-                              if (window.confirm(`删除 ${selectedParkingPoint.name} 及其 ${selectedParkingPoint.poses?.length || 0} 组机械臂姿态？`)) {
-                                onDeleteParkingPoint(selectedTask.id, selectedParkingPoint.id);
-                              }
-                            }}
-                          >
-                            <Trash2 size={11} /> 删除停车点
-                          </button>
-                        </div>
-                      </div>
                       {selectedParkingPoint.abx?.located !== false && <TeachingParkingMap
                         mapData={mapData}
                         heightRange={heightRange}
                         colorMode={colorMode}
                         parkingPoint={selectedParkingPoint}
                       />}
+                      <div className="teaching-tree-actions">
+                        <button
+                          type="button"
+                          disabled={!contextMatches || !robotReady}
+                          onClick={() => onApplyParkingPoint(selectedTask.id, selectedParkingPoint.id)}
+                        >
+                          <Play size={11} /> 定位到停车点
+                        </button>
+                        <button
+                          type="button"
+                          className="teaching-tree-danger"
+                          aria-label="删除当前停车点"
+                          disabled={Boolean(selectedTask.abx)}
+                          onClick={() => {
+                            if (window.confirm(`删除 ${selectedParkingPoint.name} 及其 ${selectedParkingPoint.poses?.length || 0} 组机械臂姿态？`)) {
+                              onDeleteParkingPoint(selectedTask.id, selectedParkingPoint.id);
+                            }
+                          }}
+                        >
+                          <Trash2 size={11} /> 删除停车点
+                        </button>
+                      </div>
                     </div>
                   )}
 

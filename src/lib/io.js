@@ -542,7 +542,7 @@ export function normalizeProject(payload) {
   }
   if (payload.schema_version === 1 && Array.isArray(payload.nodes)
     || payload.type === 'abx-teaching-task' || payload.schema === 'abx-teaching-export') {
-    throw new Error('这是机器人交换文件，请使用「导入机器人示教」或「导入机器人路径」');
+    throw new Error('这是机器人交换文件，请使用「导入机器人示教」或「路径/导航 → 导入路径」');
   }
 
   const rawPoints =

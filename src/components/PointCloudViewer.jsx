@@ -7741,7 +7741,9 @@ export default function PointCloudViewer({
               <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title="点云颜色、显示密度与网格质量"
+              title={showVisionCoverageReadout
+                ? '点云颜色、表面透明度与显示质量'
+                : '点云颜色、显示密度与网格质量'}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -7760,6 +7762,34 @@ export default function PointCloudViewer({
                   <RotateCcw size={11} />
                 </button>
               </div>
+              {showVisionCoverageReadout && (
+                <label className="viewer-display-settings__opacity">
+                  <span>表面透明度</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round(teachingSurfaceTintOpacity * 100)}
+                    aria-label="表面贴图渲染透明度"
+                    aria-valuetext={`${Math.round(teachingSurfaceTintOpacity * 100)}%`}
+                    title="调整物体表面绿色覆盖贴图的透明度"
+                    style={{
+                      '--vision-coverage-opacity': `${Math.round(
+                        teachingSurfaceTintOpacity * 100,
+                      )}%`,
+                    }}
+                    onChange={(event) => {
+                      const percentage = Math.max(
+                        0,
+                        Math.min(100, Number(event.target.value) || 0),
+                      );
+                      setTeachingSurfaceTintOpacity(percentage / 100);
+                    }}
+                  />
+                  <output>{Math.round(teachingSurfaceTintOpacity * 100)}%</output>
+                </label>
+              )}
               <div
                 className="viewer-resolution-control"
                 role="group"
@@ -7921,32 +7951,6 @@ export default function PointCloudViewer({
                     </>
                   )}
                 </strong>
-                <label className="vision-coverage-readout__opacity">
-                  <span>表面透明度</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(teachingSurfaceTintOpacity * 100)}
-                    aria-label="表面贴图渲染透明度"
-                    aria-valuetext={`${Math.round(teachingSurfaceTintOpacity * 100)}%`}
-                    title="调整物体表面绿色覆盖贴图的透明度"
-                    style={{
-                      '--vision-coverage-opacity': `${Math.round(
-                        teachingSurfaceTintOpacity * 100,
-                      )}%`,
-                    }}
-                    onChange={(event) => {
-                      const percentage = Math.max(
-                        0,
-                        Math.min(100, Number(event.target.value) || 0),
-                      );
-                      setTeachingSurfaceTintOpacity(percentage / 100);
-                    }}
-                  />
-                  <output>{Math.round(teachingSurfaceTintOpacity * 100)}%</output>
-                </label>
               </div>
               <div className="vision-coverage-readout__controls">
                 <button

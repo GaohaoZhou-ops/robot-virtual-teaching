@@ -103,6 +103,25 @@ export function readRobotPresetFile(text, definitions, fileName) {
   };
 }
 
+export function buildRobotPresetFile(joints) {
+  const unit = joints?.angularUnit || 'degree';
+  const factor = ['degree', 'degrees', 'deg'].includes(unit) ? 1
+    : ['radian', 'radians', 'rad'].includes(unit) ? 180 / Math.PI : null;
+  if (factor === null) throw new Error(`姿态角度单位不受支持：${unit}`);
+  return {
+    unit: 'deg',
+    joints: Object.fromEntries(Object.entries(ABX_JOINT_NAMES).map(([group, names]) => [
+      group, names.map((name) => {
+        const value = joints?.values?.[name];
+        if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(value * factor)) {
+          throw new Error(`姿态缺少有效关节值：${name}`);
+        }
+        return value * factor;
+      }),
+    ])),
+  };
+}
+
 export function createRobotJointPreset({ id, name, robot, joints, values, sequence = 1 }) {
   const trimmedName = String(name || '').trim();
   if (!trimmedName) throw new Error('请输入预设姿态名称');

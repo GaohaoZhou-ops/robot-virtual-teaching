@@ -16,7 +16,7 @@ export const identityTransferPose = () => ({
 
 // Placements keep the relation in the map workspace; extracted workspaces
 // keep it locally. Reuse it only for the corresponding pair of models.
-export function boundTeachingTransform(independentMap, independentTransfer, map, mapTransfer) {
+export function boundTeachingRelation(independentMap, independentTransfer, map, mapTransfer) {
   const sameMap = (expected, actual) => {
     if (expected?.sourceHash && actual?.sourceHash) return expected.sourceHash === actual.sourceHash;
     return Boolean(expected?.mapId && expected.mapId === actual?.mapId);
@@ -25,7 +25,12 @@ export function boundTeachingTransform(independentMap, independentTransfer, map,
     ? mapTransfer
     : independentTransfer?.kind === 'extraction' && sameMap(independentTransfer.sourceMap, map)
       ? independentTransfer : null;
-  return relation?.localToMap ? structuredClone(relation.localToMap) : null;
+  return relation?.localToMap ? relation : null;
+}
+
+export function boundTeachingTransform(...args) {
+  const relation = boundTeachingRelation(...args);
+  return relation ? structuredClone(relation.localToMap) : null;
 }
 
 export function transferMatrix(pose) {
@@ -42,6 +47,10 @@ export function transferMatrix(pose) {
 
 // TXT rows describe p_map = T * p_local, with translation in meters.
 export function parseTransferMatrix(text) {
+  return parseTransferMatrixFile(text).matrix;
+}
+
+export function parseTransferMatrixFile(text) {
   const rows = String(text).replace(/^\uFEFF/, '').trim().split(/\r\n?|\n/)
     .map((row) => row.trim()).filter(Boolean).map((row) => row.split(/\s+/));
   requireValue(rows.length === 4 && rows.every((row) => row.length === 4), '转换矩阵必须为 4 行，每行 4 个数值，以空格或制表符分隔');
@@ -60,11 +69,39 @@ export function parseTransferMatrix(text) {
     Math.abs(column.dot(other) - (index === otherIndex ? 1 : 0)) <= tolerance
   ))) && Math.abs(matrix.determinant() - 1) <= tolerance,
   '转换矩阵旋转部分必须为正交旋转矩阵，不支持缩放、剪切或镜像');
-  return new Matrix4().compose(
-    new Vector3(values[0][3], values[1][3], values[2][3]),
-    new Quaternion().setFromRotationMatrix(matrix).normalize(),
-    new Vector3(1, 1, 1),
-  );
+  return {
+    values: values.flat(),
+    matrix: new Matrix4().compose(
+      new Vector3(values[0][3], values[1][3], values[2][3]),
+      new Quaternion().setFromRotationMatrix(matrix).normalize(),
+      new Vector3(1, 1, 1),
+    ),
+  };
+}
+
+const matrixFileKey = (values) => Array.isArray(values) && values.length === 16
+  && values.every((value) => typeof value === 'number' && Number.isFinite(value))
+  ? JSON.stringify(values) : null;
+
+export function normalizeTransferMatrixImports(imports) {
+  const seen = new Set();
+  return (Array.isArray(imports) ? imports : []).flatMap((entry) => {
+    const key = matrixFileKey(entry?.values);
+    if (!key || seen.has(key)) return [];
+    seen.add(key);
+    return [{ name: String(entry.name || '转换矩阵.txt'), values: [...entry.values] }];
+  });
+}
+
+export function hasLoadedTransferMatrix(file, imports, legacyBoundPose = null) {
+  const key = matrixFileKey(file?.values);
+  if (!key) return false;
+  if (normalizeTransferMatrixImports(imports).some((entry) => matrixFileKey(entry.values) === key)) return true;
+  // Older projects only saved a pose. Compare the rigid transform when the
+  // original 16 file values were not recorded; do not loosen new-file matching.
+  if (!legacyBoundPose) return false;
+  const saved = transferMatrix(legacyBoundPose).elements;
+  return file.matrix.elements.every((value, index) => Math.abs(value - saved[index]) < 1e-10);
 }
 
 export function transformTeachingPose(pose, matrix, frameId) {
@@ -269,7 +306,7 @@ async function createBaseline(project) {
   };
 }
 
-export async function extractTeachingWorkspace(source, { bounds, localToMap, name }) {
+export async function extractTeachingWorkspace(source, { bounds, localToMap, name, matrixImports = [] }) {
   const project = snapshotProject(source);
   requireValue(project.workspace.teachingSpaceMode === 'map', '只能从地图示教提取局部工程');
   const map = await cropTeachingGeometry(source.map, bounds, localToMap, name);
@@ -287,6 +324,7 @@ export async function extractTeachingWorkspace(source, { bounds, localToMap, nam
   selected.edges = project.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
   const transfer = { version: 1, kind: 'extraction', id: createId('transfer'),
     sourceMap: await mapIdentity(source.map), localToMap, bounds,
+    matrixImports: normalizeTransferMatrixImports(matrixImports),
     createdAt: new Date().toISOString(), baseline: await createBaseline(selected),
     robotPath: project.robot?.relativePath || null,
   };
@@ -306,7 +344,7 @@ function assertRobotCompatibility(source, target) {
     '两个工程使用不同机器人；请先在地图工程中选择相同机器人，再转换示教内容');
 }
 
-export async function placeTeachingWorkspace(source, target, { localToMap }) {
+export async function placeTeachingWorkspace(source, target, { localToMap, matrixImports }) {
   const local = snapshotProject(source), background = snapshotProject(target);
   requireValue(local.workspace.teachingSpaceMode === 'independent' && background.workspace.teachingSpaceMode === 'map', '请选择独立工程和目标地图工程');
   assertRobotCompatibility(local, background);
@@ -335,6 +373,9 @@ export async function placeTeachingWorkspace(source, target, { localToMap }) {
     },
   }, map, 'map', { version: 1, kind: 'placement', id: createId('transfer'),
     sourceMap: await mapIdentity(source.map), localToMap, createdAt: new Date().toISOString(),
+    matrixImports: normalizeTransferMatrixImports(matrixImports ?? boundTeachingRelation(
+      source.map, local.workspace.transfer, target.map, background.workspace.transfer,
+    )?.matrixImports),
   });
   return result;
 }

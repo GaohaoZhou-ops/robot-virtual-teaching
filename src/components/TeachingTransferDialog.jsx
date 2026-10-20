@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftRight, ArrowRight, Check, Crosshair, FolderOpen, LoaderCircle, RotateCcw, Scissors, X } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Check, Crosshair, FolderOpen, LoaderCircle, RotateCcw, Scissors, TriangleAlert, X } from 'lucide-react';
 import { normalizeProject } from '../lib/io.js';
-import { boundTeachingTransform, identityTransferPose, insideTransferBounds, parseTransferMatrix, placementTransform, transferMatrix, transformTeachingPose } from '../lib/teachingTransfer.js';
+import { boundTeachingRelation, hasLoadedTransferMatrix, identityTransferPose, insideTransferBounds, normalizeTransferMatrixImports, parseTransferMatrixFile, placementTransform, transferMatrix, transformTeachingPose } from '../lib/teachingTransfer.js';
 import TeachingTransferPreview from './TeachingTransferPreview.jsx';
 import './TeachingTransferDialog.css';
 
@@ -13,13 +13,15 @@ const projectOf = (snapshot) => snapshot?.config?.config?.project ? normalizePro
 export default function TeachingTransferDialog({ state, onClose, onApply, onLoadMap }) {
   const panelRef = useRef(null);
   const [settingsVisible, setSettingsVisible] = useState(true);
+  const [pendingMatrix, setPendingMatrix] = useState(null);
   useEffect(() => {
     const previousFocus = document.activeElement;
     panelRef.current?.focus();
     return () => previousFocus?.focus?.();
   }, []);
   const ready = !state.loading && state.source;
-  return createPortal(<div className="teaching-transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
+  return createPortal(<div className="teaching-transfer-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"
+    inert={pendingMatrix ? '' : undefined} aria-hidden={pendingMatrix ? true : undefined}>
     <section className="teaching-transfer-dialog" ref={panelRef} tabIndex={-1}
       onKeyDown={(event) => {
         if (event.key === 'Escape' && !state.busy) {
@@ -43,6 +45,7 @@ export default function TeachingTransferDialog({ state, onClose, onApply, onLoad
       </header>
       {ready ? <TransferForm source={state.source} target={state.target} initialOperation={state.operation}
         settingsVisible={settingsVisible} setSettingsVisible={setSettingsVisible}
+        pendingMatrix={pendingMatrix} setPendingMatrix={setPendingMatrix}
         busy={state.busy} error={state.error} onApply={onApply} onClose={onClose} onLoadMap={onLoadMap} />
         : <div className="transfer-loading" role="status">
           {state.loading && <LoaderCircle className="transfer-spinner" size={25} />}
@@ -52,8 +55,9 @@ export default function TeachingTransferDialog({ state, onClose, onApply, onLoad
   </div>, document.body);
 }
 
-function TransferForm({ source, target, initialOperation, settingsVisible, setSettingsVisible, busy, error, onApply, onClose, onLoadMap }) {
+function TransferForm({ source, target, initialOperation, settingsVisible, setSettingsVisible, pendingMatrix, setPendingMatrix, busy, error, onApply, onClose, onLoadMap }) {
   const matrixInputRef = useRef(null);
+  const matrixButtonRef = useRef(null);
   const matrixLoadingRef = useRef(false);
   const mountedRef = useRef(false);
   const [matrixLoading, setMatrixLoading] = useState(false);
@@ -63,9 +67,13 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const sourceProject = useMemo(() => projectOf(source), [source]);
   const targetProject = useMemo(() => projectOf(target), [target]);
   const link = sourceProject.workspace.transfer;
-  const boundTransform = useMemo(() => initialOperation === 'extract' ? null
-    : boundTeachingTransform(source.map, link, target?.map, targetProject?.workspace.transfer),
+  const boundRelation = useMemo(() => initialOperation === 'extract' ? null
+    : boundTeachingRelation(source.map, link, target?.map, targetProject?.workspace.transfer),
   [initialOperation, source, link, target, targetProject]);
+  const boundTransform = boundRelation?.localToMap;
+  const initialRelation = initialOperation === 'writeback' ? link : boundRelation;
+  const [matrixImports, setMatrixImports] = useState(() => normalizeTransferMatrixImports(initialRelation?.matrixImports));
+  const legacyBoundPose = initialRelation && !Array.isArray(initialRelation.matrixImports) ? initialRelation.localToMap : null;
   const [operation, setOperation] = useState(initialOperation);
   useEffect(() => {
     mountedRef.current = true;
@@ -118,7 +126,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const presets = (extraction ? sourceProject : targetProject)?.teachingTasks.flatMap((task) => task.parkingPoints.map((point) => ({ ...point, taskName: task.name }))) || [];
   const updatePose = (group, axis, value) => setPose((current) => ({ ...current, [group]: { ...current[group], [axis]: number(value) } }));
   const loading = busy || matrixLoading;
-  const canApply = !loading && hasMap && validPose
+  const canApply = !loading && !pendingMatrix && hasMap && validPose
     && (!extraction || (validBounds && name.trim() && (!needsReplace || replaceAccepted)));
   const resetToIdentity = () => {
     if (loading || matrixLoadingRef.current || writeback) return;
@@ -128,23 +136,34 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
     setMatrixFileName('');
     setFitRequest((current) => current + 1);
   };
+  const applyMatrixFile = (file, basePose = identityTransferPose()) => {
+    // Left multiplication applies the file after the current local-to-map relation.
+    const nextPose = transformTeachingPose(basePose, file.matrix);
+    transferMatrix(nextPose);
+    setAnchor('origin');
+    setPose(nextPose);
+    setMatrixFileName(file.name);
+    setMatrixImports((current) => normalizeTransferMatrixImports([...current, { name: file.name, values: file.values }]));
+    setFitRequest((current) => current + 1);
+  };
   const importMatrix = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
-    if (!file || busy || matrixLoadingRef.current || writeback) return;
+    if (!file || busy || matrixLoadingRef.current || writeback || pendingMatrix) return;
     matrixLoadingRef.current = true;
     setMatrixLoading(true);
     setMatrixError('');
     try {
       if (!file.name.toLowerCase().endsWith('.txt')) throw new Error('请选择 .txt 转换矩阵文件');
       if (file.size > 1024 * 1024) throw new Error('转换矩阵文件不能超过 1 MB');
-      const matrix = parseTransferMatrix(await file.text());
+      const imported = { ...parseTransferMatrixFile(await file.text()), name: file.name };
       if (!mountedRef.current) return;
+      if (hasLoadedTransferMatrix(imported, matrixImports, legacyBoundPose)) {
+        setPendingMatrix({ ...imported, basePose: validPose ? structuredClone(localToMap) : null });
+        return;
+      }
       // The file transforms the entire local coordinate system, not its center or robot base.
-      setAnchor('origin');
-      setPose(transformTeachingPose(identityTransferPose(), matrix));
-      setMatrixFileName(file.name);
-      setFitRequest((current) => current + 1);
+      applyMatrixFile(imported);
     } catch (reason) {
       if (mountedRef.current) setMatrixError(`${reason.message || '转换矩阵读取失败'}；原转换参数已保留`);
     } finally {
@@ -158,7 +177,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
     aria-busy={loading}
     onSubmit={(event) => {
       event.preventDefault();
-      if (canApply && !matrixLoadingRef.current) onApply({ operation, localToMap, bounds, name });
+      if (canApply && !matrixLoadingRef.current) onApply({ operation, localToMap, bounds, name, matrixImports });
     }}>
     <fieldset disabled={loading} className="transfer-fieldset">
       <div className="transfer-route">
@@ -203,7 +222,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
               {!writeback && <div className="transfer-matrix-import">
                 <input ref={matrixInputRef} type="file" hidden tabIndex={-1} accept=".txt,text/plain"
                   aria-label="转换矩阵文件" onChange={importMatrix} />
-                <button type="button" aria-describedby="transfer-matrix-format" onClick={() => matrixInputRef.current?.click()}>
+                <button ref={matrixButtonRef} type="button" aria-describedby="transfer-matrix-format" onClick={() => matrixInputRef.current?.click()}>
                   {matrixLoading ? <LoaderCircle className="transfer-spinner" size={15} /> : <FolderOpen size={15} />}
                   {matrixLoading ? '正在读取矩阵…' : '加载转换矩阵'}
                 </button>
@@ -254,5 +273,60 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
         {extraction ? '提取并进入独立示教' : writeback ? '回写并进入地图' : '放置并进入地图'}
       </button>
     </footer>
+    {pendingMatrix && <RepeatedMatrixDialog fileName={pendingMatrix.name} returnFocusRef={matrixButtonRef}
+      canStack={Boolean(pendingMatrix.basePose)}
+      onCancel={() => setPendingMatrix(null)}
+      onResolve={(action) => {
+        if (action === 'stack' && !pendingMatrix.basePose) return;
+        try {
+          applyMatrixFile(pendingMatrix, action === 'reload' ? identityTransferPose() : pendingMatrix.basePose);
+        } catch (reason) {
+          setMatrixError(`${reason.message || '转换矩阵加载失败'}；原转换参数已保留`);
+        }
+        setPendingMatrix(null);
+      }} />}
   </form>;
+}
+
+function RepeatedMatrixDialog({ fileName, returnFocusRef, canStack, onCancel, onResolve }) {
+  const panelRef = useRef(null);
+  const cancelRef = useRef(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+    return () => {
+      window.requestAnimationFrame(() => {
+        if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+      });
+    };
+  }, [returnFocusRef]);
+  return createPortal(<div className="transfer-matrix-confirm-backdrop"
+    onKeyUp={(event) => event.stopPropagation()}
+    onKeyDown={(event) => {
+      event.stopPropagation();
+      if (event.key === 'Escape') { event.preventDefault(); onCancel(); }
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        const buttons = [...panelRef.current.querySelectorAll('button:not(:disabled)')];
+        const index = buttons.indexOf(document.activeElement);
+        const next = index < 0 ? (event.shiftKey ? buttons.length - 1 : 0)
+          : (index + (event.shiftKey ? -1 : 1) + buttons.length) % buttons.length;
+        buttons[next]?.focus();
+      }
+    }}>
+    <section ref={panelRef} className="transfer-matrix-confirm" role="alertdialog" aria-modal="true"
+      aria-labelledby="transfer-matrix-confirm-title" aria-describedby="transfer-matrix-confirm-description">
+      <TriangleAlert size={25} aria-hidden="true" />
+      <h3 id="transfer-matrix-confirm-title">转换矩阵已加载过</h3>
+      <p id="transfer-matrix-confirm-description">该文件的矩阵数据与之前加载的一致。可重载转换关系，或在当前关系上叠加转换。</p>
+      <p className="transfer-matrix-confirm__file">{fileName}</p>
+      <p className="transfer-matrix-confirm__hint">重载将用文件矩阵完整替换当前关系。取消保留当前参数；确认转换后才保存到工程。</p>
+      {!canStack && <p className="transfer-matrix-confirm__hint">当前参数不完整，可重载文件恢复有效关系。</p>}
+      <footer>
+        <button ref={cancelRef} type="button" onClick={onCancel}>取消</button>
+        <button type="button" className="transfer-matrix-confirm__reload" onClick={() => onResolve('reload')}>重载转换关系</button>
+        <button type="button" className="transfer-matrix-confirm__apply" disabled={!canStack}
+          onClick={() => onResolve('stack')}>叠加转换</button>
+      </footer>
+    </section>
+  </div>, document.body);
 }

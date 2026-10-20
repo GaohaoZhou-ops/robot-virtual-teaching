@@ -5,7 +5,7 @@ import { parseAbxTeachingTask } from './abxTeachingImport.js';
 // Robot exchange contract: 380B平地巡检.zip. Keep the richer project backup
 // separate: v11 references the robot's active route and cannot embed a graph.
 export const ABX_ROBOT_EXPORT_VERSION = 11;
-export const ABX_ROBOT_EXPORT_NOTICE = '此 ZIP 按 380B 平地巡检格式导出任务，导航步骤引用机器人当前路网的站点编号。请核对并启用对应路网；新增或修改的路网需通过“导出机器人路径”单独导入。';
+export const ABX_ROBOT_EXPORT_NOTICE = '此 ZIP 按 380B 平地巡检格式导出任务，导航步骤引用机器人当前路网的站点编号。请核对并启用对应路网；新增或修改的路网需通过右侧“路径/导航 → 导出路径”单独导入。';
 
 const readme = [
   '任务名称与文件路径见 manifest.json。',
