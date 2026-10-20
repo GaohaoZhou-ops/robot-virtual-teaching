@@ -113,6 +113,7 @@ export default function Inspector({
   waypoints,
   edges,
   selectedWaypointId,
+  arrivedWaypointId = null,
   selectedEdgeId,
   validation,
   robot,
@@ -495,7 +496,7 @@ export default function Inspector({
                   <option value="">{waypoints.length ? '选择导航点…' : '暂无导航点'}</option>
                   {waypoints.map((point) => (
                     <option key={point.id} value={point.id}>
-                      {point.name} · X {point.pose.x.toFixed(2)} / Y {point.pose.y.toFixed(2)}
+                      {point.name}
                     </option>
                   ))}
                 </select>
@@ -539,7 +540,7 @@ export default function Inspector({
             />
 
             <div className="field-section-heading">
-              <span>{selectedWaypoint.source === TEMPORARY_MAP_ROUTE_SOURCE ? '独立模型坐标 · 临时' : '原始三维坐标'}</span>
+              {selectedWaypoint.source !== TEMPORARY_MAP_ROUTE_SOURCE && <span>原始三维坐标</span>}
               <small>XYZ · meter</small>
             </div>
             <div className="field-grid three">
@@ -558,18 +559,16 @@ export default function Inspector({
               <NumericField label="YAW" value={selectedWaypoint.pose.yaw} unit="°" onCommit={(value) => updatePose('yaw', value)} />
             </div>
 
-            <div className="capture-note">
+            {selectedWaypoint.source !== TEMPORARY_MAP_ROUTE_SOURCE && <div className="capture-note">
               <CrosshairMark />
-              {selectedWaypoint.source === TEMPORARY_MAP_ROUTE_SOURCE ? (
-                <span>由地图绝对路径计算得到。修改仅影响当前临时副本，重新同步将恢复地图路径的转换结果。</span>
-              ) : selectedWaypoint.teachingTaskId ? (
+              {selectedWaypoint.teachingTaskId ? (
                 <span>关联示教任务「{selectedWaypoint.teachingTaskName}」。名称和位置与停车点同步，位置修改也会同步到所属姿态。</span>
               ) : selectedWaypoint.source === 'robot-current-pose' ? (
                 <span>XYZ 与 RPY 取自机器人当前 {coordinateFrameLabel} 位姿；导出时同时写入 <code>pose</code>、<code>xzy</code> 与 <code>rpy</code>。</span>
               ) : (
                 <span>Z 值取自点击位置附近的原始点云；导出时同时写入 <code>pose</code>、<code>xzy</code> 与 <code>rpy</code>。</span>
               )}
-            </div>
+            </div>}
 
             <button
               type="button"
@@ -805,7 +804,9 @@ export default function Inspector({
                     type="button"
                     key={point.id}
                     data-waypoint-id={point.id}
-                    title={point.teachingTaskId ? `示教停车点 · ${point.teachingTaskName}` : point.name}
+                    className={point.id === arrivedWaypointId ? 'is-arrived' : undefined}
+                    aria-current={point.id === arrivedWaypointId ? 'location' : undefined}
+                    title={`${point.id === arrivedWaypointId ? '机器人当前停车点 · ' : ''}${point.teachingTaskId ? `示教停车点 · ${point.teachingTaskName}` : point.name}`}
                     onClick={() => onSelectWaypoint(point.id)}
                   >
                     <i className={point.abx ? 'waypoint-node-id' : undefined}>{point.abx ? `N${point.abx.nodeId}` : point.source === TEMPORARY_MAP_ROUTE_SOURCE ? '↔' : String(index + 1).padStart(2, '0')}</i>

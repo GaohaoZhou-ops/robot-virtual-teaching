@@ -1165,6 +1165,7 @@ const hydrateEnvironmentResource = (project, files, manifest) => {
     mimeType: metadata.original?.mimeType || project.map?.mimeType || 'application/octet-stream',
     loadedAt: new Date().toISOString(),
     sourceKind: 'project-archive',
+    ...(project.map?.teachingGroupId ? { teachingGroupId: project.map.teachingGroupId } : {}),
     teachingSpaceMode: String(
       metadata.teachingSpaceMode || project.map?.teachingSpaceMode || 'map',
     ),

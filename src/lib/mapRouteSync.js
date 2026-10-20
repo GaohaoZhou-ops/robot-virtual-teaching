@@ -1,5 +1,5 @@
 import { createId, normalizeProject } from './io.js';
-import { boundTeachingTransform, transferMatrix, transformTeachingPose } from './teachingTransfer.js';
+import { boundTeachingTransform, identityTransferPose, transferMatrix, transformTeachingPose } from './teachingTransfer.js';
 import { TEMPORARY_MAP_ROUTE_SOURCE } from './teachingNavigation.js';
 
 function syncContext(independentMap, independentTransfer, mapConfig) {
@@ -44,6 +44,7 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
     }, inverse);
     // Do not retain ABX absolute-coordinate metadata or teaching-task links.
     return { id: ids.get(point.id), name: point.name, source: TEMPORARY_MAP_ROUTE_SOURCE,
+      sourceWaypointId: point.id,
       pose: { ...pose.position, ...pose.rpy } };
   });
   const edges = context.project.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).map((edge) => {
@@ -51,5 +52,8 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
     return { ...copy, id: `${prefix}:${edge.id}`, from: ids.get(edge.from), to: ids.get(edge.to),
       source: TEMPORARY_MAP_ROUTE_SOURCE, status: 'unchecked' };
   });
-  return { waypoints, edges };
+  // Display-only reference in the same local frame as the disposable route.
+  // Transform the full frame so the map axes retain their absolute directions.
+  const mapOrigin = transformTeachingPose(identityTransferPose(), inverse);
+  return { waypoints, edges, mapOrigin };
 }

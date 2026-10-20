@@ -394,6 +394,11 @@ playwright/.auth/
 /atlas-file-picker-*/
 /atlas-portable-test-*/
 /atlas-server-result-*/
+# These runners also use TMPDIR; cover tests/ overrides without hiding fixtures.
+/tests/atlas-load-modes-*/
+/tests/atlas-file-picker-*/
+/tests/atlas-portable-test-*/
+/tests/atlas-server-result-*/
 # Linked-workspace import/export tests can contain both complete projects.
 # Cover local TMPDIR overrides and packed copies without hiding fixture inputs.
 /atlas-linked-project-*/

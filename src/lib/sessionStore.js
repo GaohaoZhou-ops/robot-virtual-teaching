@@ -6,6 +6,10 @@ const CURRENT_KEYS = ['meta', 'map', 'config'];
 const RECOVERY_KEYS = ['recovery-meta', 'recovery-map', 'recovery-config'];
 const WORKSPACE_INDEX_KEY = 'workspace-slots';
 const WORKSPACE_MODES = ['map', 'independent'];
+// History survives workspace switches and service-session recovery.
+const INDEPENDENT_HISTORY_KEY = 'independent-history';
+const historyMapKey = (id) => `independent-history-map:${id}`;
+const historyConfigKey = (id) => `independent-history-config:${id}`;
 
 const normalizeWorkspaceMode = (value) => value === 'independent' ? 'independent' : 'map';
 const workspaceMapKey = (mode) => `workspace-map:${normalizeWorkspaceMode(mode)}`;
@@ -763,6 +767,134 @@ export async function loadWorkspaceSnapshot(sessionId, mode) {
   return { mode: workspaceMode, map: await unpackMapRecord(map), config: config || null };
 }
 
+export async function listIndependentHistory() {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readonly');
+  const completion = transactionComplete(transaction);
+  const record = await requestResult(transaction.objectStore(STORE_NAME).get(INDEPENDENT_HISTORY_KEY));
+  await completion;
+  return (record?.entries || []).slice().sort((a, b) => b.archivedAt - a.archivedAt);
+}
+
+// Only read configuration and summaries; choosing a group must not unpack its
+// model or alter either workspace before the user makes a selection.
+export async function listIndependentWorkspaces(sessionId) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readonly');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  const [meta, index, config, history] = await Promise.all([
+    requestResult(store.get('meta')),
+    requestResult(store.get(WORKSPACE_INDEX_KEY)),
+    requestResult(store.get(workspaceConfigKey('independent'))),
+    requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+  ]);
+  await completion;
+  if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId) {
+    throw new Error('工作会话已变化，请刷新页面后重试');
+  }
+  const current = index.modes?.independent;
+  if (current?.available && (!config || config.sessionId !== sessionId || config.mapId !== current.mapId)) {
+    throw new Error('独立示教缓存不完整，请重新加载工程');
+  }
+  const entries = (history?.entries || [])
+    .filter((entry) => !current?.available || entry.mapId !== current.mapId)
+    .slice().sort((a, b) => b.archivedAt - a.archivedAt)
+    .map((entry) => ({ ...entry, current: false }));
+  if (current?.available) {
+    entries.unshift({
+      ...summarizeRecovery({ sourceSessionId: sessionId }, null, config),
+      mapName: current.mapName, archivedAt: null, current: true, historyId: null,
+    });
+  }
+  return entries;
+}
+
+// Archive the outgoing group and activate a new/restored group atomically.
+// Neither a failed write nor restoring history can discard the current group.
+// The map workspace (including its absolute coordinates) is never rewritten.
+export async function switchIndependentWorkspace(sessionId, {
+  replacement = null, historyId = null, expectedConfig = null, activeMode, currentRobotPackage,
+}) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  try {
+    const [meta, index, currentMap, currentConfig, history, archivedMap, archivedConfig] = await Promise.all([
+      requestResult(store.get('meta')),
+      requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(workspaceMapKey('independent'))),
+      requestResult(store.get(workspaceConfigKey('independent'))),
+      requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+      historyId ? requestResult(store.get(historyMapKey(historyId))) : null,
+      historyId ? requestResult(store.get(historyConfigKey(historyId))) : null,
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId
+      || index.activeMode !== activeMode) throw new Error('工作会话已变化，请刷新页面后重试');
+    if (currentConfig?.mapId !== expectedConfig?.mapId || currentConfig?.savedAt !== expectedConfig?.savedAt
+      || (index.modes?.independent?.mapId ?? null) !== (currentMap?.mapId ?? currentConfig?.mapId ?? null)) {
+      throw new Error('独立工程在切换期间发生了修改，请重试');
+    }
+    if ((currentMap && (currentMap.sessionId !== sessionId || currentMap.mapId !== currentConfig?.mapId))
+      || (currentConfig && currentConfig.sessionId !== sessionId)
+      || (currentConfig?.config?.project && !currentMap)) {
+      throw new Error('当前独立工程缓存不完整，无法创建历史副本');
+    }
+    const entries = history?.entries || [];
+    if (historyId && (!entries.some((entry) => entry.historyId === historyId)
+      || !archivedConfig?.config?.project || !archivedMap || archivedConfig.mapId !== archivedMap.mapId)) {
+      throw new Error('独立示教历史缓存不完整，当前工程已保留');
+    }
+    const nextMap = historyId ? archivedMap : replacement?.map;
+    const nextConfig = historyId ? archivedConfig?.config : replacement?.config;
+    if (!nextMap?.mapId || !nextConfig?.project
+      || nextConfig.project.workspace?.teachingSpaceMode !== 'independent'
+      || (!nextMap.positionBuffer && !nextMap.blob)) throw new Error('新的独立工程资源不完整');
+    if (nextMap.mapId === currentMap?.mapId) throw new Error('该独立工程已在当前工作区中');
+
+    const savedAt = Date.now();
+    let nextEntries = entries.filter((entry) => entry.historyId !== historyId);
+    if (currentMap) {
+      if (!currentConfig?.config?.project) throw new Error('当前示教结果尚未完整保存，请重试');
+      const id = currentMap.mapId;
+      const summary = summarizeRecovery({ sourceSessionId: sessionId, archivedAt: savedAt }, currentMap, currentConfig);
+      nextEntries = nextEntries.filter((entry) => entry.historyId !== id);
+      nextEntries.push({ ...summary, historyId: id });
+      // Stored buffers may already be Blobs; keep them packed while archiving.
+      const project = currentConfig.config.project;
+      const portableRobotPackage = currentRobotPackage === undefined ? currentMap.portableRobotPackage : currentRobotPackage;
+      if (project.robot && portableRobotPackage?.relativePath !== project.robot.relativePath) {
+        throw new Error('当前机器人资源尚未完整缓存，当前工程已保留');
+      }
+      store.put(packMapRecord({ ...currentMap, key: historyMapKey(id), portableRobotPackage,
+        workspaceViews: { view2d: project.view2d || null, view3d: project.view3d || null } }));
+      store.put({ ...currentConfig, key: historyConfigKey(id) });
+    }
+    const map = { ...nextMap, key: workspaceMapKey('independent'), teachingSpaceMode: 'independent', sessionId, savedAt };
+    const config = { key: workspaceConfigKey('independent'), mapId: map.mapId,
+      teachingSpaceMode: 'independent', sessionId, savedAt,
+      config: { ...nextConfig, project: { ...nextConfig.project,
+        workspace: { ...nextConfig.project.workspace, directoryAutosaveSuspended: true } } } };
+    store.put(packMapRecord(map));
+    store.put(config);
+    if (historyId) {
+      store.delete(historyMapKey(historyId));
+      store.delete(historyConfigKey(historyId));
+    }
+    store.put({ key: INDEPENDENT_HISTORY_KEY, entries: nextEntries });
+    store.put({ ...index, activeMode: 'independent', updatedAt: savedAt,
+      modes: { ...index.modes, independent: summarizeWorkspace('independent', map, config) } });
+    store.put({ ...meta, activeMode: 'independent', activatedRecoveryId: null });
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  clearWorkspaceViewState('independent');
+}
+
 // Geometry, configuration, the reverse link and the active mode commit together.
 // A failed conversion or a concurrent edit leaves both workspaces untouched.
 export async function commitWorkspaceTransfer(sessionId, source, target, result) {
@@ -815,7 +947,7 @@ export async function commitWorkspaceTransfer(sessionId, source, target, result)
   clearWorkspaceViewState(target.mode);
 }
 
-export async function activateWorkspaceMode(sessionId, mode) {
+export async function activateWorkspaceMode(sessionId, mode, expectedMapId = undefined) {
   if (!sessionId) throw new Error('当前服务会话尚未就绪');
   const workspaceMode = normalizeWorkspaceMode(mode);
   const database = await openDatabase();
@@ -832,6 +964,11 @@ export async function activateWorkspaceMode(sessionId, mode) {
     throw new Error('工作会话已变化，请刷新页面后重试');
   }
   const summary = workspaceIndex?.modes?.[workspaceMode] || null;
+  if (expectedMapId !== undefined && summary?.mapId !== expectedMapId) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw new Error('所选工程已发生变化，请重新选择要进入的工程');
+  }
   if (!summary?.available) {
     transaction.abort();
     await completion.catch(() => undefined);

@@ -26,7 +26,7 @@
     "test:ipad:file": "node tests/ipad_result_file_smoke.mjs",
     "test:mobile-solve": "node tests/mobile_teaching_reference_smoke.mjs && node tests/mobile_teaching_solver_smoke.mjs && node tests/mobile_teaching_assignment_smoke.mjs && node tests/mobile_teaching_parallel_smoke.mjs && node tests/mobile_teaching_collision_smoke.mjs && node tests/mobile_teaching_clearance_smoke.mjs && node tests/mobile_teaching_botx_smoke.mjs && node tests/mobile_teaching_height_smoke.mjs",
     "test:ipad:qr": "node tests/ipad_qr_pairing_smoke.mjs",
-    "test:transfer": "node tests/teaching_transfer_smoke.mjs && node tests/teaching_transfer_preview_smoke.mjs && node tests/teaching_transfer_matrix_smoke.mjs",
+    "test:transfer": "node tests/teaching_transfer_smoke.mjs && node tests/teaching_transfer_preview_smoke.mjs && node tests/teaching_transfer_matrix_smoke.mjs && node tests/independent_teaching_groups_smoke.mjs",
     "test:route-sync": "node tests/map_route_sync_smoke.mjs",
     "test:viewport-reference": "node tests/viewport_reference_smoke.mjs",
     "test:viewport-zoom": "node tests/viewport_zoom_smoke.mjs",

@@ -14,17 +14,22 @@ export const identityTransferPose = () => ({
   position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 },
 });
 
-// Placements keep the relation in the map workspace; extracted workspaces
-// keep it locally. Reuse it only for the corresponding pair of models.
+// Keep earlier placements so a restored independent group can reuse its own
+// transform. A new group may use the same PLY, but must not inherit that binding.
 export function boundTeachingRelation(independentMap, independentTransfer, map, mapTransfer) {
   const sameMap = (expected, actual) => {
+    if (expected?.teachingGroupId || actual?.teachingGroupId) {
+      return Boolean(expected?.teachingGroupId && expected.teachingGroupId === actual?.teachingGroupId
+        && (!expected.sourceHash || !actual.sourceHash || expected.sourceHash === actual.sourceHash));
+    }
     if (expected?.sourceHash && actual?.sourceHash) return expected.sourceHash === actual.sourceHash;
     return Boolean(expected?.mapId && expected.mapId === actual?.mapId);
   };
-  const relation = mapTransfer?.kind === 'placement' && sameMap(mapTransfer.sourceMap, independentMap)
-    ? mapTransfer
-    : independentTransfer?.kind === 'extraction' && sameMap(independentTransfer.sourceMap, map)
-      ? independentTransfer : null;
+  const placements = mapTransfer?.kind === 'placement'
+    ? [mapTransfer, ...(Array.isArray(mapTransfer.previousPlacements) ? mapTransfer.previousPlacements : [])] : [];
+  const relation = placements.find((item) => item?.kind === 'placement' && sameMap(item.sourceMap, independentMap))
+    || (independentTransfer?.kind === 'extraction' && sameMap(independentTransfer.sourceMap, map)
+      ? independentTransfer : null);
   return relation?.localToMap ? relation : null;
 }
 
@@ -272,6 +277,7 @@ const snapshotProject = (snapshot) => {
 const mapIdentity = async (map) => ({
   name: map.name, mapId: map.mapId,
   sourceHash: map.sourceHash || await sha256Bytes(positionsOf(map)),
+  ...(map.teachingGroupId ? { teachingGroupId: map.teachingGroupId } : {}),
 });
 
 function snapshotResult(project, map, mode, transfer, suspended = true) {
@@ -359,6 +365,14 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
   }));
   const points = transformWaypoints(local.waypoints, matrix).map((point) => ({ ...point, id: newId(point.id) }));
   const sourceRobot = local.robot || background.robot;
+  const previousTransfer = background.workspace.transfer;
+  const priorPlacements = previousTransfer?.kind === 'placement'
+    ? [previousTransfer, ...(previousTransfer.previousPlacements || [])] : [];
+  const previousPlacements = priorPlacements
+    .filter((item) => source.map.teachingGroupId
+      ? item.sourceMap.teachingGroupId !== source.map.teachingGroupId
+      : item.sourceMap.mapId !== source.map.mapId)
+    .map(({ previousPlacements: earlier, ...placement }) => placement);
   map.portableRobotPackage = [source.map.portableRobotPackage, target.map.portableRobotPackage]
     .find((candidate) => candidate?.relativePath === sourceRobot?.relativePath) || null;
   const result = snapshotResult({ ...background,
@@ -373,6 +387,7 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
     },
   }, map, 'map', { version: 1, kind: 'placement', id: createId('transfer'),
     sourceMap: await mapIdentity(source.map), localToMap, createdAt: new Date().toISOString(),
+    ...(previousPlacements.length ? { previousPlacements } : {}),
     matrixImports: normalizeTransferMatrixImports(matrixImports ?? boundTeachingRelation(
       source.map, local.workspace.transfer, target.map, background.workspace.transfer,
     )?.matrixImports),

@@ -156,7 +156,7 @@ export default function HeightRange({
             onClick={() => onVisibleChange?.(!visible)}
           >
             {visible ? <Eye size={12} /> : <EyeOff size={12} />}
-            {visible ? '显示' : '隐藏'}
+            <span>{visible ? '显示' : '隐藏'}</span>
           </button>
         </div>
         <div className="height-range__body">
