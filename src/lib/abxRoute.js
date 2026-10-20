@@ -7,6 +7,20 @@ const text = (value, label, limit, empty = false) => check(typeof value === 'str
   && (empty || value.trim()) && abxBytes(value).length <= limit && !/[\x00-\x1f]/.test(value), `${label}无效`);
 const wrap = (v) => Math.atan2(Math.sin(v), Math.cos(v));
 
+export const abxNodeName = (id, label) => label ? `N${id} · ${label}` : `N${id}`;
+export const abxNodeLabel = (id, name) => {
+  const prefix = `N${id} · `;
+  return name === `N${id}` ? '' : name.startsWith(prefix) ? name.slice(prefix.length) : name;
+};
+
+export function matchAbxStation(nodes, target, name = '') {
+  const matches = nodes.filter((node) => Math.hypot(node.x_m - target.x_m, node.y_m - target.y_m) <= 1e-4);
+  const namedId = /^N(0|[1-9]\d*)(?: · |$)/.exec(name)?.[1];
+  const named = matches.find((node) => String(node.id) === namedId);
+  const aligned = matches.filter((node) => node.yaw_rad === null || Math.abs(wrap(node.yaw_rad - target.yaw_rad)) <= 1e-6);
+  return { matches, node: named || (matches.length === 1 ? matches[0] : aligned.length === 1 ? aligned[0] : null) };
+}
+
 export function validateAbxRoute(route) {
   fields(route, ['schema_version', 'id', 'name', 'scene_name', 'nodes', 'edges'], '路网文件');
   check(route.schema_version === 1, '不支持的路网文件版本');
@@ -53,7 +67,7 @@ export function abxRouteToProject(document) {
   return {
     abxRoutes: [route],
     waypoints: route.nodes.map((node) => ({
-      id: pointId(node.id), name: node.label || `N${node.id}`, source: 'abx-route',
+      id: pointId(node.id), name: abxNodeName(node.id, node.label), source: 'abx-route',
       pose: { x: node.x_m, y: node.y_m, z: 0, roll: 0, pitch: 0, yaw: (node.yaw_rad ?? 0) * 180 / Math.PI },
       abx: { routeId: route.id, nodeId: node.id },
     })),
@@ -124,7 +138,7 @@ export async function buildAbxRouteDocuments(payload, { includeTeachingPoints = 
     check(id <= 0xffffffff, '路网 ID 已耗尽');
     used.add(id); return id;
   };
-  for (const point of points) {
+  const addPoint = (point) => {
     check(!pointMap.has(point.id), '导航点 ID 重复');
     const doc = ownership.get(point.id);
     const original = imported.find((r) => r.id === doc.id)?.nodes.find((n) => n.id === point.abx?.nodeId);
@@ -133,10 +147,25 @@ export async function buildAbxRouteDocuments(payload, { includeTeachingPoints = 
     const rad = ['degree', 'degrees', 'deg'].includes(unit) ? pose.yaw * Math.PI / 180 : pose.yaw;
     const yawUnchanged = original && Math.abs(wrap(rad - (original.yaw_rad ?? 0))) < 1e-14;
     const node = { id: original?.id ?? allocate(doc),
-      label: original?.label === '' && point.name === `N${original.id}` ? '' : point.name || point.id,
+      label: original ? abxNodeLabel(original.id, point.name || '') : point.name || point.id,
       x_m: pose.x, y_m: pose.y, yaw_rad: yawUnchanged ? original.yaw_rad : wrap(rad) };
     doc.nodes.push(node);
     pointMap.set(point.id, { route: doc, node });
+  };
+  // Parking markers are projections of teaching records. When they coincide
+  // with a native station, reuse that station rather than allocate a second
+  // robot node merely because the marker has a different internal ID.
+  for (const point of points.filter((point) => point.source !== 'teaching-parking-point')) addPoint(point);
+  for (const point of points.filter((point) => point.source === 'teaching-parking-point')) {
+    check(point.pose && ['x', 'y', 'yaw'].every((key) => typeof point.pose[key] === 'number'
+      && Number.isFinite(point.pose[key])), '导航点坐标必须是有限数值');
+    const doc = ownership.get(point.id), original = imported.find((route) => route.id === doc.id);
+    const nativeIds = new Set(original?.nodes.map((node) => node.id));
+    const yaw = point.pose.yaw * (['degree', 'degrees', 'deg'].includes(unit) ? Math.PI / 180 : 1);
+    const { node } = matchAbxStation(doc.nodes.filter((node) => nativeIds.has(node.id)),
+      { x_m: point.pose.x, y_m: point.pose.y, yaw_rad: yaw }, point.name);
+    if (node) pointMap.set(point.id, { route: doc, node });
+    else addPoint(point);
   }
   for (const edge of payload.paths || payload.edges || []) {
     const from = pointMap.get(edge.from), to = pointMap.get(edge.to);

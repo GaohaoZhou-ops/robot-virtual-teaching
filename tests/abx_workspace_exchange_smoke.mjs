@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { unzipSync, zipSync } from 'fflate';
 import { abxRouteToProject, buildAbxRouteDocuments, readAbxRoute, validateAbxRoute } from '../src/lib/abxRoute.js';
 import { readAbxTeachingFile, parseAbxTeachingTask, mergeAbxImport } from '../src/lib/abxTeachingImport.js';
-import { buildAbxTeachingArchive } from '../src/lib/abxTeachingExport.js';
+import { buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
 import { buildExport, normalizeProject } from '../src/lib/io.js';
 import { buildTeachingWaypoints } from '../src/lib/teachingNavigation.js';
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
@@ -40,6 +40,14 @@ const nativePayload = (imported) => ({
   teachingSpace: { mode: 'map' }, abxRoutes: imported.abxRoutes, waypoints: imported.waypoints, paths: imported.edges,
   virtualTeaching: { tasks: imported.tasks, jointPoses: imported.jointPoses },
 });
+// This v23 reader regression covers extended records preserved in project
+// backups. The user-facing robot ZIP now targets v11 (test:abx-v11).
+const buildExtendedArchive = async (payload, options) => {
+  const result = await buildAbxTeachingExport(payload, options);
+  if (result.summary.status !== 'ready') throw new Error(result.summary.message);
+  const files = Object.fromEntries(Object.entries(result.files).map(([name, bytes]) => [name.slice(4), bytes]));
+  return { ...result, files, bytes: zipSync(files, { level: 0 }) };
+};
 try {
   run('tests/abx_teaching_reference.py', workspace, brain);
   run('tests/abx_workspace_exchange_contract.py', 'fixtures', folder, brain, workspace);
@@ -53,7 +61,7 @@ try {
   const reloaded = normalizeProject(saved);
   assert.deepEqual(reloaded.abxRoutes, imported.abxRoutes, 'route identities survive save/restore');
   assert.deepEqual(reloaded.teachingTasks.map((task) => task.abx), imported.tasks.map((task) => task.abx));
-  const roundtrip = await buildAbxTeachingArchive(saved);
+  const roundtrip = await buildExtendedArchive(saved);
   await writeFile(path.join(folder, 'roundtrip.zip'), roundtrip.bytes);
   const again = await readAbxTeachingFile(file(roundtrip.bytes, 'again.zip'));
   for (let i = 0; i < imported.tasks.length; i += 1) {
@@ -66,7 +74,7 @@ try {
   pose.name = '修改后的关节姿态';
   pose.fullBodyJoints.values.head_yaw_J += 1;
   if (edited.waypoints.length) edited.waypoints[0].pose.x += 0.05;
-  const editedBundle = await buildAbxTeachingArchive(edited);
+  const editedBundle = await buildExtendedArchive(edited);
   await writeFile(path.join(folder, 'edited.zip'), editedBundle.bytes);
   const changed = await readAbxTeachingFile(file(editedBundle.bytes, 'edited.zip'));
   assert.equal(changed.tasks[0].name, '修改后的机器人任务');
@@ -75,7 +83,7 @@ try {
   const removed = structuredClone(saved);
   removed.virtualTeaching.tasks.find((task) => task.parkingPoints.some((p) => p.poses.length))
     .parkingPoints.find((p) => p.poses.length).poses.pop();
-  await assert.rejects(buildAbxTeachingArchive(removed), /步骤结构已改变/);
+  await assert.rejects(buildExtendedArchive(removed), /步骤结构已改变/);
   const corrupt = unzipSync(deployed);
   const taskName = JSON.parse(new TextDecoder().decode(corrupt['manifest.json'])).tasks[0].file;
   const source = new TextDecoder().decode(corrupt[taskName]);
@@ -109,7 +117,7 @@ try {
   await writeFile(path.join(folder, 'route-exports/nullable.route.json'), JSON.stringify(route));
   await writeFile(path.join(folder, 'route-exports/deployed.route.json'), JSON.stringify(deployedRoute));
   const { payload, robotPackage } = abxTeachingFixture();
-  const bundle = await buildAbxTeachingArchive(payload, { robotPackage });
+  const bundle = await buildExtendedArchive(payload, { robotPackage });
   const manifest = JSON.parse(new TextDecoder().decode(bundle.files['manifest.json']));
   const values = new TextDecoder().decode(bundle.files[manifest.tasks[0].file]).trim().split('\n').map(JSON.parse);
   const poseLine = values.find((v) => v.record?.joints_rad);
@@ -137,7 +145,7 @@ try {
     { type: 'trajectory_chunk', trajectory_id: trajectory.trajectory_id, part: 0, frames }];
   const synthetic = await readAbxTeachingFile(file(rawTask(header, nativeLines), 'fixture.abxteach.ndjson'));
   assert.equal(synthetic.tasks[0].parkingPoints[0].abx.located, false);
-  const syntheticBundle = await buildAbxTeachingArchive(nativePayload(synthetic));
+  const syntheticBundle = await buildExtendedArchive(nativePayload(synthetic));
   await writeFile(path.join(folder, 'synthetic.zip'), syntheticBundle.bytes);
   run('tests/abx_workspace_exchange_contract.py', 'verify', folder, brain, workspace);
   assert.equal(await hashFile(workspace), originalHash, 'workspace.zip must remain byte-for-byte unchanged');

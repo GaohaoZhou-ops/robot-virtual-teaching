@@ -468,6 +468,17 @@ playwright/.auth/
 /robot-export-*.png
 /tests/robot-export-*.png
 
+# Route-identity and teaching-action smoke-test downloads when TMPDIR is local.
+# Scope both workspaces and packed copies to output roots, preserving fixtures.
+/atlas-route-identity-*/
+/atlas-insert-action-*/
+/tests/atlas-route-identity-*/
+/tests/atlas-insert-action-*/
+/atlas-route-identity-*.[zZ][iI][pP]
+/atlas-insert-action-*.[zZ][iI][pP]
+/tests/atlas-route-identity-*.[zZ][iI][pP]
+/tests/atlas-insert-action-*.[zZ][iI][pP]
+
 # Python bytecode, environments, and test caches
 __pycache__/
 *.py[cod]
@@ -577,11 +588,14 @@ Desktop.ini
 /workspace.[zZ][iI][pP]
 /workspace-*.[zZ][iI][pP]
 
-# Local reference inputs for preset, transform and route import compatibility.
+# Local reference inputs for preset, transform, route and teaching compatibility.
 # Match only the repository root; reusable tests/fixtures/ inputs stay trackable.
 /sample-pre-teaching-pose.json
+/pre-teaching-pose.json
 /position_[0-9]*.txt
 /1014平地路网终版.json
+/380B平地巡检.[zZ][iI][pP]
+/380B平地巡检/
 
 # Point-cloud assets are ignored by default; keep the bundled example map.
 *.[pP][lL][yY]

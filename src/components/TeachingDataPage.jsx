@@ -22,6 +22,7 @@ const formatBytes = (value) => {
 
 export default function TeachingDataPage({
   tasks = [],
+  jointPoses = [],
   teachingSpaceMode = 'map',
   activeTaskId,
   activeParkingPointId,
@@ -49,6 +50,8 @@ export default function TeachingDataPage({
   onRenamePoint,
   onDeletePoint,
   onApplyPoint,
+  onInsertPreset,
+  onMovePoint,
   onPlayTask,
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
@@ -224,6 +227,7 @@ export default function TeachingDataPage({
             <section className="teaching-data-page__archive" aria-label="示教任务管理工作区">
               <TeachingArchiveTree
                 tasks={tasks}
+                jointPoses={jointPoses}
                 teachingSpaceMode={teachingSpaceMode}
                 activeTaskId={activeTaskId}
                 activeParkingPointId={activeParkingPointId}
@@ -244,6 +248,8 @@ export default function TeachingDataPage({
                 onRenamePoint={onRenamePoint}
                 onDeletePoint={onDeletePoint}
                 onApplyPoint={onApplyPoint}
+                onInsertPreset={onInsertPreset}
+                onMovePoint={onMovePoint}
                 onPlayTask={onPlayTask}
                 onAnalyzeParkingPointMerge={onAnalyzeParkingPointMerge}
                 onMergeParkingPoints={onMergeParkingPoints}

@@ -1,11 +1,6 @@
 import { createId, normalizeProject } from './io.js';
-import { transferMatrix, transformTeachingPose } from './teachingTransfer.js';
+import { boundTeachingTransform, transferMatrix, transformTeachingPose } from './teachingTransfer.js';
 import { TEMPORARY_MAP_ROUTE_SOURCE } from './teachingNavigation.js';
-
-const sameMap = (expected, actual) => {
-  if (expected?.sourceHash && actual?.sourceHash) return expected.sourceHash === actual.sourceHash;
-  return Boolean(expected?.mapId && expected.mapId === actual?.mapId);
-};
 
 function syncContext(independentMap, independentTransfer, mapConfig) {
   const payload = mapConfig?.config?.project;
@@ -21,14 +16,8 @@ function syncContext(independentMap, independentTransfer, mapConfig) {
   if (project.workspace.teachingSpaceMode !== 'map') {
     return { available: false, reason: '路径来源必须是地图示教工程' };
   }
-  const placement = project.workspace.transfer;
-  let localToMap;
-  if (placement?.kind === 'placement' && sameMap(placement.sourceMap, independentMap)) {
-    localToMap = placement.localToMap;
-  } else if (independentTransfer?.kind === 'extraction'
-    && sameMap(independentTransfer.sourceMap, { ...project.map, mapId: mapConfig.mapId })) {
-    localToMap = independentTransfer.localToMap;
-  }
+  const localToMap = boundTeachingTransform(independentMap, independentTransfer,
+    { ...project.map, mapId: mapConfig.mapId }, project.workspace.transfer);
   if (!localToMap) {
     return { available: false, reason: '请先将当前独立模型与地图示教建立转换关系' };
   }

@@ -3,6 +3,7 @@ from pathlib import Path
 from playwright.sync_api import expect, sync_playwright
 
 from teaching_transfer_ui_smoke import CHROME, open_transfer, ready, seed, snapshot
+from topbar_tools_helpers import topbar_action
 
 
 MATRIX_PATH = Path(__file__).resolve().parent / "fixtures" / "position_0.txt"
@@ -65,6 +66,16 @@ def run():
             assert pose_values(dialog) == values
             expect(dialog.get_by_label("放置定位基准")).to_have_value("origin")
 
+            # Identity clears the import error and resets the actual transform,
+            # including the non-origin anchor, rather than only zeroing fields.
+            dialog.get_by_label("放置定位基准").select_option("robot")
+            dialog.get_by_role("button", name="单位阵", exact=True).click()
+            assert pose_values(dialog) == [0] * 6
+            expect(dialog.get_by_label("放置定位基准")).to_have_value("origin")
+            expect(dialog.get_by_role("alert")).to_have_count(0)
+            expect(dialog.locator(".transfer-matrix-file")).to_have_count(0)
+            assert snapshot(page, "map") == target
+
             # Same-file imports reset edits and clear errors; all manual controls remain usable.
             dialog.get_by_label("放置 X", exact=True).fill("12")
             load_matrix(page, dialog, str(MATRIX_PATH))
@@ -98,6 +109,47 @@ def run():
             page.reload(wait_until="networkidle")
             ready(page, "map")
             assert snapshot(page, "map")["positions"] == placed["positions"]
+
+            # Reopening must restore the saved relation without another import,
+            # even though the map robot has already moved to transformed coordinates.
+            topbar_action(page, name="切换到独立示教", exact=True).click()
+            ready(page, "independent")
+            dialog = open_transfer(page)
+            expect(dialog.get_by_label("放置定位基准")).to_have_value("origin")
+            assert all(abs(a - b) < 1e-6 for a, b in zip(pose_values(dialog), edited))
+            expect(dialog).to_contain_text("已沿用绑定关系，可直接放置")
+            page.screenshot(path="/tmp/atlas-transfer-bound-relation.png", full_page=True)
+            dialog.get_by_role("button", name="放置并进入地图", exact=True).click()
+            ready(page, "map")
+            repeated = snapshot(page, "map")
+            close_position(repeated["project"]["robot"]["origin"]["position"],
+                           transformed(source["project"]["robot"]["origin"]["position"], extra_x=1))
+            assert repeated["positions"][:len(placed["positions"])] == placed["positions"]
+            assert repeated["positions"][len(placed["positions"]):] == placed["positions"][len(target["positions"]):]
+            assert snapshot(page, "independent")["positions"] == source["positions"]
+
+            # Applying identity preserves local coordinates in the placed copy.
+            # Both the center and robot anchors must reset to the local origin.
+            topbar_action(page, name="切换到独立示教", exact=True).click()
+            ready(page, "independent")
+            dialog = open_transfer(page)
+            dialog.get_by_label("放置定位基准").select_option("center")
+            dialog.get_by_role("button", name="单位阵", exact=True).click()
+            assert pose_values(dialog) == [0] * 6
+            expect(dialog.get_by_label("放置定位基准")).to_have_value("origin")
+            expect(dialog.locator(".transfer-matrix-file")).to_have_count(0)
+            dialog.get_by_role("button", name="放置并进入地图", exact=True).click()
+            ready(page, "map")
+            identity_placed = snapshot(page, "map")
+            assert identity_placed["positions"][len(repeated["positions"]):] == source["positions"]
+            close_position(identity_placed["project"]["robot"]["origin"]["position"],
+                           list(source["project"]["robot"]["origin"]["position"].values()))
+            assert snapshot(page, "independent")["positions"] == source["positions"]
+            topbar_action(page, name="切换到独立示教", exact=True).click()
+            ready(page, "independent")
+            dialog = open_transfer(page)
+            assert pose_values(dialog) == [0] * 6
+            expect(dialog).to_contain_text("已沿用绑定关系，可直接放置")
             page.close()
 
             # Extraction uses the inverse and records the relation for an unchanged writeback flow.
@@ -107,6 +159,9 @@ def run():
             target = snapshot(page, "map")
             dialog = open_transfer(page)
             crop = [field.input_value() for field in dialog.locator(".transfer-range-grid input").all()]
+            dialog.get_by_role("button", name="单位阵", exact=True).click()
+            assert pose_values(dialog, "局部原点") == [0] * 6
+            assert [field.input_value() for field in dialog.locator(".transfer-range-grid input").all()] == crop
             load_matrix(page, dialog, str(MATRIX_PATH))
             assert [field.input_value() for field in dialog.locator(".transfer-range-grid input").all()] == crop
             assert all(abs(pose_values(dialog, "局部原点")[index] - ROWS[index][3]) < 1e-6 for index in range(3))
@@ -118,8 +173,11 @@ def run():
             assert snapshot(page, "map")["positions"] == target["positions"]
             dialog = open_transfer(page)
             expect(dialog.get_by_role("button", name="加载转换矩阵", exact=True)).to_have_count(0)
+            expect(dialog.get_by_role("button", name="单位阵", exact=True)).to_have_count(0)
             saved_relation = pose_values(dialog)
             dialog.get_by_role("button", name="作为新工位放置", exact=True).click()
+            dialog.get_by_role("button", name="单位阵", exact=True).click()
+            assert pose_values(dialog) == [0] * 6
             load_matrix(page, dialog, str(MATRIX_PATH))
             dialog.get_by_label("放置 X", exact=True).fill("25")
             dialog.get_by_role("button", name="回写原地图", exact=True).click()
@@ -134,6 +192,7 @@ def run():
             assert not errors, errors
             print("matrix_file_preview_errors_repeat_import_and_manual_adjustment=ok")
             print("matrix_placement_coordinates_source_preservation_and_reload=ok")
+            print("bound_relation_reuse_and_identity_placement=ok")
             print("matrix_extraction_inverse_and_saved_writeback_relation=ok")
         finally:
             browser.close()

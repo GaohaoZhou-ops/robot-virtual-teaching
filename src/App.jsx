@@ -69,6 +69,7 @@ import {
   parkingWaypointPose,
   removeTeachingWaypoints,
   TEMPORARY_MAP_ROUTE_SOURCE,
+  teachingParkingName,
   updateTeachingWaypoint,
   withoutTemporaryMapNavigation,
 } from './lib/teachingNavigation.js';
@@ -104,6 +105,8 @@ import {
 } from './lib/mapGeometry.js';
 import { createSpaceMouseInputState } from './lib/spaceMouse.js';
 import { createRobotJointPreset, presetJointDefinitions, presetMatchesRobot } from './lib/robotJointPresets.js';
+import { insertTeachingPreset } from './lib/teachingPresetInsertion.js';
+import { moveTeachingPose } from './lib/teachingPoseOrder.js';
 import {
   buildTeachingTaskTrajectory,
   sampleTeachingTrajectorySegment,
@@ -2839,7 +2842,7 @@ export default function App() {
     const initialParkingPoint = includeCurrentParkingPoint
       ? {
           id: createId('parking-point'),
-          name: '停车点 P01',
+          name: teachingParkingName(waypoints, pose, '停车点 P01', selectedWaypointId),
           sequence: 1,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -2891,8 +2894,10 @@ export default function App() {
     robotLoadState.status,
     robotPose,
     selectedRobot,
+    selectedWaypointId,
     teachingSpaceMode,
     teachingTasks.length,
+    waypoints,
   ]);
 
   const selectTeachingTask = useCallback((id, parkingPointId = null) => {
@@ -2950,7 +2955,7 @@ export default function App() {
     const parkingPoints = task.parkingPoints || [];
     const parkingPoint = {
       id: createId('parking-point'),
-      name: `停车点 P${String(parkingPoints.length + 1).padStart(2, '0')}`,
+      name: teachingParkingName(waypoints, pose, `停车点 P${String(parkingPoints.length + 1).padStart(2, '0')}`, selectedWaypointId),
       sequence: parkingPoints.length + 1,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -2983,8 +2988,10 @@ export default function App() {
     notify,
     robotLoadState.status,
     robotPose,
+    selectedWaypointId,
     teachingContextMatches,
     teachingTasks,
+    waypoints,
   ]);
 
   const selectTeachingParkingPoint = useCallback((id) => {
@@ -3189,7 +3196,7 @@ export default function App() {
     const parkingPoint = createParkingPoint
       ? {
           id: createId('parking-point'),
-          name: `停车点 P${String(parkingPoints.length + 1).padStart(2, '0')}`,
+          name: teachingParkingName(waypoints, pose, `停车点 P${String(parkingPoints.length + 1).padStart(2, '0')}`, selectedWaypointId),
           sequence: parkingPoints.length + 1,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -3323,8 +3330,10 @@ export default function App() {
     robotLoadState.status,
     robotLoadState.zividCount,
     robotPose,
+    selectedWaypointId,
     teachingContextMatches,
     teachingTasks,
+    waypoints,
   ]);
 
   const renameTeachingPoint = useCallback((taskId, parkingPointId, pointId, name) => {
@@ -3351,6 +3360,34 @@ export default function App() {
         : task
     )));
   }, []);
+
+  const insertTeachingPresetAction = useCallback((taskId, parkingPointId, poseId, presetId, position) => {
+    const current = latestWorkspaceRef.current;
+    const task = current.teachingTasks.find((item) => item.id === taskId);
+    const preset = current.jointPoses.find((item) => item.id === presetId);
+    const id = createId('teach-pose');
+    const updated = insertTeachingPreset(task, { parkingPointId, poseId, preset, position, id });
+    const next = current.teachingTasks.map((item) => item.id === taskId ? updated : item);
+    latestWorkspaceRef.current = { ...current, teachingTasks: next };
+    setTeachingTasks(next);
+    notify(`已在目标姿态${position === 'before' ? '之前' : '之后'}插入 ${preset.name}`, 'success');
+    return updated.parkingPoints.find((item) => item.id === parkingPointId).poses.find((item) => item.id === id);
+  }, [notify]);
+
+  const moveTeachingPoint = useCallback((taskId, parkingPointId, poseId, direction) => {
+    const current = latestWorkspaceRef.current;
+    try {
+      const task = current.teachingTasks.find((item) => item.id === taskId);
+      const updated = moveTeachingPose(task, { parkingPointId, poseId, direction });
+      if (updated === task) return;
+      const next = current.teachingTasks.map((item) => item.id === taskId ? updated : item);
+      latestWorkspaceRef.current = { ...current, teachingTasks: next };
+      setTeachingTasks(next);
+      notify(`姿态已${direction === 'up' ? '上移' : '下移'}`, 'success');
+    } catch (error) {
+      notify(error.message || '调整动作顺序失败', 'error');
+    }
+  }, [notify]);
 
   const deleteTeachingPoint = useCallback((taskId, parkingPointId, pointId) => {
     if (latestWorkspaceRef.current.teachingTasks.find((task) => task.id === taskId)?.abx) {
@@ -6038,6 +6075,7 @@ export default function App() {
       <div className="app-shell is-teaching-data-page" data-app-page="teaching-data">
         <TeachingDataPage
           tasks={teachingTasks}
+          jointPoses={jointPoses}
           teachingSpaceMode={teachingSpaceMode}
           activeTaskId={activeTeachingTaskId}
           activeParkingPointId={activeTeachingParkingPointId}
@@ -6065,6 +6103,8 @@ export default function App() {
           onRenamePoint={renameTeachingPoint}
           onDeletePoint={deleteTeachingPoint}
           onApplyPoint={applyTeachingPoint}
+          onInsertPreset={insertTeachingPresetAction}
+          onMovePoint={moveTeachingPoint}
           onPlayTask={startTeachingTaskPlayback}
           onAnalyzeParkingPointMerge={analyzeTeachingParkingPointMerge}
           onMergeParkingPoints={mergeTeachingParkingPoints}

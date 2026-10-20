@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { calculatePathDistances } from '../lib/pathMetrics.js';
 import { TEMPORARY_MAP_ROUTE_SOURCE } from '../lib/teachingNavigation.js';
+import { abxNodeLabel } from '../lib/abxRoute.js';
 import FloatingRobotJointPanel from './FloatingRobotJointPanel.jsx';
 import VirtualTeachingPanel from './VirtualTeachingPanel.jsx';
 import ZividCameraPanel from './ZividCameraPanel.jsx';
@@ -773,7 +774,8 @@ export default function Inspector({
                     title={point.teachingTaskId ? `示教停车点 · ${point.teachingTaskName}` : point.name}
                     onClick={() => onSelectWaypoint(point.id)}
                   >
-                    <i>{String(index + 1).padStart(2, '0')}</i>{point.name}
+                    <i className={point.abx ? 'waypoint-node-id' : undefined}>{point.abx ? `N${point.abx.nodeId}` : point.source === TEMPORARY_MAP_ROUTE_SOURCE ? '↔' : String(index + 1).padStart(2, '0')}</i>
+                    {point.abx ? abxNodeLabel(point.abx.nodeId, point.name) : point.name}
                   </button>
                 ))}
                 {!waypoints.length && <span className="muted-copy">暂无导航点</span>}

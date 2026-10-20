@@ -1,4 +1,5 @@
 """Import/export native task and route files using a fresh browser profile."""
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -18,13 +19,19 @@ with tempfile.TemporaryDirectory(prefix='atlas-abx-exchange-ui-') as folder, syn
         seed(page)
         fixture = page.evaluate("""async () => {
           const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
-          const { buildAbxTeachingArchive } = await import('/src/lib/abxTeachingExport.js');
+          const { buildAbxTeachingExport } = await import('/src/lib/abxTeachingExport.js');
           const { payload, robotPackage } = abxTeachingFixture();
-          const bundle = await buildAbxTeachingArchive(payload, { robotPackage });
-          return { bytes: Array.from(bundle.bytes) };
+          const bundle = await buildAbxTeachingExport(payload, { robotPackage });
+          return Object.entries(bundle.files).map(([name, bytes]) => ({ name: name.slice(4), bytes: Array.from(bytes) }));
         }""")
+        # A newer native input carries a route; the UI must still read it and
+        # export the supported task records as v11 without embedding that route.
+        native_input = io.BytesIO()
+        with zipfile.ZipFile(native_input, 'w', zipfile.ZIP_STORED) as bundle:
+            for entry in fixture:
+                bundle.writestr(entry['name'], bytes(entry['bytes']))
         page.get_by_label('机器人示教文件', exact=True).set_input_files(dict(
-            name='robot-fixture.zip', mimeType='application/zip', buffer=bytes(fixture['bytes'])))
+            name='robot-fixture.zip', mimeType='application/zip', buffer=native_input.getvalue()))
         expect(page.locator('[data-page="teaching-data"]')).to_have_attribute('data-teaching-task-count', '4')
         expect(page.get_by_role('status').filter(has_text='机器人示教已导入')).to_be_visible()
         expect(page.get_by_role('note').filter(has_text='机器人原生任务')).to_be_visible()
@@ -56,6 +63,8 @@ with tempfile.TemporaryDirectory(prefix='atlas-abx-exchange-ui-') as folder, syn
         with zipfile.ZipFile(target) as bundle:
             manifest = json.loads(bundle.read('manifest.json'))
             assert len(manifest['tasks']) == 4
+            assert set(bundle.namelist()) == {'manifest.json', 'README.txt', *[entry['file'] for entry in manifest['tasks']]}
+            assert all(json.loads(bundle.read(entry['file']).splitlines()[0])['version'] == 11 for entry in manifest['tasks'])
         page.keyboard.press('Escape')
         page.get_by_role('button', name='继续工作 · 返回主工作台继续示教', exact=True).click()
         page.get_by_role('button', name='示教菜单', exact=True).click()

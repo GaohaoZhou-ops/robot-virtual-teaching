@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftRight, ArrowRight, Check, Crosshair, FolderOpen, LoaderCircle, Scissors, X } from 'lucide-react';
+import { ArrowLeftRight, ArrowRight, Check, Crosshair, FolderOpen, LoaderCircle, RotateCcw, Scissors, X } from 'lucide-react';
 import { normalizeProject } from '../lib/io.js';
-import { identityTransferPose, insideTransferBounds, parseTransferMatrix, placementTransform, transferMatrix, transformTeachingPose } from '../lib/teachingTransfer.js';
+import { boundTeachingTransform, identityTransferPose, insideTransferBounds, parseTransferMatrix, placementTransform, transferMatrix, transformTeachingPose } from '../lib/teachingTransfer.js';
 import TeachingTransferPreview from './TeachingTransferPreview.jsx';
 import './TeachingTransferDialog.css';
 
@@ -63,6 +63,9 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const sourceProject = useMemo(() => projectOf(source), [source]);
   const targetProject = useMemo(() => projectOf(target), [target]);
   const link = sourceProject.workspace.transfer;
+  const boundTransform = useMemo(() => initialOperation === 'extract' ? null
+    : boundTeachingTransform(source.map, link, target?.map, targetProject?.workspace.transfer),
+  [initialOperation, source, link, target, targetProject]);
   const [operation, setOperation] = useState(initialOperation);
   useEffect(() => {
     mountedRef.current = true;
@@ -75,7 +78,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const map = extraction ? source.map : target?.map;
   const hasMap = map?.positionBuffer instanceof ArrayBuffer;
   const hasRobot = Boolean(sourceProject.robot);
-  const [anchor, setAnchor] = useState('center');
+  const [anchor, setAnchor] = useState(boundTransform ? 'origin' : 'center');
   const anchorPose = (value) => value === 'robot' && hasRobot ? sourceProject.robot.origin
     : value === 'center' ? { ...identityTransferPose(), position: {
       x: (source.map.bounds.min.x + source.map.bounds.max.x) / 2,
@@ -83,7 +86,8 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
       z: (source.map.bounds.min.z + source.map.bounds.max.z) / 2,
     } } : identityTransferPose();
   const [pose, setPose] = useState(() => {
-    if (initialOperation === 'writeback') return link.localToMap;
+    if (initialOperation === 'writeback') return structuredClone(link.localToMap);
+    if (boundTransform) return structuredClone(boundTransform);
     const reference = initialOperation === 'extract' ? sourceProject.robot?.origin : targetProject?.robot?.origin;
     if (reference) return structuredClone(reference);
     const bounds = map?.bounds;
@@ -99,8 +103,13 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const validBounds = ['x', 'y', 'z'].every((axis) => Number.isFinite(bounds.min[axis]) && Number.isFinite(bounds.max[axis]) && bounds.min[axis] <= bounds.max[axis])
     && bounds.min.x < bounds.max.x && bounds.min.y < bounds.max.y;
   const localToMap = useMemo(() => writeback ? link.localToMap : !validPose ? identityTransferPose()
-    : extraction ? pose : placementTransform(pose, anchorPose(anchor)),
+    : extraction || anchor === 'origin' ? pose : placementTransform(pose, anchorPose(anchor)),
   [writeback, link, validPose, extraction, pose, anchor, hasRobot, sourceProject]);
+  const usingBoundTransform = useMemo(() => {
+    if (!boundTransform || !validPose) return false;
+    const saved = transferMatrix(boundTransform).elements;
+    return transferMatrix(localToMap).elements.every((value, index) => Math.abs(value - saved[index]) < 1e-10);
+  }, [boundTransform, validPose, localToMap]);
   const stops = sourceProject.teachingTasks.flatMap((task) => task.parkingPoints);
   const selectedStops = extraction && validBounds ? stops.filter((point) => insideTransferBounds(point.mapPose.position, bounds)) : stops;
   const selectedPoseCount = selectedStops.reduce((count, point) => count + point.poses.length, 0);
@@ -111,6 +120,14 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const loading = busy || matrixLoading;
   const canApply = !loading && hasMap && validPose
     && (!extraction || (validBounds && name.trim() && (!needsReplace || replaceAccepted)));
+  const resetToIdentity = () => {
+    if (loading || matrixLoadingRef.current || writeback) return;
+    setAnchor('origin');
+    setPose(identityTransferPose());
+    setMatrixError('');
+    setMatrixFileName('');
+    setFitRequest((current) => current + 1);
+  };
   const importMatrix = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -192,6 +209,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
                 </button>
                 <p id="transfer-matrix-format">4 × 4 TXT · 独立空间 → 地图 · 平移单位 m</p>
                 {matrixFileName && <p className="transfer-matrix-file" role="status">已加载 {matrixFileName}，可继续手动调整。</p>}
+                {usingBoundTransform && <p className="transfer-matrix-file" role="status">已沿用绑定关系，可直接放置。</p>}
               </div>}
               {!extraction && !writeback && <label className="transfer-select">定位基准<select aria-label="放置定位基准" value={anchor} onChange={(event) => {
                 const value = event.target.value;
@@ -212,6 +230,9 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
                   <span>{label} <small>{unit}</small></span><input type="number" step="any" required readOnly={writeback}
                     aria-label={`${extraction ? '局部原点' : '放置'} ${label}`} value={display((writeback ? link.localToMap : pose)[group][axis])}
                     onChange={(event) => updatePose(group, axis, event.target.value)} /></label>)}</div>
+              {!writeback && <button type="button" className="transfer-identity"
+                title="使用单位阵：以独立空间原点为基准，将 XYZ 和 Roll / Pitch / Yaw 全部归零"
+                onClick={resetToIdentity}><RotateCcw size={14} /> 单位阵</button>}
               {extraction && <label className="transfer-name">局部工程名称<input value={name} required aria-label="局部工程名称" onChange={(event) => setName(event.target.value)} /></label>}
             </section>
             <div className="transfer-note"><Check size={15} /><p>{extraction ? '原地图保留。局部工程会记住来源，完成精调后可回写。'

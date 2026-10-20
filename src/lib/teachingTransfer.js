@@ -14,6 +14,20 @@ export const identityTransferPose = () => ({
   position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 },
 });
 
+// Placements keep the relation in the map workspace; extracted workspaces
+// keep it locally. Reuse it only for the corresponding pair of models.
+export function boundTeachingTransform(independentMap, independentTransfer, map, mapTransfer) {
+  const sameMap = (expected, actual) => {
+    if (expected?.sourceHash && actual?.sourceHash) return expected.sourceHash === actual.sourceHash;
+    return Boolean(expected?.mapId && expected.mapId === actual?.mapId);
+  };
+  const relation = mapTransfer?.kind === 'placement' && sameMap(mapTransfer.sourceMap, independentMap)
+    ? mapTransfer
+    : independentTransfer?.kind === 'extraction' && sameMap(independentTransfer.sourceMap, map)
+      ? independentTransfer : null;
+  return relation?.localToMap ? structuredClone(relation.localToMap) : null;
+}
+
 export function transferMatrix(pose) {
   requireValue(axes.every((axis) => Number.isFinite(pose?.position?.[axis]))
     && rotationAxes.every((axis) => Number.isFinite(pose?.rpy?.[axis])), '位置和角度必须是有效数值');
