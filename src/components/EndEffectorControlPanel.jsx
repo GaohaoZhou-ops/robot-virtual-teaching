@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Crosshair,
   Globe2,
+  GripHorizontal,
   Lock,
   Move3D,
   Orbit,
@@ -58,9 +59,12 @@ function PoseField({ axis, label, value, unit, step, tone, disabled, onCommit })
 
 const sideLabel = { left: '左机械臂', right: '右机械臂' };
 const sideShortLabel = { left: '左端', right: '右端' };
+const PANEL_EDGE = 10;
+const initialPanelPosition = () => ({ x: PANEL_EDGE, y: PANEL_EDGE });
 
 export default function EndEffectorControlPanel({
   control,
+  viewportRef,
   lockModes,
   onModeChange,
   onPoseChange,
@@ -69,6 +73,54 @@ export default function EndEffectorControlPanel({
   onToggleMapLock,
   onClose,
 }) {
+  const panelRef = useRef(null);
+  const dragRef = useRef(null);
+  const [position, setPosition] = useState(initialPanelPosition);
+  const positionRef = useRef(position);
+  const [dragging, setDragging] = useState(false);
+  const open = Boolean(control);
+
+  const movePanel = useCallback((candidate) => {
+    const panel = panelRef.current;
+    const viewport = viewportRef.current;
+    // Hidden/collapsed views have no usable bounds; retain the last position.
+    if (!panel || !viewport?.clientWidth || !viewport.clientHeight) return;
+    const next = {
+      x: Math.max(PANEL_EDGE, Math.min(
+        candidate.x, viewport.clientWidth - panel.offsetWidth - PANEL_EDGE,
+      )),
+      y: Math.max(PANEL_EDGE, Math.min(
+        candidate.y, viewport.clientHeight - panel.offsetHeight - PANEL_EDGE,
+      )),
+    };
+    positionRef.current = next;
+    setPosition((current) => current.x === next.x && current.y === next.y ? current : next);
+  }, [viewportRef]);
+
+  useLayoutEffect(() => {
+    dragRef.current = null;
+    setDragging(false);
+    if (!open) return undefined;
+    movePanel(initialPanelPosition());
+    const keepPanelVisible = () => movePanel(positionRef.current);
+    const observer = new ResizeObserver(keepPanelVisible);
+    observer.observe(viewportRef.current);
+    observer.observe(panelRef.current);
+    return () => {
+      observer.disconnect();
+      dragRef.current = null;
+    };
+  }, [movePanel, open, viewportRef]);
+
+  const finishDrag = (event) => {
+    if (dragRef.current?.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setDragging(false);
+  };
+
   if (!control) return null;
   const pose = control.pose;
   const activeLockMode = control.lockMode || null;
@@ -91,7 +143,9 @@ export default function EndEffectorControlPanel({
 
   return (
     <section
-      className={`end-effector-panel is-${control.status || 'tracking'} ${bodyLocked ? 'is-body-locked is-locked' : ''} ${mapLocked ? 'is-map-locked is-locked' : ''}`}
+      ref={panelRef}
+      className={`end-effector-panel is-draggable ${dragging ? 'is-dragging' : ''} is-${control.status || 'tracking'} ${bodyLocked ? 'is-body-locked is-locked' : ''} ${mapLocked ? 'is-map-locked is-locked' : ''}`}
+      style={{ left: position.x, top: position.y, right: 'auto' }}
       aria-label="机械臂末端空间球"
       data-end-effector-side={control.side}
       data-transform-mode={control.mode}
@@ -105,7 +159,57 @@ export default function EndEffectorControlPanel({
       data-position-error={control.positionError || 0}
       data-rotation-error={control.rotationError || 0}
     >
-      <header className="end-effector-panel__header">
+      <header
+        className="end-effector-panel__header"
+        role="group"
+        tabIndex={0}
+        aria-label="移动机械臂末端面板"
+        title="拖动移动面板 · 方向键微调 · 双击回到左上角"
+        onDoubleClick={(event) => {
+          if (!event.target.closest('button')) movePanel(initialPanelPosition());
+        }}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const delta = {
+            ArrowLeft: [-10, 0], ArrowRight: [10, 0],
+            ArrowUp: [0, -10], ArrowDown: [0, 10],
+          }[event.key];
+          if (!delta && event.key !== 'Home') return;
+          event.preventDefault();
+          event.stopPropagation();
+          movePanel(delta
+            ? { x: positionRef.current.x + delta[0], y: positionRef.current.y + delta[1] }
+            : initialPanelPosition());
+        }}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || !event.isPrimary || event.target.closest('button')) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.currentTarget.focus({ preventScroll: true });
+          event.currentTarget.setPointerCapture(event.pointerId);
+          dragRef.current = {
+            pointerId: event.pointerId,
+            clientX: event.clientX,
+            clientY: event.clientY,
+            origin: positionRef.current,
+          };
+          setDragging(true);
+        }}
+        onPointerMove={(event) => {
+          const drag = dragRef.current;
+          if (!drag || drag.pointerId !== event.pointerId) return;
+          movePanel({
+            x: drag.origin.x + event.clientX - drag.clientX,
+            y: drag.origin.y + event.clientY - drag.clientY,
+          });
+        }}
+        onPointerUp={finishDrag}
+        onPointerCancel={finishDrag}
+        onLostPointerCapture={() => {
+          dragRef.current = null;
+          setDragging(false);
+        }}
+      >
         <div className="space-ball-emblem" aria-hidden="true">
           <span /><i /><b />
           <Orbit size={17} />
@@ -114,6 +218,7 @@ export default function EndEffectorControlPanel({
           <small>6D SPACE BALL · MAP FRAME</small>
           <strong>{sideLabel[control.side]}末端</strong>
         </div>
+        <GripHorizontal size={14} className="end-effector-panel__drag-grip" aria-hidden="true" />
         <button type="button" aria-label="退出机械臂末端控制" title="保留当前姿态并退出末端控制" onClick={onClose}>
           <X size={14} />
         </button>

@@ -1562,7 +1562,6 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
                   <Unplug size={12} />断开
                 </button>
               </div>
-              <p className="spacemouse-coexist-note">左键循环 X / Y / Z，右键循环 YAW / PITCH / ROLL；推动空间球时只执行当前轴，双击同一实体键暂停。输入期间会低开销屏蔽驱动映射出的点击，并在浏览器允许时临时锁住光标；普通鼠标随后自动恢复，缩放始终由鼠标滚轮控制。</p>
             </>
           ) : (
             <div className="spacemouse-empty-state">
@@ -1797,7 +1796,6 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
                 <Check size={30} />
                 <small>PROFILE READY</small>
                 <h2>你的 SpaceMouse 已就绪</h2>
-                <p>左右实体键映射、12 个外推峰值动作指纹及解耦矩阵已保存到浏览器本地。左键循环 X / Y / Z，右键循环 YAW / PITCH / ROLL；空间球永远只驱动当前选中轴，双击同一实体键可暂停。</p>
                 <div><span>XYZ</span><i /><span>RPY</span></div>
                 <button
                   type="button"
