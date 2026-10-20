@@ -1,11 +1,14 @@
 import { useCallback, useRef, useState } from 'react';
-import { Layers3 } from 'lucide-react';
+import { Eye, EyeOff, Layers3 } from 'lucide-react';
 import { getSliceControlBounds } from '../lib/sliceRange.js';
 import ViewerMenu from './ViewerMenu.jsx';
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-export default function HeightRange({ bounds, value, onChange, disabled, collapsed, onCollapsedChange, isActive = true }) {
+export default function HeightRange({
+  bounds, value, onChange, visible = true, onVisibleChange,
+  disabled, collapsed, onCollapsedChange, isActive = true,
+}) {
   const railRef = useRef(null);
   const dragPointerRef = useRef(null);
   const [dragging, setDragging] = useState(false);
@@ -140,6 +143,22 @@ export default function HeightRange({ bounds, value, onChange, disabled, collaps
           ? `展开 Z 截面：当前 ${sliceMin.toFixed(2)} 至 ${sliceMax.toFixed(2)} m`
           : '收起 Z 截面'}
       >
+        <div className="height-range__visibility">
+          <span>截面显示</span>
+          <button
+            type="button"
+            role="switch"
+            className="distance-warning-toggle"
+            aria-label="显示 Z 截面"
+            aria-checked={visible}
+            title={visible ? '隐藏 3D 截面框' : '显示 3D 截面框'}
+            disabled={disabled}
+            onClick={() => onVisibleChange?.(!visible)}
+          >
+            {visible ? <Eye size={12} /> : <EyeOff size={12} />}
+            {visible ? '显示' : '隐藏'}
+          </button>
+        </div>
         <div className="height-range__body">
           <div className="height-range__meter">
             <span className="height-range__bound">{max.toFixed(2)}</span>

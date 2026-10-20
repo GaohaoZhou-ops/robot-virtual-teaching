@@ -6,6 +6,7 @@ import { validateIPadResult } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { ZIVID_M70_PROFILE } from './zividCamera.js';
+import { withoutTemporaryMapNavigation } from './teachingNavigation.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -763,6 +764,9 @@ export function buildExport({
   transfer = null,
   directoryAutosaveSuspended = false,
 }) {
+  // This boundary covers autosave, archives and teaching transfers. Never
+  // promote a local projection back into the map's authoritative route.
+  ({ waypoints, edges } = withoutTemporaryMapNavigation(waypoints, edges));
   const pointById = new Map(waypoints.map((point) => [point.id, point]));
   const exportedRobotPose = robotPose || robot?.origin || {};
   const normalizedTeachingSpaceMode = normalizeTeachingSpaceMode(teachingSpaceMode);

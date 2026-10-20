@@ -36,6 +36,7 @@ import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } f
 import ViewerMenu from './ViewerMenu.jsx';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
+import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
@@ -59,6 +60,7 @@ import {
   loadRobotModel,
   normalizeRobotJointValues,
   normalizeRobotPose,
+  robotGroundLift,
   readRobotJointValues,
   setRobotVisualBounds,
   setRobotJointValue,
@@ -1491,6 +1493,7 @@ export default function PointCloudViewer({
   mapData,
   displaySettingsContainer,
   heightRange,
+  showSlice = true,
   waypoints,
   edges,
   selectedWaypointId,
@@ -1551,6 +1554,8 @@ export default function PointCloudViewer({
   isActive = true,
 }) {
   const mountRef = useRef(null);
+  const distanceScaleRef = useRef(null);
+  const distanceScaleLabelRef = useRef(null);
   const spaceMouseAxisHudRef = useRef(null);
   const sceneRef = useRef(null);
   const sliceGroupRef = useRef(null);
@@ -3235,7 +3240,6 @@ export default function PointCloudViewer({
     controls.target.copy(center);
     configureViewportTrackball(controls);
     controls.minDistance = detailDollyFloor;
-    controls.maxDistance = radius * 6;
     renderer.domElement.dataset.controlMode = 'free-trackball';
     renderer.domElement.dataset.zoomMode = 'hybrid-continuous-detail';
     renderer.domElement.dataset.keyboardPlane = 'xy-target-locked';
@@ -3442,6 +3446,7 @@ export default function PointCloudViewer({
       renderer.domElement.dataset.cameraDistance = distance.toPrecision(8);
       renderer.domElement.dataset.effectiveCameraDistance = effectiveDistance.toExponential(8);
       renderer.domElement.dataset.cameraNear = nextNear.toPrecision(8);
+      renderer.domElement.dataset.cameraFar = camera.far.toPrecision(8);
       renderer.domElement.dataset.opticalZoom = opticalZoom.toExponential(8);
       renderer.domElement.dataset.zoomStage = opticalZoom > 1.000001 ? 'optical' : 'dolly';
       renderer.domElement.dataset.zoomBoost = zoomBoostForDistance(effectiveDistance).toFixed(3);
@@ -3554,35 +3559,32 @@ export default function PointCloudViewer({
     const size = new THREE.Vector3();
     bounds.getSize(size);
     const independentTeachingSpace = mapData.teachingSpaceMode === 'independent';
-    const gridExtentFromOrigin = Math.max(
-      Math.abs(bounds.min.x),
-      Math.abs(bounds.max.x),
-      Math.abs(bounds.min.y),
-      Math.abs(bounds.max.y),
-      5,
-    );
-    const gridSize = independentTeachingSpace
-      ? gridExtentFromOrigin * 2
-      : Math.max(size.x, size.y, 10);
-    const grid = new THREE.GridHelper(gridSize, 40, 0x3f7478, 0x173035);
-    grid.rotation.x = Math.PI / 2;
-    grid.position.set(
-      independentTeachingSpace ? 0 : center.x,
-      independentTeachingSpace ? 0 : center.y,
-      independentTeachingSpace ? 0 : bounds.min.z - Math.max(size.z * 0.03, 0.03),
-    );
-    grid.name = independentTeachingSpace
-      ? 'virtual-origin-reference-plane'
-      : 'map-reference-plane';
-    renderer.domElement.dataset.referencePlane = grid.name;
+    const referencePlane = independentTeachingSpace
+      ? createIndependentGround(bounds)
+      : new THREE.GridHelper(Math.max(size.x, size.y, 10), 40, 0x3f7478, 0x173035);
+    if (independentTeachingSpace) {
+      navigation.setReferenceSphere(new THREE.Sphere(
+        new THREE.Vector3(), referencePlane.userData.size / Math.SQRT2,
+      ));
+      renderer.domElement.dataset.virtualGroundZ = '0';
+      renderer.domElement.dataset.referenceGridSpacing = String(referencePlane.userData.gridSpacing);
+      renderer.domElement.dataset.referenceGridSize = String(referencePlane.userData.size);
+    } else {
+      referencePlane.rotation.x = Math.PI / 2;
+      referencePlane.position.set(
+        center.x, center.y, bounds.min.z - Math.max(size.z * 0.03, 0.03),
+      );
+      referencePlane.name = 'map-reference-plane';
+      referencePlane.material.transparent = true;
+      referencePlane.material.opacity = 0.28;
+    }
+    renderer.domElement.dataset.referencePlane = referencePlane.name;
     renderer.domElement.dataset.referencePlanePosition = [
-      grid.position.x,
-      grid.position.y,
-      grid.position.z,
+      referencePlane.position.x,
+      referencePlane.position.y,
+      referencePlane.position.z,
     ].join(',');
-    grid.material.transparent = true;
-    grid.material.opacity = 0.28;
-    scene.add(grid);
+    scene.add(referencePlane);
 
     const originGroup = new THREE.Group();
     originGroup.name = 'ros-rviz-coordinate-origin';
@@ -3638,6 +3640,7 @@ export default function PointCloudViewer({
     renderer.domElement.dataset.coordinateAxisColors = 'x:red,y:green,z:blue';
 
     const sliceGroup = new THREE.Group();
+    sliceGroup.name = 'z-slice-range';
     const routeGroup = new THREE.Group();
     const waypointGroup = new THREE.Group();
     const visionCoverageGroup = new THREE.Group();
@@ -4473,6 +4476,7 @@ export default function PointCloudViewer({
     syncDetailView();
 
     const frameClock = new THREE.Clock();
+    let lastDistanceScaleSignature = '';
     const worldUp = new THREE.Vector3(0, 0, 1);
     const forward = new THREE.Vector3();
     const right = new THREE.Vector3();
@@ -5071,6 +5075,24 @@ export default function PointCloudViewer({
         (Math.max(renderer.domElement.clientHeight, 1) / 2)
         / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
 
+      if (independentTeachingSpace && distanceScaleRef.current) {
+        const metersPerPixel = camera.position.distanceTo(controls.target)
+          / (camera.zoom * focalPixels);
+        const scale = viewportDistanceScale(metersPerPixel);
+        const signature = scale ? `${scale.meters}:${scale.pixels.toFixed(2)}:${metersPerPixel}` : '';
+        if (signature !== lastDistanceScaleSignature) {
+          lastDistanceScaleSignature = signature;
+          const element = distanceScaleRef.current;
+          element.dataset.ready = scale ? 'true' : 'false';
+          if (scale) {
+            element.style.setProperty('--distance-scale-width', `${scale.pixels.toFixed(2)}px`);
+            element.dataset.meters = String(scale.meters);
+            element.dataset.metersPerPixel = String(metersPerPixel);
+            distanceScaleLabelRef.current.textContent = scale.label;
+          }
+        }
+      }
+
       const chassisHandle = robotChassisHandleRef.current;
       if (chassisHandle?.target) {
         chassisHandle.target.getWorldPosition(chassisWorldPosition);
@@ -5297,8 +5319,7 @@ export default function PointCloudViewer({
       surfaceCoverageProjectionRef.current = null;
       surfaceGeometry?.dispose();
       meshMaterial?.dispose();
-      grid.geometry.dispose();
-      grid.material.dispose();
+      disposeObject(referencePlane);
       disposeObject(originGroup);
       disposeObject(sliceGroup);
       disposeObject(routeGroup);
@@ -5458,6 +5479,17 @@ export default function PointCloudViewer({
           'robot-load',
         );
         layer.updateMatrixWorld(true);
+        const groundLift = robotGroundLift(robot);
+        if (groundLift > 0) {
+          const groundedPose = normalizeRobotPose(robotPoseRef.current);
+          groundedPose.position.z += groundLift;
+          robotPoseRef.current = applyRobotPose(layer, groundedPose);
+          onRobotPoseChangeRef.current?.(groundedPose);
+        }
+        canvas.dataset.robotGroundLift = String(groundLift);
+        canvas.dataset.robotLoadedBottomZ = String(
+          setRobotVisualBounds(new THREE.Box3(), robot).min.z,
+        );
         const metadata = robot.userData.robot || {};
         const chassisHandle = createRobotChassisDragHandle(robot, metadata);
         chassisControlGuide = createChassisControlGuide();
@@ -6603,6 +6635,14 @@ export default function PointCloudViewer({
 
   useEffect(() => {
     const group = sliceGroupRef.current;
+    if (!group) return;
+    group.visible = showSlice;
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.sliceVisible = String(group.visible);
+  }, [showSlice, mapData?.geometry, mapData?.teachingSpaceMode]);
+
+  useEffect(() => {
+    const group = sliceGroupRef.current;
     const bounds = mapData?.geometry?.boundingBox;
     if (!group || !bounds) return;
     while (group.children.length) {
@@ -7341,6 +7381,7 @@ export default function PointCloudViewer({
     <div
       className={`point-cloud-view ${shiftPanArmed ? 'is-shift-pan-armed' : ''} ${effectiveViewportPan ? 'is-viewport-pan-mode' : ''} ${persistentPanMode ? 'is-persistent-pan-mode' : ''} ${robotControlActive ? 'is-robot-driving' : ''} ${endEffectorControlActive ? 'is-end-effector-control' : ''} ${chassisDragMode ? 'is-chassis-drag-mode' : ''} ${chassisDragging ? 'is-chassis-dragging' : ''} ${robotTrajectoryActive ? 'is-teaching-trajectory-active' : ''} ${robotParkingGhostVisible ? 'is-parking-ghost-visible' : ''} ${visionCoverageRenderingEnabled && visionCoverageStats.frameCount ? 'is-vision-coverage-active' : ''} ${visionCoverageRenderingEnabled && teachingSurfaceTintStats.status === 'visible' ? 'is-teaching-surface-tinted' : ''}`}
       ref={mountRef}
+      data-teaching-space-mode={teachingSpaceMode}
       data-robot-trajectory-active={robotTrajectoryActive ? 'true' : 'false'}
       data-parking-ghost-state={robotParkingGhostVisible ? 'visible' : 'hidden'}
       data-parking-ghost-target={robotParkingGhost?.parkingPointId || ''}
@@ -7792,6 +7833,28 @@ export default function PointCloudViewer({
               )}
             </ViewerMenu></>, displaySettingsContainer)}
           </div>
+          {teachingSpaceMode === 'independent' && (
+            <aside
+              ref={distanceScaleRef}
+              className="viewport-distance-scale"
+              aria-label="三维距离比例尺"
+              aria-description="以视图焦点深度的屏幕水平方向为参考；透视视图中不同深度的比例不同。地面网格固定为 1 米。"
+              data-ready="false"
+            >
+              <div className="viewport-distance-scale__meta">
+                <Ruler size={12} />
+                <span>Z=0 · 网格 1 m</span>
+              </div>
+              <div className="viewport-distance-scale__ruler">
+                <div className="viewport-distance-scale__labels">
+                  <span>0</span>
+                  <strong ref={distanceScaleLabelRef}>—</strong>
+                </div>
+                <div className="viewport-distance-scale__bar" aria-hidden="true" />
+              </div>
+              <small>视图焦点处比例</small>
+            </aside>
+          )}
           {isHeightColor && (
             <aside className="height-color-legend" aria-label="点云高程比例尺">
               <div className="height-color-legend__heading">

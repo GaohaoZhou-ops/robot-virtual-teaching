@@ -203,8 +203,16 @@ playwright/.auth/
 /tests/model-editor-*.mp4
 /tests/model-editor-*.webm
 /tests/model-editor-*-trace.zip
-# Network/performance captures from model-editor debugging can be large.
-# Restrict JSON rules to traces so source configuration remains trackable.
+# Network/performance captures from teaching and model-editor debugging can be large.
+# Scope to local output names; keep source configuration and fixture captures visible.
+/atlas-*.har
+/atlas-*-trace.json
+/transfer-*.har
+/transfer-*-trace.json
+/tests/atlas-*.har
+/tests/atlas-*-trace.json
+/tests/transfer-*.har
+/tests/transfer-*-trace.json
 /model-editor-*.har
 /model-editor-*-trace.json
 /tests/model-editor-*.har

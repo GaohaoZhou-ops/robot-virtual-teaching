@@ -61,13 +61,16 @@ import { mergeAbxImport, readAbxTeachingFile } from './lib/abxTeachingImport.js'
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceKey, mobileDeviceLabel } from './lib/ipadProtocol.js';
 import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
+import { mapRouteSyncStatus, syncMapRouteToIndependent } from './lib/mapRouteSync.js';
 import { inspectConnectivity } from './lib/graph.js';
 import {
   buildTeachingWaypoints,
   navigationEdgesForWaypoints,
   parkingWaypointPose,
   removeTeachingWaypoints,
+  TEMPORARY_MAP_ROUTE_SOURCE,
   updateTeachingWaypoint,
+  withoutTemporaryMapNavigation,
 } from './lib/teachingNavigation.js';
 import {
   buildExport,
@@ -112,6 +115,7 @@ import {
   fetchServiceSession,
   finalizeWorkspaceRecovery,
   loadWorkspaceViews,
+  loadWorkspaceConfig,
   loadWorkspaceSnapshot,
   prepareWorkspaceSession,
   resetWorkspaceSession,
@@ -490,6 +494,10 @@ export default function App() {
   const [abxExportSnapshot, setAbxExportSnapshot] = useState(null);
   const [abxRouteExport, setAbxRouteExport] = useState(null);
   const [abxImportBusy, setAbxImportBusy] = useState(false);
+  const [mapRouteSync, setMapRouteSync] = useState({ available: false, reason: '正在检查地图路径…' });
+  const [mapRouteSyncEnabled, setMapRouteSyncEnabled] = useState(false);
+  const [mapRouteSyncBusy, setMapRouteSyncBusy] = useState(false);
+  const mapRouteSyncBusyRef = useRef(false);
   const projectDirectoryRef = useRef(null);
   const projectDirectoryWriteChainRef = useRef(Promise.resolve());
   const projectDirectoryFailureNotifiedRef = useRef(false);
@@ -517,6 +525,7 @@ export default function App() {
   const [teachingSpaceMode, setTeachingSpaceMode] = useState('map');
   const [heightRange, setHeightRange] = useState([0, 1]);
   const [heightRangeCollapsed, setHeightRangeCollapsed] = useState(true);
+  const [showSlice3D, setShowSlice3D] = useState(true);
   const [storedWaypoints, setWaypoints] = useState([]);
   const [storedEdges, setEdges] = useState([]);
   const [abxRoutes, setAbxRoutes] = useState([]);
@@ -685,11 +694,13 @@ export default function App() {
 
   latestWorkspaceRef.current = {
     abxRoutes,
+    mapRouteSyncEnabled,
     workspaceTransfer,
     directoryAutosaveSuspended,
     mapData,
     teachingSpaceMode,
     heightRange,
+    showSlice3D,
     waypoints,
     edges,
     mode,
@@ -966,6 +977,7 @@ export default function App() {
       project,
       ui: {
         teachingSpaceMode: current.teachingSpaceMode,
+        mapRouteSyncEnabled: current.teachingSpaceMode === 'independent' && current.mapRouteSyncEnabled,
         mode: current.mode,
         connectionSourceId: current.connectionSourceId,
         selectedWaypointId: current.selectedWaypointId,
@@ -976,6 +988,7 @@ export default function App() {
         pointColorMode: current.pointColorMode,
         meshRenderQuality: current.meshRenderQuality,
         showWaypoints3D: current.showWaypoints3D,
+        showSlice3D: current.showSlice3D,
         collapsedPanel: current.collapsedPanel,
         inspectorCollapsed: current.inspectorCollapsed,
         robotHeightLocked: current.robotHeightLocked,
@@ -1060,6 +1073,74 @@ export default function App() {
       : current);
   }, []);
 
+  const applySyncedMapRoute = useCallback((synced) => {
+    const current = latestWorkspaceRef.current;
+    setWaypoints((points) => [...withoutTemporaryMapNavigation(points, []).waypoints, ...synced.waypoints]);
+    setEdges((paths) => [...withoutTemporaryMapNavigation(current.waypoints, paths).edges, ...synced.edges]);
+    setValidation(initialValidation);
+  }, []);
+
+  useEffect(() => {
+    if (teachingSpaceMode !== 'independent' || sessionState.status !== 'ready' || loadState.loading || !mapData) return undefined;
+    let cancelled = false;
+    const sessionId = sessionIdRef.current;
+    setMapRouteSync({ available: false, reason: '正在检查地图路径…' });
+    loadWorkspaceConfig(sessionId, 'map').then((config) => {
+      if (cancelled || workspaceSwitchingRef.current || !sessionReadyRef.current || sessionIdRef.current !== sessionId) return;
+      const status = mapRouteSyncStatus(mapData, workspaceTransfer, config);
+      setMapRouteSync(status);
+      const current = latestWorkspaceRef.current;
+      // Only remember the opt-in in this workspace's UI cache. On return,
+      // rebuild the disposable graph from the latest absolute map route.
+      if (status.available && current.mapRouteSyncEnabled && !mapRouteSyncBusyRef.current
+        && !current.waypoints.some((point) => point.source === TEMPORARY_MAP_ROUTE_SOURCE)) {
+        applySyncedMapRoute(syncMapRouteToIndependent(mapData, workspaceTransfer, config));
+      }
+    }).catch((error) => {
+      if (!cancelled) setMapRouteSync({ available: false, reason: error.message });
+    });
+    return () => { cancelled = true; };
+  }, [mapData, teachingSpaceMode, workspaceTransfer, sessionState.status, loadState.loading,
+    mapRouteSyncEnabled, applySyncedMapRoute,
+    cachedWorkspaces.map?.mapId, cachedWorkspaces.map?.waypointCount, cachedWorkspaces.map?.edgeCount]);
+
+  const syncMapRoute = async () => {
+    const source = latestWorkspaceRef.current;
+    if (mapRouteSyncBusyRef.current || loadState.loading || workspaceSwitchingRef.current
+      || !sessionReadyRef.current || source.teachingSpaceMode !== 'independent') return;
+    const sessionId = sessionIdRef.current;
+    mapRouteSyncBusyRef.current = true;
+    setMapRouteSyncBusy(true);
+    try {
+      // Always recompute from the latest absolute route, never from a prior projection.
+      const config = await loadWorkspaceConfig(sessionId, 'map');
+      const current = latestWorkspaceRef.current;
+      if (current.mapData !== source.mapData || current.teachingSpaceMode !== 'independent'
+        || current.workspaceTransfer !== source.workspaceTransfer || sessionIdRef.current !== sessionId
+        || workspaceSwitchingRef.current) throw new Error('同步期间工程已切换，请在目标工程重新同步');
+      const status = mapRouteSyncStatus(current.mapData, current.workspaceTransfer, config);
+      setMapRouteSync(status);
+      const synced = syncMapRouteToIndependent(current.mapData, current.workspaceTransfer, config);
+      applySyncedMapRoute(synced);
+      setMapRouteSyncEnabled(true);
+      setSelectedWaypointId(null);
+      setSelectedEdgeId(null);
+      setConnectionSourceId(null);
+      setShowWaypoints3D(true);
+      // Commit the opt-in before reporting success; a quick reload must not
+      // depend on the normal debounced save or an asynchronous pagehide write.
+      latestWorkspaceRef.current = { ...current, mapRouteSyncEnabled: true };
+      await persistWorkspaceNow();
+      if (!sessionReadyRef.current) throw new Error('同步状态尚未保存成功，请重试');
+      notify(`已同步 ${synced.waypoints.length} 个导航点 / ${synced.edges.length} 条路径到独立模型坐标系 · 临时副本，不写回地图`, 'success');
+    } catch (error) {
+      notify(error.message || '地图路径同步失败', 'error');
+    } finally {
+      mapRouteSyncBusyRef.current = false;
+      setMapRouteSyncBusy(false);
+    }
+  };
+
   useEffect(() => {
     invalidateConnectivity();
   }, [invalidateConnectivity, navigationTopology]);
@@ -1141,6 +1222,7 @@ export default function App() {
       setSynchronizedFocus(null);
       if (!preserveGraph) {
         setWorkspaceTransfer(null);
+        setMapRouteSyncEnabled(false);
         setDirectoryAutosaveSuspended(false);
         setWaypoints([]);
         setAbxRoutes([]);
@@ -1322,6 +1404,8 @@ export default function App() {
           const snapshot = configMatchesMap ? stored.config?.config : null;
           const project = snapshot?.project ? normalizeProject(snapshot.project) : null;
           setWorkspaceTransfer(project?.workspace?.transfer || null);
+          setMapRouteSyncEnabled(project?.workspace?.teachingSpaceMode === 'independent'
+            && snapshot?.ui?.mapRouteSyncEnabled === true);
           restoredDirectorySuspended = project?.workspace?.directoryAutosaveSuspended === true;
           setDirectoryAutosaveSuspended(restoredDirectorySuspended);
           restoredTeachingSpaceMode = normalizeTeachingSpaceMode(
@@ -1374,6 +1458,7 @@ export default function App() {
             snapshot?.ui?.meshRenderQuality ?? project?.rendering?.meshQuality,
           ));
           setShowWaypoints3D(snapshot?.ui?.showWaypoints3D !== false);
+          setShowSlice3D(snapshot?.ui?.showSlice3D !== false);
           defaultRobotJointLocksPendingRef.current = false;
           setSelectedRobot(restoredRobot);
           setRobotPose(
@@ -1598,6 +1683,7 @@ export default function App() {
           if (!isCurrent()) return;
           setMapData(null);
           setWorkspaceTransfer(null);
+          setMapRouteSyncEnabled(false);
           setDirectoryAutosaveSuspended(false);
           restoredDirectorySuspended = false;
           setTeachingSpaceMode('map');
@@ -1607,6 +1693,7 @@ export default function App() {
           setAbxRoutes([]);
           setEdges([]);
           setHeightRange([0, 1]);
+          setShowSlice3D(true);
           setPointColorMode('height');
           setMeshRenderQuality('auto');
           setShowWaypoints3D(true);
@@ -1728,11 +1815,13 @@ export default function App() {
     queueWorkspaceSave();
   }, [
     workspaceTransfer,
+    mapRouteSyncEnabled,
     directoryAutosaveSuspended,
     collapsedPanel,
     connectionSourceId,
     edges,
     heightRange,
+    showSlice3D,
     inspectorCollapsed,
     mapData?.mapId,
     meshRenderQuality,
@@ -2000,6 +2089,7 @@ export default function App() {
       const importedDirectorySuspended = !importedFile.directory
         && project.workspace?.directoryAutosaveSuspended === true;
       setWorkspaceTransfer(project.workspace?.transfer || null);
+      setMapRouteSyncEnabled(false);
       setDirectoryAutosaveSuspended(importedDirectorySuspended);
       const portableRobotPackage = importedFile.resources?.robot || null;
       if (portableRobotPackage) {
@@ -4396,6 +4486,29 @@ export default function App() {
     ],
   );
 
+  const moveRobotToWaypoint = useCallback((id) => {
+    const point = latestWorkspaceRef.current.waypoints.find((item) => item.id === id);
+    if (!point || !selectedRobot || robotLoadState.status !== 'loaded' || loadState.loading) return;
+    if (teachingCaptureBusyRef.current) {
+      notify('请等待当前姿态采集完成后再移动机器人', 'warning');
+      return;
+    }
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    clearRobotParkingGhost();
+    setShowRobotModel(true);
+    const { x, y, roll, pitch, yaw } = point.pose;
+    // Navigation coordinates describe the route, while the base height is
+    // calibrated independently for the loaded robot.
+    setRobotPose((current) => normalizeRobotPose({
+      position: { x, y, z: current.position.z },
+      rpy: { roll, pitch, yaw },
+    }));
+    requestSynchronizedFocus('robot', selectedRobot.id || selectedRobot.relativePath);
+    notify(`已运动到 ${point.name}，底盘朝向已对齐，Z 高度保持不变`, 'success');
+  }, [clearRobotParkingGhost, loadState.loading, notify, requestSynchronizedFocus,
+    robotLoadState.status, selectedRobot, stopTeachingTaskPlayback]);
+
   const beginTeachingParkingPointEdit = useCallback((taskId, parkingPointId) => {
     const task = teachingTasks.find((item) => item.id === taskId);
     const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
@@ -5510,6 +5623,8 @@ export default function App() {
                 bounds={mapData?.bounds}
                 value={heightRange}
                 onChange={setHeightRange}
+                visible={showSlice3D}
+                onVisibleChange={setShowSlice3D}
                 disabled={!mapData?.geometry}
                 collapsed={heightRangeCollapsed}
                 onCollapsedChange={setHeightRangeCollapsed}
@@ -5557,6 +5672,7 @@ export default function App() {
                 mapData={mapData}
                 displaySettingsContainer={displaySettingsContainer}
                 heightRange={heightRange}
+                showSlice={showSlice3D}
                 waypoints={waypoints}
                 edges={edges}
                 selectedWaypointId={selectedWaypointId}
@@ -5764,8 +5880,14 @@ export default function App() {
           onImportRoute={() => abxRouteInputRef.current?.click()}
           routeImportDisabled={!mapData || abxImportBusy || loadState.loading}
           routeImportBusy={abxImportBusy}
+          onSyncMapRoute={syncMapRoute}
+          mapRouteSync={mapRouteSync}
+          mapRouteSyncBusy={mapRouteSyncBusy}
+          mapRouteSyncDisabled={loadState.loading || sessionState.status !== 'ready'}
           onSelectWaypoint={focusWaypointFromInspector}
           onSearchWaypoint={focusWaypointFromInspector}
+          onMoveToWaypoint={moveRobotToWaypoint}
+          waypointMoveDisabled={loadState.loading || teachingCaptureState.status === 'capturing'}
           onSelectEdge={focusEdgeFromInspector}
           onClearSelection={clearSelection}
           onUpdateWaypoint={updateWaypoint}

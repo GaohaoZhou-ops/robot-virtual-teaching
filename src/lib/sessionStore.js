@@ -722,6 +722,28 @@ export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null)
   return modes[workspaceMode];
 }
 
+// Read another workspace's route/relation without unpacking its point cloud.
+export async function loadWorkspaceConfig(sessionId, mode) {
+  const workspaceMode = normalizeWorkspaceMode(mode);
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readonly');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  const [meta, index, config] = await Promise.all([
+    requestResult(store.get('meta')),
+    requestResult(store.get(WORKSPACE_INDEX_KEY)),
+    requestResult(store.get(workspaceConfigKey(workspaceMode))),
+  ]);
+  await completion;
+  if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId) {
+    throw new Error('工作会话已变化，请刷新页面后重试');
+  }
+  if (config && (config.sessionId !== sessionId || config.mapId !== index.modes?.[workspaceMode]?.mapId)) {
+    throw new Error('工程缓存不完整，请重新加载工程');
+  }
+  return config || null;
+}
+
 export async function loadWorkspaceSnapshot(sessionId, mode) {
   const workspaceMode = normalizeWorkspaceMode(mode);
   const database = await openDatabase();

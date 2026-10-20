@@ -1,4 +1,17 @@
 export const TEACHING_WAYPOINT_SOURCE = 'teaching-parking-point';
+export const TEMPORARY_MAP_ROUTE_SOURCE = 'temporary-map-route';
+
+// A synchronized map route is a disposable local projection. Edges created
+// against its points are temporary too, including mixed local/map connections.
+export function withoutTemporaryMapNavigation(waypoints, edges) {
+  const temporaryIds = new Set(waypoints
+    .filter((point) => point.source === TEMPORARY_MAP_ROUTE_SOURCE).map((point) => point.id));
+  return {
+    waypoints: waypoints.filter((point) => !temporaryIds.has(point.id)),
+    edges: edges.filter((edge) => edge.source !== TEMPORARY_MAP_ROUTE_SOURCE
+      && !temporaryIds.has(edge.from) && !temporaryIds.has(edge.to)),
+  };
+}
 
 const poseAxes = ['x', 'y', 'z', 'roll', 'pitch', 'yaw'];
 

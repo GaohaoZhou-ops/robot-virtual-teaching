@@ -83,7 +83,9 @@ def run():
             "document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'",
             timeout=180_000,
         )
-        assert canvas.get_attribute("data-robot-origin") == "0,0,0"
+        initial_pose = read_pose(canvas)
+        assert initial_pose["x"] == 0 and initial_pose["y"] == 0
+        assert float(canvas.get_attribute("data-robot-loaded-bottom-z")) > 0
         assert canvas.get_attribute("data-robot-model-format") == "urdf"
         assert canvas.get_attribute("data-robot-link-count") == "37"
         assert canvas.get_attribute("data-robot-joint-count") == "36"
@@ -105,7 +107,8 @@ def run():
         assert abs(left_tool[0] - right_tool[0]) < 1e-5
         assert abs(left_tool[1] + right_tool[1]) < 1e-5
         assert abs(left_tool[2] - right_tool[2]) < 1e-5
-        assert left_tool[2] < waist[2]
+        # Waist metadata is model-local; tool telemetry is in world space.
+        assert left_tool[2] < waist[2] + initial_pose["z"]
         assert page.locator(".robot-picker").get_attribute("data-robot-picker-state") == "loaded"
         assert page.get_by_text("2 × Zivid · 2 optical frames", exact=True).is_visible()
 
