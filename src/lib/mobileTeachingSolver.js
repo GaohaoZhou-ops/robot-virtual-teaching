@@ -4,6 +4,7 @@ import { mobileCaptureMatrix } from './ipadCaptureDisplay.js';
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
 import { mobileParkingCandidates, mobileParkingKey, mobileSolutionMapPose } from './mobileTeachingParking.js';
+import { applyMobileReferencePose, normalizeMobileReferencePose } from './mobileTeachingReference.js';
 
 const XYZ = ['x', 'y', 'z'];
 const RPY = ['roll', 'pitch', 'yaw'];
@@ -13,7 +14,7 @@ const plain = (v) => Object.fromEntries(XYZ.map((axis) => [axis, v[axis]]));
 const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 const abort = (signal) => { if (signal?.aborted) throw new DOMException('计算已取消', 'AbortError'); };
 const TORSO_PITCH_JOINTS = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J'];
-export const MOBILE_SOLVE_VERSION = 6;
+export const MOBILE_SOLVE_VERSION = 7;
 
 export const DEFAULT_MOBILE_SOLVE_OPTIONS = Object.freeze({
   positionTolerance: Object.freeze({ x: 0.05, y: 0.05, z: 0.05 }),
@@ -21,6 +22,7 @@ export const DEFAULT_MOBILE_SOLVE_OPTIONS = Object.freeze({
   targetFrame: 'optical', armMode: 'both', allowSingleArm: true,
   allowTorsoHeight: true, lockChestVertical: true, respectJointLocks: true, keyframesOnly: true,
   parkingMode: 'auto', checkCollisions: true, armBodyClearance: 0.05,
+  referencePose: Object.freeze({ type: 'current' }),
 });
 
 export function validateMobileSolveOptions(value = {}) {
@@ -44,6 +46,7 @@ export function validateMobileSolveOptions(value = {}) {
     if (typeof options[key] !== 'boolean') throw new Error('计算开关配置无效');
   }
   if (options.allowTorsoHeight && !options.lockChestVertical) throw new Error('自动调节胸部高度需要启用前胸垂直锁定');
+  options.referencePose = normalizeMobileReferencePose(options.referencePose);
   return options;
 }
 
@@ -58,7 +61,7 @@ export function mobileReportSolveOptions(report) {
 }
 
 export function normalizeMobileSolveReport(value) {
-  if (!value || ![1, 2, 3, 4, 5, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
+  if (!value || ![1, 2, 3, 4, 5, 6, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
   try {
     const options = mobileReportSolveOptions(value);
     const validPose = (pose) => XYZ.every((axis) => Number.isFinite(pose?.position?.[axis]))
@@ -252,14 +255,17 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
       score: postureCost() + comfortCost * 2 + cost * 0.2 };
   };
   let best = null;
-  // Continuity seed first, followed by independent, deterministic restarts.
+  // Try continuity first, then the chosen reference, before broader restarts.
   for (let start = 0; start < 8; start += 1) {
     await checkpoint();
     applyRobotJointValues(robot, baseline);
-    if (start === 0) joints.forEach((joint) => {
-      if (Number.isFinite(seed[joint.name])) setRobotJointValue(joint,
-        joint.userData.jointType === 'prismatic' ? seed[joint.name] : rad(seed[joint.name]));
-    });
+    if (start < 2) {
+      const initial = start === 0 ? seed : postureReference;
+      joints.forEach((joint) => {
+        if (Number.isFinite(initial[joint.name])) setRobotJointValue(joint,
+          joint.userData.jointType === 'prismatic' ? initial[joint.name] : rad(initial[joint.name]));
+      });
+    }
     if (start > 1) joints.forEach((joint, index) => {
       if (chestJoints.has(joint)) return;
       const wave = Math.sin((index + 1) * (start + 1) * 1.7);
@@ -397,8 +403,6 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     if (!sides.some((side) => controllers[side])) throw new Error(options.targetFrame === 'optical' ? '模型缺少末端相机光学坐标系，可切换为工具末端' : '模型缺少可求解的工具末端');
     const chest = options.lockChestVertical ? robot.getObjectByName('waist_yaw_L') : null;
     if (options.lockChestVertical && !chest) throw new Error('当前模型不支持前胸垂直约束，请关闭此选项');
-    const postureReference = readRobotJointValues(robot);
-    let state = { joints: postureReference, counts: { left: 0, right: 0 } };
     const locked = new Set(options.respectJointLocks ? lockedJointNames : []);
     const heightJoints = TORSO_PITCH_JOINTS.map((name) => robot.getObjectByName(name));
     const heightJointNames = options.allowTorsoHeight && heightJoints.every((joint) => joint?.userData.jointType === 'revolute')
@@ -406,6 +410,8 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     // Explicit automatic height control overrides only these three locks.
     // Other body/arm locks and every URDF joint limit remain in effect.
     heightJointNames.forEach((name) => locked.delete(name));
+    const postureReference = applyMobileReferencePose(robot, options.referencePose, locked);
+    let state = { joints: postureReference, counts: { left: 0, right: 0 } };
     const collisionChecker = options.checkCollisions ? await createMobileCollisionChecker(robot, environment, checkpoint, options) : null;
     const refineClearance = Boolean(collisionChecker && options.armBodyClearance > 0);
     const comfortable = (solution) => !refineClearance

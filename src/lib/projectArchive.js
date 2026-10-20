@@ -2,8 +2,11 @@ import { strFromU8, strToU8, unzip, zip } from 'fflate';
 import { sha256Bytes } from './hash.js';
 import { buildAbxTeachingExport } from './abxTeachingExport.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
+import { LINKED_WORKSPACE_MODES, validateLinkedWorkspaces } from './linkedProject.js';
 
 export const PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-project';
+export const LINKED_PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-linked-project';
+export const LINKED_PROJECT_ARCHIVE_VERSION = 1;
 export const PROJECT_ARCHIVE_VERSION = 2;
 export const PROJECT_ARCHIVE_MANIFEST = 'manifest.json';
 export const PROJECT_ARCHIVE_CONFIG = 'config/project.json';
@@ -665,7 +668,7 @@ const roleForArchivePath = (path) => {
   return 'project-resource';
 };
 
-export async function buildProjectArchive(payload, options = {}) {
+async function buildProjectEntries(payload, options = {}) {
   if (!payload || typeof payload !== 'object') throw new Error('工程配置为空，无法打包');
   const { mapResource, existingRobotPackage = null, onProgress } = options;
   const entries = {};
@@ -825,8 +828,80 @@ export async function buildProjectArchive(payload, options = {}) {
     },
   };
   addEntry(entries, PROJECT_ARCHIVE_MANIFEST, jsonBytes(manifest));
+  return { entries, manifest, project };
+}
 
-  onProgress?.({ phase: '压缩便携工程', detail: `${manifest.statistics.fileCount} 个文件` });
+async function buildLinkedProjectEntries(payload, options) {
+  const mode = payload?.workspace?.teachingSpaceMode;
+  const other = options.linkedWorkspace;
+  const workspaces = {
+    [mode]: { mode, map: { ...options.mapResource, portableRobotPackage: options.existingRobotPackage },
+      config: { mapId: options.mapResource?.mapId,
+        config: { project: payload, ui: options.workspaceUI || {} } } },
+    [other.mode]: { ...other },
+  };
+  validateLinkedWorkspaces(workspaces, { requireRobotResources: false });
+  // Robot files may still need collecting from the local model library.
+  for (const workspace of Object.values(workspaces)) {
+    const robot = workspace.config.config.project.robot;
+    if (robot) workspace.map = { ...workspace.map,
+      portableRobotPackage: await collectProjectRobotResources(robot, options.onProgress,
+        workspace.map.portableRobotPackage?.relativePath === robot.relativePath
+          ? workspace.map.portableRobotPackage : null) };
+  }
+  const entries = {};
+  const files = [];
+  const descriptors = {};
+  const statistics = { workspaceCount: 2 };
+  for (const workspaceMode of LINKED_WORKSPACE_MODES) {
+    const workspace = workspaces[workspaceMode];
+    const prefix = `workspaces/${workspaceMode}/`;
+    const child = await buildProjectEntries(workspace.config.config.project, {
+      mapResource: workspace.map,
+      existingRobotPackage: workspace.map.portableRobotPackage,
+      onProgress: (progress) => options.onProgress?.({ ...progress,
+        phase: `${workspaceMode === 'map' ? '地图示教' : '独立示教'} · ${progress.phase}` }),
+    });
+    Object.entries(child.entries).forEach(([path, entry]) => { entries[prefix + path] = entry; });
+    files.push(...child.manifest.files.map((record) => ({ ...record, path: prefix + record.path })));
+    const manifestBytes = asBytes(child.entries[PROJECT_ARCHIVE_MANIFEST][0]);
+    files.push({ path: prefix + PROJECT_ARCHIVE_MANIFEST, byteLength: manifestBytes.byteLength,
+      sha256: await sha256Bytes(manifestBytes) });
+    descriptors[workspaceMode] = { prefix, mapId: workspace.map.mapId,
+      ui: { mapRouteSyncEnabled: workspace.config.config.ui?.mapRouteSyncEnabled === true,
+        showSlice3D: workspace.config.config.ui?.showSlice3D !== false } };
+    Object.entries(child.manifest.statistics).forEach(([key, value]) => {
+      if (typeof value === 'number') statistics[key] = (statistics[key] || 0) + value;
+    });
+  }
+  const instructions = textBytes([
+    '虚拟示教平台 · 双边完整工程',
+    '本文件同时包含已绑定的地图示教与独立示教；两侧数据各自保留原坐标系。',
+    '从任一示教模式加载整个 ZIP，即可恢复两侧工程及转换关系。',
+    '也可解压后选择根目录加载；双边目录作为只读快照导入，不启用目录增量写入。',
+    'workspaces/map/ 和 workspaces/independent/ 分别保存两侧地图、机器人与示教数据。',
+    '请保留整个包，单独复制其中一侧无法完整恢复绑定工程。',
+  ].join('\n'));
+  addEntry(entries, 'README.txt', instructions);
+  files.push({ path: 'README.txt', byteLength: instructions.byteLength, sha256: await sha256Bytes(instructions) });
+  const manifest = {
+    format: LINKED_PROJECT_ARCHIVE_FORMAT,
+    archiveVersion: LINKED_PROJECT_ARCHIVE_VERSION,
+    exportedAt: new Date().toISOString(),
+    activeMode: mode,
+    portable: true,
+    workspaces: descriptors,
+    files,
+    statistics: { ...statistics, fileCount: files.length + 1 },
+  };
+  addEntry(entries, PROJECT_ARCHIVE_MANIFEST, jsonBytes(manifest));
+  return { entries, manifest, project: payload };
+}
+
+export async function buildProjectArchive(payload, options = {}) {
+  const { entries, manifest, project } = await (options.linkedWorkspace
+    ? buildLinkedProjectEntries(payload, options) : buildProjectEntries(payload, options));
+  options.onProgress?.({ phase: '压缩便携工程', detail: `${manifest.statistics.fileCount} 个文件` });
   const bytes = await zipEntries(entries);
   return {
     bytes,
@@ -973,7 +1048,8 @@ const validateArchiveEntryPaths = (files) => {
 };
 
 const verifyArchiveFiles = async (files, manifest, onProgress) => {
-  if (Number(manifest.archiveVersion) < 2) return;
+  const linked = manifest.format === LINKED_PROJECT_ARCHIVE_FORMAT;
+  if (!linked && Number(manifest.archiveVersion) < 2) return;
   if (!Array.isArray(manifest.files) || !manifest.files.length) {
     throw new Error('便携工程包缺少逐文件完整性清单');
   }
@@ -1002,6 +1078,7 @@ const verifyArchiveFiles = async (files, manifest, onProgress) => {
     !path.endsWith('/') && path !== PROJECT_ARCHIVE_MANIFEST && !declared.has(path)
   ));
   if (extras.length) throw new Error(`工程包包含未登记文件：${extras[0]}`);
+  if (linked) return;
 
   const environmentRecords = manifest.files
     .filter((record) => String(record.path).startsWith('environment/'))
@@ -1154,6 +1231,31 @@ const readProjectEntries = async (files, options = {}) => {
     PROJECT_ARCHIVE_MANIFEST,
     manifestLabel,
   );
+  if (manifest.format === LINKED_PROJECT_ARCHIVE_FORMAT) {
+    if (options.nested || manifest.archiveVersion !== LINKED_PROJECT_ARCHIVE_VERSION
+      || !LINKED_WORKSPACE_MODES.includes(manifest.activeMode)) {
+      throw new Error('双边工程包版本或结构不受支持');
+    }
+    await verifyArchiveFiles(files, manifest, onProgress);
+    const workspaces = {};
+    for (const mode of LINKED_WORKSPACE_MODES) {
+      const descriptor = manifest.workspaces?.[mode];
+      const prefix = `workspaces/${mode}/`;
+      if (descriptor?.prefix !== prefix || !descriptor.mapId) throw new Error('双边工程清单不完整');
+      const childFiles = Object.fromEntries(Object.entries(files)
+        .filter(([path]) => path.startsWith(prefix) && path.length > prefix.length)
+        .map(([path, bytes]) => [path.slice(prefix.length), bytes]));
+      const child = await readProjectEntries(childFiles, { ...options, nested: true });
+      workspaces[mode] = { mode,
+        map: { ...child.resources.map, mapId: descriptor.mapId, portableRobotPackage: child.resources.robot },
+        config: { mapId: descriptor.mapId, config: { schemaVersion: 1, project: child.payload,
+          ui: { ...child.payload.workspace, ...descriptor.ui, selectedRobot: child.payload.robot } } },
+      };
+    }
+    validateLinkedWorkspaces(workspaces);
+    return { source, manifest, portable: true, linkedWorkspaces: workspaces,
+      archiveFileCount: Object.keys(files).filter((path) => !path.endsWith('/')).length };
+  }
   if (manifest.format !== PROJECT_ARCHIVE_FORMAT) {
     throw new Error('所选内容不是虚拟示教平台工程');
   }
@@ -1269,7 +1371,7 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
   );
-  if (manifest.format !== PROJECT_ARCHIVE_FORMAT) {
+  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
   const paths = manifestPaths(manifest);
@@ -1290,9 +1392,9 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
   return {
     ...imported,
     directory: {
-      handle: directoryHandle,
+      handle: imported.linkedWorkspaces ? null : directoryHandle,
       name: String(directoryHandle.name || '工程目录'),
-      writable: true,
+      writable: !imported.linkedWorkspaces,
       projectFile: normalizeArchivePath(
         imported.manifest.projectFile || PROJECT_ARCHIVE_CONFIG,
         '工程配置路径',
@@ -1303,10 +1405,11 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
 
 const relativeDirectoryFiles = (fileList) => {
   const sourceFiles = Array.from(fileList || []);
-  const manifestFile = sourceFiles.find((file) => (
+  const manifestFile = sourceFiles.filter((file) => (
     String(file.webkitRelativePath || file.name).replaceAll('\\', '/').endsWith(`/${PROJECT_ARCHIVE_MANIFEST}`)
     || String(file.webkitRelativePath || file.name) === PROJECT_ARCHIVE_MANIFEST
-  ));
+  )).sort((left, right) => String(left.webkitRelativePath || left.name).split('/').length
+    - String(right.webkitRelativePath || right.name).split('/').length)[0];
   if (!manifestFile) throw new Error('所选文件夹中没有 manifest.json');
   const manifestPath = String(manifestFile.webkitRelativePath || manifestFile.name).replaceAll('\\', '/');
   const prefix = manifestPath.slice(0, -PROJECT_ARCHIVE_MANIFEST.length);
@@ -1330,7 +1433,7 @@ export async function readProjectDirectoryFiles(fileList, options = {}) {
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
   );
-  if (manifest.format !== PROJECT_ARCHIVE_FORMAT) {
+  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
   const paths = manifestPaths(manifest);

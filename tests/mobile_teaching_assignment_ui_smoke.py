@@ -57,7 +57,7 @@ def run():
             config = await_saved(page, lambda c: c['project']['virtualTeaching']['tasks'][0].get('mobileSolve'))
             source = config['project']['virtualTeaching']['tasks'][0]
             report = source['mobileSolve']
-            assert report['version'] == 6
+            assert report['version'] == 7
             assert report['feasibleCount'] == 2, report['rows']
             assert report['parkingCount'] == 1, report['rows']
             assert report['motionCount'] == 1 and report['dualMotionCount'] == 1

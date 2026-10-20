@@ -72,6 +72,7 @@ try {
     device: { model: 'iPad Pro', lidar: true }, calibrations: [{ id: 'segment-1', worldFromModel: new Matrix4().makeRotationX(-Math.PI / 2).toArray() }],
     samples: [0, 1].map((index) => ({ id: `sample-${index}`, name: `Pose ${index + 1}`, segmentId: 'segment-1', capturedAt: new Date().toISOString(), kind: 'keyframe', tracking: 'normal',
       cameraPose: { frameName: 'ipad_camera_optical_frame', position: { x: index + 1, y: 2, z: 3 }, quaternion: { x: 0, y: 0, z: 0, w: 1 } }, surfacePoint: { x: 1, y: 1, z: 1 } })) };
+  result.samples[1].name = '👨‍👩‍👧‍👦'.repeat(80); // A valid Swift Character boundary must also pass LAN receipt and retries.
   const identity = { modelHash: packed.manifest.modelHash, byteLength: packed.buffer.byteLength };
   const verify = (body = identity, expected = 200) => request(sessionPath + '/verify-model', { method: 'POST', token: paired.deviceToken, body, expected });
   await request(sessionPath + '/verify-model', { method: 'POST', body: identity, expected: 401 });
@@ -97,6 +98,8 @@ try {
   assert.throws(() => validateIPadResult(reflected, packed.manifest, created.id), /镜像/);
   const invalid = structuredClone(result); invalid.samples[0].tracking = 'limited';
   await request(sessionPath + '/result', { method: 'POST', token: paired.deviceToken, body: invalid, expected: 400 });
+  const longName = structuredClone(result); longName.samples[1].name += 'a';
+  assert.match((await request(sessionPath + '/result', { method: 'POST', token: paired.deviceToken, body: longName, expected: 400 })).error, /Pose 名称过长/);
   const receipt = await request(sessionPath + '/result', { method: 'POST', token: paired.deviceToken, body: result });
   assert.equal(receipt.received, true);
   middleware = createIPadTeachingService({ directory }); // Restart without losing models, credentials or results.
