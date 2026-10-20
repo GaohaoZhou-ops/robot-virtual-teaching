@@ -2366,6 +2366,37 @@ code {
   z-index: 2;
 }
 
+.waypoint-name-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.waypoint-name-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  padding: 3px 7px;
+  border: 1px solid rgba(89, 219, 232, 0.28);
+  border-radius: 3px;
+  color: #e5f3ef;
+  background: rgba(7, 16, 20, 0.82);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.waypoint-name-label.is-selected {
+  border-color: rgba(247, 199, 107, 0.65);
+  color: #f7c76b;
+  background: rgba(39, 31, 15, 0.9);
+}
+
 .spacemouse-axis-hud {
   position: absolute;
   top: 50%;
@@ -3609,6 +3640,7 @@ code {
 }
 
 .viewer-display-settings__color,
+.viewer-display-settings__waypoint-names,
 .viewer-display-settings__coverage,
 .robot-distance-settings__visibility {
   display: flex;
@@ -3620,6 +3652,7 @@ code {
 }
 
 .viewer-display-settings__color > span,
+.viewer-display-settings__waypoint-names > span,
 .viewer-display-settings__coverage > span,
 .robot-distance-settings__visibility > span {
   display: inline-flex;

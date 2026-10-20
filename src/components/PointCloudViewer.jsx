@@ -1504,6 +1504,8 @@ export default function PointCloudViewer({
   onMeshRenderQualityChange,
   showWaypoints = true,
   onShowWaypointsChange,
+  showWaypointNames = true,
+  onShowWaypointNamesChange,
   onSelectWaypoint,
   onSelectEdge,
   onClearSelection,
@@ -1561,6 +1563,7 @@ export default function PointCloudViewer({
   const sliceGroupRef = useRef(null);
   const routeGroupRef = useRef(null);
   const waypointGroupRef = useRef(null);
+  const waypointNameElementsRef = useRef(new Map());
   const visionCoverageGroupRef = useRef(null);
   const surfaceCoverageProjectionRef = useRef(null);
   const visionCoverageRenderingEnabledRef = useRef(true);
@@ -4489,6 +4492,7 @@ export default function PointCloudViewer({
     const lookRight = new THREE.Vector3();
     const keyboardRotation = new THREE.Quaternion();
     const waypointCameraPosition = new THREE.Vector3();
+    const waypointNamePosition = new THREE.Vector3();
     const originCameraPosition = new THREE.Vector3();
     const endEffectorWorldPosition = new THREE.Vector3();
     const endEffectorCameraPosition = new THREE.Vector3();
@@ -5265,6 +5269,27 @@ export default function PointCloudViewer({
         renderer.domElement.dataset.largestWaypointScreenDiameter = largestDiameter.toFixed(2);
         renderer.domElement.dataset.waypointMaxLodScale = largestLodScale.toFixed(3);
       }
+
+      // Project labels in CSS pixels so they follow the scene without growing
+      // with zoom. This overlay never participates in route/robot picking.
+      const labelWidth = renderer.domElement.clientWidth;
+      const labelHeight = renderer.domElement.clientHeight;
+      waypointNameElementsRef.current.forEach(({ element, pose }) => {
+        waypointNamePosition.set(pose.x, pose.y, pose.z);
+        waypointCameraPosition.copy(waypointNamePosition).applyMatrix4(camera.matrixWorldInverse);
+        waypointNamePosition.project(camera);
+        const visible = waypointCameraPosition.z < 0
+          && Math.abs(waypointNamePosition.x) <= 1
+          && Math.abs(waypointNamePosition.y) <= 1
+          && Math.abs(waypointNamePosition.z) <= 1;
+        element.style.visibility = visible ? 'visible' : 'hidden';
+        if (visible) {
+          const x = (waypointNamePosition.x + 1) * labelWidth / 2;
+          const y = (1 - waypointNamePosition.y) * labelHeight / 2
+            - MAX_WAYPOINT_SCREEN_DIAMETER / 2 - 5;
+          element.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
+        }
+      });
 
       const selectedHalo = selectedWaypointPulseRef.current;
       if (selectedHalo) {
@@ -7394,6 +7419,26 @@ export default function PointCloudViewer({
       )}
       {mapData?.geometry && (
         <>
+          {showWaypointNames && (
+            <div className="waypoint-name-layer" role="group" aria-label="3D停车点名称">
+              {waypoints.map((point) => (
+                <span
+                  key={point.id}
+                  ref={(element) => {
+                    if (element) {
+                      waypointNameElementsRef.current.set(point.id, { element, pose: point.pose });
+                    } else {
+                      waypointNameElementsRef.current.delete(point.id);
+                    }
+                  }}
+                  className={`waypoint-name-label${point.id === selectedWaypointId ? ' is-selected' : ''}`}
+                  data-waypoint-id={point.id}
+                >
+                  {point.name || point.id}
+                </span>
+              ))}
+            </div>
+          )}
           {showDistanceWarnings && collisionProtectionEnabled && (
             <RobotDistanceWarning status={robotCollisionStatus} />
           )}
@@ -7737,8 +7782,8 @@ export default function PointCloudViewer({
               key={`display-${resolutionMapKey}`}
               label="显示设置"
               title={showVisionCoverageControls
-                ? '点云颜色、投影渲染、表面透明度与显示质量'
-                : '点云颜色、显示密度与网格质量'}
+                ? '停车点名、点云颜色、投影渲染、表面透明度与显示质量'
+                : '停车点名、点云颜色、显示密度与网格质量'}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -7755,6 +7800,20 @@ export default function PointCloudViewer({
                   <i aria-hidden="true" />
                   <span>{colorModeMeta.label}</span>
                   <RotateCcw size={11} />
+                </button>
+              </div>
+              <div className="viewer-display-settings__waypoint-names">
+                <span><MapPin size={13} /> 停车点名</span>
+                <button
+                  type="button"
+                  className="viewer-display-settings__toggle"
+                  aria-label={showWaypointNames ? '隐藏停车点名' : '显示停车点名'}
+                  aria-pressed={showWaypointNames}
+                  title={showWaypointNames ? '隐藏3D导航点名称' : '显示3D导航点名称'}
+                  onClick={() => onShowWaypointNamesChange?.(!showWaypointNames)}
+                >
+                  {showWaypointNames ? <Eye size={12} /> : <EyeOff size={12} />}
+                  {showWaypointNames ? '显示' : '隐藏'}
                 </button>
               </div>
               {showVisionCoverageControls && <>

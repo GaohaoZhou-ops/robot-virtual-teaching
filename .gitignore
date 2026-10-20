@@ -386,6 +386,12 @@ playwright/.auth/
 /tests/atlas-linked-project-*/
 /atlas-linked-project-*.[zZ][iI][pP]
 /tests/atlas-linked-project-*.[zZ][iI][pP]
+# Navigation-name display tests export complete projects for ZIP round trips.
+# Keep local TMPDIR workspaces and packed copies out of source/fixture paths.
+/atlas-waypoint-names-*/
+/tests/atlas-waypoint-names-*/
+/atlas-waypoint-names-*.[zZ][iI][pP]
+/tests/atlas-waypoint-names-*.[zZ][iI][pP]
 # Export separation and Save As tests when TMPDIR is inside the repository.
 /atlas-export-separation-*/
 /atlas-save-picker-*/
