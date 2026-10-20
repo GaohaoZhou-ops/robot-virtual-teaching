@@ -466,7 +466,7 @@ export default function VirtualTeachingPanel({
         <div className="teaching-project-export__identity">
           <span><Database size={14} /></span>
           <div>
-            <strong>轻量示教数据</strong>
+            <strong>{isIndependentTeachingSpace ? '轻量示教数据' : '机器人示教数据'}</strong>
             <small>{tasks.length} TASKS · {parkingPointCount} STOPS · {teachingPointCount} POSES</small>
           </div>
         </div>
@@ -476,7 +476,8 @@ export default function VirtualTeachingPanel({
           disabled={!canExport}
           aria-label="导出示教数据"
           title={canExport
-            ? '导出机器人定位、关节值、停车点和姿态等轻量 JSON 数据'
+            ? (isIndependentTeachingSpace ? '导出机器人定位、关节值、停车点和姿态等轻量 JSON 数据'
+              : '导出 ABXBrainSystem 可直接导入的地图示教 ZIP')
             : '请先打开示教工程'}
         >
           <Download size={12} /> 导出示教数据

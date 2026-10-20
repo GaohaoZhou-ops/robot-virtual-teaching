@@ -130,7 +130,7 @@ npm install
 | ② 准备机器人 | 点击“设备 → 机器人模型”，调整基座、关节与末端位姿 | 确定示教起始姿态 |
 | ③ 记录示教 | 在“示教”页中新建任务，按工位记录停车点与机械臂 Pose | 保存关节值与视觉参考快照 |
 | ④ 检查任务 | 在“示教数据”中回看姿态、播放任务、按需合并停车点 | 检查示教顺序与结果 |
-| ⑤ 保存或交换 | 保存完整工程，或在地图示教中使用“机器人导出” | 获得工程备份或兼容机器人导入包 |
+| ⑤ 保存或交换 | 保存完整工程，或在地图示教中使用“导出示教数据” | 获得工程备份或兼容机器人导入包 |
 
 初次体验地图浏览可使用 [maps/xian_map.ply](maps/xian_map.ply)。局部工位放入地图、区域提取与精调回写使用[示教转换](#独立示教与地图示教转换)。
 
@@ -1162,8 +1162,8 @@ open ipad/AtlasTeaching.xcodeproj
 | --- | --- | --- |
 | 工作台 **工程 → 另存为工程**，或示教数据页顶部的 **导出工程** | 默认 `atlas-project-<map\|independent>-<时间>.zip`，保存时可重命名 | 完整地图 / 物体、所选机器人模型与资源、配置、全部示教任务、RGB / 点云和视角；可在其他设备直接加载 ZIP 恢复 |
 | 工作台 **工程 → 保存工程** | 最近一次成功另存为的 ZIP 文件 | 用当前工程内容覆盖该文件，无需再次选择位置；尚未另存为时不可用 |
-| 示教数据树的 **导出示教数据** | `atlas-teaching-<map\|independent>-<时间>.json` | 机器人定位、关节值、停车点、Pose、关节姿态库、导航点与路径关系；用于后续跨工程复用 |
-| 地图示教的 **机器人导出** | `robot-teaching-*.zip` | 对接指定机器人的执行格式，保持独立于工程备份和通用示教 JSON |
+| 地图示教数据树的 **导出示教数据** | `robot-teaching-*.zip` | ABXBrainSystem 可直接导入的任务、停车点、Pose 和路网导航；与完整工程备份分开 |
+| 独立示教数据树的 **导出示教数据** | `atlas-teaching-independent-<时间>.json` | 保留原轻量 JSON 导出：机器人定位、关节值、停车点、Pose、关节姿态库与导航关系 |
 
 点击“另存为工程”后先打开系统保存对话框，可选择目标文件夹并修改 ZIP 文件名；确认后才开始打包，文件写入完成后提示保存成功，并启用“保存工程”。再次另存为成功后，“保存工程”改为覆盖新文件；取消或失败时仍保留原来的保存目标。示教数据页的“导出工程”也使用这一另存为流程。重命名针对工程文件，不更改地图、机器人或示教任务名称。
 
@@ -1173,7 +1173,7 @@ open ipad/AtlasTeaching.xcodeproj
 
 新建 PLY 工程默认受浏览器自动保存保护。需要持续写入本地文件夹时，先“另存为工程”，解压 ZIP，再通过对应模式的“加载工程 → 选择其他工程目录”打开并授权；后续修改会增量保存到该目录。也可以在其他设备通过“加载工程引导文件”直接打开 ZIP。工程 ZIP 仅在手动另存为或保存时更新。
 
-轻量示教数据采用 `format: "atlas-route-studio-teaching-data"`、`version: 1`，与完整工程格式独立。主要字段：
+独立示教保留的轻量示教数据采用 `format: "atlas-route-studio-teaching-data"`、`version: 1`，与完整工程格式独立。主要字段：
 
 - `source`：来源示教模式及地图名称 / 哈希；`coordinateSystem`：坐标系、米 / 角度单位、ZYX 欧拉角顺序和列主序矩阵约定。
 - `robot`：机器人身份、当前基座 `mapPose` 和按关节名称保存的 `fullBodyJoints`；关节记录分别标明旋转与平移单位。
@@ -1269,15 +1269,17 @@ open ipad/AtlasTeaching.xcodeproj
 
 ## 📦 机器人示教数据导出
 
-入口：地图示教的 **示教数据 → 机器人导出**。独立示教需先通过“示教转换”放入地图坐标。
+入口：**地图示教 → 示教数据中心 → 导出示教数据 → 下载机器人导入包**。本适配仅覆盖地图示教，独立示教保持原有 JSON 导出。
 
 | 文件 | 用途 | 机器人侧使用方式 |
 | --- | --- | --- |
 | `robot-teaching-*.zip` | 兼容机器人 / 实例的大脑示教任务包 | 在大脑 Web“示教任务 → 导入”中直接选择，无需解压 |
 | 完整工程 ZIP | 虚拟工程备份，由“导出工程”生成 | 在虚拟示教平台打开 |
-| `robot-free-navigation-*.json` | 单独保存自由导航目标 | 当前为交换数据，不能直接变成任务内导航步骤 |
+| `robot-navigation-*.json` | 路网、坐标与导航 / Pose 对应清单 | 可在导出窗口单独下载，用于核对；导入时只需选择 ZIP |
 
-> **当前执行边界：Pose 可以导入；自由导航目标只随包保留。** 导入后的任务不会根据这些目标自动移动底盘，RGB / XYZ 快照也不会变成真机拍照动作。
+适配依据为当前目录 `workspace.zip` 中的 `workspace/ABXBrainSystem`：原生示教格式 **v23**、ZIP 清单 **v1**。每个非空停车点的首个 Pose 前，以及停车点内底盘目标变化处，导出 `route_navigation` 步骤，随后执行对应 Pose。
+
+导入后，在机器人路网管理中核对地图坐标、补齐需要的可通行连线并**切换使用导入路网**，再执行示教任务。导入本身不会激活路网或切换定位地图。RGB / XYZ 快照仍是虚拟工程参考数据，不会新增真机拍照动作。
 
 ### 导出前检查
 
@@ -1289,32 +1291,34 @@ open ipad/AtlasTeaching.xcodeproj
 机器人导出失败时，仍可保存完整虚拟工程备份。
 
 <details>
-<summary>归档协议、自由导航目标与执行边界</summary>
+<summary>归档协议、路网导航与执行边界</summary>
 
 #### 机器人 ZIP 格式
 
-- 地图示教的“示教数据 → 机器人导出”提供单独的 `robot-teaching-*.zip`，可在对应机器人/实例的大脑 Web“示教任务 → 导入”中直接选择，无需解压。
-- 包根目录的 `manifest.json` 使用 `abx-teaching-export` v1，任务为 `tasks/*.abxteach.ndjson`（`abx-teaching-task` v15），包含正文 SHA-256、停车点和 Pose 顺序、20 轴弧度关节以及 `component=auto`。
+- 地图示教的“示教数据中心 → 导出示教数据”提供 `robot-teaching-*.zip`，可在大脑 Web“示教任务 → 导入”中直接选择，无需解压。
+- 包根目录的 `manifest.json` 使用 `abx-teaching-export` v1，任务为 `tasks/*.abxteach.ndjson`（`abx-teaching-task` v23），包含正文 SHA-256、停车点和步骤顺序、20 轴弧度关节以及 `component=auto`。
+- 任务头的 `navigation.chunks` 声明分块数；`navigation_chunk` 按 4096 字节切分 UTF-8 路网数据，再编码为 Base64。分块计入正文 SHA-256，排在完整动作列表之后。
+- `routes/<任务 ID>/1.route.json` 是任务内嵌路网的可读副本；有导航的任务共享相同路网，空任务的 `navigation=null`。大脑导入器自动分配任务和路网 ID，相同内容的路网复用，既有业务路网和当前激活选择不被覆盖。
 - ZIP 使用存储模式，兼容不提供 Deflate 解压的 WebView。
 - 导出只需读取主 URDF，不重新打包地图、mesh 或视觉资源。
-- “导出工程”生成完整虚拟工程备份；机器人适配包由“机器人导出”单独生成。兼容读取既有附带 `abx/` 目录的完整工程 ZIP。
+- “导出工程”生成完整虚拟工程备份；机器人适配包由“导出示教数据”单独生成。兼容读取既有附带 `abx/` 目录的完整工程 ZIP。
 
 #### 大脑接口边界
 
-- **当前大脑的接口边界：Pose 可以直接导入；自由导航目标暂时只能随包保留，不能导入为任务内导航步骤**。
-- 当前大脑的 `teaching_store.py` v15 仅接受 `{type: "route_navigation", node_id: "N…"}`，自由导航只提供独立的 `base-navigation/start` 接口。
-- 导入后的任务只执行 Pose，不会按导出的目标自动移动底盘。
-- 当前工程不会伪造站点、SLAM 实测定位或其他动作来绕过此限制，也不写入大脑工程或数据库。
-- 大脑侧支持自由导航示教步骤后，才能接通导航与 Pose 的任务内连续执行。
+- 使用大脑现有 `{type: "route_navigation", route_id: "…", node_id: "N…"}` 动作和原生路网导入能力，不需要修改机器人代码。
+- 原导航点转换为路网节点；停车点或 Pose 的 X/Y/yaw 与已有节点一致时复用，否则新增节点。Yaw 使用周期角比较，位置 / 朝向容差均为 `1e-6`。
+- 连线只取工程内已有路径，保持方向；无向路径转为两条有向边。同一连接去重，不按 Pose 顺序或距离自动生成可通行连线。
+- 没有入向连线、相邻导航步骤无有向通路时，导出窗口和清单提示需补齐路径，仍保留数据供机器人侧核对。
+- 路网 `scene_name` 留空，点云文件名 / 摘要不是机器人 SLAM 场景名称；在机器人切换使用路网时由实际定位反馈绑定。原始地图元数据保存在源数据清单中。
+- 仅在虚拟示教工程中生成文件，不连接机器人、不写入 `workspace` 或运行中的大脑数据库。
 
-#### 自由导航数据字段
+#### 导航数据字段
 
-- 本次仅导出自由导航目标，不依赖已有站点或连线。
-- `free-navigation.json` 使用 `atlas-abx-free-navigation-targets` v1，明确标注 `nativeTaskNavigationSupported=false`：`waypoints` 保留全部原导航点；
-- `tasks[].sequence` 记录停车点首个 Pose 和底盘目标变化处的 `free_navigation` 目标及后续 Pose 序号，`tasks[].parkings` 保留停车点、每个 Pose 及坐标的对应关系。
-- 目标使用 `map` 坐标系的 `x_m`、`y_m`、`yaw_rad`，yaw 归一到 `[-π, π]`；可在导出窗口预览或单独下载 `robot-free-navigation-*.json`。
-- 坐标须与机器人现场地图对齐；原始 Z/roll/pitch、路径、逐边速度约束保存在清单与 `source-mapping.json` 中，不作为已经生效的底盘执行约束。
-- 此清单是当前工程的交换格式，大脑的 ZIP 读取器目前只导入包内原生任务文件。
+- `navigation.json` 使用 `atlas-abx-route-navigation` v1，标注 `nativeTaskNavigationSupported=true`，包含共享路网、原导航点、提示和每个任务的步骤映射。
+- `tasks[].sequence` 记录 `route_navigation` 与 Pose 顺序、原生步骤序号、节点和目标坐标；`tasks[].parkings` 保留停车点、Pose 与节点对应关系。
+- 目标使用 `map` 坐标系的 `x_m`、`y_m`、`yaw_rad`，yaw 归一到 `[-π, π]`；可在窗口预览或单独下载 `robot-navigation-*.json`。
+- `source-mapping.json` v3 保留原始 Z/roll/pitch、地图信息、路径和源 ID。逐边速度、加速度、倒车及 3D 避障设置不属于大脑路网格式，只保留为源数据，不作为执行约束。
+- `free-navigation.json` 保留为旧工具的坐标参考；其中的自由导航清单仍标注不可原生导入，实际任务使用路网站点导航。
 
 #### 关节映射与导出校验
 
@@ -1322,7 +1326,7 @@ open ipad/AtlasTeaching.xcodeproj
 - 缺失关节、超出格式的额外关节、地图或机器人不一致、非地图坐标，以及尚未求解为机器人关节的 iPad 相机 Pose 会阻止整批机器人数据生成；完整虚拟工程备份仍可正常保存。
 - 轮组不作为上身关节执行，`parking.location=null`，不伪造实测定位；RGB/XYZ 仍为虚拟工程中的参考快照，不新增真机拍照动作。
 - 单独的机器人导入包支持 1–100 个任务；导出为当前快照，目录自动保存不会更新已经下载的文件。
-- 独立示教应先用“示教转换”放入地图坐标，再导出机器人数据。
+- 每个任务最多 2000 个步骤（包含新增导航步骤）、128 个非空停车点；共享路网最多 256 个节点、512 条有向边和 48 KiB。超限或路径引用错误会阻止整包生成，不产生部分导入包。
 
 </details>
 
@@ -1526,8 +1530,8 @@ BASE_URL=http://127.0.0.1:22001 python tests/ipad_teaching_ui_smoke.py
 <summary>机器人导出：大脑契约与浏览器验证</summary>
 
 - 导出适配回归：`npm run test:abx`。
-- 默认只读参考 `../workspace/ABXBrainSystem`，也可用 `ABX_BRAIN_ROOT` 指定路径。
-- 测试将大脑 Python 源码原样复制到临时目录，在临时数据库验证 v15 导入、再导出、执行计划与自由导航参数校验，并用大脑原生 Web ZIP 读取器验证实际导入包。
+- 默认只读打开当前目录 `workspace.zip`，仅把原版导入器及其依赖复制到临时目录；不在工程目录解压 `workspace`。也可用 `ABX_WORKSPACE_ZIP` 指定压缩包，或 `ABX_BRAIN_ROOT` 指定只读参考代码路径。
+- 测试在临时数据库验证 v23 导入、路网恢复、再导出、导航 / Pose 执行计划和校验失败，并用大脑原生 Web ZIP 读取器验证实际导入包。
 - 禁止临时目录外写入、服务连接及子进程，关闭 Python 字节码写入，并核对参考源码摘要；不修改 `workspace` 或向运行中的大脑提交任务。
 - 界面回归为 `tests/abx_teaching_export_ui_smoke.py`（需要 Python Playwright 与 Chrome），使用独立浏览器会话验证下载、坐标、错误处理和布局。
 

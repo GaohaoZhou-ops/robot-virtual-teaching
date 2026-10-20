@@ -26,13 +26,13 @@ assert.equal(manifest.include_images, false);
 const taskFile = `abx/${manifest.tasks[0].file}`;
 const lines = strFromU8(native.files[taskFile]).trimEnd().split('\n');
 const records = lines.map(JSON.parse);
-assert.equal(records[0].version, 15);
+assert.equal(records[0].version, 23);
 assert.equal(records[0].basic_pose_count, '0');
-assert.equal(records[0].point_count, '3');
+assert.equal(records[0].point_count, '5');
 assert.deepEqual(records.filter((v) => v.type === 'parking').map((v) => v.name), ['停车点 A', '停车点 B']);
 assert.deepEqual(records.filter((v) => v.type === 'point').map((v) => v.record.type || 'pose'),
-  ['pose', 'pose', 'pose']);
-assert.deepEqual(records.filter((v) => v.type === 'point').map((v) => v.parking_seq), ['1', '2', '1']);
+  ['route_navigation', 'pose', 'pose', 'route_navigation', 'pose']);
+assert.deepEqual(records.filter((v) => v.type === 'point').map((v) => v.parking_seq), ['1', '2', '3', '1', '2']);
 const poses = records.filter((v) => v.record?.joints_rad);
 assert.deepEqual(poses.map((v) => v.label), ['姿态 a1', '姿态 a2', '姿态 b1']);
 assert.equal(records[0].created_ns, String(BigInt(Date.parse(stamp)) * 1000000n));
@@ -47,18 +47,29 @@ for (const { record } of poses) {
   assert.equal('arrival_action' in record, false);
 }
 assert.equal(records.at(-1).sha256, createHash('sha256').update(`${lines.slice(1, -1).join('\n')}\n`).digest('hex'));
-const navigation = parse(native.files, 'abx/free-navigation.json');
-assert.equal(native.summary.navigationMode, 'free');
-assert.equal(native.summary.navigationImportSupported, false);
+const navigation = parse(native.files, 'abx/navigation.json');
+assert.equal(native.summary.navigationMode, 'route');
+assert.equal(native.summary.navigationImportSupported, true);
 assert.equal(native.summary.poseCount, 3);
-assert.equal(navigation.nativeTaskNavigationSupported, false);
+assert.equal(navigation.nativeTaskNavigationSupported, true);
 assert.equal(Object.keys(native.files).some((name) => name.includes('graph_route') || name.includes('graph_yaw')), false);
 assert.deepEqual(navigation.waypoints[0].target, { x_m: 1.25, y_m: -2.5, yaw_rad: Math.PI / 2 });
 assert.equal(navigation.waypoints[0].sourcePose.z, 9, 'nonplanar source coordinates remain available for reference');
 assert.ok(Math.abs(Math.abs(navigation.waypoints[1].target.yaw_rad) - Math.PI) < 1e-14);
 assert.deepEqual(navigation.tasks[0].sequence.map((step) => step.type),
-  ['free_navigation', 'pose', 'pose', 'free_navigation', 'pose']);
-assert.deepEqual(navigation.tasks[0].sequence.filter((step) => step.type === 'free_navigation').map((step) => step.beforePoseSeq), ['1', '3']);
+  ['route_navigation', 'pose', 'pose', 'route_navigation', 'pose']);
+assert.deepEqual(navigation.tasks[0].sequence.filter((step) => step.type === 'route_navigation').map((step) => step.beforePoseSeq), ['2', '5']);
+assert.equal(navigation.route.nodes.length, 2);
+assert.deepEqual(navigation.route.edges, [{ id: 257, start: 1, end: 2 }]);
+assert.equal(navigation.route.scene_name, '', 'a point-cloud filename is not a measured SLAM scene name');
+assert.deepEqual(parse(native.files, `abx/${manifest.tasks[0].navigation.routes[0]}`), navigation.route);
+const chunks = records.filter((record) => record.type === 'navigation_chunk');
+assert.equal(records[0].navigation.chunks, String(chunks.length));
+const embedded = JSON.parse(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk.data, 'base64'))));
+assert.deepEqual(embedded, { routes: [navigation.route], maps: null, default_route_id: null });
+assert.equal(manifest.tasks[1].navigation, null, 'empty tasks need no route');
+const emptyTask = strFromU8(native.files[`abx/${manifest.tasks[1].file}`]).trimEnd().split('\n').map(JSON.parse);
+assert.equal(emptyTask[0].navigation, null);
 assert.deepEqual(parse(native.files, 'abx/source-mapping.json').paths, payload.paths);
 assert.deepEqual(await buildAbxTeachingExport(payload, { robotPackage }), native, 'same snapshot must produce stable IDs and bytes');
 
@@ -81,7 +92,7 @@ for (const change of [
 ]) {
   const free = structuredClone(payload); change(free);
   const result = await buildAbxTeachingExport(free, { robotPackage });
-  assert.equal(result.summary.status, 'ready', 'free navigation does not require a station graph or matching parking pose');
+  assert.equal(result.summary.status, 'ready', 'source navigation targets must be retained even when route edges need completion');
   assert.equal(result.summary.poseCount, 3);
   assert.equal(result.summary.navigationCount, 2);
 }
@@ -95,6 +106,27 @@ await blocked((p) => { p.virtualTeaching.tasks[0].robot.relativePath = 'other/ro
 await blocked((p) => { p.virtualTeaching.tasks[0].map.sourceHash = 'other-map'; }, /地图摘要不一致/);
 await blocked((p) => { p.virtualTeaching.tasks[0].name = 'a'.repeat(121); }, /120/);
 await blocked((p) => { p.virtualTeaching.tasks[0].createdAt = 'not a time'; }, /时间无效/);
+await blocked((p) => { p.paths[0].to = 'missing'; }, /不存在的导航点/);
+await blocked((p) => { p.paths[0].to = p.paths[0].from; }, /自环/);
+await blocked((p) => { p.waypoints = Array.from({ length: 257 }, (_, i) => ({ ...p.waypoints[0], id: `w${i}` })); }, /256/);
+await blocked((p) => {
+  p.waypoints.push(...Array.from({ length: 254 }, (_, i) => ({ ...p.waypoints[0], id: `w${i}`, name: '工位'.repeat(60) })));
+}, /48 KiB/);
+await blocked((p) => {
+  p.waypoints = Array.from({ length: 24 }, (_, i) => ({ ...p.waypoints[0], id: `w${i}` }));
+  p.paths = p.waypoints.flatMap((from) => p.waypoints.filter((to) => from.id !== to.id)
+    .map((to) => ({ id: `${from.id}-${to.id}`, from: from.id, to: to.id })));
+}, /512/);
+const reversed = structuredClone(payload);
+reversed.paths[0].directed = false;
+const bidirectional = await buildAbxTeachingExport(reversed, { robotPackage });
+assert.deepEqual(parse(bidirectional.files, 'abx/navigation.json').route.edges,
+  [{ id: 257, start: 1, end: 2 }, { id: 258, start: 2, end: 1 }]);
+const disconnected = structuredClone(payload);
+disconnected.paths = [];
+const noEdges = await buildAbxTeachingExport(disconnected, { robotPackage });
+assert.equal(noEdges.summary.edgeCount, 0, 'never invent drivable paths between Pose targets');
+assert.ok(noEdges.summary.warnings.some((warning) => warning.includes('有向通路')));
 const withinParking = structuredClone(payload);
 withinParking.virtualTeaching.tasks = [withinParking.virtualTeaching.tasks[0]];
 withinParking.virtualTeaching.tasks[0].parkingPoints = [withinParking.virtualTeaching.tasks[0].parkingPoints[1]];
@@ -102,6 +134,38 @@ withinParking.virtualTeaching.tasks[0].parkingPoints[0].poses[0].mapPose = b;
 const changedBase = await buildAbxTeachingExport(withinParking, { robotPackage });
 assert.equal(changedBase.summary.status, 'ready');
 assert.equal(changedBase.summary.navigationCount, 2, 'base changes within a parking must retain navigation');
+await blocked((p) => {
+  const parking = p.virtualTeaching.tasks[0].parkingPoints[0];
+  parking.poses = Array.from({ length: 2000 }, (_, i) => ({ ...parking.poses[0], id: `pose-${i}`, sequence: i + 1 }));
+}, /2000/);
+await blocked((p) => {
+  const task = p.virtualTeaching.tasks[0], parking = task.parkingPoints[0];
+  task.parkingPoints = Array.from({ length: 129 }, (_, i) => ({ ...parking, id: `parking-${i}`, sequence: i + 1 }));
+}, /128/);
+
+// Exercise real multi-chunk UTF-8 transport, and targets contributed by a later
+// task after the first task has already been compiled.
+const stressPayload = structuredClone(payload);
+stressPayload.waypoints.push(...Array.from({ length: 50 }, (_, i) => ({ id: `unicode-${i}`,
+  name: `导航点 ${i} · ${'装配工位'.repeat(16)}`, pose: { x: 20 + i, y: -10, yaw: 10 * i } })));
+const laterTask = structuredClone(stressPayload.virtualTeaching.tasks[0]);
+laterTask.id = 'later-task'; laterTask.name = '另一任务';
+laterTask.parkingPoints[0].poses[0].mapPose.position.x = 120;
+stressPayload.virtualTeaching.tasks.push(laterTask);
+const stress = await buildAbxTeachingExport(stressPayload, { robotPackage });
+assert.equal(stress.summary.status, 'ready');
+const stressManifest = parse(stress.files, 'abx/manifest.json');
+const stressRoute = parse(stress.files, 'abx/navigation.json').route;
+assert.ok(stressRoute.nodes.some((node) => node.x_m === 120));
+for (const item of stressManifest.tasks.filter((task) => task.navigation)) {
+  const entries = strFromU8(stress.files[`abx/${item.file}`]).trimEnd().split('\n');
+  const records = entries.map(JSON.parse);
+  assert.ok(Number(records[0].navigation.chunks) > 1);
+  assert.ok(entries.every((line) => Buffer.byteLength(line) <= 12000));
+  assert.deepEqual(JSON.parse(Buffer.concat(records.filter((record) => record.type === 'navigation_chunk')
+    .map((record) => Buffer.from(record.data, 'base64')))).routes, [stressRoute]);
+  assert.ok(stressRoute.nodes.every((node) => Buffer.byteLength(node.label) <= 128));
+}
 
 const mapResource = { name: 'test.ply', geometryCacheVersion: 1,
   positionBuffer: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]).buffer };
@@ -132,7 +196,17 @@ try {
     await mkdir(path.dirname(destination), { recursive: true });
     await writeFile(destination, data);
   }
-  const brainRoot = path.resolve(process.env.ABX_BRAIN_ROOT || path.join(root, '../workspace/ABXBrainSystem'));
+  for (const [name, data] of Object.entries(stress.files)) {
+    const destination = path.join(folder, 'stress', name);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await writeFile(destination, data);
+  }
+  const brainRoot = path.resolve(process.env.ABX_BRAIN_ROOT || path.join(folder, 'brain-reference'));
+  if (!process.env.ABX_BRAIN_ROOT) {
+    const copied = spawnSync(process.env.PYTHON || 'python3', [path.join(root, 'tests/abx_teaching_reference.py'),
+      process.env.ABX_WORKSPACE_ZIP || path.join(root, 'workspace.zip'), brainRoot], { encoding: 'utf8' });
+    assert.equal(copied.status, 0, copied.error?.message || copied.stdout + copied.stderr);
+  }
   await readFile(path.join(brainRoot, 'tools/web/teaching_store.py'));
   const bundle = await buildAbxTeachingArchive(payload, { robotPackage });
   const context = { window: {}, TextDecoder, ReadableStream };
@@ -153,4 +227,4 @@ try {
 } finally {
   await rm(folder, { recursive: true, force: true });
 }
-console.log('ABX v15 native ZIP import, Pose integrity, independent free-navigation targets, rejection and archive regression passed');
+console.log('ABX v23 native ZIP import, Pose/route integrity, navigation sequence, rejection and archive regression passed');

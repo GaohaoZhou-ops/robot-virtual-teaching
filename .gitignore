@@ -429,7 +429,13 @@ playwright/.auth/
 
 # ABX contract-test source copies, temporary imports and UI captures
 /atlas-abx-export-*/
+/atlas-abx-reference-*/
 /atlas-abx-ui-*/
+/tests/atlas-abx-export-*/
+/tests/atlas-abx-reference-*/
+/tests/atlas-abx-ui-*/
+/robot-export-*.png
+/tests/robot-export-*.png
 
 # Python bytecode, environments, and test caches
 __pycache__/
@@ -533,6 +539,13 @@ Desktop.ini
 # Keep same-named directories inside source packages and fixtures visible.
 /robots/
 
+# Read-only robot workspace references for the ABX importer contract tests.
+# Keep these large deployment snapshots local; nested source/fixture paths
+# named workspace remain trackable. This does not modify the robot workspace.
+/workspace/
+/workspace.[zZ][iI][pP]
+/workspace-*.[zZ][iI][pP]
+
 # Point-cloud assets are ignored by default; keep the bundled example map.
 *.[pP][lL][yY]
 # Compressed copies of imported/exported models stay local too.
@@ -570,6 +583,7 @@ virtual-teaching-*.zip
 virtual-teaching-*.json
 robot-teaching-*.zip
 robot-free-navigation-*.json
+robot-navigation-*.json
 /robot-teaching-*/
 *.abxteach.ndjson
 /virtual-teaching-*/

@@ -3612,6 +3612,10 @@ export default function App() {
   };
 
   const exportTeachingData = () => {
+    if (teachingSpaceMode === 'map') {
+      openAbxTeachingExport();
+      return;
+    }
     try {
       const data = buildTeachingDataExport(currentExportPayload());
       const stamp = data.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
@@ -5675,7 +5679,6 @@ export default function App() {
           onExportProject={exportProject}
           onExportTeachingData={exportTeachingData}
           canExportTeachingData={Boolean(mapData || selectedRobot || teachingTasks.length || jointPoses.length || waypoints.length)}
-          onExportAbxTeaching={teachingSpaceMode === 'map' ? openAbxTeachingExport : undefined}
           onSolveMobileTask={openMobileTeachingSolve}
           onSaveMobileTask={saveMobileTeachingTask}
           mobileSaveDisabledReason={mobileSaveDisabledReason}

@@ -55,7 +55,6 @@ export default function TeachingDataPage({
   onExportProject,
   onExportTeachingData,
   canExportTeachingData = false,
-  onExportAbxTeaching,
   onSolveMobileTask,
   onSaveMobileTask,
   mobileSaveDisabledReason,
@@ -223,6 +222,7 @@ export default function TeachingDataPage({
             <section className="teaching-data-page__archive" aria-label="示教任务管理工作区">
               <TeachingArchiveTree
                 tasks={tasks}
+                teachingSpaceMode={teachingSpaceMode}
                 activeTaskId={activeTaskId}
                 activeParkingPointId={activeParkingPointId}
                 mapData={mapData}
@@ -247,7 +247,6 @@ export default function TeachingDataPage({
                 onMergeParkingPoints={onMergeParkingPoints}
                 onExportTeachingData={onExportTeachingData}
                 canExportTeachingData={canExportTeachingData}
-                onExportAbxTeaching={onExportAbxTeaching}
                 onOpenCapturePage={onBack}
                 onSelectionChange={handleArchiveSelection}
               />
