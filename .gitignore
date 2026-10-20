@@ -569,6 +569,12 @@ Desktop.ini
 /workspace.[zZ][iI][pP]
 /workspace-*.[zZ][iI][pP]
 
+# Local reference inputs for preset, transform and route import compatibility.
+# Match only the repository root; reusable tests/fixtures/ inputs stay trackable.
+/sample-pre-teaching-pose.json
+/position_[0-9]*.txt
+/1014平地路网终版.json
+
 # Point-cloud assets are ignored by default; keep the bundled example map.
 *.[pP][lL][yY]
 # Compressed copies of imported/exported models stay local too.
@@ -586,6 +592,9 @@ Desktop.ini
 # Packed copies of the recovery workspace contain the same local project data.
 /recovered-projects.zip
 /recovered-projects-*.zip
+# Local Save As destination and its packed copy; keep nested fixtures visible.
+/saved-project/
+/saved-project.[zZ][iI][pP]
 *.atlas-project/
 *.atlas-project.zip
 

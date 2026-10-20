@@ -75,9 +75,14 @@ with tempfile.TemporaryDirectory(prefix='atlas-abx-exchange-ui-') as folder, syn
         route['nodes'] = [dict(id=0, label='', x_m=10, y_m=20, yaw_rad=None),
                           dict(id=42, label='工位', x_m=12, y_m=20, yaw_rad=1.5)]
         route['edges'] = [dict(id=100, start=0, end=42)]
-        page.get_by_label('机器人路径文件', exact=True).set_input_files(dict(
+        inspector = page.get_by_role('complementary', name='图谱控制台', exact=True)
+        with page.expect_file_chooser() as chooser:
+            inspector.get_by_role('button', name='导入路径', exact=True).click()
+        chooser.value.set_files(dict(
             name='ui-route.route.json', mimeType='application/json', buffer=json.dumps(route).encode()))
         expect(page.get_by_role('status').filter(has_text='机器人路径已导入')).to_be_visible()
+        expect(inspector).to_have_attribute('data-active-page', 'navigation')
+        expect(inspector.get_by_label('搜索导航点')).to_contain_text('工位')
         page.get_by_role('button', name='示教菜单', exact=True).click()
         page.get_by_role('button', name='导出机器人路径', exact=True).click()
         route_dialog.get_by_label('选择导出路网').select_option(label='往返测试路径')

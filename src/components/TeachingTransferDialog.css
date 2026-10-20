@@ -71,6 +71,10 @@
 .transfer-range-row b { font: 11px Menlo, monospace; color: var(--cyan); }
 .transfer-settings .transfer-text-button { border: 0; background: none; padding: 8px 0 0; color: var(--muted); font-size: 10px; }
 .transfer-select { display: grid; grid-template-columns: 60px 1fr; align-items: center; margin: 9px 0; color: var(--muted); font-size: 11px; }
+.transfer-matrix-import { margin: 12px 0 14px; }
+.transfer-matrix-import button { width: 100%; color: var(--cyan); }
+.transfer-matrix-import p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
+.transfer-matrix-import .transfer-matrix-file { color: #a9cfca; }
 .transfer-pose-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 8px; margin-top: 14px; }
 .transfer-pose-grid label > span { display: flex; justify-content: space-between; font: 11px Menlo, monospace; color: #b8caca; margin-bottom: 5px; }
 .transfer-pose-grid small { font-size: 10px; color: var(--muted); }

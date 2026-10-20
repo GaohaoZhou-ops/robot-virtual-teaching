@@ -26,6 +26,33 @@ export function transferMatrix(pose) {
   );
 }
 
+// TXT rows describe p_map = T * p_local, with translation in meters.
+export function parseTransferMatrix(text) {
+  const rows = String(text).replace(/^\uFEFF/, '').trim().split(/\r\n?|\n/)
+    .map((row) => row.trim()).filter(Boolean).map((row) => row.split(/\s+/));
+  requireValue(rows.length === 4 && rows.every((row) => row.length === 4), '转换矩阵必须为 4 行，每行 4 个数值，以空格或制表符分隔');
+  const decimal = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+  const values = rows.map((row, rowIndex) => row.map((value, columnIndex) => {
+    requireValue(decimal.test(value) && Number.isFinite(Number(value)), `转换矩阵第 ${rowIndex + 1} 行第 ${columnIndex + 1} 列必须是有效数值`);
+    return Number(value);
+  }));
+  requireValue(values[3].every((value, index) => Math.abs(value - (index === 3 ? 1 : 0)) <= 1e-8),
+    '转换矩阵最后一行必须是 0 0 0 1');
+  const matrix = new Matrix4().set(...values.flat());
+  // Allow rounding in six-decimal text exports, but reject scale, shear and reflections.
+  const columns = [0, 1, 2].map((axis) => new Vector3().setFromMatrixColumn(matrix, axis));
+  const tolerance = 1e-4;
+  requireValue(columns.every((column, index) => columns.every((other, otherIndex) => (
+    Math.abs(column.dot(other) - (index === otherIndex ? 1 : 0)) <= tolerance
+  ))) && Math.abs(matrix.determinant() - 1) <= tolerance,
+  '转换矩阵旋转部分必须为正交旋转矩阵，不支持缩放、剪切或镜像');
+  return new Matrix4().compose(
+    new Vector3(values[0][3], values[1][3], values[2][3]),
+    new Quaternion().setFromRotationMatrix(matrix).normalize(),
+    new Vector3(1, 1, 1),
+  );
+}
+
 export function transformTeachingPose(pose, matrix, frameId) {
   const composed = matrix.clone().multiply(transferMatrix(pose));
   const position = new Vector3().setFromMatrixPosition(composed);

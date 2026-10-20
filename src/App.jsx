@@ -17,6 +17,7 @@ import {
   Layers2,
   Map as MapIcon,
   MousePointer2,
+  Play,
   Plus,
   Route,
   ScanLine,
@@ -24,6 +25,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   Tablet,
+  Usb,
   X,
   Zap,
 } from 'lucide-react';
@@ -36,6 +38,7 @@ import ProjectLoadDialog from './components/ProjectLoadDialog.jsx';
 import ProjectExportButton from './components/ProjectExportButton.jsx';
 import ProjectExportDialog from './components/ProjectExportDialog.jsx';
 import RobotPicker from './components/RobotPicker.jsx';
+import RobotPresetDialog from './components/RobotPresetDialog.jsx';
 import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
 import ModelEditorPage from './components/ModelEditorPage.jsx';
@@ -97,6 +100,7 @@ import {
   prepareMapGeometryTopology,
 } from './lib/mapGeometry.js';
 import { createSpaceMouseInputState } from './lib/spaceMouse.js';
+import { createRobotJointPreset, presetJointDefinitions, presetMatchesRobot } from './lib/robotJointPresets.js';
 import {
   buildTeachingTaskTrajectory,
   sampleTeachingTrajectorySegment,
@@ -459,6 +463,7 @@ export default function App() {
   const abxImportBusyRef = useRef(false);
   const projectDirectoryInputRef = useRef(null);
   const mapDetailsButtonRef = useRef(null);
+  const robotMenuButtonRef = useRef(null);
   const devicesMenuButtonRef = useRef(null);
   const toastTimerRef = useRef(null);
   const view2dRef = useRef(null);
@@ -549,6 +554,11 @@ export default function App() {
   const robotParkingGhostRef = useRef(null);
   robotParkingGhostRef.current = robotParkingGhost;
   const [jointPoses, setJointPoses] = useState([]);
+  const [robotPresetDraft, setRobotPresetDraft] = useState(null);
+  const robotPresetJoints = useMemo(() => presetJointDefinitions(robotLoadState.movableJoints), [robotLoadState.movableJoints]);
+  const robotPresets = useMemo(() => jointPoses.filter((pose) => (
+    pose.joints?.source === 'robot-preset' && presetMatchesRobot(pose, selectedRobot)
+  )), [jointPoses, selectedRobot]);
   const [zividCameraPoses, setZividCameraPoses] = useState({});
   const [cameraTeachingCommand, setCameraTeachingCommand] = useState(null);
   const [cameraTeachingResult, setCameraTeachingResult] = useState({
@@ -595,6 +605,16 @@ export default function App() {
   });
   const [toast, setToast] = useState(null);
   const closeMapDetails = useCallback(() => setMapDetailsOpen(false), []);
+  const closeRobotPreset = useCallback(() => setRobotPresetDraft(null), []);
+  const robotPresetReady = Boolean(selectedRobot && robotLoadState.status === 'loaded'
+    && robotPresetJoints.length && sessionState.status === 'ready' && !loadState.loading
+    && teachingCaptureState.status !== 'capturing');
+  useEffect(() => {
+    if (robotPresetDraft && (appPage !== APP_PAGE_WORKBENCH
+      || !presetMatchesRobot(robotPresetDraft, selectedRobot) || robotPresetDraft.mapId !== mapData?.mapId)) {
+      setRobotPresetDraft(null);
+    }
+  }, [appPage, mapData?.mapId, robotPresetDraft, selectedRobot]);
   const coordinateFrame = teachingCoordinateFrame(teachingSpaceMode);
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
   const alternateTeachingMode = isIndependentTeachingSpace ? 'map' : 'independent';
@@ -1875,24 +1895,6 @@ export default function App() {
       notify('请选择 .ply 点云文件', 'error');
       return;
     }
-    const replacesActiveWorkspace = nextTeachingSpaceMode === teachingSpaceMode && Boolean(
-      mapData
-      || selectedRobot
-      || waypoints.length
-      || edges.length
-      || teachingTasks.length
-      || jointPoses.length,
-    );
-    const replacesCachedWorkspace = nextTeachingSpaceMode !== teachingSpaceMode
-      && Boolean(cachedWorkspaces[nextTeachingSpaceMode]?.available);
-    if (
-      (replacesActiveWorkspace || replacesCachedWorkspace)
-      && !window.confirm(
-        independent
-          ? '创建新的独立示教工程会替换已有的独立示教缓存，地图示教缓存不会受影响。继续吗？'
-          : '创建新的地图示教工程会替换已有的地图示教缓存，独立示教缓存不会受影响。继续吗？',
-      )
-    ) return;
     const previousMode = teachingSpaceMode;
     const previousDirectoryBinding = projectDirectoryRef.current;
     const previousDirectoryState = projectDirectoryState;
@@ -3635,7 +3637,7 @@ export default function App() {
         ]),
       );
       setRobotControlEnabled(false);
-      setRobotJointValues(values);
+      setRobotJointValues((current) => ({ ...current, ...values }));
       notify(`${pose.name} 已应用到机器人`, 'success');
     },
     [jointPoses, notify, robotLoadState.movableJoints, robotLoadState.status, selectedRobot],
@@ -4303,6 +4305,56 @@ export default function App() {
     setTeachingPlayback(createIdleTeachingPlayback());
     if (announce && wasRunning) notify('示教轨迹播放已停止，机器人保留在当前位置', 'info');
   }, [notify]);
+
+  const openRobotPreset = () => {
+    if (!robotPresetReady) return;
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    setRobotPresetDraft({
+      id: createId('joint-pose'),
+      mapId: mapData?.mapId,
+      robot: selectedRobot,
+      joints: robotPresetJoints,
+      values: { ...robotJointValues },
+    });
+  };
+
+  const saveRobotPreset = async ({ name, values }) => {
+    const current = latestWorkspaceRef.current;
+    if (!robotPresetDraft || !robotPresetReady || !sessionReadyRef.current
+      || !presetMatchesRobot(robotPresetDraft, current.selectedRobot)
+      || current.mapData?.mapId !== robotPresetDraft.mapId) {
+      throw new Error('当前工程或机器人已变化，请重新打开预设姿态窗口');
+    }
+    const previous = current.jointPoses.find((pose) => pose.id === robotPresetDraft.id);
+    if (current.jointPoses.some((pose) => pose.id !== robotPresetDraft.id
+      && presetMatchesRobot(pose, current.selectedRobot) && pose.name === name.trim())) {
+      throw new Error('当前机器人已有同名姿态，请使用其他名称');
+    }
+    const pose = createRobotJointPreset({
+      id: robotPresetDraft.id, name, robot: current.selectedRobot,
+      joints: robotPresetDraft.joints, values,
+      sequence: previous?.sequence || current.jointPoses.length + 1,
+    });
+    if (previous) pose.createdAt = previous.createdAt;
+    const next = previous
+      ? current.jointPoses.map((item) => item.id === pose.id ? pose : item)
+      : [...current.jointPoses, pose];
+    latestWorkspaceRef.current = { ...current, jointPoses: next };
+    setJointPoses(next);
+    await persistWorkspaceNow();
+    if (!sessionReadyRef.current) throw new Error('预设尚未持久保存，请先将工程另存为备份');
+    closeRobotPreset();
+    notify(`${pose.name} 已保存，可从机器人菜单直接应用`, 'success');
+  };
+
+  const applyRobotPreset = (id) => {
+    if (!robotPresetReady || !robotPresets.some((pose) => pose.id === id)) return;
+    stopTeachingTaskPlayback(false);
+    setRobotParkingGhost(null);
+    setShowRobotModel(true);
+    applyJointPose(id);
+  };
 
   const applyTeachingParkingPoint = useCallback(
     (taskId, parkingPointId, poseId = null) => {
@@ -5208,7 +5260,8 @@ export default function App() {
       data-teaching-space-mode={teachingSpaceMode}
       data-teaching-source={teachingSource}
       data-coordinate-frame={coordinateFrame}
-      aria-hidden={appPage !== APP_PAGE_WORKBENCH}
+      aria-hidden={appPage !== APP_PAGE_WORKBENCH || Boolean(robotPresetDraft)}
+      inert={robotPresetDraft ? '' : undefined}
     >
       <header className="topbar">
         <div className="brand-block">
@@ -5245,7 +5298,7 @@ export default function App() {
         </div>
 
         <WorkbenchToolbar
-          isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+          isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
           sections={[
             {
               id: 'project', label: '工程', icon: FolderOpen, triggerRef: mapDetailsButtonRef,
@@ -5338,14 +5391,14 @@ export default function App() {
               </>,
             },
             {
-              id: 'devices', label: '设备', icon: Bot, triggerRef: devicesMenuButtonRef,
+              id: 'robot', label: '机器人', icon: Bot, triggerRef: robotMenuButtonRef,
               content: <>
                 <section className="workbench-menu-section">
-                  <p>机器人与控制器</p>
+                  <p>机器人</p>
                   <RobotPicker
-                    menuAnchorRef={devicesMenuButtonRef}
+                    menuAnchorRef={robotMenuButtonRef}
                     menuLabel="机器人模型"
-                    isActive={appPage === APP_PAGE_WORKBENCH}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft}
                     selectedRobot={selectedRobot}
                     loadState={robotLoadState}
                     onSelect={handleSelectRobot}
@@ -5356,11 +5409,33 @@ export default function App() {
                       setShowRobotModel(visible);
                     }}
                   />
+                  <button type="button" className="action-button" disabled={!robotPresetReady}
+                    title={robotPresetReady ? '输入双臂、躯干和头部关节值并保存' : '请先加载具有可动关节的机器人模型'}
+                    onClick={openRobotPreset}><Plus size={15} /><span>新建预设姿态</span></button>
+                </section>
+                <section className="workbench-menu-section robot-presets-list">
+                  <p>预设姿态{robotPresets.length > 0 ? ` · ${robotPresets.length}` : ''}</p>
+                  {robotPresets.map((pose) => <button key={pose.id} type="button" className="action-button"
+                    aria-label={`应用预设姿态 ${pose.name}`} title={pose.name}
+                    disabled={!robotPresetReady} onClick={() => applyRobotPreset(pose.id)}>
+                    <Play size={15} /><span>{pose.name}</span><b>{pose.joints.count} 关节</b>
+                  </button>)}
+                  {!robotPresets.length && <p className="robot-presets-empty">
+                    {selectedRobot ? '暂无预设姿态，点击上方新建。' : '加载机器人后可创建预设姿态。'}
+                  </p>}
+                </section>
+              </>,
+            },
+            {
+              id: 'devices', label: '设备', icon: Usb, triggerRef: devicesMenuButtonRef,
+              content: <>
+                <section className="workbench-menu-section">
+                  <p>输入控制器</p>
                   <SpaceMouseControl
                     menuAnchorRef={devicesMenuButtonRef}
                     inputRef={spaceMouseInputRef}
                     onNotify={notify}
-                    isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
                   />
                 </section>
                 {isIndependentTeachingSpace && <section className="workbench-menu-section">
@@ -5368,7 +5443,7 @@ export default function App() {
                   {['ipad', 'vision'].map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
                     desktopCount={desktopTeachingTasks.length} deviceCount={mobileTasksByDevice[device].length}
                     disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-                    isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
                     onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />)}
                 </section>}
               </>,
@@ -5438,7 +5513,7 @@ export default function App() {
                 disabled={!mapData?.geometry}
                 collapsed={heightRangeCollapsed}
                 onCollapsedChange={setHeightRangeCollapsed}
-                isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
               />
               {!isIndependentTeachingSpace && (
                 <button
@@ -5537,7 +5612,7 @@ export default function App() {
                 onRecordParkingPointPosition={recordTeachingParkingPointPosition}
                 onEditTeachingPose={beginTeachingPoseEdit}
                 onConfirmTeachingPose={captureTeachingPoint}
-                isActive={appPage === APP_PAGE_WORKBENCH && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
               />
               <TeachingPlaybackDock
                 key={teachingPlayback.taskId}
@@ -5686,6 +5761,9 @@ export default function App() {
           collapsed={inspectorCollapsed}
           onCollapsedChange={setInspectorCollapsed}
           onRunConnectivity={runConnectivity}
+          onImportRoute={() => abxRouteInputRef.current?.click()}
+          routeImportDisabled={!mapData || abxImportBusy || loadState.loading}
+          routeImportBusy={abxImportBusy}
           onSelectWaypoint={focusWaypointFromInspector}
           onSearchWaypoint={focusWaypointFromInspector}
           onSelectEdge={focusEdgeFromInspector}
@@ -5804,6 +5882,10 @@ export default function App() {
           onClose={closeMapDetails}
           returnFocusRef={mapDetailsButtonRef}
         />
+      )}
+      {appPage === APP_PAGE_WORKBENCH && robotPresetDraft && (
+        <RobotPresetDialog key={robotPresetDraft.id} snapshot={robotPresetDraft} onSave={saveRobotPreset}
+          onClose={closeRobotPreset} returnFocusRef={robotMenuButtonRef} />
       )}
     </div>
     {appPage === APP_PAGE_HOME && (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeftRight, ArrowRight, Check, Crosshair, FolderOpen, LoaderCircle, Scissors, X } from 'lucide-react';
 import { normalizeProject } from '../lib/io.js';
-import { identityTransferPose, insideTransferBounds, placementTransform, transferMatrix, transformTeachingPose } from '../lib/teachingTransfer.js';
+import { identityTransferPose, insideTransferBounds, parseTransferMatrix, placementTransform, transferMatrix, transformTeachingPose } from '../lib/teachingTransfer.js';
 import TeachingTransferPreview from './TeachingTransferPreview.jsx';
 import './TeachingTransferDialog.css';
 
@@ -53,10 +53,22 @@ export default function TeachingTransferDialog({ state, onClose, onApply, onLoad
 }
 
 function TransferForm({ source, target, initialOperation, settingsVisible, setSettingsVisible, busy, error, onApply, onClose, onLoadMap }) {
+  const matrixInputRef = useRef(null);
+  const matrixLoadingRef = useRef(false);
+  const mountedRef = useRef(false);
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixError, setMatrixError] = useState('');
+  const [matrixFileName, setMatrixFileName] = useState('');
+  const [fitRequest, setFitRequest] = useState(0);
   const sourceProject = useMemo(() => projectOf(source), [source]);
   const targetProject = useMemo(() => projectOf(target), [target]);
   const link = sourceProject.workspace.transfer;
   const [operation, setOperation] = useState(initialOperation);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  useEffect(() => { setMatrixError(''); setMatrixFileName(''); }, [operation]);
   const [previewDisplay, setPreviewDisplay] = useState({ colorMode: 'layer', meshQuality: 'performance' });
   const extraction = operation === 'extract';
   const writeback = operation === 'writeback';
@@ -96,10 +108,42 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const title = extraction ? '提取局部，进入独立示教' : writeback ? '将精调结果回写原地图' : '将独立组件对齐到地图';
   const presets = (extraction ? sourceProject : targetProject)?.teachingTasks.flatMap((task) => task.parkingPoints.map((point) => ({ ...point, taskName: task.name }))) || [];
   const updatePose = (group, axis, value) => setPose((current) => ({ ...current, [group]: { ...current[group], [axis]: number(value) } }));
+  const loading = busy || matrixLoading;
+  const canApply = !loading && hasMap && validPose
+    && (!extraction || (validBounds && name.trim() && (!needsReplace || replaceAccepted)));
+  const importMatrix = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || busy || matrixLoadingRef.current || writeback) return;
+    matrixLoadingRef.current = true;
+    setMatrixLoading(true);
+    setMatrixError('');
+    try {
+      if (!file.name.toLowerCase().endsWith('.txt')) throw new Error('请选择 .txt 转换矩阵文件');
+      if (file.size > 1024 * 1024) throw new Error('转换矩阵文件不能超过 1 MB');
+      const matrix = parseTransferMatrix(await file.text());
+      if (!mountedRef.current) return;
+      // The file transforms the entire local coordinate system, not its center or robot base.
+      setAnchor('origin');
+      setPose(transformTeachingPose(identityTransferPose(), matrix));
+      setMatrixFileName(file.name);
+      setFitRequest((current) => current + 1);
+    } catch (reason) {
+      if (mountedRef.current) setMatrixError(`${reason.message || '转换矩阵读取失败'}；原转换参数已保留`);
+    } finally {
+      matrixLoadingRef.current = false;
+      if (mountedRef.current) setMatrixLoading(false);
+    }
+  };
+  const visibleError = matrixError || error;
 
   return <form className={`transfer-form${settingsVisible ? '' : ' is-preview-expanded'}`}
-    onSubmit={(event) => { event.preventDefault(); onApply({ operation, localToMap, bounds, name }); }}>
-    <fieldset disabled={busy} className="transfer-fieldset">
+    aria-busy={loading}
+    onSubmit={(event) => {
+      event.preventDefault();
+      if (canApply && !matrixLoadingRef.current) onApply({ operation, localToMap, bounds, name });
+    }}>
+    <fieldset disabled={loading} className="transfer-fieldset">
       <div className="transfer-route">
         <div><small>{extraction ? '地图示教 / 来源' : '独立示教 / 来源'}</small><strong>{source.map.name}</strong></div>
         <ArrowRight size={20} />
@@ -112,10 +156,11 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
           <div className="transfer-visual">
             <TeachingTransferPreview key={operation} map={map} overlay={!extraction ? source.map : null}
               transform={localToMap} crop={extraction && validBounds ? bounds : null}
+              fitRequest={fitRequest}
               display={previewDisplay} onDisplayChange={setPreviewDisplay}
               pose={validPose ? writeback ? link.localToMap : pose : null}
               settingsVisible={settingsVisible} onToggleSettings={() => setSettingsVisible((visible) => !visible)}
-              onPoseChange={!writeback ? setPose : undefined} disabled={busy}
+              onPoseChange={!writeback ? setPose : undefined} disabled={loading}
               onPick={!extraction && !writeback ? (point) => setPose((current) => ({ ...current, position: { ...current.position, ...point } })) : undefined}
               onCrop={extraction ? setBounds : undefined} />
           </div>
@@ -138,6 +183,16 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
               <button className="transfer-text-button" type="button" onClick={() => setBounds(structuredClone(source.map.bounds))}>恢复完整范围</button>
             </section>}
             <section><h4><Crosshair size={14} /> {extraction ? '局部原点在地图中的姿态' : writeback ? '保存的局部坐标关系' : '放置位置与朝向'}</h4>
+              {!writeback && <div className="transfer-matrix-import">
+                <input ref={matrixInputRef} type="file" hidden tabIndex={-1} accept=".txt,text/plain"
+                  aria-label="转换矩阵文件" onChange={importMatrix} />
+                <button type="button" aria-describedby="transfer-matrix-format" onClick={() => matrixInputRef.current?.click()}>
+                  {matrixLoading ? <LoaderCircle className="transfer-spinner" size={15} /> : <FolderOpen size={15} />}
+                  {matrixLoading ? '正在读取矩阵…' : '加载转换矩阵'}
+                </button>
+                <p id="transfer-matrix-format">4 × 4 TXT · 独立空间 → 地图 · 平移单位 m</p>
+                {matrixFileName && <p className="transfer-matrix-file" role="status">已加载 {matrixFileName}，可继续手动调整。</p>}
+              </div>}
               {!extraction && !writeback && <label className="transfer-select">定位基准<select aria-label="放置定位基准" value={anchor} onChange={(event) => {
                 const value = event.target.value;
                 setPose(transformTeachingPose(anchorPose(value), transferMatrix(localToMap)));
@@ -168,12 +223,12 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
         </div>}
     </fieldset>
     <footer className="transfer-footer">
-      <div role={error ? 'alert' : 'status'} className={error ? 'is-error' : ''}>{error || (busy ? '正在转换并保存，请稍候…'
+      <div role={visibleError ? 'alert' : 'status'} className={visibleError ? 'is-error' : ''}>{visibleError || (matrixLoading ? '正在读取转换矩阵…' : busy ? '正在转换并保存，请稍候…'
         : extraction && !validBounds ? '请设置有效裁剪范围'
           : !settingsVisible && needsReplace && !replaceAccepted ? '点击“显示参数”确认替换已打开的独立工程'
             : `${selectedStops.length} 停车点 · ${selectedPoseCount} 示教姿态 · 米 / 度`)}</div>
       <button type="button" onClick={onClose} disabled={busy}>取消</button>
-      <button className="transfer-submit" type="submit" disabled={busy || !hasMap || !validPose || (extraction && (!validBounds || !name.trim() || (needsReplace && !replaceAccepted)))}>
+      <button className="transfer-submit" type="submit" disabled={!canApply}>
         {busy ? <LoaderCircle className="transfer-spinner" size={16} /> : <ArrowRight size={16} />}
         {extraction ? '提取并进入独立示教' : writeback ? '回写并进入地图' : '放置并进入地图'}
       </button>

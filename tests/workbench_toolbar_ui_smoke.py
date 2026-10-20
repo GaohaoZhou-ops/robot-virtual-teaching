@@ -23,8 +23,8 @@ def run():
             wait_for_home(page)
             create_project(page, mode)
             toolbar = page.get_by_role('navigation', name='工作台工具栏', exact=True)
-            expect(toolbar.get_by_role('button')).to_have_count(3)
-            expect(toolbar.get_by_role('button')).to_have_text(['工程', '示教', '设备'])
+            expect(toolbar.get_by_role('button')).to_have_count(4)
+            expect(toolbar.get_by_role('button')).to_have_text(['工程', '示教', '机器人', '设备'])
             expect(page.locator('.map-identity small')).to_contain_text('独立示教' if mode == 'independent' else '地图示教')
             page.evaluate('window.__toolbarController = document.querySelector(".spacemouse-control")')
 
@@ -57,12 +57,12 @@ def run():
             expect(page.locator('.workbench-menu-panel:visible')).to_have_count(0)
             page.wait_for_function('''() => {
                 const menu = document.querySelector('.robot-picker__menu').getBoundingClientRect();
-                const trigger = document.querySelector('[data-workbench-menu-trigger="devices"]').getBoundingClientRect();
+                const trigger = document.querySelector('[data-workbench-menu-trigger="robot"]').getBoundingClientRect();
                 return Math.abs(menu.top - trigger.bottom - 8) < 2;
             }''')
             page.keyboard.press('Escape')
             expect(robots).to_have_count(0)
-            expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()
+            expect(toolbar.get_by_role('button', name='机器人菜单')).to_be_focused()
 
             if mode == 'independent':
                 for device in ('iPad', 'Vision Pro'):
@@ -119,6 +119,8 @@ def run():
                     elif path.endswith('/renew'):
                         ticket['pairingCode'] = 'V456'
                         result = ticket
+                    elif path == '/sessions/vision-ui-transfer/vision-pairing' and route.request.method in ('POST', 'DELETE'):
+                        result = {'published': route.request.method == 'POST'}
                     elif path == '/sessions/vision-ui-transfer':
                         result = ticket
                     else:
@@ -133,7 +135,7 @@ def run():
                     page.get_by_role('menuitem', name='配对 Vision Pro', exact=True).click()
                     dialog = page.get_by_role('dialog', name='Vision Pro 空间示教', exact=True)
                     expect(dialog.locator('.ipad-code')).to_have_text('V123' if opening == 0 else 'V456')
-                    expect(dialog).to_contain_text('搜索局域网电脑')
+                    expect(dialog).to_contain_text('自动检测局域网服务器')
                     expect(dialog.get_by_role('img', name='设备配对二维码')).to_have_count(0)
                     expect(dialog.get_by_role('button', name='导入结果文件')).to_have_count(0)
                     expect(dialog.get_by_role('alert')).to_have_count(0)
@@ -168,7 +170,7 @@ def run():
 
             for width in (1440, 1024, 680, 390):
                 page.set_viewport_size({'width': width, 'height': 900})
-                for label in ('工程', '示教', '设备'):
+                for label in ('工程', '示教', '机器人', '设备'):
                     trigger = toolbar.get_by_role('button', name=f'{label}菜单')
                     trigger.click()
                     panel = page.get_by_role('dialog', name=f'{label}菜单', exact=True)
