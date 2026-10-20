@@ -28,14 +28,6 @@ const precisionForStep = (step) => clamp(Math.ceil(-Math.log10(step)), 0, 6);
 const precisionForScale = (scale) =>
   clamp(Math.ceil(-Math.log10(1 / Math.max(scale, 0.001))) + 1, 2, 6);
 
-const pointOnCurve = (start, control, end, t) => {
-  const inverse = 1 - t;
-  return {
-    x: inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
-    y: inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y,
-  };
-};
-
 const normalizeSelectionRect = (startX, startY, endX, endY) => ({
   left: Math.min(startX, endX),
   right: Math.max(startX, endX),
@@ -79,16 +71,6 @@ const segmentIntersectsRect = (start, end, rect) => {
     if (lower > upper) return false;
   }
   return true;
-};
-
-const curveIntersectsRect = (start, control, end, rect) => {
-  let previous = start;
-  for (let step = 1; step <= 32; step += 1) {
-    const current = pointOnCurve(start, control, end, step / 32);
-    if (segmentIntersectsRect(previous, current, rect)) return true;
-    previous = current;
-  }
-  return false;
 };
 
 export default function Map2DView({
@@ -712,8 +694,8 @@ export default function Map2DView({
           )
           .map((point) => point.id);
         const edgeIds = edgeVisuals
-          .filter(({ start, control, end }) =>
-            curveIntersectsRect(start, control, end, edgeHitRect),
+          .filter(({ start, end }) =>
+            segmentIntersectsRect(start, end, edgeHitRect),
           )
           .map(({ edge }) => edge.id);
         setBoxSelection({ waypointIds, edgeIds });
@@ -763,7 +745,7 @@ export default function Map2DView({
   const pointById = useMemo(() => new Map(waypoints.map((point) => [point.id, point])), [waypoints]);
 
   const edgeVisuals = useMemo(() => {
-    const edgeKeys = new Set(edges.map((edge) => `${edge.from}:${edge.to}`));
+    const edgeKeys = new Set(edges.map((edge) => JSON.stringify([edge.from, edge.to])));
     return edges
       .map((edge) => {
         const source = pointById.get(edge.from);
@@ -773,26 +755,25 @@ export default function Map2DView({
         const endRaw = worldToScreen(target.pose.x, target.pose.y);
         const dx = endRaw.x - startRaw.x;
         const dy = endRaw.y - startRaw.y;
-        const length = Math.max(Math.hypot(dx, dy), 0.001);
+        const length = Math.hypot(dx, dy);
+        if (length < 0.001) return null;
         const ux = dx / length;
         const uy = dy / length;
-        const start = { x: startRaw.x + ux * 14, y: startRaw.y + uy * 14 };
-        const end = { x: endRaw.x - ux * 17, y: endRaw.y - uy * 17 };
-        const hasReverse = edgeKeys.has(`${edge.to}:${edge.from}`);
-        // Reversing the edge also flips this normal, so reciprocal routes land
-        // on opposite sides and both directed paths remain independently clickable.
-        const offset = hasReverse ? 14 : 0;
-        const control = {
-          x: (start.x + end.x) / 2 - uy * offset,
-          y: (start.y + end.y) / 2 + ux * offset,
-        };
-        const label = pointOnCurve(start, control, end, 0.5);
+        const hasReverse = edgeKeys.has(JSON.stringify([edge.to, edge.from]));
+        // Reciprocal edges meet at the midpoint as one straight, double-headed
+        // connection. Each half remains selectable for its own direction.
+        const startInset = hasReverse && edge.directed !== false
+          ? length / 2
+          : Math.min(14, length * 0.2);
+        const endInset = Math.min(17, length * 0.2);
+        const start = { x: startRaw.x + ux * startInset, y: startRaw.y + uy * startInset };
+        const end = { x: endRaw.x - ux * endInset, y: endRaw.y - uy * endInset };
+        const label = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
         return {
           edge,
           start,
-          control,
           end,
-          path: `M ${start.x} ${start.y} Q ${control.x} ${control.y} ${end.x} ${end.y}`,
+          path: `M ${start.x} ${start.y} L ${end.x} ${end.y}`,
           label,
           accessibleLabel: `配置路径 ${source.name || edge.from} 到 ${target.name || edge.to}`,
         };
@@ -982,7 +963,12 @@ export default function Map2DView({
             const arrowKind = boxSelected ? 'box-selected' : selected ? 'selected' : kind;
             return (
               <g key={edge.id} className={`route-edge ${kind} ${selected ? 'is-selected' : ''} ${boxSelected ? 'is-box-selected' : ''}`}>
-                <path className="route-edge__visible" d={path} markerEnd={`url(#arrow-${arrowKind})`} />
+                <path
+                  className="route-edge__visible"
+                  d={path}
+                  markerStart={edge.directed === false ? `url(#arrow-${arrowKind})` : undefined}
+                  markerEnd={`url(#arrow-${arrowKind})`}
+                />
                 <path
                   className="route-edge__hit"
                   d={path}

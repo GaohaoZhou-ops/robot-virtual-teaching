@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleGauge,
+  FolderOpen,
   MoveHorizontal,
   PanelRightClose,
   PanelRightOpen,
@@ -138,6 +139,9 @@ export default function Inspector({
   cameraTeachingResult,
   teachingCaptureState,
   onRunConnectivity,
+  onImportRoute,
+  routeImportDisabled = false,
+  routeImportBusy = false,
   onSelectWaypoint,
   onSearchWaypoint,
   onSelectEdge,
@@ -346,6 +350,21 @@ export default function Inspector({
           <h2>图谱控制台</h2>
         </div>
         <div className="inspector-heading__tools">
+          {!isIndependentTeachingSpace && <button
+            type="button"
+            className="inspector-route-import"
+            aria-label="导入路径"
+            title="导入机器人路网 JSON，保留已有路径和示教任务"
+            disabled={routeImportDisabled || routeImportBusy || !onImportRoute}
+            onClick={() => {
+              setActivePage('navigation');
+              onClearSelection();
+              onImportRoute();
+            }}
+          >
+            <FolderOpen size={12} />
+            <span>{routeImportBusy ? '导入中…' : '导入路径'}</span>
+          </button>}
           <button
             type="button"
             className={`joint-float-toggle ${jointWindowOpen ? 'is-active' : ''}`}

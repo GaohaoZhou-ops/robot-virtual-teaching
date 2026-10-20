@@ -7048,7 +7048,7 @@ export default function PointCloudViewer({
     selectedWaypointPulseRef.current = null;
 
     const pointById = new Map(waypoints.map((point) => [point.id, point]));
-    const edgeKeys = new Set(edges.map((edge) => `${edge.from}:${edge.to}`));
+    const edgeKeys = new Set(edges.map((edge) => JSON.stringify([edge.from, edge.to])));
     const routeScale = Math.max(sphere.radius * 0.006, 0.12);
     const waypointRadius = routeScale * WAYPOINT_RADIUS_SCALE;
     const canvas = controlsRef.current?.domElement;
@@ -7077,21 +7077,20 @@ export default function PointCloudViewer({
         target.pose.y,
         target.pose.z + routeScale * 0.25,
       );
-      if (edgeKeys.has(`${edge.to}:${edge.from}`)) {
-        const laneNormal = new THREE.Vector3(
-          -(end.y - start.y),
-          end.x - start.x,
-          0,
-        );
-        if (laneNormal.lengthSq() < 1e-12) laneNormal.set(1, 0, 0);
-        laneNormal.normalize().multiplyScalar(routeScale * 0.7);
-        start.add(laneNormal);
-        end.add(laneNormal);
-      }
       const direction = end.clone().sub(start);
-      const length = direction.length();
-      if (length < 0.001) return;
+      const fullLength = direction.length();
+      if (fullLength < 0.001) return;
       direction.normalize();
+      const hasReverse = edgeKeys.has(JSON.stringify([edge.to, edge.from]));
+      const inset = Math.min(waypointRadius * 1.6, fullLength * 0.2);
+      // Share the same centerline, with an independently selectable half for
+      // each direction and arrow tips outside the waypoint markers.
+      start.addScaledVector(
+        direction,
+        hasReverse && edge.directed !== false ? fullLength / 2 : inset,
+      );
+      end.addScaledVector(direction, -inset);
+      const length = start.distanceTo(end);
       const selected = edge.id === selectedEdgeId;
       const edgeGroup = new THREE.Group();
       const arrow = new THREE.ArrowHelper(
@@ -7121,6 +7120,16 @@ export default function PointCloudViewer({
       hitTarget.position.copy(start).addScaledVector(direction, length / 2);
       hitTarget.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
       edgeGroup.add(arrow, hitTarget);
+      if (edge.directed === false) {
+        edgeGroup.add(new THREE.ArrowHelper(
+          direction.clone().negate(),
+          end,
+          length,
+          statusColor(edge.status, selected),
+          Math.min(routeScale * 2.1, length * 0.24),
+          routeScale * 0.72,
+        ));
+      }
       tagSelectionTarget(edgeGroup, 'edge', edge.id);
       group.add(edgeGroup);
     });

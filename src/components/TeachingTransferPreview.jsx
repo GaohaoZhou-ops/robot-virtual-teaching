@@ -12,7 +12,7 @@ const objectPose = (object) => transformTeachingPose(identityTransferPose(), new
   object.position, object.quaternion, new THREE.Vector3(1, 1, 1),
 ));
 
-export default function TeachingTransferPreview({ map, overlay, transform, crop, pose, onPoseChange, onPick, onCrop, display, onDisplayChange, disabled = false, settingsVisible = true, onToggleSettings }) {
+export default function TeachingTransferPreview({ map, overlay, transform, crop, pose, onPoseChange, onPick, onCrop, display, onDisplayChange, disabled = false, settingsVisible = true, onToggleSettings, fitRequest = 0 }) {
   const viewportRef = useRef(null), canvasRef = useRef(null), contextRef = useRef(null);
   const latestRef = useRef(null);
   const extraction = Boolean(onCrop), editable = Boolean(onPoseChange);
@@ -291,6 +291,7 @@ export default function TeachingTransferPreview({ map, overlay, transform, crop,
   }, [map, overlay]);
 
   useEffect(() => { contextRef.current?.sync(); }, [transform, crop, pose, tool, disabled, mapVisible, overlayVisible, editable, colorMode, meshQuality]);
+  useEffect(() => { if (fitRequest) contextRef.current?.fit(); }, [fitRequest]);
   const changeView = (direction) => { setView(direction); contextRef.current?.fit(false, direction); };
   const chooseTool = (value) => {
     setTool(value);

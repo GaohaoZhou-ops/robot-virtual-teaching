@@ -9100,6 +9100,13 @@ input[type="number"]::-webkit-inner-spin-button {
 .inspector-heading > div:first-child {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+}
+
+.inspector-heading .eyebrow {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inspector-heading h2 {
@@ -9111,9 +9118,35 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .inspector-heading__tools {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 5px;
   min-width: 0;
+}
+
+.inspector-route-import {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 7px;
+  border: 1px solid rgba(89, 219, 232, 0.25);
+  background: rgba(89, 219, 232, 0.035);
+  color: #97c9cd;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.inspector-route-import:hover:not(:disabled) {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+.inspector-route-import:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 .joint-float-toggle {

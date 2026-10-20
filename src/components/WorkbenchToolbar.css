@@ -111,4 +111,9 @@
   .workbench-toolbar__menus { gap: 1px; }
   .topbar-actions.workbench-toolbar { flex: 0 0 auto; padding-left: 4px; }
 }
+
+@media (max-width: 480px) {
+  .topbar:has(.workbench-toolbar) .map-identity { display: none; }
+}
+
 .topbar:has(.workbench-toolbar) { max-width: 100vw; }

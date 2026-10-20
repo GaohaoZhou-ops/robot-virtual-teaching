@@ -84,7 +84,7 @@ def run():
         assert "mode-box" in (map_view.get_attribute("class") or "")
         assert map_view.get_attribute("data-delete-shortcut") == "Delete,Backspace"
 
-        # A narrow frame around only the middle of the first curve must select
+        # A narrow frame around only the middle of the first segment must select
         # that path without requiring either endpoint to be inside the box.
         first_path = page.locator(".route-edge__visible").nth(0)
         midpoint = path_midpoint(first_path)
