@@ -70,6 +70,7 @@ def run():
             expect(path_test).to_have_class(re.compile("is-partial"))
             synced_id = next(option.get_attribute("value") for option in temporary_options(page).all()
                              if "N1 · 同步路径 A" in option.inner_text())
+            expect(page.locator(f'.waypoint-name-label[data-waypoint-id="{synced_id}"]')).to_have_text("N1 · 同步路径 A")
             page.get_by_label("搜索导航点", exact=True).select_option(synced_id)
             editor = page.locator(".property-editor")
             expect(editor).to_contain_text("独立模型坐标 · 临时")

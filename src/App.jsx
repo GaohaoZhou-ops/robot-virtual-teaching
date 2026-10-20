@@ -547,6 +547,7 @@ export default function App() {
   const [pointColorMode, setPointColorMode] = useState('height');
   const [meshRenderQuality, setMeshRenderQuality] = useState('auto');
   const [showWaypoints3D, setShowWaypoints3D] = useState(true);
+  const [showWaypointNames3D, setShowWaypointNames3D] = useState(true);
   const [showRobotModel, setShowRobotModel] = useState(true);
   const [collapsedPanel, setCollapsedPanel] = useState(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
@@ -718,6 +719,7 @@ export default function App() {
     pointColorMode,
     meshRenderQuality,
     showWaypoints3D,
+    showWaypointNames3D,
     collapsedPanel,
     inspectorCollapsed,
     selectedRobot,
@@ -973,6 +975,7 @@ export default function App() {
           meshRenderQuality: current.meshRenderQuality,
           pointColorMode: current.pointColorMode,
           showWaypoints3D: current.showWaypoints3D,
+          showWaypointNames3D: current.showWaypointNames3D,
           activeTeachingTaskId: current.activeTeachingTaskId,
           activeTeachingParkingPointId: current.activeTeachingParkingPointId,
           collapsedPanel: current.collapsedPanel,
@@ -995,6 +998,7 @@ export default function App() {
         pointColorMode: current.pointColorMode,
         meshRenderQuality: current.meshRenderQuality,
         showWaypoints3D: current.showWaypoints3D,
+        showWaypointNames3D: current.showWaypointNames3D,
         showSlice3D: current.showSlice3D,
         collapsedPanel: current.collapsedPanel,
         inspectorCollapsed: current.inspectorCollapsed,
@@ -1465,6 +1469,9 @@ export default function App() {
             snapshot?.ui?.meshRenderQuality ?? project?.rendering?.meshQuality,
           ));
           setShowWaypoints3D(snapshot?.ui?.showWaypoints3D !== false);
+          setShowWaypointNames3D(
+            (snapshot?.ui?.showWaypointNames3D ?? project?.workspace?.showWaypointNames3D) !== false,
+          );
           setShowSlice3D(snapshot?.ui?.showSlice3D !== false);
           defaultRobotJointLocksPendingRef.current = false;
           setSelectedRobot(restoredRobot);
@@ -1704,6 +1711,7 @@ export default function App() {
           setPointColorMode('height');
           setMeshRenderQuality('auto');
           setShowWaypoints3D(true);
+          setShowWaypointNames3D(true);
           setCollapsedPanel(null);
           setInspectorCollapsed(false);
           defaultRobotJointLocksPendingRef.current = false;
@@ -1851,6 +1859,7 @@ export default function App() {
     jointPoses,
     sessionState.status,
     showWaypoints3D,
+    showWaypointNames3D,
     validation,
     waypoints,
   ]);
@@ -2222,6 +2231,7 @@ export default function App() {
         ? project.workspace.pointColorMode
         : 'height';
       const importedShowWaypoints3D = project.workspace?.showWaypoints3D !== false;
+      const importedShowWaypointNames3D = project.workspace?.showWaypointNames3D !== false;
       const importedCollapsedPanel = ['2d', '3d'].includes(project.workspace?.collapsedPanel)
         ? project.workspace.collapsedPanel
         : null;
@@ -2256,6 +2266,7 @@ export default function App() {
       setMeshRenderQuality(importedMeshQuality);
       setPointColorMode(importedPointColorMode);
       setShowWaypoints3D(importedShowWaypoints3D);
+      setShowWaypointNames3D(importedShowWaypointNames3D);
       setCollapsedPanel(importedCollapsedPanel);
       setInspectorCollapsed(importedInspectorCollapsed);
       setRestoredView2d(project.view2d);
@@ -2325,6 +2336,7 @@ export default function App() {
             meshRenderQuality: importedMeshQuality,
             pointColorMode: importedPointColorMode,
             showWaypoints3D: importedShowWaypoints3D,
+            showWaypointNames3D: importedShowWaypointNames3D,
             activeTeachingTaskId: importedTaskId,
             activeTeachingParkingPointId: importedParkingPointId,
             collapsedPanel: importedCollapsedPanel,
@@ -2342,6 +2354,7 @@ export default function App() {
             pointColorMode: importedPointColorMode,
             meshRenderQuality: importedMeshQuality,
             showWaypoints3D: importedShowWaypoints3D,
+            showWaypointNames3D: importedShowWaypointNames3D,
             collapsedPanel: importedCollapsedPanel,
             inspectorCollapsed: importedInspectorCollapsed,
             robotHeightLocked: importedRobotHeightLocked,
@@ -3815,6 +3828,7 @@ export default function App() {
     meshRenderQuality,
     pointColorMode,
     showWaypoints3D,
+    showWaypointNames3D,
     activeTeachingTaskId,
     activeTeachingParkingPointId,
     collapsedPanel,
@@ -5800,6 +5814,8 @@ export default function App() {
                 onMeshRenderQualityChange={setMeshRenderQuality}
                 showWaypoints={showWaypoints3D}
                 onShowWaypointsChange={setShowWaypoints3D}
+                showWaypointNames={showWaypointNames3D}
+                onShowWaypointNamesChange={setShowWaypointNames3D}
                 onSelectWaypoint={selectNavigationWaypoint}
                 onSelectEdge={selectEdge}
                 onClearSelection={clearSelection}
