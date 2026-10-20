@@ -94,7 +94,7 @@ def run():
         parking_option.click()
         assert parking_option.get_attribute("aria-pressed") == "true"
         create_dialog.get_by_role("button", name="创建任务", exact=True).click()
-        capture_button = page.get_by_role("button", name="记录当前机械臂姿态")
+        capture_button = page.get_by_role("button", name="记录当前姿态")
         capture_button.click()
         teaching_panel = page.get_by_label("虚拟示教", exact=True)
         page.wait_for_function(

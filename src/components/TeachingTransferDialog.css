@@ -94,6 +94,20 @@
 .transfer-empty h3, .transfer-empty p { margin: 0; }
 .transfer-empty > svg { color: var(--cyan); }
 .transfer-spinner { animation: transfer-spin 1s linear infinite; }
+.transfer-matrix-confirm-backdrop { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: 20px; background: #02080cc9; backdrop-filter: blur(5px); }
+.transfer-matrix-confirm { width: min(440px, 100%); padding: 24px; border: 1px solid #e7b94b66; border-radius: 8px; background: var(--panel); box-shadow: 0 24px 80px #0008; }
+.transfer-matrix-confirm > svg { color: var(--amber); }
+.transfer-matrix-confirm h3 { margin: 14px 0 10px; font-size: 18px; font-weight: 600; color: var(--text); }
+.transfer-matrix-confirm p { margin: 0; color: #b8caca; font-size: 13px; line-height: 1.8; }
+.transfer-matrix-confirm .transfer-matrix-confirm__file { margin: 14px 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 4px; color: var(--amber); font: 12px Menlo, monospace; overflow-wrap: anywhere; }
+.transfer-matrix-confirm .transfer-matrix-confirm__hint { color: var(--muted); font-size: 12px; }
+.transfer-matrix-confirm footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+.transfer-matrix-confirm button { padding: 9px 17px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-soft); color: var(--text); cursor: pointer; font-size: 13px; }
+.transfer-matrix-confirm button:hover { border-color: var(--amber); }
+.transfer-matrix-confirm button:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+.transfer-matrix-confirm button:disabled { opacity: 0.4; cursor: not-allowed; }
+.transfer-matrix-confirm .transfer-matrix-confirm__reload { color: var(--cyan); border-color: #59dbe84f; background: #163c42; }
+.transfer-matrix-confirm .transfer-matrix-confirm__apply { background: #e7b94b; border-color: #e7b94b; color: #191609; }
 @keyframes transfer-spin { to { transform: rotate(360deg); } }
 @media (min-width: 1800px) { .transfer-body { grid-template-columns: minmax(0, 1fr) 310px; } }
 @media (max-width: 1100px) { .teaching-transfer-modal { --transfer-margin: 4px; } .transfer-body { grid-template-columns: minmax(0, 1fr) 270px; gap: 6px; padding: 6px; } .transfer-settings { padding: 11px; } .transfer-route small { display: none; } .transfer-header__hint { display: none; } .transfer-header > button { margin-left: auto; } }

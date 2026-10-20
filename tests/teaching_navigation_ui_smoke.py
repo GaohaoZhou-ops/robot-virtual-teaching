@@ -53,7 +53,7 @@ def run():
         tree = page.get_by_label("示教任务与停车点树", exact=True)
         first_id = tree.get_attribute("data-active-parking-point")
         first_pose = read_robot_pose(canvas)
-        page.get_by_role("button", name="记录当前机械臂姿态", exact=True).click()
+        page.get_by_role("button", name="记录当前姿态", exact=True).click()
         expect(page.get_by_label("虚拟示教", exact=True)).to_have_attribute("data-teaching-point-count", "1")
         original_joints = json.loads(canvas.get_attribute("data-robot-joint-values"))
 

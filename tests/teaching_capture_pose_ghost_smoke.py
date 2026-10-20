@@ -31,7 +31,7 @@ def set_joints(page, right, left):
 
 
 def capture(page, count, allow_drift=False):
-    page.get_by_role("button", name="记录当前机械臂姿态", exact=True).click()
+    page.get_by_role("button", name="记录当前姿态", exact=True).click()
     if allow_drift:
         page.get_by_role("dialog", name="底盘已移动").get_by_role(
             "button", name="仍记录到当前停车点", exact=True
@@ -81,7 +81,7 @@ def apply_preview(page, canvas, parking_pose, joint_values):
     )
     page.wait_for_function("document.querySelector('.three-canvas').dataset.parkingGhostState === 'hidden'")
     assert page.locator('.teaching-capture-tree__pose-item[data-ghost-preview="true"]').count() == 0
-    assert page.get_by_role("button", name="记录当前机械臂姿态", exact=True).is_enabled()
+    assert page.get_by_role("button", name="记录当前姿态", exact=True).is_enabled()
     assert canvas.get_attribute("data-synchronized-focus-type") == "robot"
 
 
@@ -141,7 +141,7 @@ def run():
         page.get_by_role("button", name="新增停车点", exact=True).click()
         empty_stop = tree.get_by_role("button", name="选择当前停车点 停车点 P02", exact=True)
         expect(empty_stop).to_have_attribute("aria-expanded", "true")
-        assert tree.get_by_text("暂无姿态，可记录当前机械臂姿态", exact=True).is_visible()
+        assert tree.get_by_text("暂无姿态，可记录当前姿态", exact=True).is_visible()
         set_joints(page, 8, -5)
         live_pose = read_robot_pose(canvas)
         live_joints = json.loads(canvas.get_attribute("data-robot-joint-values"))

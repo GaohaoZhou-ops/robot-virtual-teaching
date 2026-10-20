@@ -159,7 +159,7 @@ def run():
         parking_option.click()
         create_dialog.get_by_role("button", name="创建任务", exact=True).click()
 
-        page.get_by_role("button", name="记录当前机械臂姿态").click()
+        page.get_by_role("button", name="记录当前姿态").click()
         page.wait_for_function(
             "document.querySelector('[aria-label=\"虚拟示教\"]')?.dataset.cameraCaptureStatus === 'complete'",
             timeout=180_000,
@@ -235,7 +235,7 @@ def run():
 
         # Record the identical pose again. The number of viewing volumes grows,
         # while the binary surface-union mask must retain the same intensity and size.
-        page.get_by_role("button", name="记录当前机械臂姿态").click()
+        page.get_by_role("button", name="记录当前姿态").click()
         page.wait_for_function(
             """
             () => {
@@ -293,11 +293,14 @@ def run():
         )
         assert readout.get_attribute("data-projection-rendering") == "enabled"
         assert readout.locator("em").count() == 0
-        opacity_slider = readout.get_by_role(
+        assert readout.get_by_role("slider").count() == 0
+        page.get_by_role("button", name="显示设置", exact=True).click()
+        display_settings = page.get_by_role("dialog", name="3D 显示设置", exact=True)
+        opacity_slider = display_settings.get_by_role(
             "slider", name="表面贴图渲染透明度", exact=True
         )
         assert opacity_slider.input_value() == "5"
-        assert readout.locator("output").inner_text() == "5%"
+        assert display_settings.locator("output").inner_text() == "5%"
         assert readout.get_attribute("data-surface-tint-opacity") == "0.05"
         assert overlap_metrics["render_enabled"] == "true"
         assert overlap_metrics["render_state"] == "enabled"
@@ -306,7 +309,9 @@ def run():
             == "true"
         )
 
+        display_settings.get_by_role("button", name="关闭显示设置").click()
         low_opacity_frame = canvas.screenshot()
+        page.get_by_role("button", name="显示设置", exact=True).click()
         opacity_slider.focus()
         opacity_slider.press("Home")
         for _ in range(35):
@@ -315,8 +320,10 @@ def run():
             "document.querySelector('.three-canvas')?.dataset.teachingSurfaceTintOpacity === '0.35'"
         )
         assert opacity_slider.input_value() == "35"
-        assert readout.locator("output").inner_text() == "35%"
+        assert display_settings.locator("output").inner_text() == "35%"
         assert readout.get_attribute("data-surface-tint-opacity") == "0.35"
+        page.screenshot(path="/tmp/atlas-surface-opacity-display-settings.png")
+        display_settings.get_by_role("button", name="关闭显示设置").click()
         high_opacity_frame = canvas.screenshot()
         surface_opacity_difference = image_pixel_difference(
             low_opacity_frame,
@@ -330,12 +337,15 @@ def run():
         )
         assert zivid_opacity_difference["maximum"] <= 1
         assert zivid_opacity_difference["mean"] <= 0.5
+        page.get_by_role("button", name="显示设置", exact=True).click()
+        assert opacity_slider.input_value() == "35"
         opacity_slider.press("Home")
         for _ in range(5):
             opacity_slider.press("ArrowRight")
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.teachingSurfaceTintOpacity === '0.05'"
         )
+        display_settings.get_by_role("button", name="关闭显示设置").click()
 
         visible_projection_frame = canvas.screenshot()
         disable_projection = readout.get_by_role(

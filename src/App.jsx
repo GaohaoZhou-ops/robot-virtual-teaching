@@ -85,7 +85,8 @@ import {
   readFileWithProgress,
   teachingCoordinateFrame,
 } from './lib/io.js';
-import { buildTeachingDataExport } from './lib/teachingData.js';
+import { buildTeachingDataExport, buildTeachingParkingPointCopy } from './lib/teachingData.js';
+import { writeClipboardText } from './lib/clipboard.js';
 import { normalizeIgnoredCollisionJoints } from './lib/robotCollisionSettings.js';
 import {
   normalizeRobotDescriptor,
@@ -104,7 +105,7 @@ import {
   prepareMapGeometryTopology,
 } from './lib/mapGeometry.js';
 import { createSpaceMouseInputState } from './lib/spaceMouse.js';
-import { createRobotJointPreset, presetJointDefinitions, presetMatchesRobot } from './lib/robotJointPresets.js';
+import { buildRobotPresetFile, createRobotJointPreset, presetJointDefinitions, presetMatchesRobot } from './lib/robotJointPresets.js';
 import { insertTeachingPreset } from './lib/teachingPresetInsertion.js';
 import { moveTeachingPose } from './lib/teachingPoseOrder.js';
 import {
@@ -3315,8 +3316,8 @@ export default function App() {
     setTeachingCaptureState({
       status: 'complete',
       message: cameraCapture
-        ? '左右 RGB 与点云已随机械臂姿态保存'
-        : '机械臂姿态与全身关节已保存',
+        ? '左右 RGB 与点云已随当前姿态保存'
+        : '当前姿态与全身关节已保存',
       pointId: point.id,
       parkingPointId: parkingPoint.id,
       frameCount: cameraCapture ? Object.keys(cameraCapture.frames || {}).length : 0,
@@ -3833,8 +3834,13 @@ export default function App() {
       if (current.mapData !== workspaceMap || current.teachingSpaceMode !== 'map') {
         throw new Error('导入期间工程已切换，请在目标工程重新导入');
       }
-      const merged = mergeAbxImport(current, imported);
-      const tasks = normalizeTeachingTasks(merged.tasks);
+      // Imported tasks have fresh IDs and are appended as separate tasks.
+      // Normalize only the additions, leaving existing task data untouched.
+      const merged = mergeAbxImport(current, {
+        ...imported,
+        tasks: normalizeTeachingTasks(imported.tasks || []),
+      });
+      const tasks = merged.tasks;
       const nextTaskId = imported.tasks?.[0]?.id || current.activeTeachingTaskId;
       const nextParkingId = imported.tasks?.length
         ? imported.tasks[0].parkingPoints[0]?.id || null : current.activeTeachingParkingPointId;
@@ -3854,7 +3860,7 @@ export default function App() {
       await persistWorkspaceNow();
       notify(kind === 'route'
         ? `机器人路径已导入 · ${imported.waypoints.length} 节点 / ${imported.edges.length} 有向边`
-        : `机器人示教已导入 · ${imported.tasks.length} 任务。${imported.warnings.join(' ')}`, 'success');
+        : `机器人示教已导入 · 新增 ${imported.tasks.length} 任务，原有任务已保留。${imported.warnings.join(' ')}`, 'success');
     } catch (error) {
       notify(`机器人${kind === 'route' ? '路径' : '示教'}导入失败：${error.message}`, 'error');
     } finally {
@@ -3882,6 +3888,24 @@ export default function App() {
       notify(`示教数据已导出 · ${data.statistics.taskCount} 任务 / ${data.statistics.parkingPointCount} 停车点 / ${data.statistics.poseCount} 机器人姿态 / ${data.statistics.devicePoseCount} 设备姿态`, 'success');
     } catch (error) {
       notify(`示教数据导出失败：${error.message}`, 'error');
+    }
+  };
+
+  const copyTeachingNode = async (taskId, parkingPointId, poseId) => {
+    const label = poseId ? '姿态' : '停车点';
+    try {
+      const task = latestWorkspaceRef.current.teachingTasks.find((item) => item.id === taskId);
+      const parkingPoint = task?.parkingPoints.find((item) => item.id === parkingPointId);
+      if (!parkingPoint) throw new Error('未找到选中的停车点');
+      const point = poseId ? parkingPoint.poses.find((item) => item.id === poseId) : null;
+      if (poseId && !point) throw new Error('未找到选中的姿态');
+      const data = point
+        ? buildRobotPresetFile(point.fullBodyJoints)
+        : buildTeachingParkingPointCopy(task, parkingPoint);
+      await writeClipboardText(`${JSON.stringify(data, null, 2)}\n`);
+      notify(`${label}「${(point || parkingPoint).name}」已复制到剪贴板`, 'success');
+    } catch (error) {
+      notify(`复制${label}失败：${error.message}`, 'error');
     }
   };
 
@@ -5505,16 +5529,6 @@ export default function App() {
                 </section>
                 <section className="workbench-menu-section">
                   <p>数据与转换</p>
-                  {!isIndependentTeachingSpace && <>
-                    <button type="button" className="action-button" disabled={!mapData || abxImportBusy || loadState.loading || teachingCaptureState.status === 'capturing'}
-                      onClick={() => abxTeachingInputRef.current?.click()}><FolderOpen size={15} /><span>导入机器人示教</span></button>
-                    <button type="button" className="action-button" disabled={!teachingTasks.length || abxImportBusy}
-                      onClick={openAbxTeachingExport}><Bot size={15} /><span>导出机器人示教</span></button>
-                    <button type="button" className="action-button" disabled={!mapData || abxImportBusy || loadState.loading}
-                      onClick={() => abxRouteInputRef.current?.click()}><FolderOpen size={15} /><span>导入机器人路径</span></button>
-                    <button type="button" className="action-button" disabled={(!waypoints.length && !abxRoutes.length) || abxImportBusy}
-                      onClick={exportAbxRoutes}><Route size={15} /><span>导出机器人路径</span></button>
-                  </>}
                   <button
                     type="button"
                     className="action-button teaching-data-page-link"
@@ -5915,8 +5929,10 @@ export default function App() {
           onCollapsedChange={setInspectorCollapsed}
           onRunConnectivity={runConnectivity}
           onImportRoute={() => abxRouteInputRef.current?.click()}
+          onExportRoute={exportAbxRoutes}
           routeImportDisabled={!mapData || abxImportBusy || loadState.loading}
           routeImportBusy={abxImportBusy}
+          routeExportDisabled={(!waypoints.length && !abxRoutes.length) || abxImportBusy}
           onSyncMapRoute={syncMapRoute}
           mapRouteSync={mapRouteSync}
           mapRouteSyncBusy={mapRouteSyncBusy}
@@ -6110,6 +6126,7 @@ export default function App() {
           onMergeParkingPoints={mergeTeachingParkingPoints}
           onExportProject={exportProject}
           onExportTeachingData={exportTeachingData}
+          onCopyTeachingNode={copyTeachingNode}
           onImportTeachingData={teachingSpaceMode === 'map' ? () => abxTeachingInputRef.current?.click() : null}
           teachingImportDisabled={!mapData || abxImportBusy || loadState.loading || teachingCaptureState.status === 'capturing'}
           canExportTeachingData={Boolean(mapData || selectedRobot || teachingTasks.length || jointPoses.length || waypoints.length)}

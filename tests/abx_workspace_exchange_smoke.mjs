@@ -111,7 +111,7 @@ try {
   assert.throws(() => validateAbxRoute({ ...route, edges: [{ id: 0, start: 0, end: 0xffffffff }] }), /唯一/);
   assert.throws(() => validateAbxRoute({ ...route, edges: [{ id: 2, start: 0, end: 123 }] }), /不存在/);
   assert.throws(() => validateAbxRoute({ ...route, nodes: [{ ...route.nodes[0], yaw_rad: Math.PI + 0.1 }] }), /Yaw/);
-  assert.throws(() => normalizeProject(route), /导入机器人路径/);
+  assert.throws(() => normalizeProject(route), /路径\/导航 → 导入路径/);
   assert.throws(() => mergeAbxImport({ abxRoutes: [route] }, { abxRoutes: [{ ...route, name: 'conflict' }] }), /冲突/);
   await mkdir(path.join(folder, 'route-exports'));
   await writeFile(path.join(folder, 'route-exports/nullable.route.json'), JSON.stringify(route));

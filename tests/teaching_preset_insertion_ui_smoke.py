@@ -47,7 +47,7 @@ def seed(page, mode='map', empty=False):
     }""", dict(mode=mode, empty=empty))
     page.goto(BASE_URL + '/teaching-data', wait_until='networkidle')
     page.locator('.loading-curtain').wait_for(state='hidden')
-    expect(page.get_by_role('button', name='导出示教数据', exact=True)).to_be_visible()
+    expect(page.locator('.teaching-tree-toolbar')).to_be_visible()
 
 
 def saved_project(page, mode='map'):
@@ -156,6 +156,7 @@ def run():
             page.reload(wait_until='networkidle')
             page.locator('.loading-curtain').wait_for(state='hidden')
             assert parking_branch.locator('.teaching-point-row .teaching-tree-label > span').all_text_contents() == expected_names
+            task.click()
             page.get_by_role('button', name='导出示教数据', exact=True).click()
             export = page.get_by_role('dialog', name='导出机器人示教', exact=True)
             with page.expect_download() as pending:

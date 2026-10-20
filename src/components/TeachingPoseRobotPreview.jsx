@@ -133,10 +133,22 @@ export default function TeachingPoseRobotPreview({
     const size = bounds.getSize(new THREE.Vector3());
     const radius = Math.max(size.length() * 0.5, 0.35);
     const maximumDimension = Math.max(size.x, size.y, size.z, 0.5);
-    const direction = new THREE.Vector3(1.35, -1.8, 1.05).normalize();
+    // ROS robot-local +X is forward; follow the recorded base orientation so
+    // every pose starts with the robot facing the viewer.
+    const direction = new THREE.Vector3(1, 0, 0)
+      .applyQuaternion(loadedRobot.getWorldQuaternion(new THREE.Quaternion()));
+
+    // Consume pending pointer input and damping before setting the new view,
+    // so a recent drag or wheel gesture cannot move it away from the front.
+    const damping = context.controls.dynamicDampingFactor;
+    context.controls.dynamicDampingFactor = 1;
+    context.controls.update();
+    context.controls.update();
+    context.controls.dynamicDampingFactor = damping;
 
     context.camera.near = Math.max(radius / 120, 0.002);
     context.camera.far = Math.max(radius * 90, 120);
+    context.camera.up.set(0, 0, 1);
     context.camera.position.copy(center).addScaledVector(direction, radius * 2.65);
     context.controls.target.copy(center);
     context.controls.minDistance = Math.max(radius * 0.22, 0.05);
@@ -178,7 +190,7 @@ export default function TeachingPoseRobotPreview({
     scene.fog = new THREE.FogExp2(0x050d11, 0.032);
     const camera = new THREE.PerspectiveCamera(38, 1, 0.002, 180);
     camera.up.set(0, 0, 1);
-    camera.position.set(2.2, -3.2, 2.1);
+    camera.position.set(3.2, 0, 0);
 
     const controls = new TrackballControls(camera, canvas);
     controls.rotateSpeed = 3.1;
@@ -420,7 +432,7 @@ export default function TeachingPoseRobotPreview({
         <button
           type="button"
           aria-label="重置机器人姿态预览视角"
-          title="重新将所选机器人姿态完整置于画面中央"
+          title="从机器人正面观察，并将所选姿态完整置于画面中央"
           disabled={!ready || !hasPose}
           onClick={fitRobot}
         >

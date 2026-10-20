@@ -98,6 +98,7 @@ def run():
                 tree = data_page.locator('.teaching-archive-tree')
                 assert tree.get_by_role('button', name='导出工程', exact=True).count() == 0
                 assert data_page.get_by_role('button', name='导出工程', exact=True).is_visible()
+                tree.locator('.teaching-tree-node--task .teaching-tree-label').first.click()
                 if mode == 'map':
                     tree.get_by_role('button', name='导出示教数据', exact=True).click()
                     dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)

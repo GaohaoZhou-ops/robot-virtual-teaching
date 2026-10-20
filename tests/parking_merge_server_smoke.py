@@ -79,7 +79,7 @@ def run():
         create_dialog.get_by_role("textbox", name="新示教任务名称").fill("Server 合并验证")
         create_dialog.get_by_role("button", name="添加当前位置为停车点").click()
         create_dialog.get_by_role("button", name="创建任务", exact=True).click()
-        page.get_by_role("button", name="记录当前机械臂姿态").click()
+        page.get_by_role("button", name="记录当前姿态").click()
         page.wait_for_function(
             "document.querySelector('[aria-label=\"虚拟示教\"]')?.dataset.teachingPointCount === '1'"
         )
@@ -87,7 +87,7 @@ def run():
         viewer_tool(page, name="定位机器人模型").click()
         page.keyboard.press("w")
         page.keyboard.press("w")
-        page.get_by_role("button", name="记录当前机械臂姿态").click()
+        page.get_by_role("button", name="记录当前姿态").click()
         drift_dialog = page.get_by_role("dialog", name="底盘已移动")
         drift_dialog.wait_for()
         drift_dialog.get_by_role("button", name="新建停车点并记录当前姿态").click()

@@ -72,7 +72,7 @@ def run():
                 else:
                     page.get_by_role('button', name='新增停车点', exact=True).click()
                 expect(page.get_by_role('button', name=f'选择当前停车点 N{node_id} · 停车点1', exact=True)).to_be_visible()
-                page.get_by_role('button', name='记录当前机械臂姿态', exact=True).click()
+                page.get_by_role('button', name='记录当前姿态', exact=True).click()
             page.wait_for_function("""async () => {
               const store = await import('/src/lib/sessionStore.js');
               const config = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'map');
@@ -81,6 +81,7 @@ def run():
             topbar_action(page, name='打开示教数据管理页', exact=True).click()
             page.locator('.loading-curtain').wait_for(state='hidden')
             expect(page.locator('[data-page="teaching-data"]')).to_have_attribute('data-teaching-task-count', '1')
+            page.get_by_role('button', name='选择示教任务 路网编号回归', exact=True).click()
             page.get_by_role('button', name='导出示教数据', exact=True).click()
             dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)
             button = dialog.get_by_role('button', name='下载机器人导入包', exact=True)

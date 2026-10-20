@@ -14,7 +14,7 @@ def load_matrix(page, dialog, file):
     with page.expect_file_chooser() as chooser:
         dialog.get_by_role("button", name="加载转换矩阵", exact=True).click()
     chooser.value.set_files(file)
-    expect(dialog.locator(".transfer-form")).to_have_attribute("aria-busy", "false")
+    expect(page.locator(".transfer-form")).to_have_attribute("aria-busy", "false")
 
 
 def pose_values(dialog, prefix="放置"):
@@ -76,9 +76,16 @@ def run():
             expect(dialog.locator(".transfer-matrix-file")).to_have_count(0)
             assert snapshot(page, "map") == target
 
-            # Same-file imports reset edits and clear errors; all manual controls remain usable.
+            # Repeated imports preserve edits until confirmed. Identity lets the
+            # same file be deliberately reapplied without carrying the old relation.
             dialog.get_by_label("放置 X", exact=True).fill("12")
             load_matrix(page, dialog, str(MATRIX_PATH))
+            confirmation = page.get_by_role("alertdialog", name="转换矩阵已加载过", exact=True)
+            confirmation.get_by_role("button", name="取消", exact=True).click()
+            assert pose_values(dialog)[0] == 12
+            dialog.get_by_role("button", name="单位阵", exact=True).click()
+            load_matrix(page, dialog, str(MATRIX_PATH))
+            confirmation.get_by_role("button", name="叠加转换", exact=True).click()
             expect(dialog.get_by_role("alert")).to_have_count(0)
             assert pose_values(dialog) == values
             dialog.get_by_label("放置定位基准").select_option("robot")
@@ -165,6 +172,12 @@ def run():
             load_matrix(page, dialog, str(MATRIX_PATH))
             assert [field.input_value() for field in dialog.locator(".transfer-range-grid input").all()] == crop
             assert all(abs(pose_values(dialog, "局部原点")[index] - ROWS[index][3]) < 1e-6 for index in range(3))
+            dialog.get_by_label("局部原点 X", exact=True).fill("12")
+            load_matrix(page, dialog, str(MATRIX_PATH))
+            page.get_by_role("alertdialog", name="转换矩阵已加载过", exact=True).get_by_role(
+                "button", name="重载转换关系", exact=True).click()
+            assert all(abs(pose_values(dialog, "局部原点")[index] - ROWS[index][3]) < 1e-6 for index in range(3))
+            assert [field.input_value() for field in dialog.locator(".transfer-range-grid input").all()] == crop
             dialog.get_by_role("button", name="提取并进入独立示教", exact=True).click()
             ready(page, "independent")
             extracted = snapshot(page, "independent")
@@ -179,6 +192,8 @@ def run():
             dialog.get_by_role("button", name="单位阵", exact=True).click()
             assert pose_values(dialog) == [0] * 6
             load_matrix(page, dialog, str(MATRIX_PATH))
+            page.get_by_role("alertdialog", name="转换矩阵已加载过", exact=True).get_by_role(
+                "button", name="叠加转换", exact=True).click()
             dialog.get_by_label("放置 X", exact=True).fill("25")
             dialog.get_by_role("button", name="回写原地图", exact=True).click()
             assert pose_values(dialog) == saved_relation

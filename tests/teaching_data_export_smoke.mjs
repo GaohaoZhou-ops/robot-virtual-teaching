@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { buildTeachingDataExport, TEACHING_DATA_FORMAT } from '../src/lib/teachingData.js';
+import { buildTeachingDataExport, buildTeachingParkingPointCopy, TEACHING_DATA_FORMAT } from '../src/lib/teachingData.js';
 import { normalizeProject } from '../src/lib/io.js';
 import { readProjectFile } from '../src/lib/projectArchive.js';
 import { teachingTransferFixture } from './teaching_transfer_helpers.mjs';
@@ -60,6 +60,26 @@ for (const mode of ['map', 'independent']) {
   result.tasks[0].parkingPoints[0].mapPose.position.x = 999;
   assert.deepEqual(project, before, 'exchange data must not alias live pose objects');
 
+  const task = project.virtualTeaching.tasks[0];
+  const parkingCopy = buildTeachingParkingPointCopy(task, task.parkingPoints[1]);
+  assert.equal(parkingCopy.format, 'atlas-route-studio-parking-point');
+  assert.equal(parkingCopy.version, 1);
+  assert.equal(parkingCopy.coordinateSystem.frameId, mode === 'map' ? 'map' : 'virtual_origin');
+  assert.deepEqual(parkingCopy.parkingPoint, result.tasks[0].parkingPoints[1]);
+  assert.equal(parkingCopy.parkingPoint.sequence, 2);
+  assert.equal(parkingCopy.task.id, task.id);
+  assert.ok(!JSON.stringify(parkingCopy).includes('cameraCapture'));
+  parkingCopy.parkingPoint.mapPose.position.x = 12345;
+  parkingCopy.parkingPoint.poses[0].fullBodyJoints.values.shoulder = 999;
+  assert.deepEqual(project, before, 'parking clipboard payload must not alias saved teaching data');
+  assert.throws(() => buildTeachingParkingPointCopy(task, { id: 'missing' }), /未找到/);
+  const nativeTask = structuredClone(task);
+  nativeTask.parkingPoints[0].abx = { located: false };
+  nativeTask.parkingPoints[0].poses[0].abx = { located: false };
+  const nativeCopy = buildTeachingParkingPointCopy(nativeTask, nativeTask.parkingPoints[0]);
+  assert.equal(nativeCopy.parkingPoint.located, false);
+  assert.equal(nativeCopy.parkingPoint.poses[0].located, false);
+
   await assert.rejects(readProjectFile(new File([serialized], 'teaching.json')), /轻量示教数据/);
   assert.throws(() => normalizeProject(JSON.parse(serialized)), /轻量示教数据/);
   assert.equal((await readProjectFile(new File([JSON.stringify(project)], 'legacy.json'))).source, 'json');
@@ -101,3 +121,4 @@ console.log('robot_navigation_units_and_identity=ok');
 console.log('media_exclusion_and_snapshot_isolation=ok');
 console.log('ipad_and_vision_pose_exports=ok');
 console.log('project_loader_rejects_teaching_data=ok');
+console.log('parking_clipboard_frames_media_exclusion_and_isolation=ok');

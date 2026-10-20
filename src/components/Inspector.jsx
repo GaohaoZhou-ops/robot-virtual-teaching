@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronRight,
   CircleGauge,
+  Download,
   FolderOpen,
   MoveHorizontal,
   Navigation,
@@ -144,8 +145,10 @@ export default function Inspector({
   teachingCaptureState,
   onRunConnectivity,
   onImportRoute,
+  onExportRoute,
   routeImportDisabled = false,
   routeImportBusy = false,
+  routeExportDisabled = false,
   onSyncMapRoute,
   mapRouteSync,
   mapRouteSyncBusy = false,
@@ -183,6 +186,9 @@ export default function Inspector({
   isWorkbenchActive = true,
 }) {
   const [activePage, setActivePage] = useState('teaching');
+  const [routeIndexCollapsed, setRouteIndexCollapsed] = useState(false);
+  const [waypointIndexCollapsed, setWaypointIndexCollapsed] = useState(false);
+  const navigationListsId = useId();
   const [activeTeachingCameraSide, setActiveTeachingCameraSide] = useState('left');
   const [expandedCameraSide, setExpandedCameraSide] = useState(null);
   const [jointWindowOpen, setJointWindowOpen] = useState(false);
@@ -361,21 +367,6 @@ export default function Inspector({
           <h2>图谱控制台</h2>
         </div>
         <div className="inspector-heading__tools">
-          {!isIndependentTeachingSpace && <button
-            type="button"
-            className="inspector-route-import"
-            aria-label="导入路径"
-            title="导入机器人路网 JSON，保留已有路径和示教任务"
-            disabled={routeImportDisabled || routeImportBusy || !onImportRoute}
-            onClick={() => {
-              setActivePage('navigation');
-              onClearSelection();
-              onImportRoute();
-            }}
-          >
-            <FolderOpen size={12} />
-            <span>{routeImportBusy ? '导入中…' : '导入路径'}</span>
-          </button>}
           <button
             type="button"
             className={`joint-float-toggle ${jointWindowOpen ? 'is-active' : ''}`}
@@ -425,46 +416,62 @@ export default function Inspector({
             id="inspector-page-navigation"
             aria-labelledby="inspector-tab-navigation"
           >
-            {isIndependentTeachingSpace && (
-              <section className="map-route-sync" aria-label="地图路径同步" aria-busy={mapRouteSyncBusy}>
-                <div className="map-route-sync__heading">
-                  <strong><Route size={14} />地图路径同步</strong>
-                  <button
-                    type="button"
-                    className="inspector-route-import"
-                    disabled={!mapRouteSync?.available || mapRouteSyncDisabled || mapRouteSyncBusy || !onSyncMapRoute}
-                    onClick={onSyncMapRoute}
-                    title="按已建立的转换关系，将地图绝对路径转换到独立模型坐标系"
-                  >
-                    <RefreshCw size={12} />
-                    {mapRouteSyncBusy ? '同步中…' : hasTemporaryMapRoute ? '重新同步地图路径' : '同步地图路径'}
-                  </button>
-                </div>
-                <p role="status">
-                  {mapRouteSync?.available
-                    ? hasTemporaryMapRoute
-                      ? '已转换到 VIRTUAL_ORIGIN；重新同步会替换临时副本。'
-                      : `地图中有 ${mapRouteSync.pointCount} 个导航点，可转换到当前独立模型。`
-                    : mapRouteSync?.reason}
-                </p>
-                <small>同步后，切回或刷新会自动恢复；临时路径不写回地图。</small>
-              </section>
-            )}
-            <section className={`connectivity-card ${validation.status}`}>
-              <div className="connectivity-card__icon"><ValidationIcon size={18} /></div>
-              <div className="connectivity-card__copy">
-                <strong>{validationCopy.title}</strong>
-                {validationCopy.detail && <span>{validationCopy.detail}</span>}
+            {!isIndependentTeachingSpace && (
+              <div className="inspector-route-actions" role="group" aria-label="路径导入导出">
+                <button
+                  type="button"
+                  className="inspector-route-import"
+                  aria-label="导入路径"
+                  title="导入机器人路网 JSON，保留已有路径和示教任务"
+                  disabled={routeImportDisabled || routeImportBusy || !onImportRoute}
+                  onClick={() => {
+                    onClearSelection();
+                    onImportRoute();
+                  }}
+                >
+                  <FolderOpen size={13} />
+                  <span>{routeImportBusy ? '导入中…' : '导入路径'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="inspector-route-import"
+                  aria-label="导出路径"
+                  title="导出机器人路网 JSON，保留节点编号和有向连接"
+                  disabled={routeExportDisabled || routeImportBusy || !onExportRoute}
+                  onClick={onExportRoute}
+                >
+                  <Download size={13} />
+                  <span>导出路径</span>
+                </button>
               </div>
+            )}
+            <div className="inspector-navigation-actions" role="group" aria-label="路径操作">
+              {isIndependentTeachingSpace && (
+                <button
+                  type="button"
+                  className={`inspector-route-import map-route-sync-button ${hasTemporaryMapRoute ? 'is-synced' : ''}`}
+                  aria-busy={mapRouteSyncBusy}
+                  disabled={!mapRouteSync?.available || mapRouteSyncDisabled || mapRouteSyncBusy || !onSyncMapRoute}
+                  onClick={onSyncMapRoute}
+                  title={mapRouteSync?.available
+                    ? '按已建立的转换关系同步到独立模型坐标系；重新同步会替换临时副本，不修改地图路径'
+                    : mapRouteSync?.reason}
+                >
+                  <RefreshCw size={13} />
+                  <span>{mapRouteSyncBusy ? '同步中…' : hasTemporaryMapRoute ? '重新同步' : '同步路径'}</span>
+                </button>
+              )}
               <button
                 type="button"
+                className={`inspector-route-import path-test-button is-${validation.status}`}
                 onClick={onRunConnectivity}
                 disabled={!edges.length}
-                title="运行有向图强连通检测"
+                title={['运行有向图强连通检测', validationCopy.title, validationCopy.detail].filter(Boolean).join(' · ')}
               >
-                检测
+                <ValidationIcon size={13} />
+                <span>路径测试</span>
               </button>
-            </section>
+            </div>
 
             <section className="waypoint-search" aria-label="导航点搜索">
               <div className="waypoint-search__copy">
@@ -738,34 +745,61 @@ export default function Inspector({
         {!selectedWaypoint && !selectedEdge && (
           <>
             <section className="route-index">
-              <div className="section-title">
+              <div className="section-title navigation-index-heading">
                 <Route size={14} />
                 <span>有向路径</span>
                 <small>{edges.length}</small>
+                <button
+                  type="button"
+                  className="navigation-index-toggle"
+                  aria-label={routeIndexCollapsed ? '展开有向路径' : '折叠有向路径'}
+                  title={routeIndexCollapsed ? '展开有向路径' : '折叠有向路径'}
+                  aria-expanded={!routeIndexCollapsed}
+                  aria-controls={`${navigationListsId}-routes`}
+                  onClick={() => setRouteIndexCollapsed((value) => !value)}
+                >
+                  <span className="navigation-index-toggle__triangle" aria-hidden="true" />
+                </button>
               </div>
-              {!edges.length && (
-                <div className="empty-list">
-                  <CircleGauge size={24} strokeWidth={1.3} />
-                  <span>切换到“连接路径”，依次选择起点与终点</span>
-                </div>
-              )}
-              {edges.map((edge, index) => {
-                const meta = statusMeta[edge.status] || statusMeta.unchecked;
-                return (
-                  <button type="button" className="route-index__item" key={edge.id} onClick={() => onSelectEdge(edge.id)}>
-                    <span className={`status-dot ${meta.className}`} />
-                    <span className="route-index__number">E{String(index + 1).padStart(2, '0')}</span>
-                    <strong>{pointById.get(edge.from)?.name || '?'} <ArrowRight size={12} /> {pointById.get(edge.to)?.name || '?'}</strong>
-                    <small>{edge.limits.maxSpeed.toFixed(1)} m/s</small>
-                    <ChevronRight size={14} />
-                  </button>
-                );
-              })}
+              <div id={`${navigationListsId}-routes`} className="navigation-index-content" hidden={routeIndexCollapsed}>
+                {!edges.length && (
+                  <div className="empty-list">
+                    <CircleGauge size={24} strokeWidth={1.3} />
+                    <span>切换到“连接路径”，依次选择起点与终点</span>
+                  </div>
+                )}
+                {edges.map((edge, index) => {
+                  const meta = statusMeta[edge.status] || statusMeta.unchecked;
+                  return (
+                    <button type="button" className="route-index__item" key={edge.id} onClick={() => onSelectEdge(edge.id)}>
+                      <span className={`status-dot ${meta.className}`} />
+                      <span className="route-index__number">E{String(index + 1).padStart(2, '0')}</span>
+                      <strong>{pointById.get(edge.from)?.name || '?'} <ArrowRight size={12} /> {pointById.get(edge.to)?.name || '?'}</strong>
+                      <small>{edge.limits.maxSpeed.toFixed(1)} m/s</small>
+                      <ChevronRight size={14} />
+                    </button>
+                  );
+                })}
+              </div>
             </section>
 
             <section className="waypoint-index">
-              <div className="section-title"><span>导航点</span><small>{waypoints.length}</small></div>
-              <div className="waypoint-chips">
+              <div className="section-title navigation-index-heading">
+                <span>导航点</span>
+                <small>{waypoints.length}</small>
+                <button
+                  type="button"
+                  className="navigation-index-toggle"
+                  aria-label={waypointIndexCollapsed ? '展开导航点' : '折叠导航点'}
+                  title={waypointIndexCollapsed ? '展开导航点' : '折叠导航点'}
+                  aria-expanded={!waypointIndexCollapsed}
+                  aria-controls={`${navigationListsId}-waypoints`}
+                  onClick={() => setWaypointIndexCollapsed((value) => !value)}
+                >
+                  <span className="navigation-index-toggle__triangle" aria-hidden="true" />
+                </button>
+              </div>
+              <div id={`${navigationListsId}-waypoints`} className="waypoint-chips navigation-index-content" hidden={waypointIndexCollapsed}>
                 {waypoints.map((point, index) => (
                   <button
                     type="button"

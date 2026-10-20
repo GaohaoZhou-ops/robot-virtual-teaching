@@ -89,7 +89,7 @@ def run():
         assert page.locator(".teaching-context").count() == 0
         assert page.get_by_role("tab", name="相机反算", exact=True).count() == 0
         assert page.get_by_label("自碰撞保护", exact=True).count() == 0
-        assert page.get_by_role("button", name="记录当前机械臂姿态").is_disabled()
+        assert page.get_by_role("button", name="记录当前姿态").is_disabled()
 
         page.get_by_role("button", name="新增停车点", exact=True).click()
         page.wait_for_function(
@@ -116,14 +116,14 @@ def run():
         assert first_pose["y"] > 0.04
         assert first_pose["yaw"] > 4
 
-        page.get_by_role("button", name="记录当前机械臂姿态").click()
+        page.get_by_role("button", name="记录当前姿态").click()
         page.wait_for_function(
             "document.querySelector('[aria-label=\"虚拟示教\"]')?.dataset.teachingPointCount === '1'"
         )
         assert page.get_by_role("button", name="新建示教任务", exact=True).is_visible()
         assert page.get_by_label("示教任务与停车点树", exact=True).is_visible()
         assert page.get_by_role("button", name="新增停车点", exact=True).is_visible()
-        assert page.get_by_role("button", name="记录当前机械臂姿态", exact=True).is_visible()
+        assert page.get_by_role("button", name="记录当前姿态", exact=True).is_visible()
         assert page.get_by_text("当前已归档姿态", exact=True).count() == 0
         assert page.locator(".teaching-data-handoff").count() == 0
         assert topbar_action(page, name="打开示教数据管理页").is_visible()
@@ -192,7 +192,7 @@ def run():
         page.locator('[data-app-page="teaching-data"]').wait_for(state="detached")
         teaching_tab.click()
         assert page.get_by_label("全关节控制浮动窗口", exact=True).count() == 0
-        page.get_by_role("button", name="记录当前机械臂姿态").click()
+        page.get_by_role("button", name="记录当前姿态").click()
         page.wait_for_function(
             "document.querySelector('[aria-label=\"虚拟示教\"]')?.dataset.teachingPointCount === '2'"
         )
@@ -201,7 +201,7 @@ def run():
         page.wait_for_timeout(160)
         second_pose = read_pose(canvas)
         assert abs(second_pose["x"] - first_pose["x"]) > 0.04
-        record_pose = page.get_by_role("button", name="记录当前机械臂姿态")
+        record_pose = page.get_by_role("button", name="记录当前姿态")
         record_pose.click()
         drift_dialog = page.get_by_role("dialog", name="底盘已移动")
         drift_dialog.wait_for()

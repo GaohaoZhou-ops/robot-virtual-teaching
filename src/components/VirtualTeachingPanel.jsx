@@ -484,6 +484,41 @@ export default function VirtualTeachingPanel({
         </button>
       </div>}
 
+      {!isDataView && activeTask && !activeTask.mobileCapture && <>
+      <button
+        type="button"
+        className="teaching-capture-button"
+        onClick={requestTeachingCapture}
+        disabled={!canCapture || captureInProgress}
+        aria-busy={captureInProgress}
+        aria-label="记录当前姿态"
+        title={canCapture
+          ? `保存到 ${activeParkingPoint.name}：${coordinateFrameLabel} 位姿、双臂/头部/躯干等全身关节与左右 Zivid RGB/XYZ 快照`
+          : activeParkingPoint ? `当前${environmentLabel}、坐标系或机器人与任务不匹配` : '请先新增或选择停车点'}
+      >
+        <span><Save size={15} /></span>
+        <div>
+          <strong>{captureInProgress ? '正在冻结双目视觉…' : '记录当前姿态'}</strong>
+          <small>
+            {captureInProgress
+              ? 'CAM-L + CAM-R · RGB + XYZ CLOUD'
+              : `${coordinateFrameLabel} 6DOF + ${currentJointCount} JOINTS + DUAL VISION`}
+          </small>
+        </div>
+        <kbd>A{String(activePoses.length + 1).padStart(2, '0')}</kbd>
+      </button>
+
+      {captureState?.message && (
+        <div
+          className={`teaching-capture-state is-${captureState.status || 'idle'}`}
+          role={captureState.status === 'error' ? 'alert' : 'status'}
+        >
+          {captureState.status === 'capturing' ? <Camera size={10} /> : <Database size={10} />}
+          <span>{captureState.message}</span>
+        </div>
+      )}
+      </>}
+
       {!isDataView && (
         <section
           className="teaching-capture-tree-card"
@@ -623,7 +658,7 @@ export default function VirtualTeachingPanel({
                                       </button>
                                     );
                                   })}
-                                  {!poses.length && <div className="teaching-capture-tree__empty">暂无姿态，可记录当前机械臂姿态</div>}
+                                  {!poses.length && <div className="teaching-capture-tree__empty">暂无姿态，可记录当前姿态</div>}
                                 </div>
                               )}
                             </div>
@@ -806,41 +841,6 @@ export default function VirtualTeachingPanel({
               )}
             </section>
           )}
-
-          {!isDataView && !activeTask.mobileCapture && <>
-          <button
-            type="button"
-            className="teaching-capture-button"
-            onClick={requestTeachingCapture}
-            disabled={!canCapture || captureInProgress}
-            aria-busy={captureInProgress}
-            aria-label="记录当前机械臂姿态"
-            title={canCapture
-              ? `保存到 ${activeParkingPoint.name}：${coordinateFrameLabel} 位姿、全部关节与左右 Zivid RGB/XYZ 快照`
-              : activeParkingPoint ? `当前${environmentLabel}、坐标系或机器人与任务不匹配` : '请先新增或选择停车点'}
-          >
-            <span><Save size={15} /></span>
-            <div>
-              <strong>{captureInProgress ? '正在冻结双目视觉…' : '记录当前机械臂姿态'}</strong>
-              <small>
-                {captureInProgress
-                  ? 'CAM-L + CAM-R · RGB + XYZ CLOUD'
-                  : `${coordinateFrameLabel} 6DOF + ${currentJointCount} JOINTS + DUAL VISION`}
-              </small>
-            </div>
-            <kbd>A{String(activePoses.length + 1).padStart(2, '0')}</kbd>
-          </button>
-
-          {captureState?.message && (
-            <div
-              className={`teaching-capture-state is-${captureState.status || 'idle'}`}
-              role={captureState.status === 'error' ? 'alert' : 'status'}
-            >
-              {captureState.status === 'capturing' ? <Camera size={10} /> : <Database size={10} />}
-              <span>{captureState.message}</span>
-            </div>
-          )}
-          </>}
 
           {isDataView && <>
           <div className="teaching-sequence-heading">
