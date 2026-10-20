@@ -380,6 +380,12 @@ playwright/.auth/
 /atlas-file-picker-*/
 /atlas-portable-test-*/
 /atlas-server-result-*/
+# Linked-workspace import/export tests can contain both complete projects.
+# Cover local TMPDIR overrides and packed copies without hiding fixture inputs.
+/atlas-linked-project-*/
+/tests/atlas-linked-project-*/
+/atlas-linked-project-*.[zZ][iI][pP]
+/tests/atlas-linked-project-*.[zZ][iI][pP]
 # Export separation and Save As tests when TMPDIR is inside the repository.
 /atlas-export-separation-*/
 /atlas-save-picker-*/

@@ -12,6 +12,19 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
 const finiteVector = (v, keys) => v && keys.every((key) => Number.isFinite(v[key]));
 const xyz = ['x', 'y', 'z'];
 const validDate = (v) => typeof v === 'string' && Number.isFinite(Date.parse(v));
+const poseNameSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+function validPoseName(name) {
+  if (name == null) return true;
+  if (typeof name !== 'string') return false;
+  if (name.length <= 80) return true;
+  // Swift String.prefix(80) counts Characters, not UTF-16 code units.
+  let count = 0;
+  for (const _ of poseNameSegmenter.segment(name)) {
+    if (++count > 80) return false;
+  }
+  return true;
+}
 
 export function validateModelBytes(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -57,7 +70,7 @@ export function validateIPadResult(result, manifest, sessionId) {
   for (const sample of result.samples) {
     check(typeof sample.id === 'string' && !ids.has(sample.id), '示教点标识重复');
     ids.add(sample.id);
-    check(sample.name == null || (typeof sample.name === 'string' && sample.name.length <= 80), 'Pose 名称过长');
+    check(validPoseName(sample.name), 'Pose 名称过长');
     check(sample.previewAspect == null || (Number.isFinite(sample.previewAspect) && sample.previewAspect > 0 && sample.previewAspect < 10), 'Pose 预览比例无效');
     for (const key of ['previewCameraTransform', 'previewProjection']) {
       check(sample[key] == null || (Array.isArray(sample[key]) && sample[key].length === 16 && sample[key].every(Number.isFinite)), 'Pose 预览矩阵无效');

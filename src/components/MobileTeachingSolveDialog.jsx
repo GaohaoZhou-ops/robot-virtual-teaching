@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Bot, Check, Download, Play, Save, X } from 'lucide-react';
 import { DEFAULT_MOBILE_SOLVE_OPTIONS, MOBILE_SOLVE_VERSION, mobileReportSolveOptions, validateMobileSolveOptions } from '../lib/mobileTeachingSolver.js';
 import { mobileSolutionMapPose } from '../lib/mobileTeachingParking.js';
+import { mobileReferenceFromPreset } from '../lib/mobileTeachingReference.js';
 import { downloadJson } from '../lib/io.js';
 import RobotPicker from './RobotPicker.jsx';
 import './MobileTeachingSolveDialog.css';
@@ -11,7 +12,7 @@ const sideName = (side) => side === 'left' ? '左臂' : '右臂';
 const groups = [['positionTolerance', ['x', 'y', 'z'], '位置容差', 'cm', 100], ['rotationTolerance', ['roll', 'pitch', 'yaw'], '角度容差', '°', 1]];
 const format = (value, scale = 1) => Number.isFinite(value) ? (value * scale).toFixed(2) : '—';
 
-export default function MobileTeachingSolveDialog({ task, robot, robotPose, robotLoadState, ready, readinessMessage, onSelectRobot, robotSelectionDisabled, initialOptions, initialSampleId, running, computationStatus, computationError, onClose, onCalculate, onApply, onSave, onPlay }) {
+export default function MobileTeachingSolveDialog({ task, robot, robotPose, robotPresets = [], robotLoadState, ready, readinessMessage, onSelectRobot, robotSelectionDisabled, initialOptions, initialSampleId, running, computationStatus, computationError, onClose, onCalculate, onApply, onSave, onPlay }) {
   const [options, setOptions] = useState(() => {
     const initial = { ...DEFAULT_MOBILE_SOLVE_OPTIONS, ...(initialOptions || task.mobileSolve?.options),
       ...(!initialOptions && task.mobileSolve?.version === 1 ? { parkingMode: 'auto', checkCollisions: true } : {}),
@@ -43,7 +44,16 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
   }, [report?.computedAt, initialSampleId]);
   let validation = '';
   try { validateMobileSolveOptions(options); } catch (cause) { validation = cause.message; }
+  const referenceId = options.referencePose?.type === 'preset' ? options.referencePose.id : 'current';
+  const missingReference = referenceId !== 'current' && !robotPresets.some((preset) => preset.id === referenceId);
+  if (missingReference) validation = '参考预设已不存在或不属于当前机器人，请重新选择';
   const update = (patch) => { setOptions((current) => ({ ...current, ...patch })); setDirty(true); setError(''); };
+  const selectReference = (id) => {
+    try {
+      update({ referencePose: id === 'current' ? { type: 'current' }
+        : mobileReferenceFromPreset(robotPresets.find((preset) => preset.id === id), robot) });
+    } catch (cause) { setError(cause.message); }
+  };
   const calculate = (event) => {
     event.preventDefault();
     if (validation || !ready) return;
@@ -90,6 +100,16 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
               </>}
               <small>搜索参考位置 · 底盘高度保持当前值</small><small>XYZ {['x', 'y', 'z'].map((axis) => format(robotPose?.position?.[axis])).join(' / ')} m</small><small>底盘 RPY {['roll', 'pitch', 'yaw'].map((axis) => format(robotPose?.rpy?.[axis])).join(' / ')}°</small>
             </div>
+            <label className="mobile-solve-select">参考起始姿态<select aria-label="参考起始姿态" value={referenceId}
+              onChange={(event) => selectReference(event.target.value)}>
+              <option value="current">当前姿态</option>
+              {missingReference && <option value={referenceId} disabled>{options.referencePose.name} · 不可用</option>}
+              {robotPresets.length > 0 && <optgroup label="机器人预设姿态">
+                {robotPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+              </optgroup>}
+            </select></label>
+            <p className="mobile-solve-help">以所选姿态初始化双臂、头部和躯干，并优先选择接近参考姿态的可达解。已锁定关节遵守下方设置，底盘位置由停车点策略决定。</p>
+            {!robotPresets.length && <p className="mobile-solve-help">暂无当前机器人的预设，可在“机器人”菜单中保存预设姿态。</p>}
             <label className="mobile-solve-select">停车点策略<select aria-label="停车点策略" value={options.parkingMode} onChange={(event) => update({ parkingMode: event.target.value })}>
               <option value="auto">自动搜索 · 避让躯干并复用停车点</option><option value="per-pose">每个 Pose 独立停车</option><option value="fixed">固定当前停车点</option>
             </select></label>
@@ -129,6 +149,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
           <section className="mobile-solve-results" aria-label="姿态计算结果">
             <div className="mobile-solve-results-heading"><h3>{report?.version < MOBILE_SOLVE_VERSION ? '旧版计算结果' : report && (optionsChanged || running || ['error', 'cancelled'].includes(computationStatus)) ? '上次计算结果' : '计算结果'}</h3>{report && <span>{report.feasibleCount} / {report.rows.length} 可达 · {report.parkingCount ?? (report.feasibleCount ? 1 : 0)} 个停车点</span>}</div>
             {report && <p className="mobile-solve-help">计算于 {Number.isFinite(Date.parse(report.computedAt)) ? new Date(report.computedAt).toLocaleString('zh-CN', { hour12: false }) : '时间未记录'} · 本报告自动升降{storedOptions.allowTorsoHeight ? '已开启' : '未开启'}</p>}
+            {report && <p className="mobile-solve-help">本报告参考起始姿态 · {storedOptions.referencePose.type === 'preset' ? storedOptions.referencePose.name : '计算开始时的当前姿态'}</p>}
             {report?.version >= 4 && <p className="mobile-solve-help">拍摄分工：左臂 {report.rows.filter((item) => item.feasible && item.selectedSide === 'left').length} 个 · 右臂 {report.rows.filter((item) => item.feasible && item.selectedSide === 'right').length} 个 · 每个姿态拍摄一次</p>}
             {report?.version >= 5 && <p className="mobile-solve-help">执行动作：{report.motionCount} 组 · 双臂同步 {report.dualMotionCount} 组 · 单臂 {report.motionCount - report.dualMotionCount} 组</p>}
             {running && <p className="mobile-solve-notice">后台计算尚未结束，可关闭此窗口查看进度和虚影。重新计算会替换当前计算；已有报告在本轮完成后更新。</p>}

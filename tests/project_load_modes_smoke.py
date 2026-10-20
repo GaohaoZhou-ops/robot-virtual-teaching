@@ -79,7 +79,8 @@ def open_loader(page, mode):
         "document.querySelector('.project-load-modal')?.dataset.defaultSource !== 'checking'"
     )
     assert dialog.get_attribute("data-teaching-space-mode") == mode
-    assert f"仅加载{LABELS[mode]}工程" in dialog.inner_text()
+    assert f"单边工程仅加载{LABELS[mode]}" in dialog.inner_text()
+    assert "双边完整工程会同时恢复两侧数据" in dialog.inner_text()
     return dialog
 
 

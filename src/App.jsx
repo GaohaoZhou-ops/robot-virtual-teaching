@@ -52,6 +52,7 @@ import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
 import { buildMobileSolvedTask, MOBILE_SOLVE_VERSION, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
+import { mobileReferenceFromPreset } from './lib/mobileTeachingReference.js';
 import { mobileSolutionMapPose } from './lib/mobileTeachingParking.js';
 import AbxTeachingExportDialog from './components/AbxTeachingExportDialog.jsx';
 import AbxRouteExportDialog from './components/AbxRouteExportDialog.jsx';
@@ -123,10 +124,12 @@ import {
   loadWorkspaceSnapshot,
   prepareWorkspaceSession,
   resetWorkspaceSession,
+  restoreLinkedWorkspaces,
   saveWorkspaceConfig,
   saveWorkspaceMap,
   saveWorkspaceViews,
 } from './lib/sessionStore.js';
+import { linkedWorkspaceRelation, prepareLinkedProjectImport } from './lib/linkedProject.js';
 import {
   clearProjectDirectoryBinding,
   loadProjectDirectoryBinding,
@@ -2071,6 +2074,7 @@ export default function App() {
     const previousPortableResourceId = portableRobotPackageRef.current?.resourceId || null;
     let nextPortableResourceId = null;
     let portableResourceCommitted = false;
+    let reloadingLinkedProject = false;
     setLoadState({
       loading: true,
       progress: 0.04,
@@ -2084,6 +2088,22 @@ export default function App() {
           phase,
           detail,
         }));
+      if (importedFile.linkedWorkspaces) {
+        if (!sessionReadyRef.current) throw new Error('工作会话尚未就绪，无法恢复双边工程');
+        const workspaces = prepareLinkedProjectImport(importedFile.linkedWorkspaces);
+        setLoadState({ loading: true, progress: 0.85, phase: '恢复双边完整工程',
+          detail: '正在一起恢复地图示教、独立示教及绑定关系' });
+        await restoreLinkedWorkspaces(sessionIdRef.current, workspaces, normalizeTeachingSpaceMode(requestedMode));
+        for (const mode of ['map', 'independent']) {
+          await clearProjectDirectoryBinding(mode).catch(() => undefined);
+        }
+        // Reload through the same hydration path used by workspace switching.
+        // Keep autosave blocked so the old UI cannot overwrite the committed pair.
+        reloadingLinkedProject = true;
+        sessionReadyRef.current = false;
+        window.location.assign('/workbench');
+        return;
+      }
       const payload = importedFile.payload;
       const project = normalizeProject(payload);
       const importedTeachingSpaceMode = normalizeTeachingSpaceMode(
@@ -2426,8 +2446,10 @@ export default function App() {
       notify(error.code === 'PROJECT_MODE_MISMATCH' ? error.message : `工程文件无效：${error.message}`, 'error');
       if (sourcePage === APP_PAGE_HOME) navigateAppPage(APP_PAGE_HOME, { replace: true });
     } finally {
-      workspaceSwitchingRef.current = false;
-      queueWorkspaceSave();
+      if (!reloadingLinkedProject) {
+        workspaceSwitchingRef.current = false;
+        queueWorkspaceSave();
+      }
     }
   };
 
@@ -3986,16 +4008,48 @@ export default function App() {
           teachingSpaceMode,
         },
       );
+      mapResource.mapId = mapData.mapId;
       const reusableRobotPackage = portableRobotPackageRef.current?.relativePath
         === selectedRobot?.relativePath
         ? portableRobotPackageRef.current
         : null;
+      const workspaceUI = { mapRouteSyncEnabled, showSlice3D };
+      let linkedWorkspace = null;
+      if (sessionReadyRef.current && sessionIdRef.current) {
+        await sessionWriteChainRef.current;
+        const otherMode = teachingSpaceMode === 'map' ? 'independent' : 'map';
+        const otherConfig = await loadWorkspaceConfig(sessionIdRef.current, otherMode);
+        const candidates = {
+          [teachingSpaceMode]: { mode: teachingSpaceMode, map: mapResource,
+            config: { mapId: mapData.mapId, config: { project: payload } } },
+          [otherMode]: { mode: otherMode,
+            map: { mapId: otherConfig?.mapId, sourceHash: otherConfig?.config?.project?.map?.sourceHash },
+            config: otherConfig },
+        };
+        if (linkedWorkspaceRelation(candidates)) {
+          linkedWorkspace = await loadWorkspaceSnapshot(sessionIdRef.current, otherMode);
+          notify('正在打包已绑定的地图示教与独立示教完整工程…', 'info');
+        } else if (payload.workspace?.transfer && !otherConfig?.config?.project) {
+          throw new Error('已绑定的另一侧工程缓存缺失，请恢复对应工程后再保存双边工程');
+        }
+      } else if (payload.workspace?.transfer) {
+        throw new Error('工作会话不可用，无法读取已绑定的另一侧工程');
+      }
+      const linkedMapIds = linkedWorkspace
+        ? { [teachingSpaceMode]: mapData.mapId, [linkedWorkspace.mode]: linkedWorkspace.map?.mapId }
+        : null;
+      if (overwrite && activeProjectSaveTarget.linkedMapIds
+        && ['map', 'independent'].some((mode) => activeProjectSaveTarget.linkedMapIds[mode] !== linkedMapIds?.[mode])) {
+        throw new Error('当前双边绑定关系已变化，请使用“另存为工程”保存');
+      }
       const archive = await (fileHandle ? saveProjectArchive : downloadProjectArchive)(
         payload,
         fileHandle || filename,
         {
           mapResource,
           existingRobotPackage: reusableRobotPackage,
+          linkedWorkspace,
+          workspaceUI,
           onProgress: ({ phase, detail, progress }) => setProjectExportState({
             status: 'packing',
             operation,
@@ -4007,8 +4061,9 @@ export default function App() {
         },
       );
       let targetRemembered = true;
-      if (!overwrite) {
-        const target = fileHandle ? { mapId: mapData.mapId, teachingSpaceMode, handle: fileHandle } : null;
+      if (!overwrite || linkedWorkspace) {
+        const target = fileHandle
+          ? { mapId: mapData.mapId, teachingSpaceMode, handle: fileHandle, linkedMapIds } : null;
         const current = latestWorkspaceRef.current;
         if (current.mapData?.mapId === mapData.mapId && current.teachingSpaceMode === teachingSpaceMode) {
           projectSaveTargetRevisionRef.current += 1;
@@ -4017,6 +4072,11 @@ export default function App() {
         try {
           if (target) await rememberProjectSaveTarget(target);
           else await clearProjectSaveTarget(mapData.mapId, teachingSpaceMode);
+          if (linkedWorkspace) {
+            if (target) await rememberProjectSaveTarget({ ...target,
+              mapId: linkedWorkspace.map.mapId, teachingSpaceMode: linkedWorkspace.mode });
+            else await clearProjectSaveTarget(linkedWorkspace.map.mapId, linkedWorkspace.mode);
+          }
         } catch {
           targetRemembered = false;
         }
@@ -4029,8 +4089,9 @@ export default function App() {
       const sizeMb = archive.byteLength / (1024 * 1024);
       const sizeLabel = sizeMb >= 0.1 ? `${sizeMb.toFixed(1)} MB` : `${Math.max(1, Math.round(archive.byteLength / 1024))} KB`;
       notify(
-        fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}${targetRemembered ? '' : ' · 无法记住保存位置，刷新后请重新另存为'}`
-          : `工程下载已开始 · ${filename} · ${sizeLabel}`,
+        (fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}${targetRemembered ? '' : ' · 无法记住保存位置，刷新后请重新另存为'}`
+          : `工程下载已开始 · ${filename} · ${sizeLabel}`)
+          + (linkedWorkspace ? ' · 已包含地图示教与独立示教' : ''),
         targetRemembered ? 'success' : 'warning',
       );
     } catch (error) {
@@ -5168,6 +5229,11 @@ export default function App() {
     const solver = mobileTeachingSolverRef.current;
     if (!solver) throw new Error('运动学求解器尚未就绪，请稍后重试');
     const options = validateMobileSolveOptions(rawOptions);
+    if (options.referencePose.type === 'preset') {
+      options.referencePose = mobileReferenceFromPreset(
+        current.jointPoses.find((preset) => preset.id === options.referencePose.id), current.selectedRobot,
+      );
+    }
     const total = task.mobileCapture.samples.filter((sample) => !options.keyframesOnly || sample.kind === 'keyframe').length;
     if (!total) throw new Error('没有可计算的采样点');
     mobileTeachingRunRef.current?.controller.abort();
@@ -6171,6 +6237,7 @@ export default function App() {
     {mobileSolveTaskId && teachingTasks.find((task) => task.id === mobileSolveTaskId)?.mobileCapture && <MobileTeachingSolveDialog
       initialSampleId={mobileSolveSampleId}
       key={mobileSolveTaskId} task={teachingTasks.find((task) => task.id === mobileSolveTaskId)} robot={selectedRobot} robotPose={robotPose}
+      robotPresets={robotPresets}
       initialOptions={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.options : undefined}
       running={mobileComputation?.taskId === mobileSolveTaskId && ['running', 'pausing', 'paused'].includes(mobileComputation?.status)}
       computationStatus={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.status : null}

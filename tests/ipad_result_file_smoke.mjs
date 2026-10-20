@@ -42,6 +42,9 @@ try {
   const { result, ticket } = await readIPadResultFile(new Blob([bytes]));
   const task = await ipadResultTask(result, ticket, map);
   assert.equal(task.mobileCapture.samples[0].name, 'Pose 001');
+  assert.deepEqual(task.mobileCapture.samples.slice(1).map((sample) => sample.name),
+    ['中', '🤖', '👨‍👩‍👧‍👦', 'e\u0301'].map((character) => character.repeat(80)),
+    'names allowed by the native 80-Character limit survive without truncation or normalization');
   assert.deepEqual(task.mobileCapture, archive.result, 'every native field survives file import');
   const retried = await ipadResultTask(result, ticket, { ...map, name: 'renamed.ply', mapId: 'reopened', sourceHash: 'new-metadata' });
   assert.equal(task.id, retried.id, 'file and LAN imports share the same deduplication key');
@@ -63,6 +66,10 @@ try {
   ]) {
     const invalid = structuredClone(archive); mutate(invalid);
     await assert.rejects(readIPadResultFile(blob(invalid)), expected);
+  }
+  for (const name of ['a', '中', '🤖', '👨‍👩‍👧‍👦', 'e\u0301'].map((character) => character.repeat(81)).concat([123, {}])) {
+    const invalid = structuredClone(archive); invalid.result.samples[0].name = name;
+    await assert.rejects(readIPadResultFile(blob(invalid)), /Pose 名称过长/);
   }
   await assert.rejects(readIPadResultFile(new Blob(['{truncated'])), /有效的 JSON/);
   await assert.rejects(readIPadResultFile(blob(null)), /格式或版本/);

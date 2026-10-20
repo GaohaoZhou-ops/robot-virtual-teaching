@@ -738,7 +738,8 @@ export async function loadWorkspaceConfig(sessionId, mode) {
   if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId) {
     throw new Error('工作会话已变化，请刷新页面后重试');
   }
-  if (config && (config.sessionId !== sessionId || config.mapId !== index.modes?.[workspaceMode]?.mapId)) {
+  if (config && (config.sessionId !== sessionId
+    || (config.mapId ?? null) !== (index.modes?.[workspaceMode]?.mapId ?? null))) {
     throw new Error('工程缓存不完整，请重新加载工程');
   }
   return config || null;
@@ -844,6 +845,47 @@ export async function activateWorkspaceMode(sessionId, mode) {
   store.put({ ...meta, activeMode: workspaceMode });
   await completion;
   return summary;
+}
+
+// Import both sides in one transaction; quota/serialization failures roll back
+// geometry, teaching configuration, and the active-workspace index together.
+export async function restoreLinkedWorkspaces(sessionId, workspaces, activeMode) {
+  if (!sessionId || !WORKSPACE_MODES.includes(activeMode)) throw new Error('工作会话尚未就绪');
+  for (const mode of WORKSPACE_MODES) {
+    const snapshot = workspaces?.[mode];
+    if (!snapshot?.map?.positionBuffer || !snapshot.config?.config?.project
+      || snapshot.config.mapId !== snapshot.map.mapId || snapshot.mode !== mode) {
+      throw new Error('双边工程快照不完整');
+    }
+  }
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  try {
+    const meta = await requestResult(store.get('meta'));
+    if (meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
+    const savedAt = Date.now();
+    const modes = {};
+    for (const mode of WORKSPACE_MODES) {
+      const snapshot = workspaces[mode];
+      const map = { ...snapshot.map, key: workspaceMapKey(mode), teachingSpaceMode: mode, sessionId, savedAt };
+      const config = { ...snapshot.config, key: workspaceConfigKey(mode), teachingSpaceMode: mode, sessionId, savedAt };
+      store.put(packMapRecord(map));
+      store.put(config);
+      modes[mode] = summarizeWorkspace(mode, map, config);
+    }
+    store.delete('map');
+    store.delete('config');
+    store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode, modes, updatedAt: savedAt });
+    store.put({ ...meta, activeMode });
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  clearWorkspaceViewState();
 }
 
 export async function resetWorkspaceSession(sessionId) {

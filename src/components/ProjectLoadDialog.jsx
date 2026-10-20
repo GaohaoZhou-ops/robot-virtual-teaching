@@ -143,7 +143,7 @@ export default function ProjectLoadDialog({
           <div>
             <small>PROJECT RESTORE / {isIndependent ? 'VIRTUAL_ORIGIN' : 'MAP FRAME'}</small>
             <h2 id="project-load-title">加载工程</h2>
-            <p>仅加载{modeLabel}工程，默认目录、工作缓存和恢复副本按示教类型分别查找。</p>
+            <p>单边工程仅加载{modeLabel}；双边完整工程会同时恢复两侧数据，并进入{modeLabel}。</p>
           </div>
           <span className="project-load-dialog__mode">
             <ScanLine size={12} /> {modeLabel}

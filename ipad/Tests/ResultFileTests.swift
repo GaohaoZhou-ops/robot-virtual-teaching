@@ -18,6 +18,14 @@ import simd
             cameraPose: TeachingCoordinates.opticalPose(camera: matrix_identity_float4x4, worldFromModel: TeachingCoordinates.zUpToAR),
             surfacePoint: Point3(SIMD3(1, 2, 3)), previewCameraTransform: matrix_identity_float4x4.elements,
             previewProjection: matrix_identity_float4x4.elements, previewAspect: 4.0 / 3.0)]
+        // The editor's 80-Character limit counts whole graphemes, including emoji and combining marks.
+        for character in ["中", "🤖", "👨‍👩‍👧‍👦", "e\u{301}"] {
+            var sample = result.samples[0]
+            sample.id = UUID().uuidString
+            sample.name = String(repeating: character, count: 80)
+            precondition(sample.name.count == 80)
+            result.samples.append(sample)
+        }
         var project = LocalProject(serverURL: "http://192.168.7.42:21990",
             session: PairedSession(id: id, deviceToken: "PRIVATE-PAIRING-SECRET", manifest: manifest), result: result)
         try await store.saveModel(model, id: id)
@@ -35,7 +43,7 @@ import simd
         precondition(!text.contains("PRIVATE-PAIRING-SECRET") && !text.contains(project.serverURL))
         let decoded = try JSONDecoder().decode(TeachingResultFile.self, from: data)
         precondition(decoded.format == "atlas-teaching-result" && decoded.version == 1)
-        precondition(decoded.result.id == result.id && decoded.result.samples.count == 1)
+        precondition(decoded.result.id == result.id && decoded.result.samples.count == result.samples.count)
         precondition(decoded.result.samples[0].previewProjection == matrix_identity_float4x4.elements)
         let retryURL = try await store.exportResult(project)
         let retryData = try Data(contentsOf: retryURL)

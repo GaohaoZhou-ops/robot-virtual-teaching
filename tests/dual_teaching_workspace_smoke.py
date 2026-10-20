@@ -48,6 +48,8 @@ def add_waypoints(page, count):
 
 
 def set_color_mode(page, expected):
+    if page.locator(".workbench-menu-panel:visible").count():
+        page.keyboard.press("Escape")
     page.get_by_role("button", name="显示设置", exact=True).click()
     button = page.get_by_role("button", name="切换点云颜色模式")
     for _ in range(3):
