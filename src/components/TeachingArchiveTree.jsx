@@ -93,6 +93,7 @@ const selectionExists = (tasks, selection) => {
 
 export default function TeachingArchiveTree({
   tasks = [],
+  teachingSpaceMode = 'map',
   activeTaskId,
   activeParkingPointId,
   mapData,
@@ -117,7 +118,6 @@ export default function TeachingArchiveTree({
   onMergeParkingPoints,
   onExportTeachingData,
   canExportTeachingData = false,
-  onExportAbxTeaching,
   onOpenCapturePage,
   onSelectionChange,
 }) {
@@ -636,15 +636,14 @@ export default function TeachingArchiveTree({
           </div>
           <span>{tasks.length} 任务 · {totalParkingPoints} 停车点 · {totalPoses} 姿态</span>
           <button type="button" onClick={onOpenCapturePage}>继续示教</button>
-          {onExportAbxTeaching && <button type="button" onClick={onExportAbxTeaching}
-            disabled={!tasks.length || exportPacking} aria-label="导出机器人示教"
-            title="生成大脑可直接导入的 Pose ZIP，并附带自由导航目标清单">机器人导出</button>}
           <button
             type="button"
             aria-label="导出示教数据"
             onClick={onExportTeachingData}
             disabled={!canExportTeachingData || exportPacking}
-            title="导出当前工程全部轻量示教数据 JSON：机器人定位、关节值、停车点、姿态与导航关系，用于后续跨工程复用"
+            title={teachingSpaceMode === 'map'
+              ? '导出 ABXBrainSystem 可直接导入的示教 ZIP：任务、停车点、机器人姿态和路网导航'
+              : '导出当前工程全部轻量示教数据 JSON：机器人定位、关节值、停车点、姿态与导航关系'}
           >
             <Download size={11} /> 导出示教数据
           </button>

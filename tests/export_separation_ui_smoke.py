@@ -9,7 +9,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +22,7 @@ def make_fixtures(directory):
       import { writeFile } from 'node:fs/promises';
       import { teachingTransferFixture } from './tests/teaching_transfer_helpers.mjs';
       import { buildProjectArchive } from './src/lib/projectArchive.js';
+      import { buildTeachingDataExport } from './src/lib/teachingData.js';
       for (const mode of ['map', 'independent']) {
         const fixture = teachingTransferFixture(mode);
         const project = fixture.config.config.project;
@@ -31,6 +32,7 @@ def make_fixtures(directory):
           mapResource: fixture.map, existingRobotPackage: fixture.map.portableRobotPackage,
         });
         await writeFile(`${process.argv[1]}/${mode}.zip`, archive.bytes);
+        await writeFile(`${process.argv[1]}/${mode}-legacy-teaching.json`, JSON.stringify(buildTeachingDataExport(project)));
       }
     ''', str(directory)], cwd=ROOT, check=True)
 
@@ -96,20 +98,30 @@ def run():
                 tree = data_page.locator('.teaching-archive-tree')
                 assert tree.get_by_role('button', name='导出工程', exact=True).count() == 0
                 assert data_page.get_by_role('button', name='导出工程', exact=True).is_visible()
-                with page.expect_download() as download:
+                if mode == 'map':
                     tree.get_by_role('button', name='导出示教数据', exact=True).click()
-                assert download.value.suggested_filename.startswith(f'atlas-teaching-{mode}-')
-                lightweight_path = directory / f'{mode}-teaching.json'
-                download.value.save_as(lightweight_path)
-                data = json.loads(lightweight_path.read_text())
-                assert data['format'] == 'atlas-route-studio-teaching-data'
-                assert data['source']['teachingSpaceMode'] == mode
-                assert data['statistics']['parkingPointCount'] == 2
-                assert data['statistics']['poseCount'] == 2
-                assert data['tasks'][0]['parkingPoints'][0]['poses'][0]['fullBodyJoints']['values']['shoulder'] == 12
-                assert data['robot']['mapPose']['position']['x'] == 10
-                assert 'cameraCapture' not in lightweight_path.read_text()
-                assert 'view3d' not in data
+                    dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)
+                    # This fixture intentionally has a generic "shoulder" joint,
+                    # so native export is blocked while its full backup works.
+                    expect(dialog.get_by_role('alert')).to_contain_text('ABX 20 关节格式无法表达')
+                    expect(dialog.get_by_role('button', name='下载机器人导入包')).to_be_disabled()
+                    page.keyboard.press('Escape')
+                    lightweight_path = directory / 'map-legacy-teaching.json'
+                else:
+                    with page.expect_download() as download:
+                        tree.get_by_role('button', name='导出示教数据', exact=True).click()
+                    assert download.value.suggested_filename.startswith(f'atlas-teaching-{mode}-')
+                    lightweight_path = directory / f'{mode}-teaching.json'
+                    download.value.save_as(lightweight_path)
+                    data = json.loads(lightweight_path.read_text())
+                    assert data['format'] == 'atlas-route-studio-teaching-data'
+                    assert data['source']['teachingSpaceMode'] == mode
+                    assert data['statistics']['parkingPointCount'] == 2
+                    assert data['statistics']['poseCount'] == 2
+                    assert data['tasks'][0]['parkingPoints'][0]['poses'][0]['fullBodyJoints']['values']['shoulder'] == 12
+                    assert data['robot']['mapPose']['position']['x'] == 10
+                    assert 'cameraCapture' not in lightweight_path.read_text()
+                    assert 'view3d' not in data
                 toolbar = tree.locator('.teaching-tree-toolbar').bounding_box()
                 workspace = tree.locator('.teaching-tree-workspace').bounding_box()
                 archive = tree.bounding_box()

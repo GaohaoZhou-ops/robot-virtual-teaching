@@ -1,9 +1,10 @@
 import { sha256Bytes } from './hash.js';
 import { zipSync } from 'fflate';
 
-// Match the current native importer, including automatic component selection.
-const VERSION = 15;
+// Contract: workspace.zip / ABXBrainSystem, teaching_store.py v23.
+const VERSION = 23;
 const MAX_LINE_BYTES = 12000;
+const NAVIGATION_CHUNK_BYTES = 4096;
 const POSITION_TOLERANCE_M = 1e-6;
 const YAW_TOLERANCE_RAD = 1e-6;
 const JOINT_ORDER = {
@@ -93,7 +94,73 @@ const sameTarget = (a, b) => a && b
   && Math.hypot(a.x_m - b.x_m, a.y_m - b.y_m) <= POSITION_TOLERANCE_M
   && yawDistance(a.yaw_rad, b.yaw_rad) <= YAW_TOLERANCE_RAD;
 
-const navigationNotice = '当前大脑仅支持导入站点导航步骤；本包只导入 Pose，自由导航目标保存在 free-navigation.json，导入后不会自动执行导航。';
+const navigationNotice = '导航与 Pose 按示教顺序导入。执行前请在机器人路网管理中核对连线、定位地图并切换使用导入的路网。';
+
+// Route text limits are UTF-8 bytes, unlike teaching labels (Unicode characters).
+const routeLabel = (value) => {
+  requireExport(typeof value === 'string' && value.trim() && !/[\x00-\x1f\x7f]/.test(value), '路网名称不能为空或包含控制字符');
+  let result = '';
+  for (const character of value) {
+    if (bytes(result + character).length > 128) break;
+    result += character;
+  }
+  return result;
+};
+
+const navigationLines = (context) => {
+  if (!context) return [];
+  const data = bytes(JSON.stringify(context));
+  requireExport(data.length <= NAVIGATION_CHUNK_BYTES * 2048, '任务路网和地图信息超过 ABX 8 MiB 上限');
+  const chunks = [];
+  for (let offset = 0; offset < data.length; offset += NAVIGATION_CHUNK_BYTES) {
+    chunks.push({ type: 'navigation_chunk', seq: String(chunks.length + 1),
+      data: btoa(String.fromCharCode(...data.subarray(offset, offset + NAVIGATION_CHUNK_BYTES))) });
+  }
+  return chunks;
+};
+
+// One shared route keeps all tasks on the same graph. Only source edges are
+// exported: proximity or teaching order is not evidence of a traversable path.
+const createRoute = async (payload, waypoints) => {
+  const route = { schema_version: 1,
+    id: `atlas-${await stableId('atlas-abx-route', payload.map?.sourceHash, payload.map?.fileName)}`,
+    name: routeLabel(`地图示教 · ${payload.map?.fileName || '未命名地图'}`),
+    scene_name: '', nodes: [], edges: [] };
+  const nodeIds = new Map();
+  const addNode = (name, target) => {
+    const id = route.nodes.length + 1;
+    route.nodes.push({ id, label: routeLabel(name), ...target });
+    requireExport(route.nodes.length <= 256, '地图路网超过 ABX 256 个节点上限，请拆分工程后导出');
+    return `N${id}`;
+  };
+  for (const point of waypoints) {
+    point.nodeId = addNode(text(point.name, '导航点名称'), point.target);
+    nodeIds.set(point.sourceId, Number(point.nodeId.slice(1)));
+  }
+  const edges = new Set();
+  const pathMappings = [];
+  const link = (start, end) => {
+    const key = `${start}:${end}`;
+    requireExport(start !== end, 'ABX 路网不支持自环连线');
+    if (edges.has(key)) return;
+    edges.add(key);
+    // Node and edge IDs share a uint32 namespace. Reserve 1..256 for nodes.
+    route.edges.push({ id: 257 + route.edges.length, start, end });
+    requireExport(route.edges.length <= 512, '地图路网超过 ABX 512 条有向边上限');
+  };
+  for (const path of ordered(payload.paths || [], '路径')) {
+    const start = nodeIds.get(path.from), end = nodeIds.get(path.to);
+    requireExport(start !== undefined && end !== undefined, `路径 ${path.id}引用了不存在的导航点`);
+    requireExport(path.directed === undefined || typeof path.directed === 'boolean', `路径 ${path.id}方向无效`);
+    link(start, end);
+    if (path.directed === false) link(end, start);
+    pathMappings.push({ sourceId: path.id, start: `N${start}`, end: `N${end}`, directed: path.directed !== false });
+  }
+  return { route, pathMappings, nodeFor(name, target) {
+    const existing = route.nodes.find((node) => sameTarget(node, target));
+    return existing ? `N${existing.id}` : addNode(name, target);
+  } };
+};
 
 const robotModel = (robotPackage) => {
   requireExport(robotPackage?.format === 'urdf', 'ABX 示教导出需要完整 URDF 机器人资源');
@@ -122,19 +189,21 @@ const line = (value) => {
 };
 
 const instructions = [
-  'ABX 机器人 Pose 与自由导航目标',
+  'ABX 地图示教导入包',
   '',
   '1. robot-teaching-*.zip 可直接在大脑 Web「示教任务 → 导入」选择；不用解压。',
   '   完整工程 ZIP 中的 abx/ 是同一份数据目录，也可逐个导入 tasks/*.abxteach.ndjson。',
-  '   原生任务使用 abx-teaching-task v15，导出清单使用 abx-teaching-export v1。',
+  '   原生任务使用 abx-teaching-task v23，导出清单使用 abx-teaching-export v1。',
   '2. ' + navigationNotice,
-  '   执行导入任务只执行上身 Pose，不会移动到底盘目标。导航接入前请按所需位置分别使用自由导航与对应 Pose。',
-  '   free-navigation.json 的 waypoints 保存原导航点，tasks[].sequence 保存导航与 Pose 的对应顺序。',
-  '   自由导航接口使用 mode=free、x_m、y_m、yaw_rad；run_id 和现场控制权限须由调用端当次取得。',
-  '   本导出不调用导航接口、不创建站点路网、不写入大脑目录或数据库。',
+  '   每个非空停车点的首个 Pose 前，以及同一停车点内底盘目标变化处，插入 route_navigation 步骤。',
+  '   路网以 navigation_chunk 内嵌在任务文件中；routes/ 为副本，navigation.json 保存节点及步骤映射。',
+  '   导入器自动分配新任务/路网 ID，不覆盖已存在的路网，也不激活路网或切换定位地图。',
+  '   导出路网的 scene_name 留空；点云文件名不能冒充现场定位场景名称，切换使用时由机器人绑定。',
+  '   连线只来自工程中已有路径，新增 Pose 目标不会自动连线；未连通的目标需在路网管理中补齐可通行路径。',
   '3. 坐标使用机器人 map 坐标系，X/Y 单位 m，yaw 单位 rad，范围 [-π, π]，逆时针为正。',
   '   现场地图须与虚拟工程地图对齐；原始 Z/roll/pitch、路径及逐边速度约束保存在 source-mapping.json。',
-  '   自由导航无需匹配站点或连线；路径及速度约束不是大脑已接受的执行配置。',
+  '   逐边速度、加速度、倒车和 3D 避障开关不属于机器人路网格式，仅保留为源数据，不作为执行配置。',
+  '   free-navigation.json 是兼容旧工具的坐标参考清单；原生任务实际使用随包路网站点导航。',
   '4. 20 个关节按实际 URDF 名称匹配，head、torso、left_arm、right_arm 转为 rad。',
   '   component=auto 由大脑根据实况判断执行部位；轮组不作为上身关节执行，缺失关节不会补零。',
   '   虚拟 Pose 没有实测定位，parking.location=null，不伪造 SLAM 或里程计。',
@@ -156,6 +225,7 @@ const compileExport = async (payload, robotPackage) => {
     target: freeTarget(point.pose, angleUnit, `导航点 ${point.name || point.id}`),
     sourcePose: point.pose,
   }));
+  const { route, nodeFor, pathMappings } = await createRoute(payload, waypoints);
   const files = {};
   const exportedAt = payload.exportedAt || new Date().toISOString();
   const tasks = [];
@@ -163,6 +233,7 @@ const compileExport = async (payload, robotPackage) => {
   let navigationCount = 0;
   let poseCount = 0;
   const navigationTasks = [];
+  const nativeTasks = [];
   for (const task of ordered(payload.virtualTeaching?.tasks || [], '任务')) {
     const name = text(task.name, '任务名称');
     requireExport(!task.mobileCapture?.samples?.length, `任务 ${name}包含 ${task.mobileCapture?.device?.platform === 'visionOS' ? 'Vision Pro 头显 Pose' : 'iPad 相机 Pose'}，尚未转换成机器人关节姿态`);
@@ -181,6 +252,7 @@ const compileExport = async (payload, robotPackage) => {
       const parkingName = text(parking.name, '停车点名称');
       const label = `${name} / ${parkingName}`;
       const parkingTarget = freeTarget(parking.mapPose, angleUnit, label);
+      const parkingNodeId = nodeFor(parkingName, parkingTarget);
       const parkingId = await stableId('atlas-abx-parking', task.id, parking.id);
       const parkingPoints = [];
       const poseMappings = [];
@@ -196,6 +268,7 @@ const compileExport = async (payload, robotPackage) => {
         const poseName = text(pose.name, '姿态名称');
         const poseLabel = `${label} / ${poseName}`;
         const target = freeTarget(pose.mapPose, angleUnit, poseLabel);
+        const nodeId = nodeFor(poseName, target);
         if (!model) {
           const sourceRobot = task.robot?.relativePath || task.robot?.id;
           requireExport(sourceRobot && sourceRobot === robotPackage?.relativePath, `任务 ${name}的机器人与当前 URDF 不一致`);
@@ -203,7 +276,10 @@ const compileExport = async (payload, robotPackage) => {
         }
         const joints = bodyJoints(pose, poseLabel);
         if (!sameTarget(previousTarget, target)) {
-          navigationSequence.push({ type: 'free_navigation', mode: 'free', parkingId,
+          const navigationPoint = append({ type: 'route_navigation', route_id: route.id, node_id: nodeId },
+            `导航 ${nodeId}`);
+          navigationSequence.push({ type: 'route_navigation', mode: 'route', parkingId,
+            seq: navigationPoint.seq, nodeId, routeId: route.id,
             beforePoseSeq: String(points.length + 1), target });
           previousTarget = target;
           navigationCount += 1;
@@ -218,41 +294,97 @@ const compileExport = async (payload, robotPackage) => {
         }, poseName);
         poseCount += 1;
         navigationSequence.push({ type: 'pose', parkingId, seq: point.seq, name: poseName, sourceId: pose.id });
-        poseMappings.push({ sourceId: pose.id, name: poseName, seq: point.seq, target, mapPose: pose.mapPose });
+        poseMappings.push({ sourceId: pose.id, name: poseName, seq: point.seq, nodeId, target, mapPose: pose.mapPose });
       }
       parkings.push({ type: 'parking', id: parkingId, seq: String(parkings.length + 1), name: parkingName,
         created_ns: timestamp(parking.createdAt, task.createdAt || exportedAt, label),
         point_count: String(parkingPoints.length), location: null });
-      parkingMappings.push({ sourceId: parking.id, id: parkingId, name: parkingName, target: parkingTarget, mapPose: parking.mapPose, poses: poseMappings });
+      parkingMappings.push({ sourceId: parking.id, id: parkingId, name: parkingName, nodeId: parkingNodeId,
+        target: parkingTarget, mapPose: parking.mapPose, poses: poseMappings });
     }
     requireExport(points.length <= 2000 && parkings.filter((parking) => parking.point_count !== '0').length <= 128,
       `任务 ${name}超过 ABX 单次执行的 2000 步骤或 128 个非空停车点上限`);
     const counts = { point_count: String(points.length), parking_count: String(parkings.length), basic_pose_count: '0' };
     const created = timestamp(task.createdAt, exportedAt, name);
-    const body = [...parkings, ...points].map(line).join('');
-    const header = { type: 'abx-teaching-task', version: VERSION, name, created_ns: created,
-      ...counts, joint_order: JOINT_ORDER, units: { joints: 'rad', position: 'm' } };
-    const footer = { type: 'end', ...counts, sha256: await sha256Bytes(bytes(body)) };
     const file = `tasks/${id}.abxteach.ndjson`;
-    files[`abx/${file}`] = bytes(line(header) + body + line(footer));
+    nativeTasks.push({ id, file, name, created, counts, parkings, points,
+      hasNavigation: navigationSequence.some((step) => step.type === 'route_navigation') });
     tasks.push({ id, name, created_ns: created, updated_ns: timestamp(task.updatedAt, task.createdAt || exportedAt, name),
       ...counts, file, image_count: 0 });
     taskMappings.push({ sourceId: task.id, id, file, robotModel: model, parkings: parkingMappings });
     navigationTasks.push({ sourceId: task.id, id, name, file, sequence: navigationSequence, parkings: parkingMappings });
   }
+  // Finish the shared route before embedding it in any task. ABX assigns its
+  // own stable content ID on import, reusing identical routes across tasks.
+  // Reserve room for Python numeric serialization, the imported ID and the
+  // measured scene name bound later by the robot's route activation flow.
+  requireExport(bytes(JSON.stringify(route)).length + 2048 <= 48 * 1024, '地图路网超过 ABX 48 KiB 上限（含导入和地图绑定预留），请拆分工程后导出');
+  const context = { routes: [route], maps: null, default_route_id: null };
+  const chunks = navigationLines(context);
+  for (const [index, task] of nativeTasks.entries()) {
+    const taskChunks = task.hasNavigation ? chunks : [];
+    const body = [...task.parkings, ...task.points, ...taskChunks].map(line).join('');
+    const header = { type: 'abx-teaching-task', version: VERSION, name: task.name, created_ns: task.created,
+      ...task.counts, joint_order: JOINT_ORDER, units: { joints: 'rad', position: 'm' },
+      navigation: task.hasNavigation ? { chunks: String(taskChunks.length) } : null };
+    const footer = { type: 'end', ...task.counts, sha256: await sha256Bytes(bytes(body)) };
+    files[`abx/${task.file}`] = bytes(line(header) + body + line(footer));
+    const routeFile = `routes/${task.id}/1.route.json`;
+    tasks[index].navigation = task.hasNavigation ? { routes: [routeFile], maps: null } : null;
+    if (task.hasNavigation) files[`abx/${routeFile}`] = jsonBytes(route);
+  }
+  const warnings = [];
+  if (navigationCount) {
+    const incoming = new Set(route.edges.map((edge) => edge.end));
+    const targets = new Set(navigationTasks.flatMap((task) => task.sequence
+      .filter((step) => step.type === 'route_navigation').map((step) => Number(step.nodeId.slice(1)))));
+    const unlinked = [...targets].filter((id) => !incoming.has(id));
+    if (unlinked.length) warnings.push(`${unlinked.length} 个导航目标没有入向连线，请在机器人路网管理中核对并补齐可通行路径。`);
+    const outgoing = new Map(route.nodes.map((node) => [node.id, []]));
+    for (const edge of route.edges) outgoing.get(edge.start).push(edge.end);
+    const reachableFrom = new Map();
+    const reachable = (start, end) => {
+      if (!reachableFrom.has(start)) {
+        const visited = new Set([start]);
+        for (const id of visited) for (const next of outgoing.get(id)) visited.add(next);
+        reachableFrom.set(start, visited);
+      }
+      return reachableFrom.get(start).has(end);
+    };
+    let disconnected = 0;
+    for (const task of navigationTasks) {
+      const steps = task.sequence.filter((step) => step.type === 'route_navigation');
+      for (let index = 1; index < steps.length; index += 1) {
+        if (!reachable(Number(steps[index - 1].nodeId.slice(1)), Number(steps[index].nodeId.slice(1)))) disconnected += 1;
+      }
+    }
+    if (disconnected) warnings.push(`${disconnected} 处相邻导航步骤之间没有有向通路，执行前需补齐连线。`);
+  }
+  if ((payload.paths || []).some((path) => path.limits || path.motion)) {
+    warnings.push('逐边速度、加速度、倒车和 3D 避障设置仅保存在源数据清单中，机器人路网不支持导入这些约束。');
+  }
   files['abx/manifest.json'] = jsonBytes({ schema: 'abx-teaching-export', version: 1, exported_utc: exportedAt,
     include_images: false, tasks, images: [], pending_captures: 0 });
+  files['abx/navigation.json'] = jsonBytes({ schema: 'atlas-abx-route-navigation', version: 1,
+    exportedAt, mode: 'route', coordinateFrame: 'map', units: { position: 'm', yaw: 'rad' },
+    nativeTaskNavigationSupported: true, notice: navigationNotice, warnings,
+    map: payload.map, route, waypoints, tasks: navigationTasks });
   files['abx/free-navigation.json'] = jsonBytes({ schema: 'atlas-abx-free-navigation-targets', version: 1,
     exportedAt, mode: 'free', coordinateFrame: 'map', units: { position: 'm', yaw: 'rad' },
-    nativeTaskNavigationSupported: false, notice: navigationNotice,
-    map: payload.map, waypoints, tasks: navigationTasks });
-  files['abx/source-mapping.json'] = jsonBytes({ schema: 'atlas-abx-export-mapping', version: 2,
+    nativeTaskNavigationSupported: false, nativeTaskNavigationMode: 'route',
+    notice: '此文件仅供坐标参考；包内任务使用 navigation.json 所述的路网站点导航。',
+    map: payload.map, waypoints, tasks: navigationTasks.map((task) => ({ ...task,
+      sequence: task.sequence.map((step) => step.type === 'route_navigation'
+        ? { type: 'free_navigation', mode: 'free', parkingId: step.parkingId, beforePoseSeq: step.beforePoseSeq, target: step.target }
+        : step) })) });
+  files['abx/source-mapping.json'] = jsonBytes({ schema: 'atlas-abx-export-mapping', version: 3,
     exportedAt, sourceProject: 'config/project.json', map: payload.map,
-    navigationMode: 'free', waypoints, paths: payload.paths || [], tasks: taskMappings });
+    navigationMode: 'route', routeId: route.id, waypoints, paths: payload.paths || [], pathMappings, tasks: taskMappings });
   files['abx/README.txt'] = bytes(instructions.join('\n'));
-  return { files, summary: { status: 'ready', navigationMode: 'free', navigationImportSupported: false,
+  return { files, summary: { status: 'ready', navigationMode: 'route', navigationImportSupported: true,
     taskCount: tasks.length, poseCount, waypointCount: waypoints.length, navigationCount,
-    notice: navigationNotice, manifestFile: 'abx/manifest.json', navigationFile: 'abx/free-navigation.json' } };
+    nodeCount: route.nodes.length, edgeCount: route.edges.length, warnings,
+    notice: navigationNotice, manifestFile: 'abx/manifest.json', navigationFile: 'abx/navigation.json' } };
 };
 
 // Conversion is atomic: an incompatible task never leaves a partial native

@@ -24,6 +24,10 @@ def seed(page, invalid=False):
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransferFixture('map');
       const { payload, robotPackage } = abxTeachingFixture();
+      for (const task of payload.virtualTeaching.tasks) {
+        task.parkingPoints.sort((a, b) => a.sequence - b.sequence);
+        for (const parking of task.parkingPoints) parking.poses.sort((a, b) => a.sequence - b.sequence);
+      }
       fixture.map.name = payload.map.fileName;
       fixture.map.sourceHash = payload.map.sourceHash;
       fixture.map.portableRobotPackage = robotPackage;
@@ -36,7 +40,7 @@ def seed(page, invalid=False):
     }''', invalid)
     page.goto(BASE_URL + '/teaching-data', wait_until='networkidle')
     page.locator('.loading-curtain').wait_for(state='hidden')
-    page.get_by_role('button', name='导出机器人示教', exact=True).wait_for()
+    page.get_by_role('button', name='导出示教数据', exact=True).wait_for()
 
 
 def run():
@@ -52,13 +56,14 @@ def run():
             page.set_default_timeout(30000)
             page.on('pageerror', lambda error: errors.append(str(error)))
             seed(page)
-            export = page.get_by_role('button', name='导出机器人示教', exact=True)
+            export = page.get_by_role('button', name='导出示教数据', exact=True)
             export.click()
             dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)
             bundle_button = dialog.get_by_role('button', name='下载机器人导入包', exact=True)
             expect(bundle_button).to_be_enabled()
-            expect(dialog.get_by_role('table', name='自由导航目标预览')).to_be_visible()
-            expect(dialog.get_by_role('note')).to_contain_text('执行导入任务不会自动移动底盘')
+            expect(dialog.get_by_role('table', name='路网导航目标预览')).to_be_visible()
+            expect(dialog.get_by_role('note')).to_contain_text('切换使用导入的路网')
+            expect(dialog.get_by_label('路网导出提示')).to_contain_text('没有入向连线')
             page.screenshot(path=str(SHOTS / 'robot-export-desktop.png'), full_page=True)
             with page.expect_download() as waiting:
                 bundle_button.click()
@@ -73,14 +78,18 @@ def run():
                 task = bundle.read(manifest['tasks'][0]['file']).decode()
                 lines = task.splitlines(keepends=True)
                 records = [json.loads(line) for line in lines]
-                assert records[0]['version'] == 15 and records[0]['point_count'] == '3'
+                assert records[0]['version'] == 23 and records[0]['point_count'] == '5'
                 assert records[-1]['sha256'] == hashlib.sha256(''.join(lines[1:-1]).encode()).hexdigest()
-                poses = [entry['record'] for entry in records if entry['type'] == 'point']
+                actions = [entry['record'] for entry in records if entry['type'] == 'point']
+                assert [action.get('type', 'pose') for action in actions] == ['route_navigation', 'pose', 'pose', 'route_navigation', 'pose']
+                poses = [action for action in actions if 'joints_rad' in action]
                 assert all('type' not in pose and pose['component'] == 'auto' for pose in poses)
                 assert math.isclose(poses[0]['joints_rad']['head'][0], math.radians(20))
-                targets = json.loads(bundle.read('free-navigation.json'))
+                targets = json.loads(bundle.read('navigation.json'))
                 assert targets['waypoints'][0]['target'] == {'x_m': 1.25, 'y_m': -2.5, 'yaw_rad': math.pi / 2}
-                assert targets['nativeTaskNavigationSupported'] is False
+                assert targets['nativeTaskNavigationSupported'] is True
+                assert targets['route']['edges'] == [{'id': 257, 'start': 1, 'end': 2}]
+                assert json.loads(bundle.read(manifest['tasks'][0]['navigation']['routes'][0])) == targets['route']
             with page.expect_download() as waiting:
                 dialog.get_by_role('button', name='下载导航清单', exact=True).click()
             nav_path = Path(directory) / 'navigation.json'
@@ -93,7 +102,7 @@ def run():
             expect(dialog).not_to_be_visible()
             expect(export).to_be_focused()
             seed(page, invalid=True)
-            page.get_by_role('button', name='导出机器人示教', exact=True).click()
+            page.get_by_role('button', name='导出示教数据', exact=True).click()
             dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)
             expect(dialog.get_by_role('alert')).to_contain_text('head_yaw_J')
             expect(dialog.get_by_role('button', name='下载机器人导入包', exact=True)).to_be_disabled()
@@ -101,7 +110,7 @@ def run():
             assert not errors, errors
         finally:
             browser.close()
-    print('Robot export UI, native ZIP, coordinate/angle conversion, navigation JSON, compact layout and invalid Pose rejection passed')
+    print('Teaching Data Center export UI, native ZIP, route/Pose sequence, navigation JSON, compact layout and invalid Pose rejection passed')
 
 
 if __name__ == '__main__':
