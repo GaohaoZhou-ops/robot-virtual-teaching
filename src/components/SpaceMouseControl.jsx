@@ -42,6 +42,7 @@ import {
 
 const CENTER_THRESHOLD = 28;
 const MOTION_THRESHOLD = 62;
+const CAPTURE_DURATION_MS = 2000;
 const AUTO_ADVANCE_DELAY_MS = 500;
 const CAPTURE_SAMPLE_LIMIT = 480;
 const PEAK_ENVELOPE_RATIO = 0.7;
@@ -104,6 +105,7 @@ const initialCalibration = () => ({
   buttonDraft: { xyz: null, rpy: null },
   captured: null,
   captureMeta: null,
+  captureStartedAt: null,
   issues: [],
 });
 
@@ -200,9 +202,62 @@ const summarizeCoupledCapture = (samples, metadata = {}) => {
     captureStrategy: SPACEMOUSE_CAPTURE_STRATEGY,
     ignoredReleaseSamples: Number(metadata.ignoredReleaseSamples || 0),
     centerSettleMs: CENTER_SETTLE_MS,
+    recordingDurationMs: CAPTURE_DURATION_MS,
     capturedAt: new Date().toISOString(),
   };
 };
+
+function CalibrationCaptureProgress({ stage, startedAt, buttonStep, complete }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (stage !== 'sampling' || startedAt === null) return undefined;
+    let frame;
+    const tick = () => {
+      const next = Math.min(CAPTURE_DURATION_MS, Math.max(0, performance.now() - startedAt));
+      setElapsed(next);
+      if (next < CAPTURE_DURATION_MS) frame = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(frame);
+  }, [stage, startedAt]);
+  const progress = complete ? 100 : elapsed / CAPTURE_DURATION_MS * 100;
+  const secondsLeft = ((CAPTURE_DURATION_MS - elapsed) / 1000).toFixed(1);
+  return (
+    <span
+      className={`spacemouse-capture-progress${complete ? ' is-complete' : ''}`}
+      role={buttonStep ? 'img' : 'progressbar'}
+      aria-label={buttonStep ? (complete ? '实体键已记录' : '等待按键') : '方向录制进度'}
+      aria-live="off"
+      aria-valuemin={buttonStep ? undefined : 0}
+      aria-valuemax={buttonStep ? undefined : 100}
+      aria-valuenow={buttonStep ? undefined : Math.round(progress)}
+      aria-valuetext={buttonStep ? undefined : complete
+        ? '2 秒录制完成，方向已锁定'
+        : `剩余 ${secondsLeft} 秒，共 2 秒`}
+    >
+      <svg className="spacemouse-capture-progress__ring" viewBox="0 0 88 88" aria-hidden="true">
+        <circle className="spacemouse-capture-progress__track" cx="44" cy="44" r="39" />
+        <circle
+          className="spacemouse-capture-progress__fill"
+          cx="44" cy="44" r="39" pathLength="100"
+          strokeDasharray="100"
+          strokeDashoffset={100 - progress}
+          transform="rotate(-90 44 44)"
+        />
+      </svg>
+      {complete ? (
+        <svg className="spacemouse-capture-progress__check" viewBox="0 0 40 40" aria-hidden="true">
+          <path d="M9 20.5 16.5 28 31 12" pathLength="1" />
+        </svg>
+      ) : stage === 'capture-error' ? <TriangleAlert size={24} aria-hidden="true" /> : (
+        <span className="spacemouse-capture-progress__value" aria-hidden="true">
+          <b>{buttonStep ? '单击' : `${secondsLeft}s`}</b>
+          <small>{buttonStep ? '指定按键' : stage === 'sampling' ? '录制中' : '待开始'}</small>
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function SpaceMouseControl({ inputRef, onNotify, isActive = true, menuAnchorRef }) {
   const rootRef = useRef(null);
@@ -222,6 +277,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
   const calibrationFrameRef = useRef(null);
   const pendingCalibrationAxesRef = useRef(zeroSpaceMouseAxes());
   const captureSettleTimerRef = useRef(null);
+  const captureDeadlineTimerRef = useRef(null);
   const pointerGuardUntilRef = useRef(0);
   const pointerGuardTimerRef = useRef(null);
   const pointerGuardActiveRef = useRef(false);
@@ -604,7 +660,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     });
   }, []);
 
-  const updateDraftRecord = useCallback((step, captured) => {
+  const updateDraftRecord = useCallback((step, captured, stage) => {
     setCalibration((current) => {
       const draft = {
         ...current.draft,
@@ -615,7 +671,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
       };
       return {
         ...current,
-        stage: 'captured',
+        stage,
         draft,
         captured,
         captureMeta: {
@@ -635,6 +691,13 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     }
   }, []);
 
+  const clearCaptureDeadlineTimer = useCallback(() => {
+    if (captureDeadlineTimerRef.current !== null) {
+      window.clearTimeout(captureDeadlineTimerRef.current);
+      captureDeadlineTimerRef.current = null;
+    }
+  }, []);
+
   const clearScheduledCalibrationInput = useCallback(() => {
     if (calibrationFrameRef.current) {
       cancelAnimationFrame(calibrationFrameRef.current);
@@ -650,26 +713,13 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
   }), []);
 
   const finalizeCalibrationCapture = useCallback((capture) => {
-    if (!capture || captureRef.current !== capture) return;
+    if (!capture?.recorded || captureRef.current !== capture) return;
     clearCaptureSettleTimer();
-    const captured = summarizeCoupledCapture(capture.samples, {
-      ignoredReleaseSamples: capture.ignoredReleaseSamples,
-    });
     captureRef.current = null;
-    if (!captured) {
-      setCalibration((current) => ({
-        ...current,
-        stage: 'capture-error',
-        captured: null,
-        captureMeta: captureProgressMeta(capture),
-        issues: ['没有锁定到稳定的外推动作峰值，请重新执行当前动作'],
-      }));
-      return;
-    }
-
-    const step = SPACEMOUSE_CALIBRATION_STEPS[capture.stepIndex];
-    updateDraftRecord(step, captured);
-  }, [captureProgressMeta, clearCaptureSettleTimer, updateDraftRecord]);
+    // The direction was committed at the two-second deadline. Returning to
+    // center only gates the next step; it never recalculates the fingerprint.
+    setCalibration((current) => ({ ...current, stage: 'captured' }));
+  }, [clearCaptureSettleTimer]);
 
   const beginStableCenterCheck = useCallback((capture) => {
     if (!capture || captureRef.current !== capture) return;
@@ -699,6 +749,32 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     }, CENTER_SETTLE_MS);
   }, [captureProgressMeta, clearCaptureSettleTimer, finalizeCalibrationCapture]);
 
+  const completeCalibrationRecording = useCallback((capture) => {
+    if (!capture || captureRef.current !== capture || capture.recorded) return;
+    clearCaptureDeadlineTimer();
+    const captured = summarizeCoupledCapture(capture.samples, {
+      ignoredReleaseSamples: capture.ignoredReleaseSamples,
+    });
+    if (!captured) {
+      captureRef.current = null;
+      setCalibration((current) => ({
+        ...current,
+        stage: 'capture-error',
+        captured: null,
+        captureMeta: captureProgressMeta(capture),
+        issues: ['没有锁定到有效的方向信号，请重新采集并按提示保持动作 2 秒'],
+      }));
+      return;
+    }
+    capture.recorded = captured;
+    capture.phase = 'returning';
+    const step = SPACEMOUSE_CALIBRATION_STEPS[capture.stepIndex];
+    updateDraftRecord(step, captured, 'returning');
+    if (maxRawMagnitude(rawAxesRef.current) <= CENTER_THRESHOLD) {
+      beginStableCenterCheck(capture);
+    }
+  }, [beginStableCenterCheck, captureProgressMeta, clearCaptureDeadlineTimer, updateDraftRecord]);
+
   const processCalibrationInput = useCallback((rawAxes) => {
     const capture = captureRef.current;
     if (!capture || capture.kind === 'button') return;
@@ -716,12 +792,25 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
       if (magnitude < MOTION_THRESHOLD) return;
       capture.phase = 'sampling';
       capture.startedAt = performance.now();
-      setCalibration((current) => ({ ...current, stage: 'sampling' }));
+      setCalibration((current) => ({
+        ...current, stage: 'sampling', captureStartedAt: capture.startedAt,
+      }));
+      captureDeadlineTimerRef.current = window.setTimeout(
+        () => completeCalibrationRecording(capture),
+        CAPTURE_DURATION_MS,
+      );
     }
 
     if (capture.phase === 'sampling') {
-      if (magnitude <= CENTER_THRESHOLD) {
-        beginStableCenterCheck(capture);
+      // Enforce the deadline here as well: a delayed timer must never admit a
+      // late HID report into the recorded window.
+      if (performance.now() - capture.startedAt >= CAPTURE_DURATION_MS) {
+        completeCalibrationRecording(capture);
+        return;
+      }
+      if (capture.outboundFrozen || magnitude <= CENTER_THRESHOLD) {
+        capture.outboundFrozen = true;
+        capture.ignoredReleaseSamples += 1;
         return;
       }
 
@@ -740,15 +829,8 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
       if (returningByMagnitude || returningByDirection) {
         // Freeze the outbound peak window before the cap crosses center. Any
         // spring-back reports from this point on are deliberately excluded.
-        capture.phase = 'returning';
-        capture.frozenAt = performance.now();
+        capture.outboundFrozen = true;
         capture.ignoredReleaseSamples += 1;
-        setCalibration((current) => ({
-          ...current,
-          stage: 'returning',
-          captureMeta: captureProgressMeta(capture),
-          issues: [],
-        }));
         return;
       }
 
@@ -792,6 +874,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     beginStableCenterCheck,
     captureProgressMeta,
     clearCaptureSettleTimer,
+    completeCalibrationRecording,
   ]);
 
   const scheduleCalibrationInput = useCallback((rawAxes) => {
@@ -920,7 +1003,11 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     clearPointerGuard(true);
     clearScheduledCalibrationInput();
     clearCaptureSettleTimer();
+    clearCaptureDeadlineTimer();
     captureRef.current = null;
+    if (mountedRef.current) {
+      setCalibration((current) => ({ ...current, open: false }));
+    }
     setRawDisplay(zeroSpaceMouseAxes());
     setSignalActive(false);
     setControlEnabled(true);
@@ -934,6 +1021,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     }
     if (mountedRef.current) setStatus(disconnected ? 'disconnected' : 'idle');
   }, [
+    clearCaptureDeadlineTimer,
     clearCaptureSettleTimer,
     clearPointerGuard,
     clearScheduledDisplay,
@@ -1107,6 +1195,8 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
       clearScheduledDisplay();
       clearScheduledCalibrationInput();
       clearCaptureSettleTimer();
+      clearCaptureDeadlineTimer();
+      captureRef.current = null;
       const device = deviceRef.current;
       if (device && inputHandlerRef.current) {
         device.removeEventListener('inputreport', inputHandlerRef.current);
@@ -1114,6 +1204,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
     };
   }, [
     attachDevice,
+    clearCaptureDeadlineTimer,
     clearCaptureSettleTimer,
     clearScheduledDisplay,
     clearScheduledCalibrationInput,
@@ -1184,6 +1275,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
   const armCalibrationStep = useCallback((stepIndex, { reset = false } = {}) => {
     clearScheduledCalibrationInput();
     clearCaptureSettleTimer();
+    clearCaptureDeadlineTimer();
     const step = SPACEMOUSE_CALIBRATION_STEPS[stepIndex];
     const buttonStep = step?.type === 'button';
     const centered = maxRawMagnitude(rawAxesRef.current) <= CENTER_THRESHOLD;
@@ -1196,6 +1288,8 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
       peakVector: null,
       outboundSampleCount: 0,
       ignoredReleaseSamples: 0,
+      outboundFrozen: false,
+      recorded: null,
     };
     setCalibration((current) => ({
       ...(reset ? initialCalibration() : current),
@@ -1208,9 +1302,10 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
         : { ...current.buttonDraft },
       captured: null,
       captureMeta: null,
+      captureStartedAt: null,
       issues: [],
     }));
-  }, [clearCaptureSettleTimer, clearScheduledCalibrationInput]);
+  }, [clearCaptureDeadlineTimer, clearCaptureSettleTimer, clearScheduledCalibrationInput]);
 
   const startCalibration = useCallback(() => {
     armCalibrationStep(0, { reset: true });
@@ -1281,9 +1376,10 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
   const closeCalibration = useCallback(() => {
     clearScheduledCalibrationInput();
     clearCaptureSettleTimer();
+    clearCaptureDeadlineTimer();
     captureRef.current = null;
     setCalibration((current) => ({ ...current, open: false }));
-  }, [clearCaptureSettleTimer, clearScheduledCalibrationInput]);
+  }, [clearCaptureDeadlineTimer, clearCaptureSettleTimer, clearScheduledCalibrationInput]);
 
   useEffect(() => {
     if (!calibration.open) return undefined;
@@ -1496,6 +1592,7 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
             data-calibration-stage={calibration.stage}
             data-calibration-step={calibration.stepIndex + 1}
             data-auto-advance-ms={AUTO_ADVANCE_DELAY_MS}
+            data-capture-duration-ms={CAPTURE_DURATION_MS}
           >
             <header>
               <div>
@@ -1515,11 +1612,11 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
                 </div>
                 <small>14-STEP CONTROL CALIBRATION</small>
                 <h2>先认按键，再定义每个方向</h2>
-                <p>前两项分别记录用于循环 X / Y / Z 与 YAW / PITCH / ROLL 的左右实体键，随后按 +X 前进、+Y 向左、+Z 向上的语义采集 12 个动作。运行时只放行由按键选中的一个轴；标定仍会读取完整六维指纹，以消除手部耦合与松手回弹。</p>
+                <p>先分别单击左右实体键，再按提示完成 12 个方向动作。开始推动后自动录制 2 秒，按住该方向直到圆环走满、出现对勾，再松手回中。方向取自录制期间的有效动作，松手和回弹不会改变已记录的结果。</p>
                 <div className="spacemouse-calibration__rules">
                   <span><b>01</b>左右键分别单击一次</span>
-                  <span><b>02</b>空间球推至舒适峰值</span>
-                  <span><b>03</b>每项确认 0.5 秒后继续</span>
+                  <span><b>02</b>按方向保持 2 秒</span>
+                  <span><b>03</b>看到对勾后松手回中</span>
                 </div>
                 <button type="button" className="spacemouse-calibration__primary" onClick={startCalibration}>
                   开始 14 项标定 <ChevronRight size={15} />
@@ -1559,21 +1656,29 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
                     || 0
                   }
                   data-center-settle-ms={CENTER_SETTLE_MS}
+                  data-capture-started-at={calibration.captureStartedAt ?? ''}
+                  data-recording-complete={calibration.captured ? 'true' : 'false'}
                 >
-                  <span className="spacemouse-capture-state__orb"><i /><b /></span>
+                  <CalibrationCaptureProgress
+                    key={`${calibration.stepIndex}-${calibration.captureStartedAt ?? 'ready'}`}
+                    stage={calibration.stage}
+                    startedAt={calibration.captureStartedAt}
+                    buttonStep={currentStep.type === 'button'}
+                    complete={Boolean(calibration.captured)}
+                  />
                   <div>
-                    <small>CAPTURE STATE</small>
+                    <small>{currentStep.type === 'button' ? 'BUTTON CAPTURE' : 'DIRECTION CAPTURE · 2 SEC'}</small>
                     <strong>
                       {calibration.stage === 'ready' && '准备采集'}
                       {calibration.stage === 'centering' && '请先松手，让空间球回中'}
                       {calibration.stage === 'armed' && (
                         currentStep.type === 'button'
                           ? '已就绪，请单击指定实体键'
-                          : '已就绪，请执行上方动作'
+                          : '开始推动后自动录制 2 秒'
                       )}
-                      {calibration.stage === 'sampling' && '正在锁定外推动作峰值'}
-                      {calibration.stage === 'returning' && '峰值已冻结，请松手回中'}
-                      {calibration.stage === 'settling' && '正在过滤回弹，请保持松手'}
+                      {calibration.stage === 'sampling' && '正在录制，请保持指定方向'}
+                      {calibration.stage === 'returning' && '录制完成，请松手回中'}
+                      {calibration.stage === 'settling' && '方向已记录，正在等待回中稳定'}
                       {calibration.stage === 'captured' && (
                         calibration.stepIndex === SPACEMOUSE_CALIBRATION_STEPS.length - 1
                           ? '全部配置已捕获 · 即将校验保存'
@@ -1583,6 +1688,9 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
                       )}
                       {calibration.stage === 'capture-error' && '有效动作信号不足'}
                     </strong>
+                    {currentStep.type !== 'button' && !calibration.captured && calibration.stage !== 'capture-error' && (
+                      <span className="spacemouse-capture-hint">圆环走满并出现对勾后即可松手</span>
+                    )}
                     {calibration.captured?.kind === 'button' && (
                       <span>
                         {calibration.captured.role.toUpperCase()} SWITCH · {formatButtonMask(calibration.captured.mask)}
@@ -1595,9 +1703,9 @@ export default function SpaceMouseControl({ inputRef, onNotify, isActive = true,
                           .join(' + ')} · {calibration.captured.sampleCount} SAMPLES
                       </span>
                     )}
-                    {['returning', 'settling'].includes(calibration.stage) && (
-                      <span>
-                        PEAK LOCKED · 已忽略 {calibration.captureMeta?.ignoredReleaseSamples || 0} 个回程/回弹样本
+                    {calibration.captured && currentStep.type !== 'button' && (
+                      <span className="spacemouse-capture-hint">
+                        已锁定 2 秒内的动作，松手和回弹不会改变记录
                       </span>
                     )}
                     {calibration.stage === 'captured' && (
