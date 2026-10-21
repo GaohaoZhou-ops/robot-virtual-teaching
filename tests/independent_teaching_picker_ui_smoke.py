@@ -1,6 +1,6 @@
 from playwright.sync_api import expect, sync_playwright
 
-from independent_teaching_history_ui_smoke import PLY, history
+from independent_teaching_history_ui_smoke import PLY, history, new_group
 from linked_project_ui_smoke import seed_linked, state
 from project_save_target_ui_smoke import switch_mode
 from teaching_transfer_ui_smoke import BASE_URL, CHROME, ready, snapshot
@@ -43,14 +43,7 @@ def run():
             assert state(page) == original
 
             # Same filename, different group: both must remain selectable.
-            with page.expect_file_chooser() as chooser:
-                topbar_action(page, "新增独立示教", exact=True).click()
-            with page.expect_navigation(wait_until="networkidle"):
-                chooser.value.set_files({
-                    "name": source_name, "mimeType": "application/octet-stream",
-                    "buffer": PLY.read_bytes(),
-                })
-            ready(page, "independent")
+            new_group(page, {"name": source_name, "mimeType": "application/octet-stream", "buffer": PLY.read_bytes()})
             second_id = snapshot(page, "independent")["mapId"]
             page.get_by_role("button", name="新建示教任务", exact=True).click()
             task_dialog = page.get_by_role("dialog", name="新建示教任务", exact=True)

@@ -14,21 +14,32 @@ export const identityTransferPose = () => ({
   position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 },
 });
 
+const sameTeachingMap = (expected, actual) => {
+  if (expected?.teachingGroupId || actual?.teachingGroupId) {
+    return Boolean(expected?.teachingGroupId && expected.teachingGroupId === actual?.teachingGroupId
+      && (!expected.sourceHash || !actual.sourceHash || expected.sourceHash === actual.sourceHash));
+  }
+  if (expected?.sourceHash && actual?.sourceHash) return expected.sourceHash === actual.sourceHash;
+  return Boolean(expected?.mapId && expected.mapId === actual?.mapId);
+};
+
+// Placing another group changes the map geometry, but preserves its coordinate
+// frame. Remember those source maps for alignments that have not been placed yet.
+export function isTeachingAlignmentTarget(relation, map, mapTransfer) {
+  if (relation?.kind !== 'alignment' || !map) return false;
+  const sources = mapTransfer?.kind === 'placement' && Array.isArray(mapTransfer.mapFrameSources)
+    ? mapTransfer.mapFrameSources : [];
+  return [map, ...sources].some((candidate) => sameTeachingMap(relation.sourceMap, candidate));
+}
+
 // Keep earlier placements so a restored independent group can reuse its own
 // transform. A new group may use the same PLY, but must not inherit that binding.
 export function boundTeachingRelation(independentMap, independentTransfer, map, mapTransfer) {
-  const sameMap = (expected, actual) => {
-    if (expected?.teachingGroupId || actual?.teachingGroupId) {
-      return Boolean(expected?.teachingGroupId && expected.teachingGroupId === actual?.teachingGroupId
-        && (!expected.sourceHash || !actual.sourceHash || expected.sourceHash === actual.sourceHash));
-    }
-    if (expected?.sourceHash && actual?.sourceHash) return expected.sourceHash === actual.sourceHash;
-    return Boolean(expected?.mapId && expected.mapId === actual?.mapId);
-  };
   const placements = mapTransfer?.kind === 'placement'
     ? [mapTransfer, ...(Array.isArray(mapTransfer.previousPlacements) ? mapTransfer.previousPlacements : [])] : [];
-  const relation = placements.find((item) => item?.kind === 'placement' && sameMap(item.sourceMap, independentMap))
-    || (independentTransfer?.kind === 'extraction' && sameMap(independentTransfer.sourceMap, map)
+  const relation = placements.find((item) => item?.kind === 'placement' && sameTeachingMap(item.sourceMap, independentMap))
+    || ((independentTransfer?.kind === 'extraction' && sameTeachingMap(independentTransfer.sourceMap, map))
+      || isTeachingAlignmentTarget(independentTransfer, map, mapTransfer)
       ? independentTransfer : null);
   return relation?.localToMap ? relation : null;
 }
@@ -280,6 +291,29 @@ const mapIdentity = async (map) => ({
   ...(map.teachingGroupId ? { teachingGroupId: map.teachingGroupId } : {}),
 });
 
+export function hasLoadedMapWorkspace(snapshot) {
+  return Boolean(snapshot?.mode === 'map' && snapshot.map?.mapId
+    && snapshot.map.geometryCacheVersion === 1
+    && snapshot.map.positionBuffer instanceof ArrayBuffer
+    && snapshot.map.positionBuffer.byteLength > 0 && snapshot.map.positionBuffer.byteLength % 12 === 0
+    && snapshot.config?.mapId === snapshot.map.mapId
+    && snapshot.config.config?.project?.workspace?.teachingSpaceMode === 'map');
+}
+
+// A new model can know its map alignment before any geometry or teaching data
+// is placed on the map. Keep this distinct from an extraction/write-back link.
+export async function createTeachingAlignment(target, { localToMap, matrixImports = [] }) {
+  requireValue(hasLoadedMapWorkspace(target), '请先加载完整的地图示教工程，再设置转换矩阵');
+  transferMatrix(localToMap);
+  return {
+    version: 1, kind: 'alignment', id: createId('transfer'),
+    sourceMap: await mapIdentity(target.map),
+    localToMap: structuredClone(localToMap),
+    matrixImports: normalizeTransferMatrixImports(matrixImports),
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function snapshotResult(project, map, mode, transfer, suspended = true) {
   const payload = buildExport({
     ...project, mapData: map,
@@ -368,11 +402,14 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
   const previousTransfer = background.workspace.transfer;
   const priorPlacements = previousTransfer?.kind === 'placement'
     ? [previousTransfer, ...(previousTransfer.previousPlacements || [])] : [];
+  const mapFrameSources = [await mapIdentity(target.map),
+    ...(previousTransfer?.kind === 'placement' && Array.isArray(previousTransfer.mapFrameSources)
+      ? previousTransfer.mapFrameSources : [])];
   const previousPlacements = priorPlacements
     .filter((item) => source.map.teachingGroupId
       ? item.sourceMap.teachingGroupId !== source.map.teachingGroupId
       : item.sourceMap.mapId !== source.map.mapId)
-    .map(({ previousPlacements: earlier, ...placement }) => placement);
+    .map(({ previousPlacements: earlier, mapFrameSources: earlierFrames, ...placement }) => placement);
   map.portableRobotPackage = [source.map.portableRobotPackage, target.map.portableRobotPackage]
     .find((candidate) => candidate?.relativePath === sourceRobot?.relativePath) || null;
   const result = snapshotResult({ ...background,
@@ -387,6 +424,9 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
     },
   }, map, 'map', { version: 1, kind: 'placement', id: createId('transfer'),
     sourceMap: await mapIdentity(source.map), localToMap, createdAt: new Date().toISOString(),
+    mapFrameSources: mapFrameSources.filter((item, index, all) => all.findIndex(
+      (candidate) => candidate.sourceHash === item.sourceHash && candidate.mapId === item.mapId,
+    ) === index),
     ...(previousPlacements.length ? { previousPlacements } : {}),
     matrixImports: normalizeTransferMatrixImports(matrixImports ?? boundTeachingRelation(
       source.map, local.workspace.transfer, target.map, background.workspace.transfer,

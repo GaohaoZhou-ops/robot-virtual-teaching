@@ -411,6 +411,12 @@ playwright/.auth/
 /tests/atlas-linked-project-*/
 /atlas-linked-project-*.[zZ][iI][pP]
 /tests/atlas-linked-project-*.[zZ][iI][pP]
+# New-independent-teaching dialog tests export complete projects and matrices.
+# Cover TMPDIR overrides and packed copies; preserve tests/fixtures/ inputs.
+/atlas-new-independent-*/
+/tests/atlas-new-independent-*/
+/atlas-new-independent-*.[zZ][iI][pP]
+/tests/atlas-new-independent-*.[zZ][iI][pP]
 # Navigation-name display tests export complete projects for ZIP round trips.
 # Keep local TMPDIR workspaces and packed copies out of source/fixture paths.
 /atlas-waypoint-names-*/

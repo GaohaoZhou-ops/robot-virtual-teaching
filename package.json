@@ -15,6 +15,8 @@
     "test:playback": "node tests/teaching_playback_smoke.mjs",
     "test:archive": "node tests/project_archive_smoke.mjs",
     "test:linked-project": "node tests/linked_project_smoke.mjs",
+    "test:project-collection": "node tests/project_collection_smoke.mjs",
+    "test:independent-alignment": "node tests/independent_teaching_alignment_smoke.mjs",
     "test:teaching-data": "node tests/teaching_data_export_smoke.mjs",
     "test:project-save": "node tests/project_save_smoke.mjs",
     "test:directory": "node tests/project_directory_smoke.mjs",

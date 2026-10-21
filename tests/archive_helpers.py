@@ -8,6 +8,11 @@ from pathlib import Path
 PROJECT_CONFIG_PATH = "config/project.json"
 
 
+def active_project_path(manifest):
+    workspace = manifest.get("workspaces", {}).get(manifest.get("activeMode"))
+    return workspace["prefix"] + PROJECT_CONFIG_PATH if workspace else PROJECT_CONFIG_PATH
+
+
 def start_project_download(page, name=None):
     """Use the browser fallback so existing ZIP-content tests get a Download."""
     page.evaluate("window.showSaveFilePicker = undefined")
@@ -23,7 +28,8 @@ def read_exported_project(download):
     path = Path(download.path())
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as archive:
-            return json.loads(archive.read(PROJECT_CONFIG_PATH))
+            manifest = json.loads(archive.read("manifest.json"))
+            return json.loads(archive.read(active_project_path(manifest)))
     return json.loads(path.read_text())
 
 
@@ -33,7 +39,7 @@ def read_exported_archive(download):
     with zipfile.ZipFile(path) as archive:
         names = archive.namelist()
         manifest = json.loads(archive.read("manifest.json"))
-        project_bytes = archive.read(PROJECT_CONFIG_PATH)
+        project_bytes = archive.read(active_project_path(manifest))
         project = json.loads(project_bytes)
         return {
             "path": path,

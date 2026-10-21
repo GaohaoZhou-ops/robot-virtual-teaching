@@ -128,7 +128,7 @@ def check_shared_save_target(browser, errors):
       await store.activateWorkspaceMode(sessionId, 'map');
     }""")
     topbar_action(page, "保存工程", exact=True).click()
-    page.get_by_text("工程保存失败：当前双边绑定关系已变化", exact=False).wait_for()
+    page.get_by_text("工程保存失败：当前工程工作区已变化", exact=False).wait_for()
     assert saved_bytes(page, "linked.zip") == committed
     context.close()
     print("shared_save_target_latest_data_and_replaced_binding_protection=ok", flush=True)
