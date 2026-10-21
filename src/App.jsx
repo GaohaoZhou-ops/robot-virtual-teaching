@@ -36,6 +36,8 @@ import IndependentWorkspaceDialog from './components/IndependentWorkspaceDialog.
 import WorkspaceCacheDialog from './components/WorkspaceCacheDialog.jsx';
 import NewIndependentTeachingDialog from './components/NewIndependentTeachingDialog.jsx';
 import IndependentTeachingNameDialog from './components/IndependentTeachingNameDialog.jsx';
+import IndependentTeachingExportDialog from './components/IndependentTeachingExportDialog.jsx';
+import { buildIndependentMapTeachingExport } from './lib/independentTeachingExport.js';
 import { defaultIndependentTeachingName, validateIndependentTeachingName } from './lib/independentTeachingName.js';
 import Inspector from './components/Inspector.jsx';
 import Map2DView from './components/Map2DView.jsx';
@@ -532,6 +534,8 @@ export default function App() {
   const projectExportBusyRef = useRef(false);
   const projectSaveTargetRevisionRef = useRef(0);
   const [abxExportSnapshot, setAbxExportSnapshot] = useState(null);
+  const [independentExportDialog, setIndependentExportDialog] = useState(null);
+  const teachingExportBusyRef = useRef(false);
   const [abxRouteExport, setAbxRouteExport] = useState(null);
   const [abxImportBusy, setAbxImportBusy] = useState(false);
   const [mapRouteSync, setMapRouteSync] = useState({ available: false, checking: true, reason: '正在检查地图路径…' });
@@ -4192,18 +4196,66 @@ export default function App() {
     } catch (error) { notify(`机器人路径导出失败：${error.message}`, 'error'); }
   };
 
-  const exportTeachingData = () => {
+  const exportIndependentTeachingJson = (payload) => {
+    const data = buildTeachingDataExport(payload);
+    const stamp = data.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
+    downloadJson(data, `atlas-teaching-independent-${stamp}.json`);
+    notify(`示教数据已导出 · ${data.statistics.taskCount} 任务 / ${data.statistics.parkingPointCount} 停车点 / ${data.statistics.poseCount} 机器人姿态 / ${data.statistics.devicePoseCount} 设备姿态`, 'success');
+  };
+
+  const exportTeachingData = async () => {
     if (teachingSpaceMode === 'map') {
       openAbxTeachingExport();
       return;
     }
+    if (teachingExportBusyRef.current || independentExportDialog) return;
+    teachingExportBusyRef.current = true;
     try {
-      const data = buildTeachingDataExport(currentExportPayload());
-      const stamp = data.exportedAt.replace(/[:.]/g, '-').slice(0, 19);
-      downloadJson(data, `atlas-teaching-${teachingSpaceMode}-${stamp}.json`);
-      notify(`示教数据已导出 · ${data.statistics.taskCount} 任务 / ${data.statistics.parkingPointCount} 停车点 / ${data.statistics.poseCount} 机器人姿态 / ${data.statistics.devicePoseCount} 设备姿态`, 'success');
+      const snapshot = { payload: currentExportPayload(), map: mapData, sessionId: sessionIdRef.current,
+        robot: selectedRobot, robotPackage: portableRobotPackageRef.current };
+      if (mapRouteSyncEnabled) {
+        const mapConfig = await loadWorkspaceConfig(snapshot.sessionId, 'map');
+        if (latestWorkspaceRef.current.mapData !== snapshot.map || latestWorkspaceRef.current.teachingSpaceMode !== 'independent'
+          || sessionIdRef.current !== snapshot.sessionId || workspaceSwitchingRef.current) {
+          throw new Error('工程已切换，请在目标独立示教中重新导出');
+        }
+        if (mapRouteSyncStatus(snapshot.map, snapshot.payload.workspace.transfer, mapConfig).available) {
+          setIndependentExportDialog({ ...snapshot, mapConfig, busy: false, error: '' });
+          return;
+        }
+      }
+      exportIndependentTeachingJson(snapshot.payload);
     } catch (error) {
       notify(`示教数据导出失败：${error.message}`, 'error');
+    } finally {
+      teachingExportBusyRef.current = false;
+    }
+  };
+
+  const chooseIndependentTeachingExport = async (format) => {
+    if (!independentExportDialog || teachingExportBusyRef.current) return;
+    const snapshot = independentExportDialog;
+    teachingExportBusyRef.current = true;
+    setIndependentExportDialog({ ...snapshot, busy: true, error: '' });
+    try {
+      if (format === 'json') {
+        exportIndependentTeachingJson(snapshot.payload);
+      } else {
+        // Recheck the authoritative map when ZIP is chosen; another tab may
+        // have replaced it while this dialog was open. Never use a stale link.
+        const mapConfig = await loadWorkspaceConfig(snapshot.sessionId, 'map');
+        if (sessionIdRef.current !== snapshot.sessionId || latestWorkspaceRef.current.mapData !== snapshot.map
+          || latestWorkspaceRef.current.teachingSpaceMode !== 'independent' || workspaceSwitchingRef.current) {
+          throw new Error('工程已切换，请关闭窗口后重新导出');
+        }
+        const payload = buildIndependentMapTeachingExport(snapshot.payload, snapshot.map, mapConfig);
+        setAbxExportSnapshot({ payload, robot: snapshot.robot, robotPackage: snapshot.robotPackage });
+      }
+      setIndependentExportDialog(null);
+    } catch (error) {
+      setIndependentExportDialog({ ...snapshot, busy: false, error: error.message || '示教数据导出失败' });
+    } finally {
+      teachingExportBusyRef.current = false;
     }
   };
 
@@ -6889,6 +6941,10 @@ export default function App() {
       onClose={() => setProjectExportDialog(null)}
     />}
     {abxExportSnapshot && <AbxTeachingExportDialog snapshot={abxExportSnapshot} onClose={() => setAbxExportSnapshot(null)} />}
+    {independentExportDialog && <IndependentTeachingExportDialog state={independentExportDialog}
+      onMapExport={() => chooseIndependentTeachingExport('zip')}
+      onJsonExport={() => chooseIndependentTeachingExport('json')}
+      onClose={() => { if (!teachingExportBusyRef.current) setIndependentExportDialog(null); }} />}
     {abxRouteExport && <AbxRouteExportDialog routes={abxRouteExport} onClose={() => setAbxRouteExport(null)} />}
     <MobileTeachingComputeDock computation={mobileComputation} inWorkbench={appPage === APP_PAGE_WORKBENCH}
       onSave={saveMobileTeachingTask} onPlay={playMobileTeachingTask} saveDisabledReason={mobileSaveDisabledReason}

@@ -19,6 +19,7 @@
     "test:project-collection": "node tests/project_collection_smoke.mjs",
     "test:independent-alignment": "node tests/independent_teaching_alignment_smoke.mjs",
     "test:teaching-data": "node tests/teaching_data_export_smoke.mjs",
+    "test:independent-export": "node tests/independent_teaching_export_smoke.mjs",
     "test:project-save": "node tests/project_save_smoke.mjs",
     "test:directory": "node tests/project_directory_smoke.mjs",
     "test:abx": "node tests/abx_teaching_bundle_smoke.mjs && node tests/abx_teaching_v11_smoke.mjs && node tests/abx_route_identity_smoke.mjs",
