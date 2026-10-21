@@ -405,6 +405,20 @@ playwright/.auth/
 /tests/atlas-file-picker-*/
 /tests/atlas-portable-test-*/
 /tests/atlas-server-result-*/
+# ZIP-import and independent-browser regression workspaces, including packed copies.
+/atlas-import-*/
+/tests/atlas-import-*/
+/atlas-import-*.[zZ][iI][pP]
+/tests/atlas-import-*.[zZ][iI][pP]
+/atlas-independent-test-*/
+/tests/atlas-independent-test-*/
+/atlas-independent-test-*.[zZ][iI][pP]
+/tests/atlas-independent-test-*.[zZ][iI][pP]
+# Browser-state snapshots contain complete local teaching results.
+/atlas-work-sync-*.json
+/tests/atlas-work-sync-*.json
+/atlas-independent-*.json
+/tests/atlas-independent-*.json
 # Linked-workspace import/export tests can contain both complete projects.
 # Cover local TMPDIR overrides and packed copies without hiding fixture inputs.
 /atlas-linked-project-*/
@@ -512,6 +526,10 @@ playwright/.auth/
 /tests/atlas-abx-export-*/
 /tests/atlas-abx-reference-*/
 /tests/atlas-abx-ui-*/
+/atlas-abx-bundle-*/
+/tests/atlas-abx-bundle-*/
+/atlas-abx-bundle-*.[zZ][iI][pP]
+/tests/atlas-abx-bundle-*.[zZ][iI][pP]
 /atlas-abx-exchange-*.[zZ][iI][pP]
 /tests/atlas-abx-exchange-*.[zZ][iI][pP]
 /robot-export-*.png
@@ -650,6 +668,12 @@ Desktop.ini
 /pre-teaching-pose.json
 /position_[0-9]*.txt
 /1014平地路网终版.json
+/1019平地路网终版测试.json
+# Supplied robot source, extracted copies and locally repackaged variants.
+/ABXBrainSystem/
+/ABXBrainSystem.[zZ][iI][pP]
+/ABXBrainSystem-*/
+/ABXBrainSystem-*.[zZ][iI][pP]
 /380B平地巡检.[zZ][iI][pP]
 /380B平地巡检/
 

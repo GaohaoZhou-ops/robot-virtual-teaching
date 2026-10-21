@@ -7764,9 +7764,19 @@ input[type="number"]::-webkit-inner-spin-button {
 .start-page__resume-copy strong { margin-top: 4px; overflow: hidden; color: #d6e3e0; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .start-page__resume-copy span { display: flex; align-items: center; gap: 8px; margin-top: 5px; color: #617779; font: 8px "SFMono-Regular", Menlo, monospace; }
 .start-page__resume-copy i { width: 1px; height: 8px; background: #34494b; }
-.start-page__resume > button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 13px; border: 1px solid rgba(113, 149, 152, 0.22); color: #839799; background: rgba(11, 25, 29, 0.76); font-size: 9px; cursor: pointer; }
-.start-page__resume > button:hover { border-color: rgba(var(--start-accent-rgb), 0.48); color: #e5efed; }
-.start-page__resume > .start-page__resume-action { min-width: 124px; border-color: rgba(var(--start-accent-rgb), 0.42); color: #e4edeb; background: rgba(var(--start-accent-rgb), 0.11); }
+.start-page__resume > button,
+.start-page .work-sync__button,
+.start-page .start-page__global-reset { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 13px; border: 1px solid rgba(113, 149, 152, 0.22); border-radius: 0; color: #839799; background: rgba(11, 25, 29, 0.76); font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 9px; font-weight: 400; letter-spacing: 0; white-space: nowrap; cursor: pointer; }
+.start-page__resume > .start-page__resume-action,
+.start-page .start-page__global-reset,
+.start-page .work-sync .work-sync__button { min-width: 124px; border-color: rgba(var(--start-accent-rgb), 0.42); color: #e4edeb; background: rgba(var(--start-accent-rgb), 0.11); }
+.start-page__resume > button:hover,
+.start-page .start-page__global-reset:hover:not(:disabled),
+.start-page .work-sync__button:hover:not(:disabled) { border-color: rgba(var(--start-accent-rgb), 0.48); color: #e5efed; }
+.start-page .work-sync__button:disabled,
+.start-page .start-page__global-reset:disabled { opacity: 0.42; }
+.start-page .work-sync__button:focus-visible,
+.start-page .start-page__global-reset:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
 
 .start-page__footer {
   display: flex;
@@ -8141,10 +8151,18 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .project-load-history li > svg { color: rgb(var(--project-load-accent)); }
 .project-load-history li > div { display: grid; min-width: 0; gap: 5px; }
-.project-load-history li > .independent-workspace-actions { display: flex; align-items: center; gap: 6px; }
+.project-load-history li > .independent-workspace-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .independent-workspace-actions > button { flex-shrink: 0; white-space: nowrap; }
 .project-load-history li strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .project-load-history li span { color: #839a9b; font-size: 9px; overflow-wrap: anywhere; }
+.project-load-history li[data-workspace-kind="current"] {
+  --project-load-accent: 244, 201, 93;
+  border-color: rgba(var(--project-load-accent), 0.55);
+  background: rgba(var(--project-load-accent), 0.18);
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+.project-load-history li[data-workspace-kind="current"] strong { color: var(--amber); }
+.project-load-history li[data-workspace-kind="current"] span { color: #d4c79f; }
 .project-load-history button {
   display: inline-flex;
   gap: 8px;
@@ -13749,6 +13767,17 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .loading-module small { color: var(--muted-2); font-size: 8px; }
+
+.loading-module.is-project-import { width: min(460px, calc(100vw - 40px)); padding: 22px; }
+.loading-module.is-project-import .loading-module__top span { font-size: 13px; }
+.loading-module.is-project-import .loading-module__top strong { font-size: 12px; font-variant-numeric: tabular-nums; }
+.loading-module.is-project-import .loading-track { height: 4px; margin: 18px 0 14px; }
+.loading-module.is-project-import .loading-track span { transition: width 240ms ease-out; }
+.loading-module .loading-module__source { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #adc3c3; }
+.loading-module .loading-module__stage { display: block; margin-top: 7px; font-size: 10px; color: #8ca7aa; }
+@media (prefers-reduced-motion: reduce) {
+  .loading-module.is-project-import .loading-track span { transition: none; }
+}
 
 .toast-message {
   position: fixed;

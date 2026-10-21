@@ -1,4 +1,5 @@
 """Import a repeated-label robot route, teach at N31/N62, and inspect the ZIP."""
+import base64
 import json
 from pathlib import Path
 import tempfile
@@ -10,7 +11,7 @@ from topbar_tools_helpers import topbar_action
 
 
 def run():
-    reference = Path(__file__).resolve().parent.parent / '1014平地路网终版.json'
+    reference = Path(__file__).resolve().parent.parent / '1019平地路网终版测试.json'
     if reference.exists():
         route = json.loads(reference.read_text())
     else:
@@ -52,7 +53,7 @@ def run():
             page.locator('.three-canvas[data-robot-model-state="loaded"]').wait_for()
             page.get_by_role('tab', name='路径与导航', exact=True).click()
             page.get_by_label('机器人路径文件', exact=True).set_input_files(dict(
-                name='1014平地路网终版.json', mimeType='application/json',
+                name='1019平地路网终版测试.json', mimeType='application/json',
                 buffer=json.dumps(route, ensure_ascii=False).encode()))
             search = page.get_by_label('搜索导航点', exact=True)
             for node_id in [1, 31, 62, 98]:
@@ -91,6 +92,7 @@ def run():
                 page.screenshot(path='/tmp/atlas-abx-route-identity-error.png', full_page=True)
                 raise AssertionError(dialog.inner_text()) from error
             table = dialog.get_by_role('table', name='路网导航目标预览')
+            expect(dialog.get_by_label('随包路网')).to_contain_text(f"1 个路网 · {len(route['nodes'])} 个节点 · {len(route['edges'])} 条有向边")
             expect(table).to_contain_text('N31 · 停车点1')
             expect(table).to_contain_text('N62 · 停车点1')
             with page.expect_download() as pending:
@@ -102,6 +104,11 @@ def run():
                 rows = [json.loads(line) for line in bundle.read(manifest['tasks'][0]['file']).splitlines()]
                 assert [row['name'] for row in rows if row['type'] == 'parking'] == ['N31 · 停车点1', 'N62 · 停车点1']
                 assert [row['record']['node_id'] for row in rows if row.get('record', {}).get('type') == 'route_navigation'] == ['N31', 'N62']
+                assert rows[0]['version'] == 23
+                context = json.loads(b''.join(base64.b64decode(row['data']) for row in rows if row['type'] == 'navigation_chunk'))
+                assert context['routes'] == [route], 'the complete graph, not just visited stations, must be embedded'
+                assert json.loads(bundle.read(manifest['tasks'][0]['navigation']['routes'][0])) == route
+                assert json.loads(bundle.read('navigation.json'))['routeImportIncluded'] is True
             saved_route = page.evaluate("""async () => {
               const store = await import('/src/lib/sessionStore.js');
               const saved = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'map');

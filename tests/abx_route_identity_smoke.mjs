@@ -122,7 +122,7 @@ ambiguous.virtualTeaching.tasks[0].parkingPoints[0].name = abxNodeName(62, '停�
 assert.equal(taskRecords(await buildAbxTeachingArchive(ambiguous, { robotPackage }))
   .find((record) => record.record?.type === 'route_navigation').record.node_id, 'N62');
 
-const referencePath = process.env.ABX_ROUTE_REFERENCE || '1014平地路网终版.json';
+const referencePath = process.env.ABX_ROUTE_REFERENCE || '1019平地路网终版测试.json';
 let reference;
 try { reference = await readFile(referencePath); } catch (error) {
   if (error.code !== 'ENOENT' || process.env.ABX_ROUTE_REFERENCE) throw error;
@@ -131,6 +131,6 @@ if (reference) {
   const route = JSON.parse(reference);
   await checkRoute(route);
   assert.equal(sha(await readFile(referencePath)), sha(reference));
-  console.log(`1014 reference: ${route.nodes.length} nodes / ${route.edges.length} edges unchanged; N1/N31/N62/N98 map to the correct work areas`);
+  console.log(`${referencePath}: ${route.nodes.length} nodes / ${route.edges.length} edges unchanged; N1/N31/N62/N98 map to the correct work areas`);
 }
 console.log('Route identity, naming, cache migration, no renumbering, independent projection and unmatched/ambiguous target rejection passed');

@@ -18,7 +18,10 @@ struct VisionImmersiveView: View {
                 }
             }
         }
-        .gesture(SpatialTapGesture().targetedToAnyEntity().onEnded { value in
+        // Resolve placement targets before recognizing the gesture. An all-entity
+        // gesture also competes with the attachment's native button/toggle input,
+        // even if its onEnded handler later ignores the attachment by name.
+        .simultaneousGesture(SpatialTapGesture().targetedToEntity(spatial.planesRoot).onEnded { value in
             guard value.entity.name == "atlas-surface" else { return }
             let point = value.convert(value.location3D, from: .local, to: .scene)
             spatial.place(at: point)

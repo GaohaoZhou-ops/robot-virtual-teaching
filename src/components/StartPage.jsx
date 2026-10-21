@@ -12,6 +12,7 @@ import {
   ScanLine,
   Server,
   ShieldCheck,
+  Trash2,
 } from 'lucide-react';
 
 const normalizeMode = (value) => value === 'independent' ? 'independent' : 'map';
@@ -22,11 +23,14 @@ export default function StartPage({
   sessionState,
   projectDirectoryState,
   busy = false,
+  syncControl,
   onNewProject,
   onLoadProject,
   onContinue,
   onOpenTeachingData,
   onOpenModelEditor,
+  onGlobalReset,
+  resetDisabled = false,
 }) {
   const [selectedMode, setSelectedMode] = useState(() => normalizeMode(initialMode));
   const modeTouchedRef = useRef(false);
@@ -68,6 +72,10 @@ export default function StartPage({
             {sessionReady ? '工作会话就绪' : '正在恢复工作会话'}
           </span>
           <span><Server size={12} /> LAN :21990</span>
+          {syncControl}
+          <button type="button" className="start-page__global-reset" disabled={controlsDisabled || resetDisabled}
+            title={resetDisabled ? '请等待当前加载、保存或示教操作完成后重置' : '清空当前设备的示教与模型编辑缓存'}
+            onClick={onGlobalReset}><Trash2 size={13} />全局重置</button>
         </div>
         {hasWorkspace && (
           <button

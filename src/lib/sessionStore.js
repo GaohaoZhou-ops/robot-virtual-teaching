@@ -26,6 +26,21 @@ const ALL_WORKSPACE_KEYS = [
 
 let databasePromise = null;
 
+// Retain the last shared baseline separately from the user's live workspace.
+// Reauthorization can then upload offline work without restoring stale poses.
+export async function loadWorkSyncCheckpoint(projectKey) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readonly');
+  return (await requestResult(transaction.objectStore(STORE_NAME).get(`work-sync:${projectKey}`)))?.checkpoint || null;
+}
+
+export async function saveWorkSyncCheckpoint(checkpoint) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  transaction.objectStore(STORE_NAME).put({ key: `work-sync:${checkpoint.projectKey}`, checkpoint });
+  await transactionComplete(transaction);
+}
+
 const MAP_BUFFER_FIELDS = ['positionBuffer', 'colorBuffer', 'indexBuffer'];
 const MAX_INLINE_MAP_BYTES = 64 * 1024 * 1024;
 
@@ -469,14 +484,17 @@ export async function fetchServiceSession() {
   return payload;
 }
 
-export async function prepareWorkspaceSession(sessionId) {
+export async function prepareWorkspaceSession(sessionId, { preserveExisting = false } = {}) {
   const database = await openDatabase();
   const records = await readWorkspaceRecords(database);
   const { meta, recoveryMeta } = records;
+  // Browser work belongs to this device, not to the lifetime of the LAN server.
+  if (preserveExisting && meta?.sessionId) sessionId = meta.sessionId;
 
   if (meta?.sessionId !== sessionId) {
     const recovery = await archiveWorkspaceAndReplaceSession(database, sessionId, records);
     return {
+      sessionId,
       restarted: Boolean(meta?.sessionId),
       map: null,
       config: null,
@@ -524,6 +542,7 @@ export async function prepareWorkspaceSession(sessionId) {
   }
 
   return {
+    sessionId,
     restarted: false,
     map: await unpackMapRecord(map),
     config,
@@ -903,6 +922,81 @@ export async function renameIndependentWorkspace(sessionId, { historyId = null, 
   }
   await completion;
   return teachingName;
+}
+
+// Delete one logical independent workspace atomically, including its stored
+// geometry. The map workspace and other independent groups are untouched.
+export async function deleteIndependentWorkspace(sessionId, { historyId = null, mapId }) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  try {
+    const [meta, index, history, recovery, keys] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(INDEPENDENT_HISTORY_KEY)), requestResult(store.get('recovery-config')),
+      requestResult(store.getAllKeys()),
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId) {
+      throw new Error('工作会话已变化，请刷新页面后重试');
+    }
+    const entry = historyId ? history?.entries?.find((item) => item.historyId === historyId) : index.modes?.independent;
+    if (!mapId || !entry || entry.mapId !== mapId || (historyId && index.modes?.independent?.mapId === mapId)) {
+      throw new Error('所选独立示教缓存已变化，请重新打开列表后重试');
+    }
+    const removed = (history?.entries || []).filter((item) => historyId ? item.historyId === historyId : item.mapId === mapId);
+    for (const item of removed) {
+      store.delete(historyMapKey(item.historyId));
+      store.delete(historyConfigKey(item.historyId));
+    }
+    store.put({ key: INDEPENDENT_HISTORY_KEY, entries: (history?.entries || []).filter((item) => !removed.includes(item)) });
+    if (!historyId) {
+      store.delete(workspaceMapKey('independent'));
+      store.delete(workspaceConfigKey('independent'));
+      store.put({ ...index, modes: { ...index.modes, independent: null }, updatedAt: Date.now() });
+    }
+    if (recovery?.mapId === mapId && inferWorkspaceMode(null, recovery) === 'independent') {
+      RECOVERY_KEYS.forEach((key) => store.delete(key));
+      store.put({ ...meta, activatedRecoveryId: null });
+    }
+    for (const key of keys) {
+      if (typeof key !== 'string' || !key.startsWith('work-sync:')) continue;
+      try {
+        const [mode, identity] = JSON.parse(key.slice('work-sync:'.length));
+        if (mode === 'independent' && identity === mapId) store.delete(key);
+      } catch { /* Ignore unrelated checkpoint formats. */ }
+    }
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  if (!historyId) clearWorkspaceViewState('independent');
+}
+
+// Explicit user reset differs from session recovery: history, recovery copies
+// and synchronization checkpoints must all be removed, not archived again.
+export async function clearAllWorkspaceCaches(sessionId) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  try {
+    const meta = await requestResult(store.get('meta'));
+    if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
+    store.clear();
+    store.put({ key: 'meta', sessionId, activeMode: 'map', startedAt: Date.now() });
+    store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode: 'map', modes: { map: null, independent: null }, updatedAt: Date.now() });
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  clearWorkspaceViewState();
+  try { browserStorage()?.removeItem('atlas-ipad-handoffs-v1'); } catch { /* Storage can be disabled. */ }
+  try { globalThis.sessionStorage?.removeItem('atlas-project-import-progress'); } catch { /* Storage can be disabled. */ }
 }
 
 // Archive the outgoing group and activate a new/restored group atomically.

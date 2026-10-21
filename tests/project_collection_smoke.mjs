@@ -19,7 +19,11 @@ for (const mode of ['map', 'independent']) {
   assert.equal(archive.manifest.statistics.workspaceCount, 4);
   assert.equal(archive.manifest.statistics.independentWorkspaceCount, 3);
   assert.equal(archive.manifest.statistics.independentHistoryCount, 2);
-  const restored = await readProjectArchive(archive.bytes);
+  const importProgress = [];
+  const restored = await readProjectArchive(archive.bytes, { onProgress: ({ progress }) => importProgress.push(progress) });
+  assert.equal(importProgress.at(-1), 1);
+  assert.ok(importProgress.every((value, index) => value >= 0 && value <= 1
+    && (!index || value >= importProgress[index - 1])), 'Historical groups must share one forward-only progress range');
   const prepared = prepareWorkspaceCollectionImport(restored.workspaceCollection);
   assert.equal(prepared.activeMode, mode);
   assert.equal(linkedWorkspaceRelation(prepared.workspaces), null, 'Same file does not make group C bound');

@@ -10,6 +10,7 @@ import {
   PROJECT_ARCHIVE_VERSION,
   buildProjectArchive,
   readProjectArchive,
+  readProjectFile,
 } from '../src/lib/projectArchive.js';
 import {
   normalizeRobotDescriptor,
@@ -206,6 +207,14 @@ const legacyArchive = zipSync({
 const restoredLegacy = await readProjectArchive(legacyArchive);
 assert.equal(restoredLegacy.portable, false);
 assert.equal(restoredLegacy.resources.map, null);
+// File imports pass the Blob to the decompressor, and ZIP signatures still
+// take precedence when the file has a misleading extension.
+for (const name of ['project.zip', 'project.json']) {
+  const imported = await readProjectFile(new File([legacyArchive], name));
+  assert.deepEqual(imported.payload, restoredLegacy.payload);
+}
+assert.deepEqual((await readProjectArchive(new Blob([legacyArchive]))).payload, restoredLegacy.payload);
+await assert.rejects(readProjectFile(new File(['not a zip'], 'broken.zip')));
 
 const originalBytes = strToU8(`ply
 format ascii 1.0

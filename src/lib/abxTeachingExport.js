@@ -5,7 +5,7 @@ import { appendImportedAbxTasks } from './abxTeachingRoundtrip.js';
 import { buildAbxV11Files } from './abxTeachingV11.js';
 import { ABX_VERSION as VERSION, ABX_JOINT_ORDER as JOINT_ORDER, ABX_JOINT_NAMES as JOINT_NAMES } from './abxFormat.js';
 
-// Contract: workspace.zip / ABXBrainSystem, teaching_store.py v23.
+// Contract: supplied ABXBrainSystem.zip, teaching_store.py v23.
 const MAX_LINE_BYTES = 12000;
 const NAVIGATION_CHUNK_BYTES = 4096;
 const POSITION_TOLERANCE_M = 1e-6;
@@ -85,7 +85,7 @@ const sameTarget = (a, b) => a && b
   && Math.hypot(a.x_m - b.x_m, a.y_m - b.y_m) <= POSITION_TOLERANCE_M
   && yawDistance(a.yaw_rad, b.yaw_rad) <= YAW_TOLERANCE_RAD;
 
-const navigationNotice = '导航与 Pose 按示教顺序导入。执行前请在机器人路网管理中核对连线、定位地图并切换使用导入的路网。';
+const navigationNotice = '在大脑“示教任务 → 导入”选择此 ZIP，任务及其路网会一并导入并自动关联。导入不会切换当前路网或定位地图；执行前请核对连线和定位地图，并启用对应路网。';
 
 // Route text limits are UTF-8 bytes, unlike teaching labels (Unicode characters).
 const routeLabel = (value) => {
@@ -211,16 +211,16 @@ const line = (value) => {
 };
 
 const instructions = [
-  'ABX 扩展示教记录（工程备份）',
+  'ABX 机器人示教与路网',
   '',
-  '1. 此 abx/ 目录保留扩展记录，适用于支持 v23 的机器人程序。',
-  '   使用 380B 平地巡检 v11 格式的机器人，请通过「导出机器人示教」生成专用 robot-teaching-*.zip。',
-  '   原生任务使用 abx-teaching-task v23，导出清单使用 abx-teaching-export v1。',
+  '1. 在大脑“示教任务 → 导入”选择 robot-teaching-*.zip；完整工程备份中的本目录仅供提取参考。',
+  '   适用于提供的 ABXBrainSystem 源码（teaching_store.py v23），ZIP 清单为 abx-teaching-export v1。',
+  '   任务使用支持内嵌路网的 v23；没有附加路网的旧版原生任务保持原格式与原始记录。',
   '2. ' + navigationNotice,
   '   每个非空停车点的首个 Pose 前，以及同一停车点内底盘目标变化处，插入 route_navigation 步骤。',
   '   路网以 navigation_chunk 内嵌在任务文件中；routes/ 为副本，navigation.json 保存节点及步骤映射。',
   '   导入器自动分配新任务/路网 ID，不覆盖已存在的路网，也不激活路网或切换定位地图。',
-  '   导出路网的 scene_name 留空；点云文件名不能冒充现场定位场景名称，切换使用时由机器人绑定。',
+  '   已导入路网保留完整节点、连线、原始 N 编号及 scene_name；新建虚拟路网的 scene_name 留空，使用时由机器人绑定。',
   '   连线只来自工程中已有路径，新增 Pose 目标不会自动连线；未连通的目标需在路网管理中补齐可通行路径。',
   '3. 坐标使用机器人 map 坐标系，X/Y 单位 m，yaw 单位 rad，范围 [-π, π]，逆时针为正。',
   '   现场地图须与虚拟工程地图对齐；原始 Z/roll/pitch、路径及逐边速度约束保存在 source-mapping.json。',
@@ -415,13 +415,13 @@ const compileExport = async (payload, robotPackage) => {
 
 // Conversion is atomic: an incompatible task never leaves a partial native
 // bundle, while the existing Atlas backup remains available to the operator.
-export async function buildAbxTeachingExport(payload, { robotPackage = null } = {}) {
+export async function buildAbxTeachingExport(payload, { robotPackage = null, attachLegacyRoutes = false } = {}) {
   const mode = payload.teachingSpace?.mode || payload.workspace?.teachingSpaceMode || payload.map?.teachingSpaceMode || 'map';
   if (mode !== 'map') return null;
   try {
     const virtualPayload = { ...payload, virtualTeaching: { ...payload.virtualTeaching,
       tasks: (payload.virtualTeaching?.tasks || []).filter((task) => !task.abx) } };
-    return await appendImportedAbxTasks(await compileExport(virtualPayload, robotPackage), payload);
+    return await appendImportedAbxTasks(await compileExport(virtualPayload, robotPackage), payload, { attachLegacyRoutes });
   } catch (error) {
     const summary = { status: 'blocked', message: error.message };
     return { summary, files: {
@@ -431,15 +431,40 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null } = 
   }
 }
 
-// The deployed robot uses the v11 exchange package supplied by the user.
-// Rich native records remain in project backups; only the supported v11
-// contract goes into this directly importable robot ZIP.
+// Use the supplied robot's existing native navigation importer. Keep explicit
+// v11 conversion available for older installations, without dropping routes in
+// the normal UI export or stripping newer native actions.
 export async function buildAbxTeachingArchive(payload, options = {}) {
-  const result = await buildAbxTeachingExport(payload, options);
+  const taskVersion = options.taskVersion ?? VERSION;
+  requireExport([11, VERSION].includes(taskVersion), '不支持的机器人示教导出版本');
+  const result = await buildAbxTeachingExport(payload, { ...options, attachLegacyRoutes: taskVersion !== 11 });
   requireExport(result, '请先将独立示教转换到地图示教，再导出机器人示教数据');
   requireExport(result.summary.status === 'ready', result.summary.message);
   requireExport(result.summary.taskCount >= 1 && result.summary.taskCount <= 100, '机器人示教导入包需要包含 1–100 个任务');
-  const compatible = await buildAbxV11Files(result);
+  let compatible;
+  if (taskVersion === 11) compatible = await buildAbxV11Files(result);
+  else {
+    const files = Object.fromEntries(Object.entries(result.files).map(([name, data]) => [name.slice(4), data]));
+    const manifest = JSON.parse(new TextDecoder().decode(files['manifest.json']));
+    const navigation = JSON.parse(new TextDecoder().decode(files['navigation.json']));
+    const includedRoutes = new Map(manifest.tasks.flatMap((task) => (task.navigation?.routes || []).map((file) => {
+      const route = JSON.parse(new TextDecoder().decode(files[file]));
+      return [route.id, route];
+    })));
+    const taskVersions = [...new Set(manifest.tasks.map((task) =>
+      JSON.parse(new TextDecoder().decode(files[task.file]).split('\n', 1)[0]).version))];
+    const notice = includedRoutes.size ? navigationNotice
+      : '在大脑“示教任务 → 导入”选择此 ZIP。此包没有可关联的路网；旧版任务中的站点编号保持不变，执行前请核对机器人当前启用的路网。';
+    Object.assign(navigation, { routeImportIncluded: includedRoutes.size > 0, taskVersions,
+      taskVersion: taskVersions.length === 1 ? taskVersions[0] : null, notice, warnings: result.summary.warnings });
+    files['navigation.json'] = jsonBytes(navigation);
+    files['README.txt'] = bytes(`${instructions.join('\n')}\n本次导出：${notice}\n${result.summary.warnings.join('\n')}\n`);
+    const summary = { ...result.summary, routeImportIncluded: navigation.routeImportIncluded,
+      routeCount: includedRoutes.size, nodeCount: [...includedRoutes.values()].reduce((sum, route) => sum + route.nodes.length, 0),
+      edgeCount: [...includedRoutes.values()].reduce((sum, route) => sum + route.edges.length, 0),
+      taskVersion: navigation.taskVersion, notice, manifestFile: 'manifest.json', navigationFile: 'navigation.json' };
+    compatible = { files, summary, navigation, navigationBytes: files['navigation.json'] };
+  }
   const archiveBytes = zipSync(compatible.files, { level: 0 });
   return { ...compatible, bytes: archiveBytes, byteLength: archiveBytes.length,
     blob: new Blob([archiveBytes], { type: 'application/zip' }) };

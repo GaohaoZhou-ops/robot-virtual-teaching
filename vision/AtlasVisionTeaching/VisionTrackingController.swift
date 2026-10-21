@@ -28,7 +28,8 @@ final class VisionTrackingController: ObservableObject {
     let root = Entity()
     let objectRoot = Entity()
     let panelRoot = Entity()
-    private let planesRoot = Entity()
+    // Only this hierarchy participates in the immersive placement gesture.
+    let planesRoot = Entity()
     private let frustum = Entity()
     private var markers: Entity?
     private var arSession: ARKitSession?

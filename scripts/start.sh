@@ -44,7 +44,15 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$APP_PORT" -sTCP:LISTEN >/
 fi
 
 cd "$PROJECT_DIR"
-nohup "$VITE_BIN" --host "$BIND_HOST" --port "$APP_PORT" --strictPort >"$LOG_FILE" 2>&1 &
+# Serve an isolated build so source edits and ordinary dist/ builds never
+# invalidate a colleague's open teaching workspace.
+SERVICE_BUILD_DIR="$PROJECT_DIR/build/service"
+echo "正在构建示教服务…"
+"$VITE_BIN" build --outDir "$SERVICE_BUILD_DIR" --emptyOutDir false >"$LOG_FILE" 2>&1 || {
+  echo "服务构建失败，请查看日志: $LOG_FILE" >&2
+  exit 1
+}
+nohup "$VITE_BIN" preview --outDir "$SERVICE_BUILD_DIR" --host "$BIND_HOST" --port "$APP_PORT" --strictPort >>"$LOG_FILE" 2>&1 &
 SERVICE_PID=$!
 printf '%s %s %s\n' "$SERVICE_PID" "$APP_PORT" "$BIND_HOST" > "$PID_FILE"
 
