@@ -13776,6 +13776,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .toast-message {
   position: fixed;
+  pointer-events: none;
   left: 50%;
   bottom: 43px;
   z-index: 80;

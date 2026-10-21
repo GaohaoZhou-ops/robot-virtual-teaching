@@ -111,6 +111,7 @@ const statusMeta = {
 
 export default function Inspector({
   mapData,
+  pageRequest = null,
   teachingSpaceMode = 'map',
   waypoints,
   edges,
@@ -327,6 +328,14 @@ export default function Inspector({
       setActivePage('navigation');
     }
   }, [selectedEdgeId, selectedWaypointId, selectedWaypoint?.id, selectedWaypoint?.teachingTaskId]);
+
+  useEffect(() => {
+    if (!pageRequest) return;
+    setActivePage(pageRequest.page);
+    if (pageRequest.cameraSide === 'left' || pageRequest.cameraSide === 'right') {
+      setActiveTeachingCameraSide(pageRequest.cameraSide);
+    }
+  }, [pageRequest]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;

@@ -91,6 +91,7 @@ import {
   serializeRobotCollisionProxies,
 } from '../lib/robotCollision.js';
 import { createRobotCollisionBackend } from '../lib/robotCollisionBackend.js';
+import { buildWaypointLabels } from '../lib/waypointLabels.js';
 
 const RESOLUTION_LEVELS = [
   { ratio: 0.05, label: '极速', tone: 'turbo' },
@@ -1532,6 +1533,7 @@ export default function PointCloudViewer({
   showWaypointNames = true,
   onShowWaypointNamesChange,
   onSelectWaypoint,
+  onInspectorPageRequest,
   onSelectEdge,
   onClearSelection,
   focusRequest,
@@ -1589,6 +1591,7 @@ export default function PointCloudViewer({
   const routeGroupRef = useRef(null);
   const waypointGroupRef = useRef(null);
   const waypointNameElementsRef = useRef(new Map());
+  const waypointLabels = useMemo(() => buildWaypointLabels(waypoints), [waypoints]);
   const mapOriginGroupRef = useRef(null);
   const mapOriginLabelRef = useRef(null);
   const visionCoverageGroupRef = useRef(null);
@@ -1626,6 +1629,7 @@ export default function PointCloudViewer({
   const colorModeRef = useRef(colorMode);
   const renderActiveRef = useRef(Boolean(isActive));
   const onSelectWaypointRef = useRef(onSelectWaypoint);
+  const onInspectorPageRequestRef = useRef(onInspectorPageRequest);
   const onSelectEdgeRef = useRef(onSelectEdge);
   const onClearSelectionRef = useRef(onClearSelection);
   const pressedKeysRef = useRef(new Set());
@@ -1706,6 +1710,7 @@ export default function PointCloudViewer({
   colorModeRef.current = colorMode;
   renderActiveRef.current = Boolean(isActive);
   onSelectWaypointRef.current = onSelectWaypoint;
+  onInspectorPageRequestRef.current = onInspectorPageRequest;
   onSelectEdgeRef.current = onSelectEdge;
   onClearSelectionRef.current = onClearSelection;
   initialViewRef.current = initialView;
@@ -3768,6 +3773,8 @@ export default function PointCloudViewer({
     const raycaster = new THREE.Raycaster();
     const normalizedPointer = new THREE.Vector2();
     let pointerStart = null;
+    let lastPointerSelection = null;
+    let firstClickWaypoint = null;
     let chassisPointerDrag = null;
 
     const clearProjectionPan = () => {
@@ -4234,6 +4241,7 @@ export default function PointCloudViewer({
 
     const onPickPointerDown = (event) => {
       if (event.button !== 0 && event.button !== 2) return;
+      lastPointerSelection = null;
       claimKeyboardFocus('pointer');
       const shiftPressed =
         event.shiftKey
@@ -4362,6 +4370,7 @@ export default function PointCloudViewer({
       }
 
       const selection = selectionAtPointer(event);
+      lastPointerSelection = selection;
       renderer.domElement.dataset.lastPickType = selection?.type || 'none';
       renderer.domElement.dataset.lastPickId = selection?.id || '';
       if (selection?.type === 'waypoint') onSelectWaypointRef.current?.(selection.id);
@@ -4421,11 +4430,32 @@ export default function PointCloudViewer({
       }
       return null;
     };
-    const onRobotDoubleClick = (event) => {
+    const onSceneClick = (event) => {
+      if (event.detail === 1) {
+        firstClickWaypoint = lastPointerSelection?.type === 'waypoint'
+          ? lastPointerSelection : null;
+      }
+    };
+    const onSceneDoubleClick = (event) => {
+      // The first click can focus a teaching parking point and move the camera
+      // before the second click. Keep that gesture's original waypoint target.
+      const waypoint = firstClickWaypoint || selectionAtPointer(event);
+      firstClickWaypoint = null;
       if (!renderActiveRef.current || robotTrajectoryActiveRef.current) return;
-      if (robotLoadStateRef.current?.status !== 'loaded') return;
       if (transformControls.dragging || transformControls.axis) return;
-      const side = endEffectorAtPointer(event);
+      const robotLoaded = robotLoadStateRef.current?.status === 'loaded';
+      const side = robotLoaded ? endEffectorAtPointer(event) : null;
+      // A repeated double-click must also reopen navigation for an already
+      // selected parking point; selecting the same ID does not rerun effects.
+      if (!side && waypoint?.type === 'waypoint') {
+        if (lastPointerSelection?.id !== waypoint.id) {
+          onSelectWaypointRef.current?.(waypoint.id);
+          renderer.domElement.dataset.lastPickType = 'waypoint';
+          renderer.domElement.dataset.lastPickId = waypoint.id;
+        }
+        onInspectorPageRequestRef.current?.({ page: 'navigation' });
+      }
+      if (!robotLoaded) return;
       renderer.domElement.dataset.lastEndEffectorDoubleClick = side || 'none';
       const chassis = side ? null : chassisAtPointer(event);
       renderer.domElement.dataset.lastChassisDoubleClick = chassis ? 'chassis' : 'none';
@@ -4438,7 +4468,10 @@ export default function PointCloudViewer({
       );
       if (side) {
         chassisDragInteractionRef.current?.exit?.('end-effector-control');
-        endEffectorInteractionRef.current?.enter?.(side);
+        const entered = endEffectorInteractionRef.current?.enter?.(side);
+        if (entered && (side === 'left' || side === 'right')) {
+          onInspectorPageRequestRef.current?.({ page: 'camera', cameraSide: side });
+        }
       } else {
         robotControlInteractionRef.current?.enter?.();
         renderer.domElement.dataset.chassisDoubleClickCount = String(
@@ -4452,7 +4485,8 @@ export default function PointCloudViewer({
     renderer.domElement.addEventListener('pointerup', onPickPointerUp, true);
     renderer.domElement.addEventListener('pointercancel', resetPickPointer);
     renderer.domElement.addEventListener('pointerleave', onPickPointerLeave);
-    renderer.domElement.addEventListener('dblclick', onRobotDoubleClick, true);
+    renderer.domElement.addEventListener('click', onSceneClick, true);
+    renderer.domElement.addEventListener('dblclick', onSceneDoubleClick, true);
 
     const resize = () => {
       const width = mount.clientWidth || 1;
@@ -5346,7 +5380,8 @@ export default function PointCloudViewer({
       renderer.domElement.removeEventListener('pointerup', onPickPointerUp, true);
       renderer.domElement.removeEventListener('pointercancel', resetPickPointer);
       renderer.domElement.removeEventListener('pointerleave', onPickPointerLeave);
-      renderer.domElement.removeEventListener('dblclick', onRobotDoubleClick, true);
+      renderer.domElement.removeEventListener('click', onSceneClick, true);
+      renderer.domElement.removeEventListener('dblclick', onSceneDoubleClick, true);
       renderer.domElement.removeEventListener(
         MAIN_VIEW_PREVIEW_CONTROL_EVENT,
         onMainViewPreviewControl,
@@ -7499,7 +7534,7 @@ export default function PointCloudViewer({
           )}
           {showWaypointNames && (
             <div className="waypoint-name-layer" role="group" aria-label="3D停车点名称">
-              {waypoints.map((point) => (
+              {waypointLabels.map(({ point, waypointIds }) => (
                 <span
                   key={point.id}
                   ref={(element) => {
@@ -7509,8 +7544,9 @@ export default function PointCloudViewer({
                       waypointNameElementsRef.current.delete(point.id);
                     }
                   }}
-                  className={`waypoint-name-label${point.id === selectedWaypointId ? ' is-selected' : ''}`}
+                  className={`waypoint-name-label${waypointIds.includes(selectedWaypointId) ? ' is-selected' : ''}`}
                   data-waypoint-id={point.id}
+                  data-waypoint-ids={JSON.stringify(waypointIds)}
                 >
                   {point.name || point.id}
                 </span>
