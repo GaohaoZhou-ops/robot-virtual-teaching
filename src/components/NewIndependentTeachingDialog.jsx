@@ -3,12 +3,14 @@ import { createPortal } from 'react-dom';
 import { ArrowLeftRight, Check, FileText, FolderOpen, LoaderCircle, Map, MapPin, Plus, Route, ScanLine, X } from 'lucide-react';
 import { identityTransferPose, parseTransferMatrixFile, transformTeachingPose } from '../lib/teachingTransfer.js';
 import { defaultIndependentTeachingName, INDEPENDENT_TEACHING_NAME_MAX_LENGTH, validateIndependentTeachingName } from '../lib/independentTeachingName.js';
+import { TEACHING_WAYPOINT_SOURCE, TEMPORARY_MAP_ROUTE_SOURCE } from '../lib/teachingNavigation.js';
 import './NewIndependentTeachingDialog.css';
 
-export default function NewIndependentTeachingDialog({ state, progress, onCreate, onClose }) {
+export default function NewIndependentTeachingDialog({ state, progress, onCreate, onClose, onLoadRoute }) {
   const dialogRef = useRef(null);
   const modelInputRef = useRef(null);
   const matrixInputRef = useRef(null);
+  const routeInputRef = useRef(null);
   const modelButtonRef = useRef(null);
   const matrixReadRevision = useRef(0);
   const nameEditedRef = useRef(false);
@@ -21,8 +23,10 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
   const [syncRoute, setSyncRoute] = useState(false);
   const [placeInMap, setPlaceInMap] = useState(false);
   const hasMap = Boolean(state.mapSnapshot);
-  const busy = state.busy === true;
-  const hasRoute = Boolean(state.mapSnapshot?.config?.config?.project?.waypoints?.length);
+  const busy = state.busy === true || state.routeLoading === true;
+  const hasRoute = Boolean(state.mapSnapshot?.config?.config?.project?.waypoints?.some((point) =>
+    point.source !== TEACHING_WAYPOINT_SOURCE && point.source !== TEMPORARY_MAP_ROUTE_SOURCE));
+  const canLoadRoute = hasMap && !hasRoute;
   const canPlace = hasMap && Boolean(matrix) && !matrixError;
   const canSyncRoute = canPlace && hasRoute;
   const placementDisabledReason = !hasMap ? '请先加载地图示教工程'
@@ -163,11 +167,13 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
             {(matrix || matrixError) && <button type="button" disabled={busy} onClick={clearMatrix}>移除矩阵</button>}
           </div>
           <div className="new-independent-dialog__options" role="group" aria-label="创建时同步与放置">
-            <button type="button" aria-pressed={syncRoute && canSyncRoute}
-              disabled={!canSyncRoute || busy || matrixLoading}
-              title={routeDisabledReason || '创建时将地图路网同步到独立模型坐标系'}
-              onClick={() => setSyncRoute((selected) => !selected)}>
-              <Route size={15} />同步路网{syncRoute && canSyncRoute && <Check size={14} />}
+            <button type="button" aria-pressed={canLoadRoute ? undefined : syncRoute && canSyncRoute}
+              disabled={(canLoadRoute ? !onLoadRoute : !canSyncRoute) || busy || matrixLoading}
+              title={canLoadRoute ? '将路网 JSON 加载到当前地图，也可跳过直接创建独立示教'
+                : routeDisabledReason || '创建时将地图路网同步到独立模型坐标系'}
+              onClick={() => canLoadRoute ? routeInputRef.current?.click() : setSyncRoute((selected) => !selected)}>
+              {state.routeLoading ? <LoaderCircle size={15} className="transfer-spinner" /> : <Route size={15} />}
+              {canLoadRoute ? '加载路网' : '同步路网'}{syncRoute && canSyncRoute && <Check size={14} />}
             </button>
             <button type="button" aria-pressed={placeInMap && canPlace}
               disabled={!canPlace || busy || matrixLoading}
@@ -176,14 +182,23 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
               <MapPin size={15} />放置进入地图{placeInMap && canPlace && <Check size={14} />}
             </button>
           </div>
+          <input ref={routeInputRef} type="file" accept=".route.json,.json,application/json" hidden
+            aria-label="新增独立示教地图路网" disabled={!canLoadRoute || busy}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file && canLoadRoute && !busy) onLoadRoute?.(file);
+            }} />
+          {state.routeError && <p className="new-independent-dialog__error" role="alert">{state.routeError}</p>}
+          {state.routeNotice && <p className="new-independent-dialog__route-status" role="status">{state.routeNotice}</p>}
         </section>
         {state.error && <p className="new-independent-dialog__error" role="alert">{state.error}</p>}
         {busy && <p className="new-independent-dialog__progress" role="status">
-          <LoaderCircle size={15} className="transfer-spinner" />{progress?.phase || '正在创建独立示教…'}
+          <LoaderCircle size={15} className="transfer-spinner" />{state.routeLoading ? '正在加载地图路网…' : progress?.phase || '正在创建独立示教…'}
         </p>}
       </div>
       <footer>
-        <span>当前独立示教将保存到缓存列表</span>
+        <span>{state.sourceMode === 'map' ? '当前地图示教将保留' : '当前独立示教将保存到缓存列表'}</span>
         <button type="button" disabled={busy} onClick={onClose}>取消</button>
         <button type="submit" className="new-independent-dialog__create" disabled={!canCreate}>
           {busy ? <LoaderCircle size={15} className="transfer-spinner" /> : <Plus size={15} />}创建独立示教

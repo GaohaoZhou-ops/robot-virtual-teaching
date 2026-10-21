@@ -775,6 +775,41 @@ export async function loadWorkspaceConfig(sessionId, mode) {
   return config || null;
 }
 
+// Update a map's configuration from either teaching workspace without activating
+// it or rewriting geometry. A stale dialog must never replace newer map data.
+export async function commitMapWorkspaceConfig(sessionId, { expectedConfig, config, activeMode }) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  let record, summary;
+  try {
+    const [meta, index, current, geometryKey] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(workspaceConfigKey('map'))), requestResult(store.getKey(workspaceMapKey('map'))),
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId
+      || index.activeMode !== activeMode) throw new Error('工作会话已变化，请刷新页面后重试');
+    if (!geometryKey || !expectedConfig?.mapId || current?.sessionId !== sessionId
+      || current.mapId !== expectedConfig.mapId || current.savedAt !== expectedConfig.savedAt
+      || index.modes?.map?.mapId !== expectedConfig.mapId
+      || config?.project?.workspace?.teachingSpaceMode !== 'map') {
+      throw new Error('地图示教已变化，请重新打开新增独立示教窗口后加载路网');
+    }
+    const savedAt = Date.now();
+    record = { ...current, savedAt, config };
+    summary = summarizeWorkspace('map', null, record, index.modes.map);
+    store.put(record);
+    store.put({ ...index, updatedAt: savedAt, modes: { ...index.modes, map: summary } });
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  return { record, summary };
+}
+
 export async function loadWorkspaceSnapshot(sessionId, mode) {
   const workspaceMode = normalizeWorkspaceMode(mode);
   const database = await openDatabase();

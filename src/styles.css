@@ -4037,15 +4037,18 @@ code {
   line-height: 1.2;
 }
 
-.point-cloud-view[data-teaching-space-mode="independent"] .height-color-legend {
-  right: 14px;
-  bottom: 102px;
+.point-cloud-view[data-teaching-space-mode="independent"]:has(.height-color-legend) .viewport-distance-scale {
+  right: 112px;
 }
 
 .point-cloud-view[data-teaching-space-mode="independent"] .viewer-help {
   right: 176px;
   flex-wrap: wrap;
   row-gap: 5px;
+}
+
+.point-cloud-view[data-teaching-space-mode="independent"]:has(.height-color-legend) .viewer-help {
+  right: 274px;
 }
 
 .point-cloud-view[data-teaching-space-mode="independent"] .viewer-help__mesh {
@@ -4055,7 +4058,7 @@ code {
 
 .height-color-legend {
   position: absolute;
-  right: 94px;
+  right: 14px;
   bottom: 11px;
   z-index: 7;
   width: 88px;
