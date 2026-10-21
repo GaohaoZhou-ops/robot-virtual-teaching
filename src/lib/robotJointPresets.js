@@ -39,6 +39,28 @@ export function presetMatchesRobot(pose, robot) {
   return Boolean(poseKey && robotKey && poseKey === robotKey);
 }
 
+export function validateRobotPresetName(name, poses = [], robot = null, excludedId = null) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('请输入预设姿态名称');
+  if (trimmed.length > 80) throw new Error('预设姿态名称不能超过 80 个字符');
+  if (poses.some((pose) => pose.id !== excludedId && presetMatchesRobot(pose, robot)
+    && pose.name.trim() === trimmed)) {
+    throw new Error('当前机器人已有同名姿态，请使用其他名称');
+  }
+  return trimmed;
+}
+
+export function robotPresetValuesForEditing(pose, definitions) {
+  const unit = pose.joints?.angularUnit || 'degree';
+  if (!['degree', 'degrees', 'deg', 'radian', 'radians', 'rad'].includes(unit)) {
+    throw new Error('预设姿态的关节角度单位无效');
+  }
+  const radians = ['radian', 'radians', 'rad'].includes(unit);
+  return Object.fromEntries(definitions.filter((joint) => Object.hasOwn(pose.joints?.values || {}, joint.name))
+    .map((joint) => [joint.name, pose.joints.values[joint.name]
+      * (radians && joint.type !== 'prismatic' ? 180 / Math.PI : 1)]));
+}
+
 export function jointValueToInput(value, joint, unit) {
   return joint.type !== 'prismatic' && unit === 'radian' ? value * Math.PI / 180 : value;
 }
@@ -123,8 +145,7 @@ export function buildRobotPresetFile(joints) {
 }
 
 export function createRobotJointPreset({ id, name, robot, joints, values, sequence = 1 }) {
-  const trimmedName = String(name || '').trim();
-  if (!trimmedName) throw new Error('请输入预设姿态名称');
+  const trimmedName = validateRobotPresetName(name);
   if (!robot || !(robot.id || robot.relativePath)) throw new Error('请先加载机器人模型');
   const definitions = presetJointDefinitions(joints);
   if (!definitions.length) throw new Error('当前机器人没有可设置的姿态关节');

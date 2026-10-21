@@ -181,7 +181,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
     }}>
     <fieldset disabled={loading} className="transfer-fieldset">
       <div className="transfer-route">
-        <div><small>{extraction ? '地图示教 / 来源' : '独立示教 / 来源'}</small><strong>{source.map.name}</strong></div>
+        <div><small>{extraction ? '地图示教 / 来源' : '独立示教 / 来源'}</small><strong title={source.map.name}>{(!extraction && sourceProject.workspace.independentTeachingName) || source.map.name}</strong></div>
         <ArrowRight size={20} />
         <div><small>{extraction ? '独立示教 / 局部工程' : '地图示教 / 目标'}</small><strong>{extraction ? name || '局部工程' : map?.name || '尚未打开地图工程'}</strong></div>
       </div>

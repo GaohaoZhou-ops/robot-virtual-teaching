@@ -1,4 +1,5 @@
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
+import { normalizeIndependentTeachingName, validateIndependentTeachingName } from './independentTeachingName.js';
 
 const DATABASE_NAME = 'atlas-route-studio';
 const DATABASE_VERSION = 1;
@@ -249,6 +250,7 @@ const summarizeWorkspace = (mode, map, config, previous = null) => {
     mode: normalizeWorkspaceMode(mode),
     mapId: map?.mapId || config?.mapId || project?.map?.mapId || null,
     mapName: map?.name || project?.map?.fileName || previous?.mapName || '未命名工作现场',
+    teachingName: project ? normalizeIndependentTeachingName(project.workspace?.independentTeachingName) : previous?.teachingName || '',
     pointCount: Number(map?.pointCount ?? project?.map?.pointCount ?? previous?.pointCount) || 0,
     faceCount: Number(map?.faceCount ?? project?.map?.faceCount ?? previous?.faceCount) || 0,
     waypointCount: Array.isArray(project?.waypoints)
@@ -386,6 +388,7 @@ const summarizeRecovery = ({ recoveryId, sourceSessionId, archivedAt }, map, con
     teachingGroupId: map?.teachingGroupId || project?.map?.teachingGroupId || null,
     portableOriginalMapId: map?.portableOriginalMapId || null,
     mapName: map?.name || project?.map?.fileName || '未命名地图',
+    teachingName: normalizeIndependentTeachingName(project?.workspace?.independentTeachingName),
     activeTaskName: activeTask?.name || '',
     taskCount: teachingTasks.length,
     parkingPointCount,
@@ -854,6 +857,54 @@ export async function listIndependentWorkspaces(sessionId) {
   return entries;
 }
 
+// A display-name edit touches configuration and the cache index in one
+// transaction. Geometry, group IDs and transformation links remain unchanged.
+export async function renameIndependentWorkspace(sessionId, { historyId = null, mapId, name, expectedName = '' }) {
+  const teachingName = validateIndependentTeachingName(name);
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  try {
+    const configKey = historyId ? historyConfigKey(historyId) : workspaceConfigKey('independent');
+    const mapKey = historyId ? historyMapKey(historyId) : workspaceMapKey('independent');
+    const [meta, index, history, record, geometryKey] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(INDEPENDENT_HISTORY_KEY)), requestResult(store.get(configKey)),
+      requestResult(store.getKey(mapKey)),
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId) {
+      throw new Error('工作会话已变化，请刷新页面后重试');
+    }
+    const entry = historyId ? history?.entries?.find((item) => item.historyId === historyId) : index.modes?.independent;
+    const project = record?.config?.project;
+    if (!mapId || !geometryKey || !entry || entry.mapId !== mapId || record?.mapId !== mapId
+      || project?.workspace?.teachingSpaceMode !== 'independent' || (!historyId && record.sessionId !== sessionId)) {
+      throw new Error('所选独立示教缓存已变化，请重新打开列表后重试');
+    }
+    if (normalizeIndependentTeachingName(project.workspace.independentTeachingName) !== normalizeIndependentTeachingName(expectedName)) {
+      throw new Error('独立示教名称已被修改，请重新打开列表后重试');
+    }
+    const savedAt = Date.now();
+    store.put({ ...record, savedAt, config: { ...record.config,
+      project: { ...project, workspace: { ...project.workspace, independentTeachingName: teachingName } },
+      ui: { ...record.config.ui, independentTeachingName: teachingName },
+    } });
+    const updated = { ...entry, teachingName, savedAt };
+    if (historyId) {
+      store.put({ ...history, entries: history.entries.map((item) => item.historyId === historyId ? updated : item) });
+    } else {
+      store.put({ ...index, updatedAt: savedAt, modes: { ...index.modes, independent: updated } });
+    }
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  return teachingName;
+}
+
 // Archive the outgoing group and activate a new/restored group atomically.
 // Neither a failed write nor restoring history can discard the current group.
 // The map workspace (including its absolute coordinates) is never rewritten.
@@ -886,7 +937,7 @@ export async function switchIndependentWorkspace(sessionId, {
     if ((currentMap && (currentMap.sessionId !== sessionId || currentMap.mapId !== currentConfig?.mapId))
       || (currentConfig && currentConfig.sessionId !== sessionId)
       || (currentConfig?.config?.project && !currentMap)) {
-      throw new Error('当前独立工程缓存不完整，无法创建历史副本');
+      throw new Error('当前独立工程缓存不完整，无法创建缓存副本');
     }
     if (expectedMapConfig && (!targetMap?.positionBuffer || targetMap.sessionId !== sessionId
       || targetConfig?.sessionId !== sessionId || targetMap.mapId !== expectedMapConfig.mapId
@@ -897,7 +948,7 @@ export async function switchIndependentWorkspace(sessionId, {
     const entries = history?.entries || [];
     if (historyId && (!entries.some((entry) => entry.historyId === historyId)
       || !archivedConfig?.config?.project || !archivedMap || archivedConfig.mapId !== archivedMap.mapId)) {
-      throw new Error('独立示教历史缓存不完整，当前工程已保留');
+      throw new Error('独立示教缓存不完整，当前工程已保留');
     }
     const nextMap = historyId ? archivedMap : replacement?.map;
     const nextConfig = historyId ? archivedConfig?.config : replacement?.config;

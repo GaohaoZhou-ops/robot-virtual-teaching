@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowRight, Clock3, LoaderCircle, ScanLine, X } from 'lucide-react';
+import { independentWorkspaceLabel } from '../lib/independentTeachingName.js';
 
 const savedTime = (value) => {
   const date = value ? new Date(value) : null;
@@ -66,17 +67,19 @@ export default function IndependentWorkspaceDialog({ state, disabled = false, on
             <ul>
               {entries.map((entry, index) => {
                 const id = entry.historyId || 'current';
+                const label = independentWorkspaceLabel(entry);
                 return <li key={id} data-workspace-kind={entry.current ? 'current' : 'history'}
                   data-map-id={entry.mapId} data-history-id={entry.historyId || undefined}>
                   <ScanLine size={18} />
                   <div>
-                    <strong title={entry.mapName}>{entry.mapName}</strong>
+                    <strong title={label}>{label}</strong>
+                    <span>模型：{entry.mapName}</span>
                     <span><b>{entry.current ? '上次使用' : '已缓存'}</b> · {entry.activeTaskName || '暂无示教任务'}</span>
                     <span>{entry.taskCount} 个任务 · {entry.parkingPointCount} 个停车点 · {entry.teachingPoseCount} 组姿态</span>
                     <span className="independent-workspace-picker__time"><Clock3 size={10} /> {savedTime(entry.savedAt)}</span>
                   </div>
                   <button type="button" ref={index === 0 ? firstButtonRef : undefined}
-                    disabled={busy || disabled} aria-label={`进入独立示教 ${entry.mapName}`}
+                    disabled={busy || disabled} aria-label={`进入独立示教 ${label}`}
                     onClick={() => onSelect(entry)}>
                     {busy && selectedId === id
                       ? <><LoaderCircle size={14} className="transfer-spinner" />正在切换</>

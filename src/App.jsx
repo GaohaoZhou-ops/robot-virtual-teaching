@@ -16,6 +16,7 @@ import {
   History,
   House,
   Layers2,
+  List,
   Map as MapIcon,
   MousePointer2,
   Play,
@@ -33,6 +34,8 @@ import {
 import HeightRange from './components/HeightRange.jsx';
 import IndependentWorkspaceDialog from './components/IndependentWorkspaceDialog.jsx';
 import NewIndependentTeachingDialog from './components/NewIndependentTeachingDialog.jsx';
+import IndependentTeachingNameDialog from './components/IndependentTeachingNameDialog.jsx';
+import { defaultIndependentTeachingName, validateIndependentTeachingName } from './lib/independentTeachingName.js';
 import Inspector from './components/Inspector.jsx';
 import Map2DView from './components/Map2DView.jsx';
 import MapDetailsDialog from './components/MapDetailsDialog.jsx';
@@ -42,6 +45,7 @@ import ProjectExportButton from './components/ProjectExportButton.jsx';
 import ProjectExportDialog from './components/ProjectExportDialog.jsx';
 import RobotPicker from './components/RobotPicker.jsx';
 import RobotPresetDialog from './components/RobotPresetDialog.jsx';
+import RobotPresetManagerDialog from './components/RobotPresetManagerDialog.jsx';
 import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
 import ModelEditorPage from './components/ModelEditorPage.jsx';
@@ -109,7 +113,10 @@ import {
   prepareMapGeometryTopology,
 } from './lib/mapGeometry.js';
 import { createSpaceMouseInputState } from './lib/spaceMouse.js';
-import { buildRobotPresetFile, createRobotJointPreset, presetJointDefinitions, presetMatchesRobot } from './lib/robotJointPresets.js';
+import {
+  buildRobotPresetFile, createRobotJointPreset, presetJointDefinitions, presetMatchesRobot,
+  robotPresetValuesForEditing, validateRobotPresetName,
+} from './lib/robotJointPresets.js';
 import { insertTeachingPreset } from './lib/teachingPresetInsertion.js';
 import { moveTeachingPose } from './lib/teachingPoseOrder.js';
 import {
@@ -126,8 +133,8 @@ import {
   loadWorkspaceConfig,
   loadWorkspaceSnapshot,
   loadProjectCompanions,
-  listIndependentHistory,
   listIndependentWorkspaces,
+  renameIndependentWorkspace,
   prepareWorkspaceSession,
   resetWorkspaceSession,
   restoreLinkedWorkspaces,
@@ -488,6 +495,7 @@ export default function App() {
   const projectDirectoryInputRef = useRef(null);
   const mapDetailsButtonRef = useRef(null);
   const robotMenuButtonRef = useRef(null);
+  const robotPresetReturnFocusRef = useRef(null);
   const devicesMenuButtonRef = useRef(null);
   const toastTimerRef = useRef(null);
   const view2dRef = useRef(null);
@@ -533,6 +541,8 @@ export default function App() {
   const [appPage, setAppPage] = useState(appPageFromLocation);
   const [startPageMode, setStartPageMode] = useState(null);
   const [workspaceTransfer, setWorkspaceTransfer] = useState(null);
+  const [independentTeachingName, setIndependentTeachingName] = useState('');
+  const [independentNameDialog, setIndependentNameDialog] = useState(null);
   const [independentHistory, setIndependentHistory] = useState({ status: 'idle', entries: [] });
   const [independentWorkspaceDialog, setIndependentWorkspaceDialog] = useState(null);
   const [newIndependentDialog, setNewIndependentDialog] = useState(null);
@@ -590,10 +600,12 @@ export default function App() {
   robotParkingGhostRef.current = robotParkingGhost;
   const [jointPoses, setJointPoses] = useState([]);
   const [robotPresetDraft, setRobotPresetDraft] = useState(null);
+  const [robotPresetManager, setRobotPresetManager] = useState(null);
+  const robotPresetModalOpen = Boolean(robotPresetDraft || robotPresetManager);
   const robotPresetJoints = useMemo(() => presetJointDefinitions(robotLoadState.movableJoints), [robotLoadState.movableJoints]);
-  const robotPresets = useMemo(() => jointPoses.filter((pose) => (
-    pose.joints?.source === 'robot-preset' && presetMatchesRobot(pose, selectedRobot)
-  )), [jointPoses, selectedRobot]);
+  const projectRobotPresets = useMemo(() => jointPoses.filter((pose) => pose.joints?.source === 'robot-preset'), [jointPoses]);
+  const robotPresets = useMemo(() => projectRobotPresets.filter((pose) => presetMatchesRobot(pose, selectedRobot)),
+    [projectRobotPresets, selectedRobot]);
   const [zividCameraPoses, setZividCameraPoses] = useState({});
   const [cameraTeachingCommand, setCameraTeachingCommand] = useState(null);
   const [cameraTeachingResult, setCameraTeachingResult] = useState({
@@ -641,6 +653,9 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const closeMapDetails = useCallback(() => setMapDetailsOpen(false), []);
   const closeRobotPreset = useCallback(() => setRobotPresetDraft(null), []);
+  const closeRobotPresetManager = useCallback(() => setRobotPresetManager(null), []);
+  const robotPresetManagerReady = Boolean(mapData && sessionState.status === 'ready'
+    && !loadState.loading && teachingCaptureState.status !== 'capturing');
   const robotPresetReady = Boolean(selectedRobot && robotLoadState.status === 'loaded'
     && robotPresetJoints.length && sessionState.status === 'ready' && !loadState.loading
     && teachingCaptureState.status !== 'capturing');
@@ -650,6 +665,12 @@ export default function App() {
       setRobotPresetDraft(null);
     }
   }, [appPage, mapData?.mapId, robotPresetDraft, selectedRobot]);
+  useEffect(() => {
+    if (robotPresetManager && (appPage !== APP_PAGE_WORKBENCH
+      || robotPresetManager.mapId !== mapData?.mapId || robotPresetManager.teachingSpaceMode !== teachingSpaceMode)) {
+      setRobotPresetManager(null);
+    }
+  }, [appPage, mapData?.mapId, robotPresetManager, teachingSpaceMode]);
   const coordinateFrame = teachingCoordinateFrame(teachingSpaceMode);
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
   const independentSwitchBlocked = loadState.loading || sessionState.status !== 'ready'
@@ -739,6 +760,7 @@ export default function App() {
     abxRoutes,
     mapRouteSyncEnabled,
     workspaceTransfer,
+    independentTeachingName,
     directoryAutosaveSuspended,
     mapData,
     teachingSpaceMode,
@@ -1000,6 +1022,7 @@ export default function App() {
     const project = current.mapData
       ? buildExport({
           transfer: current.workspaceTransfer,
+          independentTeachingName: current.independentTeachingName,
           directoryAutosaveSuspended: current.directoryAutosaveSuspended,
           mapData: current.mapData,
           teachingSpaceMode: current.teachingSpaceMode,
@@ -1284,6 +1307,7 @@ export default function App() {
       setSynchronizedFocus(null);
       if (!preserveGraph) {
         setWorkspaceTransfer(null);
+        setIndependentTeachingName(normalizedTeachingSpaceMode === 'independent' ? defaultIndependentTeachingName(name) : '');
         setMapRouteSyncEnabled(false);
         setSyncedMapOrigin(null);
         setDirectoryAutosaveSuspended(false);
@@ -1469,6 +1493,7 @@ export default function App() {
           const snapshot = configMatchesMap ? stored.config?.config : null;
           const project = snapshot?.project ? normalizeProject(snapshot.project) : null;
           setWorkspaceTransfer(project?.workspace?.transfer || null);
+          setIndependentTeachingName(project?.workspace?.independentTeachingName || '');
           setMapRouteSyncEnabled(project?.workspace?.teachingSpaceMode === 'independent'
             && snapshot?.ui?.mapRouteSyncEnabled === true);
           setSyncedMapOrigin(null);
@@ -1757,6 +1782,7 @@ export default function App() {
           if (!isCurrent()) return;
           setMapData(null);
           setWorkspaceTransfer(null);
+          setIndependentTeachingName('');
           setMapRouteSyncEnabled(false);
           setSyncedMapOrigin(null);
           setDirectoryAutosaveSuspended(false);
@@ -1891,6 +1917,7 @@ export default function App() {
     queueWorkspaceSave();
   }, [
     workspaceTransfer,
+    independentTeachingName,
     mapRouteSyncEnabled,
     directoryAutosaveSuspended,
     collapsedPanel,
@@ -2168,7 +2195,7 @@ export default function App() {
     setNewIndependentDialog(null);
   };
 
-  const createIndependentTeaching = async ({ file, matrix = null }) => {
+  const createIndependentTeaching = async ({ file, matrix = null, name = defaultIndependentTeachingName(file?.name) }) => {
     if (!file || independentSwitchBusyRef.current || workspaceSwitchingRef.current || independentSwitchBlocked
       || !isIndependentTeachingSpace || !newIndependentDialog) return;
     if (!file.name.toLowerCase().endsWith('.ply')) {
@@ -2180,6 +2207,7 @@ export default function App() {
     setLoadState({ loading: true, progress: 0, phase: '新增独立示教', detail: '保存当前工作现场' });
     let geometry;
     try {
+      const teachingName = validateIndependentTeachingName(name);
       if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
       const saved = persistWorkspaceNow();
       workspaceSwitchingRef.current = true;
@@ -2216,6 +2244,7 @@ export default function App() {
       };
       const project = buildExport({
         mapData: map, teachingSpaceMode: 'independent',
+        independentTeachingName: teachingName,
         heightRange: clampSlice(suggestedSlice(positions, bounds), bounds),
         waypoints: [], edges: [],
         robot: current.selectedRobot, robotPose: normalizeRobotPose(null), robotJointValues: {},
@@ -2280,7 +2309,7 @@ export default function App() {
         const activeMode = collection.workspaces[normalizeTeachingSpaceMode(requestedMode)]
           ? normalizeTeachingSpaceMode(requestedMode) : collection.activeMode;
         setLoadState({ loading: true, progress: 0.85, phase: '恢复完整工程与独立示教列表',
-          detail: `正在恢复工作区和 ${collection.independentHistory.length} 组独立示教历史` });
+          detail: `正在恢复工作区和 ${collection.independentHistory.length} 组独立示教缓存` });
         await restoreWorkspaceCollection(sessionIdRef.current, collection, activeMode);
         for (const mode of Object.keys(collection.workspaces)) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
@@ -2315,6 +2344,7 @@ export default function App() {
       const importedDirectorySuspended = !importedFile.directory
         && project.workspace?.directoryAutosaveSuspended === true;
       setWorkspaceTransfer(project.workspace?.transfer || null);
+      setIndependentTeachingName(project.workspace?.independentTeachingName || '');
       setMapRouteSyncEnabled(false);
       setSyncedMapOrigin(null);
       setDirectoryAutosaveSuspended(importedDirectorySuspended);
@@ -2511,6 +2541,7 @@ export default function App() {
           schemaVersion: 1,
           project: buildExport({
             transfer: project.workspace?.transfer || null,
+            independentTeachingName: project.workspace?.independentTeachingName || '',
             directoryAutosaveSuspended: importedDirectorySuspended,
             mapData: effectiveMap,
             teachingSpaceMode: importedTeachingSpaceMode,
@@ -4006,6 +4037,7 @@ export default function App() {
   const currentExportPayload = () => buildExport({
     abxRoutes,
     transfer: workspaceTransfer,
+    independentTeachingName,
     directoryAutosaveSuspended,
     mapData,
     teachingSpaceMode,
@@ -4302,7 +4334,7 @@ export default function App() {
         (fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}${targetRemembered ? '' : ' · 无法记住保存位置，刷新后请重新另存为'}`
           : `工程下载已开始 · ${filename} · ${sizeLabel}`)
           + (companionWorkspace ? ' · 已包含地图示教与独立示教' : '')
-          + (independentHistory.length ? ` · ${independentHistory.length} 组独立示教历史` : ''),
+          + (independentHistory.length ? ` · ${independentHistory.length} 组独立示教缓存` : ''),
         targetRemembered ? 'success' : 'warning',
       );
     } catch (error) {
@@ -4729,17 +4761,65 @@ export default function App() {
     if (announce && wasRunning) notify('示教轨迹播放已停止，机器人保留在当前位置', 'info');
   }, [notify]);
 
-  const openRobotPreset = () => {
+  const openRobotPreset = (presetId = null) => {
     if (!robotPresetReady) return;
+    const preset = presetId ? latestWorkspaceRef.current.jointPoses.find((pose) => pose.id === presetId) : null;
+    if (presetId && (!preset || preset.joints?.source !== 'robot-preset' || !presetMatchesRobot(preset, selectedRobot))) {
+      throw new Error('预设姿态或机器人已变化，请重新选择');
+    }
+    const values = preset ? robotPresetValuesForEditing(preset, robotPresetJoints) : { ...robotJointValues };
+    robotPresetReturnFocusRef.current = robotPresetManager ? document.activeElement : robotMenuButtonRef.current;
     stopTeachingTaskPlayback(false);
     setRobotControlEnabled(false);
     setRobotPresetDraft({
-      id: createId('joint-pose'),
+      id: preset?.id || createId('joint-pose'),
+      mode: preset ? 'edit' : 'new',
+      name: preset?.name || '',
       mapId: mapData?.mapId,
       robot: selectedRobot,
       joints: robotPresetJoints,
-      values: { ...robotJointValues },
+      values,
     });
+  };
+
+  const openRobotPresetManager = () => {
+    if (!robotPresetManagerReady) return;
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    setRobotPresetManager({ mapId: mapData.mapId, teachingSpaceMode });
+  };
+
+  const persistRobotPresetChanges = async (current, next) => {
+    latestWorkspaceRef.current = { ...current, jointPoses: next };
+    setJointPoses(next);
+    await persistWorkspaceNow();
+    if (!sessionReadyRef.current) throw new Error('预设变更尚未持久保存，请先将工程另存为备份');
+  };
+
+  const robotPresetManagerContext = (id) => {
+    const current = latestWorkspaceRef.current;
+    if (!robotPresetManager || !robotPresetManagerReady || !sessionReadyRef.current || workspaceSwitchingRef.current
+      || current.mapData?.mapId !== robotPresetManager.mapId
+      || current.teachingSpaceMode !== robotPresetManager.teachingSpaceMode) {
+      throw new Error('当前工程已变化或尚未就绪，请重新打开预设姿态管理');
+    }
+    const pose = current.jointPoses.find((item) => item.id === id && item.joints?.source === 'robot-preset');
+    if (!pose) throw new Error('该预设姿态已不存在，请重新选择');
+    return { current, pose };
+  };
+
+  const renameRobotPreset = async (id, requestedName) => {
+    const { current, pose } = robotPresetManagerContext(id);
+    const name = validateRobotPresetName(requestedName, current.jointPoses, pose.robot, id);
+    if (name === pose.name) return;
+    await persistRobotPresetChanges(current, current.jointPoses.map((item) => item.id === id
+      ? { ...item, name, updatedAt: new Date().toISOString() } : item));
+  };
+
+  const deleteRobotPreset = async (id) => {
+    const { current } = robotPresetManagerContext(id);
+    await persistRobotPresetChanges(current, current.jointPoses.filter((pose) => pose.id !== id)
+      .map((pose, index) => ({ ...pose, sequence: index + 1 })));
   };
 
   const saveRobotPreset = async ({ name, values }) => {
@@ -4750,23 +4830,21 @@ export default function App() {
       throw new Error('当前工程或机器人已变化，请重新打开预设姿态窗口');
     }
     const previous = current.jointPoses.find((pose) => pose.id === robotPresetDraft.id);
-    if (current.jointPoses.some((pose) => pose.id !== robotPresetDraft.id
-      && presetMatchesRobot(pose, current.selectedRobot) && pose.name === name.trim())) {
-      throw new Error('当前机器人已有同名姿态，请使用其他名称');
+    if (robotPresetDraft.mode === 'edit' && (!previous || previous.joints?.source !== 'robot-preset')) {
+      throw new Error('该预设姿态已不存在，请重新选择');
     }
-    const pose = createRobotJointPreset({
-      id: robotPresetDraft.id, name, robot: current.selectedRobot,
+    const pose = { ...previous, ...createRobotJointPreset({
+      id: robotPresetDraft.id,
+      name: validateRobotPresetName(name, current.jointPoses, current.selectedRobot, robotPresetDraft.id),
+      robot: current.selectedRobot,
       joints: robotPresetDraft.joints, values,
       sequence: previous?.sequence || current.jointPoses.length + 1,
-    });
+    }) };
     if (previous) pose.createdAt = previous.createdAt;
     const next = previous
       ? current.jointPoses.map((item) => item.id === pose.id ? pose : item)
       : [...current.jointPoses, pose];
-    latestWorkspaceRef.current = { ...current, jointPoses: next };
-    setJointPoses(next);
-    await persistWorkspaceNow();
-    if (!sessionReadyRef.current) throw new Error('预设尚未持久保存，请先将工程另存为备份');
+    await persistRobotPresetChanges(current, next);
     closeRobotPreset();
     notify(`${pose.name} 已保存，可从机器人菜单直接应用`, 'success');
   };
@@ -5112,6 +5190,7 @@ export default function App() {
         mode: teachingSpaceMode,
         mapId: mapData?.mapId || null,
         mapName: projectDirectoryState.name || mapData?.name || selectedRobot?.name || '未命名工作现场',
+        teachingName: isIndependentTeachingSpace ? independentTeachingName : '',
         pointCount: Number(mapData?.pointCount) || 0,
         faceCount: Number(mapData?.faceCount) || 0,
         waypointCount: waypoints.length,
@@ -5134,6 +5213,7 @@ export default function App() {
       if (
         previous?.mapId === liveWorkspaceSummary.mapId
         && previous?.mapName === liveWorkspaceSummary.mapName
+        && previous?.teachingName === liveWorkspaceSummary.teachingName
         && previous?.pointCount === liveWorkspaceSummary.pointCount
         && previous?.waypointCount === liveWorkspaceSummary.waypointCount
         && previous?.edgeCount === liveWorkspaceSummary.edgeCount
@@ -5146,6 +5226,7 @@ export default function App() {
     liveWorkspaceSummary?.edgeCount,
     liveWorkspaceSummary?.mapId,
     liveWorkspaceSummary?.mapName,
+    liveWorkspaceSummary?.teachingName,
     liveWorkspaceSummary?.pointCount,
     liveWorkspaceSummary?.robotName,
     liveWorkspaceSummary?.taskCount,
@@ -5248,7 +5329,7 @@ export default function App() {
     if (!projectLoadDialog.open || projectLoadDialog.mode !== 'independent') return undefined;
     let cancelled = false;
     setIndependentHistory({ status: 'loading', entries: [] });
-    listIndependentHistory().then((entries) => {
+    listIndependentWorkspaces(sessionIdRef.current).then((entries) => {
       if (!cancelled) setIndependentHistory({ status: 'ready', entries });
     }).catch((error) => {
       if (!cancelled) setIndependentHistory({ status: 'error', entries: [], error: error.message });
@@ -5256,10 +5337,54 @@ export default function App() {
     return () => { cancelled = true; };
   }, [projectLoadDialog.open, projectLoadDialog.mode]);
 
+  const openIndependentNameDialog = (entry) => {
+    if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
+    setRobotControlEnabled(false);
+    setIndependentNameDialog({ entry, busy: false, error: '' });
+  };
+
+  const renameIndependentTeaching = async (name) => {
+    if (!independentNameDialog || independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
+    const { entry } = independentNameDialog;
+    independentSwitchBusyRef.current = true;
+    setIndependentNameDialog((current) => ({ ...current, busy: true, error: '' }));
+    let savingCurrent = false;
+    try {
+      const current = latestWorkspaceRef.current;
+      savingCurrent = !entry.historyId && current.teachingSpaceMode === 'independent' && current.mapData?.mapId === entry.mapId;
+      if (savingCurrent) {
+        if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+        const saved = persistWorkspaceNow();
+        workspaceSwitchingRef.current = true;
+        await saved;
+        if (!sessionReadyRef.current) throw new Error('当前工程尚未保存成功，请重试');
+      }
+      const teachingName = await renameIndependentWorkspace(sessionIdRef.current, {
+        historyId: entry.historyId, mapId: entry.mapId, expectedName: entry.teachingName, name,
+      });
+      if (savingCurrent) {
+        latestWorkspaceRef.current = { ...latestWorkspaceRef.current, independentTeachingName: teachingName };
+        setIndependentTeachingName(teachingName);
+      }
+      const updateEntries = (entries) => entries.map((item) => item.mapId === entry.mapId ? { ...item, teachingName } : item);
+      setIndependentHistory((current) => ({ ...current, entries: updateEntries(current.entries) }));
+      setIndependentWorkspaceDialog((current) => current ? { ...current, entries: updateEntries(current.entries) } : null);
+      setCachedWorkspaces((current) => current.independent?.mapId === entry.mapId
+        ? { ...current, independent: { ...current.independent, teachingName } } : current);
+      setIndependentNameDialog(null);
+      notify('独立示教名称已更新', 'success');
+    } catch (error) {
+      setIndependentNameDialog((current) => current ? { ...current, busy: false, error: error.message || '修改名称失败，请重试' } : null);
+    } finally {
+      if (savingCurrent) workspaceSwitchingRef.current = false;
+      independentSwitchBusyRef.current = false;
+    }
+  };
+
   const restoreIndependentHistory = async (historyId, destination = APP_PAGE_WORKBENCH) => {
     if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
     independentSwitchBusyRef.current = true;
-    setLoadState({ loading: true, progress: 0.5, phase: '恢复独立示教', detail: '先完整缓存当前独立工程，再恢复选中的历史工程' });
+    setLoadState({ loading: true, progress: 0.5, phase: '恢复独立示教', detail: '先完整缓存当前独立工程，再恢复选中的缓存工程' });
     try {
       if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
       const saved = persistWorkspaceNow();
@@ -5799,8 +5924,8 @@ export default function App() {
       data-teaching-space-mode={teachingSpaceMode}
       data-teaching-source={teachingSource}
       data-coordinate-frame={coordinateFrame}
-      aria-hidden={appPage !== APP_PAGE_WORKBENCH || Boolean(robotPresetDraft)}
-      inert={robotPresetDraft ? '' : undefined}
+      aria-hidden={appPage !== APP_PAGE_WORKBENCH || robotPresetModalOpen}
+      inert={robotPresetModalOpen ? '' : undefined}
     >
       <header className="topbar">
         <div className="brand-block">
@@ -5826,7 +5951,7 @@ export default function App() {
           <span className={`map-state-dot ${mapData?.geometry ? 'online' : ''}`} />
           <div>
             <small>{isIndependentTeachingSpace ? '独立示教 · ORIGIN 0' : '地图示教 · MAP'}</small>
-            <strong>{mapData?.name || (isIndependentTeachingSpace ? 'NO SPACE LOADED' : 'NO MAP LOADED')}</strong>
+            <strong title={mapData?.name}>{(isIndependentTeachingSpace && independentTeachingName) || mapData?.name || (isIndependentTeachingSpace ? 'NO SPACE LOADED' : 'NO MAP LOADED')}</strong>
           </div>
           {mapData?.pointCount > 0 && (
             <em>
@@ -5837,7 +5962,7 @@ export default function App() {
         </div>
 
         <WorkbenchToolbar
-          isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+          isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
           sections={[
             {
               id: 'project', label: '工程', icon: FolderOpen, triggerRef: mapDetailsButtonRef,
@@ -5897,7 +6022,7 @@ export default function App() {
                       className="action-button independent-teaching-action"
                       onClick={openNewIndependentDialog}
                       disabled={independentSwitchBlocked || !mapData?.geometry}
-                      title="选择独立模型，可选加载与当前地图的转换矩阵；当前独立工程将保存到历史列表"
+                      title="选择独立模型，可选加载与当前地图的转换矩阵；当前独立工程将保存到缓存列表"
                     >
                       <Plus size={15} /><span>新增独立示教</span>
                     </button>
@@ -5907,7 +6032,7 @@ export default function App() {
                       onClick={() => showProjectLoadDialog('independent')}
                       disabled={independentSwitchBlocked}
                     >
-                      <History size={15} /><span>独立示教历史</span>
+                      <History size={15} /><span>独立示教缓存</span>
                     </button>
                   </>}
                 </section>
@@ -5946,7 +6071,7 @@ export default function App() {
                   <RobotPicker
                     menuAnchorRef={robotMenuButtonRef}
                     menuLabel="机器人模型"
-                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen}
                     selectedRobot={selectedRobot}
                     loadState={robotLoadState}
                     onSelect={handleSelectRobot}
@@ -5959,7 +6084,9 @@ export default function App() {
                   />
                   <button type="button" className="action-button" disabled={!robotPresetReady}
                     title={robotPresetReady ? '输入双臂、躯干和头部关节值并保存' : '请先加载具有可动关节的机器人模型'}
-                    onClick={openRobotPreset}><Plus size={15} /><span>新建预设姿态</span></button>
+                    onClick={() => openRobotPreset()}><Plus size={15} /><span>新建预设姿态</span></button>
+                  <button type="button" className="action-button" disabled={!robotPresetManagerReady}
+                    onClick={openRobotPresetManager}><List size={15} /><span>管理预设姿态</span></button>
                 </section>
                 <section className="workbench-menu-section robot-presets-list">
                   <p>预设姿态{robotPresets.length > 0 ? ` · ${robotPresets.length}` : ''}</p>
@@ -5983,7 +6110,7 @@ export default function App() {
                     menuAnchorRef={devicesMenuButtonRef}
                     inputRef={spaceMouseInputRef}
                     onNotify={notify}
-                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
                   />
                 </section>
                 {isIndependentTeachingSpace && <section className="workbench-menu-section">
@@ -5991,7 +6118,7 @@ export default function App() {
                   {['ipad', 'vision'].map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
                     desktopCount={desktopTeachingTasks.length} deviceCount={mobileTasksByDevice[device].length}
                     disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
                     onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />)}
                 </section>}
               </>,
@@ -6063,7 +6190,7 @@ export default function App() {
                 disabled={!mapData?.geometry}
                 collapsed={heightRangeCollapsed}
                 onCollapsedChange={setHeightRangeCollapsed}
-                isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
               />
               {!isIndependentTeachingSpace && (
                 <button
@@ -6167,7 +6294,7 @@ export default function App() {
                 onRecordParkingPointPosition={recordTeachingParkingPointPosition}
                 onEditTeachingPose={beginTeachingPoseEdit}
                 onConfirmTeachingPose={captureTeachingPoint}
-                isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetDraft && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
               />
               <TeachingPlaybackDock
                 key={teachingPlayback.taskId}
@@ -6450,9 +6577,15 @@ export default function App() {
           returnFocusRef={mapDetailsButtonRef}
         />
       )}
+      {appPage === APP_PAGE_WORKBENCH && robotPresetManager && (
+        <RobotPresetManagerDialog poses={projectRobotPresets} robot={selectedRobot} canEdit={robotPresetReady}
+          hidden={Boolean(robotPresetDraft)} onNew={() => openRobotPreset()} onEdit={openRobotPreset}
+          onRename={renameRobotPreset} onDelete={deleteRobotPreset}
+          onClose={closeRobotPresetManager} returnFocusRef={robotMenuButtonRef} />
+      )}
       {appPage === APP_PAGE_WORKBENCH && robotPresetDraft && (
         <RobotPresetDialog key={robotPresetDraft.id} snapshot={robotPresetDraft} onSave={saveRobotPreset}
-          onClose={closeRobotPreset} returnFocusRef={robotMenuButtonRef} />
+          onClose={closeRobotPreset} returnFocusRef={robotPresetReturnFocusRef} />
       )}
     </div>
     {appPage === APP_PAGE_HOME && (
@@ -6606,15 +6739,21 @@ export default function App() {
       recovery={lastProjectRecovery}
       independentHistory={independentHistory}
       historyDisabled={independentSwitchBlocked}
-      busy={loadState.loading}
+      busy={loadState.loading || Boolean(independentNameDialog)}
       onClose={closeProjectLoadDialog}
       onLoadDefaultDirectory={loadDefaultProjectDirectory}
       onLoadWorkspace={loadAutoSavedProject}
       onLoadRecovery={loadRecoveryProject}
       onLoadHistory={restoreIndependentHistory}
+      onRenameIndependent={openIndependentNameDialog}
       onChooseDirectory={chooseProjectDirectory}
       onChooseGuideFile={chooseProjectGuideFile}
     />
+    {independentNameDialog && <IndependentTeachingNameDialog
+      state={independentNameDialog}
+      onSave={renameIndependentTeaching}
+      onClose={() => { if (!independentSwitchBusyRef.current) setIndependentNameDialog(null); }}
+    />}
     </>
   );
 }

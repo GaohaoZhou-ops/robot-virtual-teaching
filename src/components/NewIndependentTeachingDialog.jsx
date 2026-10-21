@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowLeftRight, Check, FileText, FolderOpen, LoaderCircle, Map, Plus, ScanLine, X } from 'lucide-react';
 import { identityTransferPose, parseTransferMatrixFile, transformTeachingPose } from '../lib/teachingTransfer.js';
+import { defaultIndependentTeachingName, INDEPENDENT_TEACHING_NAME_MAX_LENGTH, validateIndependentTeachingName } from '../lib/independentTeachingName.js';
 import './NewIndependentTeachingDialog.css';
 
 export default function NewIndependentTeachingDialog({ state, progress, onCreate, onClose }) {
@@ -10,6 +11,8 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
   const matrixInputRef = useRef(null);
   const modelButtonRef = useRef(null);
   const matrixReadRevision = useRef(0);
+  const nameEditedRef = useRef(false);
+  const [name, setName] = useState('');
   const [modelFile, setModelFile] = useState(null);
   const [modelError, setModelError] = useState('');
   const [matrix, setMatrix] = useState(null);
@@ -40,6 +43,7 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
     }
     setModelError('');
     setModelFile(file);
+    if (!nameEditedRef.current) setName(defaultIndependentTeachingName(file.name));
   };
 
   const chooseMatrix = async (event) => {
@@ -69,7 +73,9 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
     setMatrixError('');
     setMatrixLoading(false);
   };
-  const canCreate = Boolean(modelFile && !modelError && !matrixError && !matrixLoading && !busy);
+  let nameError = '';
+  try { validateIndependentTeachingName(name); } catch (error) { nameError = error.message; }
+  const canCreate = Boolean(modelFile && !nameError && !modelError && !matrixError && !matrixLoading && !busy);
 
   return createPortal(<dialog ref={dialogRef} className="new-independent-dialog"
     aria-labelledby="new-independent-title" aria-describedby="new-independent-description" aria-busy={busy}
@@ -77,7 +83,7 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
     onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
     <form onSubmit={(event) => {
       event.preventDefault();
-      if (canCreate) onCreate({ file: modelFile, matrix: hasMap ? matrix : null });
+      if (canCreate) onCreate({ file: modelFile, matrix: hasMap ? matrix : null, name: name.trim() });
     }}>
       <header className="new-independent-dialog__header">
         <span className="new-independent-dialog__mark"><ScanLine size={24} /></span>
@@ -87,6 +93,14 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
           disabled={busy} onClick={onClose}><X size={18} /></button>
       </header>
       <div className="new-independent-dialog__body">
+        <label className="new-independent-dialog__name">独立示教名称
+          <input value={name} onChange={(event) => { nameEditedRef.current = true; setName(event.target.value); }}
+            aria-label="独立示教名称"
+            maxLength={INDEPENDENT_TEACHING_NAME_MAX_LENGTH} required disabled={busy}
+            placeholder="例如：1 号工位 · 左侧阀门" autoComplete="off" />
+          <span>选择模型后自动填写，可按工位或对象命名，便于在缓存列表中查找。</span>
+          {nameEditedRef.current && nameError && <small role="alert">{nameError}</small>}
+        </label>
         <section className="new-independent-dialog__section" aria-labelledby="new-independent-model-title">
           <div className="new-independent-dialog__section-title"><span>01</span>
             <h3 id="new-independent-model-title">独立模型</h3><small>必选 · PLY</small></div>
@@ -141,7 +155,7 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
         </p>}
       </div>
       <footer>
-        <span>当前独立示教将保存到历史列表</span>
+        <span>当前独立示教将保存到缓存列表</span>
         <button type="button" disabled={busy} onClick={onClose}>取消</button>
         <button type="submit" className="new-independent-dialog__create" disabled={!canCreate}>
           {busy ? <LoaderCircle size={15} className="transfer-spinner" /> : <Plus size={15} />}创建独立示教

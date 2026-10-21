@@ -742,7 +742,7 @@ async function buildProjectEntries(payload, options = {}) {
     kind: 'directory-project',
     manifestFile: PROJECT_ARCHIVE_MANIFEST,
     projectFile: PROJECT_ARCHIVE_CONFIG,
-    name: String(payload.virtualTeaching?.tasks?.[0]?.name || payload.map?.fileName || '未命名工程'),
+    name: String(payload.workspace?.independentTeachingName || payload.virtualTeaching?.tasks?.[0]?.name || payload.map?.fileName || '未命名工程'),
     updatedAt: project.exportedAt || new Date().toISOString(),
   }));
   addEntry(entries, 'README.txt', textBytes([
@@ -947,12 +947,12 @@ async function buildWorkspaceCollectionEntries(payload, options) {
   const independentHistory = [];
   for (const [index, snapshot] of collection.independentHistory.entries()) {
     const descriptor = await addWorkspace(snapshot, `independent-history/${index + 1}/`,
-      `独立示教历史 ${index + 1}/${collection.independentHistory.length}`);
+      `独立示教缓存 ${index + 1}/${collection.independentHistory.length}`);
     independentHistory.push({ ...descriptor, archivedAt: snapshot.archivedAt });
   }
   const instructions = textBytes([
     '虚拟示教平台 · 完整工程与独立示教列表',
-    '本文件包含当前工作区、另一侧已打开的工作区以及独立示教历史列表的全部模型和配置。',
+    '本文件包含当前工作区、另一侧已打开的工作区以及独立示教缓存列表的全部模型和配置。',
     '每组均包含地图/物体、机器人模型与资源、预设姿态、路径、示教任务、RGB/点云、视角及转换关系。',
     '在另一台运行本平台的设备上加载整个 ZIP，即可恢复工作区和独立示教列表；坐标和转换矩阵保持不变。',
     'workspaces/ 保存当前工作区；independent-history/ 保存历史示教组，包含同名模型的不同组。',

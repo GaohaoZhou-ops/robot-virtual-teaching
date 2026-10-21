@@ -8,6 +8,7 @@ import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { ZIVID_M70_PROFILE } from './zividCamera.js';
 import { withoutTemporaryMapNavigation } from './teachingNavigation.js';
 import { abxNodeLabel, abxNodeName } from './abxRoute.js';
+import { normalizeIndependentTeachingName } from './independentTeachingName.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -726,6 +727,7 @@ export function normalizeProject(payload) {
     rendering: payload.rendering || null,
     workspace: {
       teachingSpaceMode,
+      independentTeachingName: normalizeIndependentTeachingName(workspace.independentTeachingName),
       pointColorMode: String(workspace.pointColorMode || ''),
       showWaypoints3D: workspace.showWaypoints3D !== false,
       showWaypointNames3D: workspace.showWaypointNames3D !== false,
@@ -774,6 +776,7 @@ export function buildExport({
   collapsedPanel = null,
   inspectorCollapsed = false,
   transfer = null,
+  independentTeachingName = '',
   directoryAutosaveSuspended = false,
 }) {
   // This boundary covers autosave, archives and teaching transfers. Never
@@ -811,6 +814,8 @@ export function buildExport({
     },
     workspace: {
       teachingSpaceMode: normalizedTeachingSpaceMode,
+      ...(normalizedTeachingSpaceMode === 'independent' && normalizeIndependentTeachingName(independentTeachingName)
+        ? { independentTeachingName: normalizeIndependentTeachingName(independentTeachingName) } : {}),
       pointColorMode: ['height', 'source', 'white'].includes(pointColorMode)
         ? pointColorMode
         : 'height',

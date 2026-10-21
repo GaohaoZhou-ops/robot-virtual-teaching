@@ -9,10 +9,12 @@ import {
   HardDrive,
   History,
   LoaderCircle,
+  Pencil,
   ScanLine,
   ShieldCheck,
   X,
 } from 'lucide-react';
+import { independentWorkspaceLabel } from '../lib/independentTeachingName.js';
 
 const formatTimestamp = (value) => {
   if (!value) return '尚无保存时间';
@@ -51,6 +53,7 @@ export default function ProjectLoadDialog({
   onLoadWorkspace,
   onLoadRecovery,
   onLoadHistory,
+  onRenameIndependent,
   onChooseDirectory,
   onChooseGuideFile,
 }) {
@@ -103,7 +106,7 @@ export default function ProjectLoadDialog({
       ? {
           icon: <Database size={21} />,
           eyebrow: 'LOCAL AUTO-SAVE / READY',
-          title: workspace.mapName || '本地自动保存工程',
+          title: (isIndependent && workspace.teachingName) || workspace.mapName || '本地自动保存工程',
           description: '当前模式的工作现场已由浏览器自动保护，可直接恢复地图、机器人、示教数据与视角。',
           savedAt: workspace.savedAt,
           facts: workspaceFacts(workspace),
@@ -114,7 +117,7 @@ export default function ProjectLoadDialog({
         ? {
             icon: <History size={21} />,
             eyebrow: 'RECOVERY SNAPSHOT / READY',
-            title: recovery.mapName || '上一次未完成工程',
+            title: (isIndependent && recovery.teachingName) || recovery.mapName || '上一次未完成工程',
             description: '检测到服务重启前保存的工程副本，可恢复当时的工作现场与示教数据。',
             savedAt: recovery.savedAt,
             facts: [
@@ -220,28 +223,38 @@ export default function ProjectLoadDialog({
             <header>
               <span>02</span>
               <div>
-                <small>LOCAL TEACHING HISTORY</small>
-                <strong id="project-load-history-title">独立示教历史</strong>
+                <small>LOCAL TEACHING CACHE</small>
+                <strong id="project-load-history-title">独立示教缓存</strong>
               </div>
             </header>
-            <p>恢复后可继续编辑。当前独立工程会先存入历史，地图中已转换的结果继续保留。</p>
-            {independentHistory?.status === 'loading' ? <p role="status">正在读取历史缓存…</p>
-              : independentHistory?.status === 'error' ? <p role="alert">{independentHistory.error || '无法读取历史缓存'}</p>
+            <p>按工位或对象重命名，方便查找。切换前会缓存当前独立工程，地图中已转换的结果继续保留。</p>
+            {independentHistory?.status === 'loading' ? <p role="status">正在读取独立示教缓存…</p>
+              : independentHistory?.status === 'error' ? <p role="alert">{independentHistory.error || '无法读取独立示教缓存'}</p>
                 : independentHistory?.entries?.length ? <ul>
-                  {independentHistory.entries.map((entry) => <li key={entry.historyId}>
+                  {independentHistory.entries.map((entry) => {
+                    const label = independentWorkspaceLabel(entry);
+                    return <li key={entry.historyId || 'current'} data-map-id={entry.mapId}
+                      data-workspace-kind={entry.current ? 'current' : 'history'}>
                     <History size={18} />
                     <div>
-                      <strong title={entry.mapName}>{entry.mapName}</strong>
-                      <span>{entry.activeTaskName || '未命名示教'} · {formatTimestamp(entry.archivedAt)}</span>
+                      <strong title={label}>{label}</strong>
+                      <span>模型：{entry.mapName}</span>
+                      <span>{entry.current ? '当前工作区' : '已缓存'} · {entry.activeTaskName || '暂无示教任务'} · {formatTimestamp(entry.savedAt || entry.archivedAt)}</span>
                       <span>{entry.taskCount} 个任务 · {entry.parkingPointCount} 个停车点 · {entry.teachingPoseCount} 组姿态</span>
                     </div>
+                    <div className="independent-workspace-actions">
                     <button type="button" disabled={busy || historyDisabled}
-                      aria-label={`恢复独立示教 ${entry.mapName}`}
-                      onClick={() => onLoadHistory?.(entry.historyId)}>
+                      aria-label={`重命名独立示教 ${label}`} onClick={() => onRenameIndependent?.(entry)}>
+                      <Pencil size={13} />重命名
+                    </button>
+                    <button type="button" disabled={busy || historyDisabled}
+                      aria-label={`恢复独立示教 ${label}`}
+                      onClick={() => entry.historyId ? onLoadHistory?.(entry.historyId) : onLoadWorkspace?.()}>
                       继续示教 <ArrowRight size={14} />
                     </button>
-                  </li>)}
-                </ul> : <p>暂无历史工程。使用“示教 → 新增独立示教”后，上一组完整工程会保存在这里。</p>}
+                    </div>
+                  </li>; })}
+                </ul> : <p>暂无独立示教缓存。使用“示教 → 新增独立示教”后，各组完整工程会保存在这里。</p>}
           </section>}
 
           <section className="project-load-alternatives" aria-labelledby="project-load-alternatives-title">

@@ -199,7 +199,7 @@ export default function StartPage({
             </div>
             <div className="start-page__resume-copy">
               <small>CACHED WORKSPACE / {independent ? 'VIRTUAL_ORIGIN' : 'MAP'}</small>
-              <strong>{selectedWorkspace.mapName || '未命名工作现场'}</strong>
+              <strong>{selectedWorkspace.teachingName || selectedWorkspace.mapName || '未命名工作现场'}</strong>
               <span>
                 {(Number(selectedWorkspace.pointCount) || 0).toLocaleString('zh-CN')} 点
                 <i />{Number(selectedWorkspace.waypointCount) || 0} 导航点

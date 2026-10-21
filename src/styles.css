@@ -8141,6 +8141,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .project-load-history li > svg { color: rgb(var(--project-load-accent)); }
 .project-load-history li > div { display: grid; min-width: 0; gap: 5px; }
+.project-load-history li > .independent-workspace-actions { display: flex; align-items: center; gap: 6px; }
+.independent-workspace-actions > button { flex-shrink: 0; white-space: nowrap; }
 .project-load-history li strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .project-load-history li span { color: #839a9b; font-size: 9px; overflow-wrap: anywhere; }
 .project-load-history button {
@@ -8274,6 +8276,8 @@ input[type="number"]::-webkit-inner-spin-button {
   .project-load-default__card { grid-template-columns: 42px minmax(0, 1fr); padding: 14px; }
   .project-load-default__icon { width: 40px; height: 40px; }
   .project-load-default__action { grid-column: 1 / -1; }
+  .project-load-history li { grid-template-columns: 20px minmax(0, 1fr); }
+  .project-load-history li > .independent-workspace-actions { grid-column: 2; justify-self: end; }
   .project-load-alternatives > div { grid-template-columns: 1fr; }
   .project-load-dialog__footer > span:last-child { display: none; }
 }
@@ -12094,12 +12098,12 @@ input[type="number"]::-webkit-inner-spin-button {
   grid-template-rows: 52px minmax(0, 1fr);
   width: min(520px, calc(100vw - 20px));
   height: min(760px, calc(100vh - 108px));
-  min-width: 420px;
-  min-height: 340px;
+  min-width: min(420px, calc(100vw - 20px));
+  min-height: min(340px, calc(100vh - 20px));
   max-width: calc(100vw - 20px);
   max-height: calc(100vh - 20px);
   overflow: hidden;
-  resize: both;
+  resize: none;
   border: 1px solid rgba(244, 201, 93, 0.3);
   background:
     linear-gradient(145deg, rgba(244, 201, 93, 0.055), transparent 32%),
@@ -12121,15 +12125,11 @@ input[type="number"]::-webkit-inner-spin-button {
   to { opacity: 1; filter: brightness(1); }
 }
 
-.joint-float-window::before,
-.joint-float-window::after {
+.joint-float-window::before {
   content: "";
   position: absolute;
   z-index: 3;
   pointer-events: none;
-}
-
-.joint-float-window::before {
   top: -1px;
   left: -1px;
   width: 118px;
@@ -12138,16 +12138,8 @@ input[type="number"]::-webkit-inner-spin-button {
   box-shadow: 0 0 14px rgba(244, 201, 93, 0.2);
 }
 
-.joint-float-window::after {
-  right: 3px;
-  bottom: 3px;
-  width: 8px;
-  height: 8px;
-  border-right: 1px solid rgba(244, 201, 93, 0.5);
-  border-bottom: 1px solid rgba(244, 201, 93, 0.5);
-}
-
-.joint-float-window.is-dragging {
+.joint-float-window.is-dragging,
+.joint-float-window.is-resizing {
   border-color: rgba(244, 201, 93, 0.58);
   box-shadow:
     0 32px 88px rgba(0, 0, 0, 0.74),
@@ -12156,19 +12148,35 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .joint-float-window.is-waiting {
   height: 208px;
-  min-height: 180px;
+  min-height: min(180px, calc(100vh - 20px));
 }
 
 .joint-float-window.is-minimized {
   grid-template-rows: 52px;
   width: 360px !important;
   height: 52px !important;
-  min-width: 360px;
+  min-width: min(360px, calc(100vw - 20px));
   min-height: 52px;
   resize: none;
 }
 
-.joint-float-window.is-minimized::after { display: none; }
+.joint-float-window__resize {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(244, 201, 93, 0.75);
+  touch-action: none;
+  user-select: none;
+}
+.joint-float-window__resize--width { top: 52px; right: 0; bottom: 24px; width: 8px; cursor: ew-resize; }
+.joint-float-window__resize--height { left: 0; right: 24px; bottom: 0; height: 8px; cursor: ns-resize; }
+.joint-float-window__resize--both { right: 0; bottom: 0; width: 24px; height: 24px; cursor: nwse-resize; background: #111d1f; }
+.joint-float-window__resize:hover,
+.joint-float-window__resize:focus-visible { background: rgba(244, 201, 93, 0.2); color: var(--amber); outline-offset: -2px; }
 
 .joint-float-window__titlebar {
   position: relative;
@@ -12294,6 +12302,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .joint-float-window__body {
   min-width: 0;
   min-height: 0;
+  margin: 0 8px 8px 0;
   overflow: auto;
   background: rgb(5, 14, 17);
   overscroll-behavior: contain;

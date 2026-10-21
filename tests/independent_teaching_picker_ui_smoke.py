@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from playwright.sync_api import expect, sync_playwright
 
 from independent_teaching_history_ui_smoke import PLY, history, new_group
@@ -58,7 +60,7 @@ def run():
 
             dialog = open_picker(page)
             expect(dialog.locator("li")).to_have_count(2)
-            expect(dialog.locator("li strong")).to_have_text([source_name, source_name])
+            expect(dialog.locator("li strong")).to_have_text([Path(source_name).stem, source_name])
             expect(dialog.locator('[data-workspace-kind="current"]')).to_contain_text("上次使用")
             expect(dialog.locator('[data-workspace-kind="current"]')).to_contain_text("第二组对象")
             expect(dialog.locator('[data-workspace-kind="history"]')).to_contain_text("2 组姿态")
