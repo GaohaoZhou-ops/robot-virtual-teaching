@@ -38,10 +38,11 @@ def new_group(page, file=PLY):
 
 
 def restore_group(page, map_name):
-    topbar_action(page, "独立示教历史", exact=True).click()
+    topbar_action(page, "独立示教缓存", exact=True).click()
     dialog = page.get_by_role("dialog", name="加载工程", exact=True)
+    entry = next(entry for entry in history(page) if entry["mapName"] == map_name)
     with page.expect_navigation(wait_until="networkidle"):
-        dialog.get_by_role("button", name=f"恢复独立示教 {map_name}", exact=True).click()
+        dialog.locator(f'li[data-map-id="{entry["mapId"]}"]').get_by_role("button", name=f'恢复独立示教 {entry.get("teachingName") or map_name}', exact=True).click()
     ready(page, "independent")
 
 
@@ -159,9 +160,9 @@ def run():
             page.reload(wait_until="networkidle")
             ready(page, "independent")
             assert len(history(page)) == 2
-            topbar_action(page, "独立示教历史", exact=True).click()
+            topbar_action(page, "独立示教缓存", exact=True).click()
             loader = page.get_by_role("dialog", name="加载工程", exact=True)
-            expect(loader.get_by_text("独立示教历史", exact=True)).to_be_visible()
+            expect(loader.get_by_text("独立示教缓存", exact=True)).to_be_visible()
             page.screenshot(path="/tmp/atlas-independent-history.png", full_page=True, animations="disabled")
             loader.get_by_role("button", name="关闭加载工程窗口", exact=True).click()
 
@@ -180,10 +181,10 @@ def run():
             dialog.get_by_role("button", name="关闭示教转换", exact=True).click()
 
             # B and C share a filename. Select B by its task label.
-            topbar_action(page, "独立示教历史", exact=True).click()
+            topbar_action(page, "独立示教缓存", exact=True).click()
             row = page.locator(".project-load-history li").filter(has_text="第二组对象")
             with page.expect_navigation(wait_until="networkidle"):
-                row.get_by_role("button", name=f"恢复独立示教 {PLY.name}", exact=True).click()
+                row.get_by_role("button", name=f"恢复独立示教 {PLY.stem}", exact=True).click()
             ready(page, "independent")
             assert current_group_id(page) == group_b_id
             assert state(page)["states"]["independent"] == second

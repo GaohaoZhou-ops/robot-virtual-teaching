@@ -129,7 +129,9 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
         ref={panelRef} tabIndex={-1} noValidate onSubmit={save} aria-busy={busy}>
         <header>
           <span className="robot-preset-dialog__icon"><Bot size={23} /></span>
-          <div><small>ROBOT / POSE LIBRARY</small><h2 id="robot-preset-title">新建预设姿态</h2>
+          <div><small>ROBOT / POSE LIBRARY</small><h2 id="robot-preset-title">
+            {snapshot.mode === 'edit' ? '编辑预设姿态' : '新建预设姿态'}
+          </h2>
             <p>{snapshot.robot.name} · {snapshot.joints.length} 个关节</p></div>
           <button type="button" aria-label="关闭预设姿态窗口" disabled={busy} onClick={onClose}><X size={18} /></button>
         </header>

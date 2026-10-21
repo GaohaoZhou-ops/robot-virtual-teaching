@@ -60,7 +60,7 @@ def validate_zip(path):
 
 
 def restore_group(page, group):
-    topbar_action(page, "独立示教历史", exact=True).click()
+    topbar_action(page, "独立示教缓存", exact=True).click()
     row = page.locator(".project-load-history li").filter(has_text=f"独立组 {group}")
     with page.expect_navigation(wait_until="networkidle"):
         row.get_by_role("button", name="恢复独立示教 same-model.ply", exact=True).click()

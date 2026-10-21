@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import {
   buildRobotPresetFile, createRobotJointPreset, groupPresetJoints, jointPresetErrors,
   jointValueFromInput, jointValueToInput, presetJointDefinitions, presetMatchesRobot, readRobotPresetFile,
+  robotPresetValuesForEditing, validateRobotPresetName,
 } from '../src/lib/robotJointPresets.js';
 import { buildExport, normalizeProject } from '../src/lib/io.js';
 
@@ -47,6 +48,21 @@ assert.equal(presetMatchesRobot(pose, { ...robot, id: 'robot-b' }), false);
 assert.equal(presetMatchesRobot(pose, null), false);
 assert.throws(() => createRobotJointPreset({ id: 'bad', name: ' ', robot, joints, values }), /名称/);
 assert.throws(() => createRobotJointPreset({ id: 'bad', name: '越界', robot, joints, values: { ...values, right_J1: 181 } }), /限位/);
+
+// A rename keeps the same preset identity, but cannot collide with another pose of this robot.
+assert.equal(validateRobotPresetName(' 准备姿态 ', [pose], robot, pose.id), pose.name);
+assert.throws(() => validateRobotPresetName('准备姿态', [pose], robot, 'another'), /同名/);
+assert.equal(validateRobotPresetName('准备姿态', [pose], { id: 'robot-b' }), pose.name);
+assert.throws(() => validateRobotPresetName(' '), /名称/);
+assert.throws(() => validateRobotPresetName('姿'.repeat(81)), /80/);
+assert.deepEqual(robotPresetValuesForEditing(pose, joints), values);
+const radianPose = { ...pose, joints: { ...pose.joints, angularUnit: 'rad', values: {
+  ...Object.fromEntries(Object.entries(values).map(([name, value]) => [name, value * Math.PI / 180])),
+  torso_lift: 0.25,
+} } };
+const editableValues = robotPresetValuesForEditing(radianPose, joints);
+Object.entries(values).forEach(([name, value]) => assert.ok(Math.abs(editableValues[name] - value) < 1e-10));
+assert.throws(() => robotPresetValuesForEditing({ joints: { angularUnit: 'unknown' } }, joints), /单位/);
 
 for (const mode of ['map', 'independent']) {
   const exported = buildExport({ mapData: { name: 'fixture.ply' }, teachingSpaceMode: mode,

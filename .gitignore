@@ -417,6 +417,12 @@ playwright/.auth/
 /tests/atlas-new-independent-*/
 /atlas-new-independent-*.[zZ][iI][pP]
 /tests/atlas-new-independent-*.[zZ][iI][pP]
+# Preset-management UI tests export complete projects into temporary workspaces.
+# Keep root/tests TMPDIR overrides and packed copies local, but retain fixtures.
+/atlas-preset-manager-*/
+/tests/atlas-preset-manager-*/
+/atlas-preset-manager-*.[zZ][iI][pP]
+/tests/atlas-preset-manager-*.[zZ][iI][pP]
 # Navigation-name display tests export complete projects for ZIP round trips.
 # Keep local TMPDIR workspaces and packed copies out of source/fixture paths.
 /atlas-waypoint-names-*/

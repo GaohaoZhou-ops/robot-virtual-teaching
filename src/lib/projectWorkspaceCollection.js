@@ -43,7 +43,7 @@ export function validateWorkspaceCollection(collection, options = {}) {
   }
   for (const snapshot of independentHistory) {
     if (snapshot.mode !== 'independent' || !Number.isFinite(snapshot.archivedAt) || snapshot.archivedAt < 0) {
-      throw new Error('独立示教历史记录无效');
+      throw new Error('独立示教缓存记录无效');
     }
   }
 }
