@@ -117,5 +117,7 @@ linked.config.project.paths[0].abx = { routeId: 'absolute-route', edgeId: 2 };
 const linkedSync = syncMapRouteToIndependent(local.map, null, linked);
 assert.equal(linkedSync.waypoints[0].abx, undefined);
 assert.equal(linkedSync.waypoints[0].teachingTaskId, undefined);
+assert.equal(linkedSync.waypoints[0].sourceWaypointSource, 'teaching-parking-point',
+  'temporary copies retain only the source kind needed to group duplicate labels');
 assert.equal(linkedSync.edges[0].abx, undefined);
 console.log('map route sync: inverse XYZ/RPY, map origin frame, graph, repeat sync, isolation, transient exports and both relations passed');

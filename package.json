@@ -34,6 +34,7 @@
     "test:ipad:qr": "node tests/ipad_qr_pairing_smoke.mjs",
     "test:transfer": "node tests/teaching_transfer_smoke.mjs && node tests/teaching_transfer_preview_smoke.mjs && node tests/teaching_transfer_matrix_smoke.mjs && node tests/independent_teaching_groups_smoke.mjs",
     "test:route-sync": "node tests/map_route_sync_smoke.mjs",
+    "test:waypoint-labels": "node tests/waypoint_labels_smoke.mjs",
     "test:viewport-reference": "node tests/viewport_reference_smoke.mjs",
     "test:viewport-zoom": "node tests/viewport_zoom_smoke.mjs",
     "test:robot-grounding": "node tests/robot_grounding_smoke.mjs",

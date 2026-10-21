@@ -596,6 +596,7 @@ export default function App() {
   const [showRobotModel, setShowRobotModel] = useState(true);
   const [collapsedPanel, setCollapsedPanel] = useState(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [inspectorPageRequest, setInspectorPageRequest] = useState(null);
   const [mapDetailsOpen, setMapDetailsOpen] = useState(false);
   const [displaySettingsContainer, setDisplaySettingsContainer] = useState(null);
   const [synchronizedFocus, setSynchronizedFocus] = useState(null);
@@ -2948,6 +2949,11 @@ export default function App() {
   const requestSynchronizedFocus = useCallback((type, id) => {
     focusRevisionRef.current += 1;
     setSynchronizedFocus({ type, id, revision: focusRevisionRef.current });
+  }, []);
+
+  const requestInspectorPage = useCallback((request) => {
+    setInspectorPageRequest({ ...request });
+    setInspectorCollapsed(false);
   }, []);
 
   const selectEdge = useCallback((id) => {
@@ -6504,6 +6510,7 @@ export default function App() {
                 showWaypointNames={showWaypointNames3D}
                 onShowWaypointNamesChange={setShowWaypointNames3D}
                 onSelectWaypoint={selectNavigationWaypoint}
+                onInspectorPageRequest={requestInspectorPage}
                 onSelectEdge={selectEdge}
                 onClearSelection={clearSelection}
                 focusRequest={synchronizedFocus}
@@ -6660,6 +6667,7 @@ export default function App() {
 
         <Inspector
           mapData={mapData}
+          pageRequest={inspectorPageRequest}
           teachingSpaceMode={teachingSpaceMode}
           waypoints={waypoints}
           edges={edges}

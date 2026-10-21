@@ -46,6 +46,7 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
     // Do not retain ABX absolute-coordinate metadata or teaching-task links.
     return { id: ids.get(point.id), name: point.name, source: TEMPORARY_MAP_ROUTE_SOURCE,
       sourceWaypointId: point.id,
+      sourceWaypointSource: point.source,
       navigationUp: { ...navigationUp },
       pose: { ...pose.position, ...pose.rpy } };
   });
