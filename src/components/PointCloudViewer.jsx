@@ -8118,7 +8118,7 @@ export default function PointCloudViewer({
             {robotLoadState?.status === 'loaded' && !endEffectorControlActive && !chassisDragMode && (
               <span><Bot size={12} /> 双击底盘启用 WASD · 双击胸甲联动躯干 · 双击末端进入 6D 控制</span>
             )}
-            <span>
+            <span className={hasEmbeddedMesh ? 'viewer-help__mesh' : undefined}>
               <Gauge size={12} />
               {hasEmbeddedMesh
                 ? `内嵌网格 ${formatPointCount(meshInfo.faceCount)} 面 · 档位仅调整未成面点`

@@ -4048,6 +4048,11 @@ code {
   row-gap: 5px;
 }
 
+.point-cloud-view[data-teaching-space-mode="independent"] .viewer-help__mesh {
+  order: -1;
+  flex-basis: 100%;
+}
+
 .height-color-legend {
   position: absolute;
   right: 94px;
@@ -7764,18 +7769,23 @@ input[type="number"]::-webkit-inner-spin-button {
 .start-page__resume-copy strong { margin-top: 4px; overflow: hidden; color: #d6e3e0; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .start-page__resume-copy span { display: flex; align-items: center; gap: 8px; margin-top: 5px; color: #617779; font: 8px "SFMono-Regular", Menlo, monospace; }
 .start-page__resume-copy i { width: 1px; height: 8px; background: #34494b; }
+/* Share action styling between the welcome page and both teaching workbenches. */
+.start-page,
+.app-shell { --workspace-action-accent-rgb: 89, 219, 232; }
+.start-page.is-independent-selected,
+.app-shell.is-independent-teaching-space { --workspace-action-accent-rgb: 170, 145, 255; }
 .start-page__resume > button,
-.start-page .work-sync__button,
+.work-sync__button,
 .start-page .start-page__global-reset { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 0 13px; border: 1px solid rgba(113, 149, 152, 0.22); border-radius: 0; color: #839799; background: rgba(11, 25, 29, 0.76); font-family: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 9px; font-weight: 400; letter-spacing: 0; white-space: nowrap; cursor: pointer; }
 .start-page__resume > .start-page__resume-action,
 .start-page .start-page__global-reset,
-.start-page .work-sync .work-sync__button { min-width: 124px; border-color: rgba(var(--start-accent-rgb), 0.42); color: #e4edeb; background: rgba(var(--start-accent-rgb), 0.11); }
+.work-sync__button { min-width: 124px; border-color: rgba(var(--workspace-action-accent-rgb), 0.42); color: #e4edeb; background: rgba(var(--workspace-action-accent-rgb), 0.11); }
 .start-page__resume > button:hover,
 .start-page .start-page__global-reset:hover:not(:disabled),
-.start-page .work-sync__button:hover:not(:disabled) { border-color: rgba(var(--start-accent-rgb), 0.48); color: #e5efed; }
-.start-page .work-sync__button:disabled,
+.work-sync__button:hover:not(:disabled) { border-color: rgba(var(--workspace-action-accent-rgb), 0.48); color: #e5efed; }
+.work-sync__button:disabled,
 .start-page .start-page__global-reset:disabled { opacity: 0.42; }
-.start-page .work-sync__button:focus-visible,
+.work-sync__button:focus-visible,
 .start-page .start-page__global-reset:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
 
 .start-page__footer {
@@ -11392,7 +11402,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-capture-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 104px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -11436,7 +11446,7 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-capture-button {
   display: grid;
-  grid-template-columns: 31px minmax(0, 1fr) auto;
+  grid-template-columns: 31px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   width: calc(100% - 18px);
@@ -11471,21 +11481,6 @@ input[type="number"]::-webkit-inner-spin-button {
   color: #cfe2dc;
   font-size: 8px;
   font-weight: 570;
-}
-
-.teaching-capture-button small {
-  margin-top: 3px;
-  color: #6e9d8a;
-  font: 5px "SFMono-Regular", Menlo, monospace;
-  letter-spacing: 0.05em;
-}
-
-.teaching-capture-button kbd {
-  padding: 4px 5px;
-  border: 1px solid rgba(94, 229, 154, 0.18);
-  color: var(--green);
-  background: rgba(94, 229, 154, 0.055);
-  font: 6px "SFMono-Regular", Menlo, monospace;
 }
 
 .teaching-capture-button:hover:not(:disabled) {

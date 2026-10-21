@@ -552,13 +552,7 @@ export default function VirtualTeachingPanel({
         <span><Save size={15} /></span>
         <div>
           <strong>{captureInProgress ? '正在冻结双目视觉…' : '记录当前姿态'}</strong>
-          <small>
-            {captureInProgress
-              ? 'CAM-L + CAM-R · RGB + XYZ CLOUD'
-              : `${coordinateFrameLabel} 6DOF + ${currentJointCount} JOINTS + DUAL VISION`}
-          </small>
         </div>
-        <kbd>A{String(activePoses.length + 1).padStart(2, '0')}</kbd>
       </button>
       <button
         type="button"

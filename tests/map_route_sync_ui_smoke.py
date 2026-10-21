@@ -19,6 +19,11 @@ def temporary_options(page):
     return page.get_by_label("搜索导航点", exact=True).locator('option[value^="map-route-"]')
 
 
+def route_definition(paths):
+    # Editing/syncing points invalidates cached connectivity, not the graph.
+    return [{key: value for key, value in path.items() if key != 'connectivity'} for path in paths]
+
+
 def check_map_origin(page):
     canvas = page.locator('.three-canvas')
     expect(canvas).to_have_attribute('data-map-origin-position', re.compile(r'^\['))
@@ -138,7 +143,7 @@ def run():
             assert snapshot(page, "map") == absolute_before
             local_after = snapshot(page, "independent")["project"]
             assert local_after["waypoints"] == local_before["project"]["waypoints"]
-            assert local_after["paths"] == local_before["project"]["paths"]
+            assert route_definition(local_after["paths"]) == route_definition(local_before["project"]["paths"])
             assert local_after.get("abxRoutes") == local_before["project"].get("abxRoutes")
 
             # Repeated sync replaces copies and recomputes from the map.
@@ -241,7 +246,7 @@ def run():
             expect(page.locator('.property-editor input[type="number"]').nth(0)).to_have_value("12.00")
             local_after = snapshot(page, "independent")["project"]
             assert local_after["waypoints"] == local_before["project"]["waypoints"]
-            assert local_after["paths"] == local_before["project"]["paths"]
+            assert route_definition(local_after["paths"]) == route_definition(local_before["project"]["paths"])
             updated_map = snapshot(page, "map")
             updated_point = next(point for point in updated_map["project"]["waypoints"]
                                  if point["id"] == "abx-route:sync-test:N1")

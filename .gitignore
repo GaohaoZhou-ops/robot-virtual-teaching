@@ -546,6 +546,18 @@ playwright/.auth/
 /tests/atlas-route-identity-*.[zZ][iI][pP]
 /tests/atlas-insert-action-*.[zZ][iI][pP]
 
+# Tilted independent-route export tests download task bundles into temporary
+# workspaces. Keep these and local coordinate diagnostics out of commits,
+# while preserving the test runners and nested regression fixtures.
+/atlas-tilted-route-*/
+/tests/atlas-tilted-route-*/
+/atlas-tilted-route-*.[zZ][iI][pP]
+/tests/atlas-tilted-route-*.[zZ][iI][pP]
+/atlas-tilted-*.json
+/tests/atlas-tilted-*.json
+/atlas-current-route-height-check.json
+/tests/atlas-current-route-height-check.json
+
 # Clipboard smoke-test downloads when TMPDIR is local, plus packed copies.
 # Root/tests output scopes preserve matching regression fixture directories.
 /atlas-copy-ui-*/

@@ -20,12 +20,26 @@ export const parkingWaypointPose = (mapPose) => ({
   ...mapPose.rpy,
 });
 
+// Intersect the station's map-vertical line with the calibrated local height.
+// Replacing local Z alone moves map X/Y when the two frames are tilted.
+export function waypointRobotPose(point, height) {
+  const { x, y, z, roll, pitch, yaw } = point.pose;
+  const up = point.source === TEMPORARY_MAP_ROUTE_SOURCE ? point.navigationUp : null;
+  if (up && Math.abs(up.z) < 1e-6) return null;
+  const offset = up ? (height - z) / up.z : 0;
+  return { position: { x: x + (up?.x || 0) * offset, y: y + (up?.y || 0) * offset, z: height },
+    rpy: { roll, pitch, yaw } };
+}
+
 // A robot route may repeat labels across work areas. Reuse its full imported
 // N-number/name at the current position, including on temporary local copies.
 export function teachingParkingName(waypoints, pose, fallback, selectedId) {
   const position = pose.position || pose, rpy = pose.rpy || pose;
-  const candidates = waypoints.filter((point) => point.source !== TEACHING_WAYPOINT_SOURCE
-    && Math.hypot(point.pose.x - position.x, point.pose.y - position.y) <= 1e-4);
+  const candidates = waypoints.filter((point) => {
+    if (point.source === TEACHING_WAYPOINT_SOURCE) return false;
+    const target = waypointRobotPose(point, position.z ?? point.pose.z);
+    return target && Math.hypot(target.position.x - position.x, target.position.y - position.y) <= 1e-4;
+  });
   const selected = candidates.find((point) => point.id === selectedId);
   if (selected) return selected.name;
   if (candidates.length === 1) return candidates[0].name;

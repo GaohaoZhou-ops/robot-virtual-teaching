@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link2, Unplug, ShieldCheck, RefreshCw } from 'lucide-react';
 import './WorkSyncControl.css';
 
-export function WorkSyncControl({ sync, showIdleStatus = true }) {
+export function WorkSyncControl({ sync }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!sync.link) return undefined;
@@ -15,11 +15,11 @@ export function WorkSyncControl({ sync, showIdleStatus = true }) {
   const preparing = ['preparing', 'receiving'].includes(sync.phase) || sync.deciding;
   const status = sync.error || (preparing ? (sync.progress?.phase || '正在传输工程…')
     : sync.pending ? '等待主机授权 · 可再次申请'
-      : connected ? `每 3 秒同步 · 授权剩余 ${countdown}` : sync.reason || (showIdleStatus ? '独立作业' : ''));
+      : connected ? `每 3 秒同步 · 授权剩余 ${countdown}` : sync.reason || '');
   const unavailable = !connected && (sync.role === 'host' || sync.phase === 'starting');
   const title = connected ? '断开后，两端已同步和示教的结果都会保留'
     : sync.role === 'host' ? '其他设备访问本服务后，可在此申请同步；请保持本页面打开'
-      : '申请同步主机工程；主机授权前保持独立作业';
+      : '申请同步主机工程；需主机授权后开始同步';
   return (
     <div className={`work-sync ${connected ? 'is-connected' : ''}`} data-sync-phase={sync.phase} data-sync-role={sync.role}>
       <div className="work-sync__actions">
