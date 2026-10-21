@@ -25,6 +25,29 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertNotEqual(preview.value as? String, value, "the gesture must remain applied after releasing")
     }
 
+    func testContinuousModelPreviewRotation() throws {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.buttons["open-demo"].waitForExistence(timeout: 15))
+        app.buttons["open-demo"].tap()
+        let preview = app.descendants(matching: .any).matching(identifier: "model-preview").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 20))
+        let initialView = try XCTUnwrap(preview.value as? String)
+        let poseCount = app.staticTexts["pose-count"].label
+        let drags: [(CGFloat, CGFloat, Int)] = [(0, 0.36, 12), (0, -0.36, 4), (0.36, 0, 4), (-0.36, 0, 4)]
+        for (dx, dy, count) in drags {
+            for _ in 0..<count {
+                let prior = try XCTUnwrap(preview.value as? String)
+                dragPreview(preview, dx: dx, dy: dy)
+                expectPreviewChanged(from: prior, in: preview)
+            }
+        }
+        XCTAssertEqual(app.staticTexts["pose-count"].label, poseCount, "preview rotation never records teaching poses")
+        XCTAssertFalse(app.buttons["place-front"].exists)
+        preview.doubleTap()
+        expectValue(initialView, in: preview)
+    }
+
     @MainActor func testExistingLocalModelPreview() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let projectID = environment["ATLAS_PREVIEW_PROJECT_ID"],
@@ -39,9 +62,16 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertTrue(preview.waitForExistence(timeout: 30))
         let poseCount = app.staticTexts["pose-count"].label
         let initialView = try XCTUnwrap(preview.value as? String)
+        _ = try await URLSession.shared.data(from: URL(string: captureURL + "/initial")!)
         dragPreview(preview, dx: 0.12, dy: -0.12)
         expectPreviewChanged(from: initialView, in: preview)
         _ = try await URLSession.shared.data(from: URL(string: captureURL + "/rotated")!)
+        for index in 1...4 {
+            let prior = try XCTUnwrap(preview.value as? String)
+            dragPreview(preview, dx: 0.12, dy: 0.36)
+            expectPreviewChanged(from: prior, in: preview)
+            _ = try await URLSession.shared.data(from: URL(string: captureURL + "/angle-\(index)")!)
+        }
         preview.doubleTap()
         expectValue(initialView, in: preview)
         _ = try await URLSession.shared.data(from: URL(string: captureURL + "/default")!)
@@ -348,13 +378,28 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertFalse(record.exists)
         app.buttons["spatial-cancel-adjustment"].tap()
         XCTAssertTrue(record.exists)
-        enter.tap()
+        let lock = app.switches["spatial-lock-panel"]
+        XCTAssertEqual(lock.value as? String, "0")
+        lock.tap()
+        expectValue("1", in: lock)
+        // Exit from the floating panel while pinned; the draft must survive and
+        // a fresh immersive session must place an unlocked panel within reach.
+        app.buttons["spatial-exit-space"].tap()
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"))
         waitForEntry(enter)
+        let quality = app.buttons["render-quality"], summary = app.staticTexts["render-summary"]
+        for label in ["全量", "精细", "轻量", "全量"] {
+            quality.tap()
+            app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch.tap()
+            expectation(for: NSPredicate(format: "label CONTAINS %@", "Mesh · \(label) · 12 / 12 面"), evaluatedWith: summary)
+            waitForExpectations(timeout: 15)
+            XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"), "changing display quality must preserve recorded poses")
+        }
         enter.tap()
         // visionOS Simulator may omit RealityView attachments from its AX tree
         // after reopening. Continue through the equivalent workspace controls.
         XCTAssertTrue(front.waitForExistence(timeout: 15))
+        expectValue("0", in: app.switches["lock-panel"])
         XCTAssertFalse(app.buttons["record-pose"].exists, "reopening must require calibration")
         enter.tap()
         waitForEntry(enter)

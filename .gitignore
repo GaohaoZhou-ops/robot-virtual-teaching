@@ -186,6 +186,12 @@ playwright/.auth/
 /tests/atlas-end-effector-*/
 /atlas-end-effector-*.[zZ][iI][pP]
 /tests/atlas-end-effector-*.[zZ][iI][pP]
+# Contextual teaching-delete UI snapshots copied from /tmp for review.
+# Keep the runner and reusable fixture assets visible.
+/atlas-teaching-capture-delete/
+/tests/atlas-teaching-capture-delete/
+/atlas-teaching-capture-delete.[zZ][iI][pP]
+/tests/atlas-teaching-capture-delete.[zZ][iI][pP]
 # Model-editor smoke-test captures copied from /tmp for local inspection.
 /model-editor-*.png
 /tests/model-editor-*.png

@@ -64,11 +64,57 @@ import ImageIO
         precondition(previewNext.yaw == -30 && previewNext.pitch == 20 && abs(previewNext.zoom - 1.2) < 0.00001,
                      "a new gesture continues from the previously committed view")
         let previewLimit = previewStart.applying(drag: [10_000, 10_000], magnification: 100)
-        precondition(abs(previewLimit.yaw) <= 180 && previewLimit.pitch == 80 && previewLimit.zoom == 2)
+        precondition(abs(previewLimit.yaw) <= 180 && abs(previewLimit.pitch) <= 180 && previewLimit.zoom == 2)
         let previewLowerLimit = previewLimit.applying(drag: [0, -10_000], magnification: 0.001)
-        precondition(previewLowerLimit.pitch == -80 && previewLowerLimit.zoom == 0.5)
+        precondition(previewLowerLimit.pitch == previewStart.pitch && previewLowerLimit.zoom == 0.5,
+                     "reversing a multi-turn vertical drag restores the starting angle while zoom stays bounded")
+        var continuousPreview = previewStart
+        for _ in 0..<72 {
+            let next = continuousPreview.applying(drag: [100, 100])
+            precondition((next.yaw - continuousPreview.yaw).remainder(dividingBy: 360) == 35 &&
+                         (next.pitch - continuousPreview.pitch).remainder(dividingBy: 360) == 35,
+                         "every new drag continues rotating both axes across poles and angle wraparound")
+            continuousPreview = next
+        }
+        precondition(continuousPreview == previewStart, "seven complete turns restore the original view without changing zoom")
         precondition(previewStart.applying(drag: [.nan, .infinity], magnification: .nan) == previewStart,
                      "invalid gesture samples must not corrupt the preview transform")
+        // A long, shallow scan must remain inside the preview's depth at every
+        // angle, including at 200% zoom. A flat or signed-height layout used to
+        // mirror the model and clip its middle/back as soon as it was rotated.
+        let scanExtent = SIMD3<Float>(3.19, 4.54, 1.22)
+        let scanDiameter = simd_length(scanExtent)
+        for viewport in [SIMD3<Float>(0.608, 0.257, 0.412), SIMD3(0.2, 0.5, 0.4), SIMD3(0.8, 0.2, 0.4)] {
+            let normal = VisionPreviewFraming(diameter: scanDiameter, availableSize: viewport, zoom: 1)!
+            for zoom: Float in [0.5, 1, 2] {
+                let framing = VisionPreviewFraming(diameter: scanDiameter, availableSize: viewport, zoom: zoom)!
+                precondition(framing.scale > 0 && abs(framing.scale - normal.scale * zoom) < 0.00001,
+                             "preview scaling stays positive and preserves the complete zoom range")
+                for yaw in stride(from: -180, through: 180, by: 30) {
+                    for pitch in stride(from: -180, through: 180, by: 30) {
+                        let rotation = simd_quatf(angle: Float(pitch) * .pi / 180, axis: SIMD3(1, 0, 0))
+                            * simd_quatf(angle: Float(yaw) * .pi / 180, axis: SIMD3(0, 1, 0))
+                            * simd_quatf(angle: -.pi / 2, axis: SIMD3(1, 0, 0))
+                        for corner in 0..<8 {
+                            let signs = SIMD3<Float>(corner & 1 == 0 ? -1 : 1, corner & 2 == 0 ? -1 : 1, corner & 4 == 0 ? -1 : 1)
+                            let point = rotation.act(scanExtent * signs / 2) * framing.scale + SIMD3(0, 0, framing.centerZ)
+                            precondition(point.z > -viewport.z / 2 && point.z < viewport.z / 2,
+                                         "every rotated corner stays between the front and back clipping planes")
+                            if zoom <= 1 {
+                                precondition(abs(point.x) < viewport.x / 2 && abs(point.y) < viewport.y / 2,
+                                             "the entire model fits the initial preview at every rotation")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for invalidSize in [SIMD3<Float>.zero, SIMD3(0.6, -0.25, 0.4), SIMD3(0.6, 0.25, 0), SIMD3(.infinity, 1, 1)] {
+            precondition(VisionPreviewFraming(diameter: scanDiameter, availableSize: invalidSize, zoom: 1) == nil,
+                         "invalid or zero-depth geometry cannot produce a mirrored or clipped preview")
+        }
+        precondition(VisionPreviewFraming(diameter: 0, availableSize: SIMD3(repeating: 1), zoom: 1) == nil)
+        precondition(VisionPreviewFraming(diameter: scanDiameter, availableSize: SIMD3(repeating: 1), zoom: .nan) == nil)
         let denseFixture = URL(fileURLWithPath: args[2] + "-dense")
         let denseManifest = try JSONDecoder().decode(ModelManifest.self, from: Data(contentsOf: denseFixture.appendingPathExtension("json")))
         let denseBytes = try Data(contentsOf: denseFixture.appendingPathExtension("atls"))
@@ -84,6 +130,26 @@ import ImageIO
         let spatialMesh = try VisionMeshData(model: denseModel, mode: .mesh, quality: .light)
         precondition(spatialMesh.isMesh && spatialMesh.primitiveCount == 40_000 && denseModel.data == denseBytes,
                      "preview budgets must not alter spatial rendering or the original model bytes")
+        let detailMesh = try VisionMeshData(model: denseModel, mode: .mesh, quality: .detail)
+        precondition(detailMesh.primitiveCount == 300_000 && detailMesh.primitiveCount < denseModel.indices / 3)
+        let fullMesh = try VisionMeshData(model: denseModel, mode: .mesh, quality: .full)
+        precondition(fullMesh.isMesh && fullMesh.primitiveCount == denseModel.indices / 3 &&
+                     fullMesh.triangles.count == denseModel.indices && fullMesh.positions.count == denseModel.indices,
+                     "full quality must retain every triangle even above the detail budget")
+        denseBytes.withUnsafeBytes { raw in
+            func uint(_ offset: Int) -> UInt32 { UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: offset, as: UInt32.self)) }
+            for corner in 0..<denseModel.indices {
+                let vertex = Int(uint(32 + denseModel.vertices * 16 + corner * 4))
+                let position = SIMD3(Float(bitPattern: uint(32 + vertex * 12)),
+                                     Float(bitPattern: uint(36 + vertex * 12)), Float(bitPattern: uint(40 + vertex * 12)))
+                precondition(fullMesh.positions[Int(fullMesh.triangles[corner])] == position,
+                             "full quality preserves each source triangle's vertices, winding and absolute coordinates")
+            }
+        }
+        let fullPoints = try VisionMeshData(model: denseModel, mode: .points, quality: .full)
+        precondition(!fullPoints.isMesh && fullPoints.primitiveCount == denseModel.vertices &&
+                     fullPoints.positions.count == denseModel.vertices * 4 && denseModel.data == denseBytes,
+                     "full point mode must also retain all source points without mutating the model")
         var corrupt = bytes; corrupt[32] ^= 1
         do { _ = try ModelGeometry(data: corrupt, manifest: manifest); preconditionFailure("corrupt model accepted") } catch is TeachingError {}
 

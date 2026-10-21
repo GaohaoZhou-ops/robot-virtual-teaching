@@ -1075,9 +1075,9 @@ diffuseColor.rgb = mix(
 };
 
 const statusColor = (status, selected = false) => {
+  if (status === 'unreachable') return 0xf4c95d;
   if (selected) return 0xb7f8ff;
   if (status === 'connected') return 0x5ee59a;
-  if (status === 'unreachable') return 0xf4c95d;
   return 0x59dbe8;
 };
 

@@ -24,7 +24,7 @@ private final class VisionPreviewScene: ObservableObject {
         }
     }
 
-    func update(source: ModelEntity, availableSize: SIMD3<Float>, yaw: Float, pitch: Float, zoom: Float) {
+    func update(source: ModelEntity, bounds: BoundingBox, yaw: Float, pitch: Float, zoom: Float) {
         if sourceID != source.id {
             root.children.removeAll()
             let copy = source.clone(recursive: true)
@@ -34,9 +34,13 @@ private final class VisionPreviewScene: ObservableObject {
             root.addChild(copy)
             sourceID = source.id
         }
-        let scale = min(availableSize.x, availableSize.y) * 0.82 / diameter * zoom
-        root.scale = SIMD3(repeating: scale)
-        root.position = .zero
+        guard let framing = VisionPreviewFraming(diameter: diameter, availableSize: bounds.extents, zoom: zoom) else {
+            root.isEnabled = false; return
+        }
+        root.isEnabled = true
+        root.scale = SIMD3(repeating: framing.scale)
+        // Keep the entire rotating sphere in front of the window's back plane.
+        root.position = SIMD3(0, 0, framing.centerZ)
         // Source files are Z-up; the window's vertical axis is Y.
         root.orientation = simd_quatf(angle: pitch * .pi / 180, axis: SIMD3(1, 0, 0))
             * simd_quatf(angle: yaw * .pi / 180, axis: SIMD3(0, 1, 0))
@@ -67,24 +71,26 @@ struct VisionModelPreview: View {
                     GeometryReader3D { geometry in
                         RealityView { content in
                             content.add(scene.root)
-                            scene.update(source: source, availableSize: content.convert(geometry.size, from: .local, to: .scene),
+                            scene.update(source: source, bounds: content.convert(geometry.frame(in: .local), from: .local, to: .scene),
                                          yaw: displayedPose.yaw, pitch: displayedPose.pitch, zoom: displayedPose.zoom)
                         } update: { content in
-                            scene.update(source: source, availableSize: content.convert(geometry.size, from: .local, to: .scene),
+                            scene.update(source: source, bounds: content.convert(geometry.frame(in: .local), from: .local, to: .scene),
                                          yaw: displayedPose.yaw, pitch: displayedPose.pitch, zoom: displayedPose.zoom)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .overlay {
-                            // A window-sized input surface remains easy to hit even
-                            // when the model is a sparse scan or zoomed all the way out.
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .gesture(manipulationGesture)
-                                .simultaneousGesture(TapGesture(count: 2).onEnded {
-                                    pose = VisionPreviewPose()
-                                })
-                        }
                     }
+                    .frame(depth: 560)
+                    // Keep interaction on the window plane while the rendering
+                    // has its own positive depth in front of that plane.
+                    .frame(depth: 0, alignment: .back)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(manipulationGesture)
+                    .simultaneousGesture(TapGesture(count: 2).onEnded {
+                        pose = VisionPreviewPose()
+                    })
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("三维模型预览")
                     .accessibilityValue(displayedPose.accessibilityValue)
@@ -113,7 +119,6 @@ struct VisionModelPreview: View {
             }
             .frame(minHeight: 280, maxHeight: .infinity)
             .frame(maxWidth: .infinity)
-            .frame(depth: 0)
             .clipped()
             if scene.source != nil {
                 ViewThatFits(in: .horizontal) {

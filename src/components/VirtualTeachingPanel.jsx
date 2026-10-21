@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { mobileDeviceLabel } from '../lib/ipadProtocol.js';
 import MobileTeachingPoseList from './MobileTeachingPoseList.jsx';
@@ -154,6 +154,21 @@ export default function VirtualTeachingPanel({
     (parkingPoint) => parkingPoint.id === activeParkingPointId,
   ) || parkingPoints[0] || null;
   const activePoses = activeParkingPoint?.poses || [];
+  const [captureSelection, setCaptureSelection] = useState(null);
+  const previousPreviewPoseId = useRef(previewPoseId);
+  const captureSelectionMatches = captureSelection?.taskId === activeTask?.id
+    && captureSelection?.parkingPointId === (activeParkingPoint?.id || null);
+  const captureSelectedPose = activePoses.find((pose) => pose.id === (
+    captureSelectionMatches
+      ? captureSelection.poseId
+      : previewParkingPointId === activeParkingPoint?.id ? previewPoseId : null
+  ));
+  const captureSelectionType = captureSelectionMatches && captureSelection.type === 'task'
+    ? 'task'
+    : captureSelectedPose ? 'pose' : activeParkingPoint ? 'parking' : 'task';
+  const captureDeleteLabel = {
+    task: '删除示教', parking: '删除停车点', pose: '删除姿态',
+  }[captureSelectionType];
   const [taskNameDraft, setTaskNameDraft] = useState(activeTask?.name || '');
   const [parkingPointNameDraft, setParkingPointNameDraft] = useState(
     activeParkingPoint?.name || '',
@@ -174,6 +189,17 @@ export default function VirtualTeachingPanel({
   const [expandedCaptureParkingPointIds, setExpandedCaptureParkingPointIds] = useState(
     () => new Set(activeParkingPoint?.id ? [activeParkingPoint.id] : []),
   );
+
+  useEffect(() => {
+    const previousPoseId = previousPreviewPoseId.current;
+    previousPreviewPoseId.current = previewPoseId;
+    // Escape/applying a preview already clears the pose's tree selection.
+    // Keep the contextual action aligned with that existing behavior.
+    if (previousPoseId && !previewPoseId) {
+      setCaptureSelection((current) => current?.type === 'pose' && current.poseId === previousPoseId
+        ? { ...current, type: 'parking', poseId: null } : current);
+    }
+  }, [previewPoseId]);
 
   useEffect(() => {
     setTaskNameDraft(activeTask?.name || '');
@@ -275,6 +301,9 @@ export default function VirtualTeachingPanel({
   const canCapture = Boolean(activeTask && activeParkingPoint && robotReady && contextMatches);
   const canCreateParkingPoint = Boolean(activeTask && robotReady && contextMatches);
   const captureInProgress = captureState?.status === 'capturing';
+  const captureDeleteDisabled = captureInProgress || !activeTask
+    || (captureSelectionType !== 'task' && Boolean(activeTask.abx))
+    || !({ task: onDeleteTask, parking: onDeleteParkingPoint, pose: onDeletePoint }[captureSelectionType]);
   const canExport = Boolean(onExportTeachingData && (mapData || robot || tasks.length));
   const teachingPointCount = tasks.reduce(
     (count, task) => count + (task.mobileCapture?.samples.length || 0) + (task.parkingPoints || []).reduce(
@@ -350,11 +379,13 @@ export default function VirtualTeachingPanel({
   };
 
   const selectCaptureTask = (task) => {
+    setCaptureSelection({ type: 'task', taskId: task.id, parkingPointId: task.parkingPoints?.[0]?.id || null });
     onSelectTask(task.id);
     setExpandedCaptureTaskIds((current) => new Set(current).add(task.id));
   };
 
   const selectCaptureParkingPoint = (task, parkingPoint) => {
+    setCaptureSelection({ type: 'parking', taskId: task.id, parkingPointId: parkingPoint.id });
     if (task.id !== activeTask?.id) onSelectTask(task.id);
     onSelectParkingPoint(parkingPoint.id);
     setExpandedCaptureTaskIds((current) => new Set(current).add(task.id));
@@ -367,10 +398,31 @@ export default function VirtualTeachingPanel({
   };
 
   const previewCapturePose = (task, parkingPoint, pose) => {
+    setCaptureSelection({ type: 'pose', taskId: task.id, parkingPointId: parkingPoint.id, poseId: pose.id });
     if (task.id !== activeTask?.id) onSelectTask(task.id);
     onSelectParkingPoint(parkingPoint.id, pose.id);
     setExpandedCaptureTaskIds((current) => new Set(current).add(task.id));
     setExpandedCaptureParkingPointIds((current) => new Set(current).add(parkingPoint.id));
+  };
+
+  const deleteCaptureSelection = () => {
+    if (captureDeleteDisabled) return;
+    if (captureSelectionType === 'task') {
+      if (!window.confirm(`删除 ${activeTask.name} 及其全部停车点和姿态？`)) return;
+      onDeleteTask(activeTask.id);
+      setCaptureSelection(null);
+    } else if (captureSelectionType === 'parking') {
+      if (!window.confirm(`删除 ${activeParkingPoint.name} 及其 ${activePoses.length} 组姿态？`)) return;
+      onDeleteParkingPoint(activeTask.id, activeParkingPoint.id);
+      setCaptureSelection({
+        type: 'task', taskId: activeTask.id,
+        parkingPointId: parkingPoints.find((point) => point.id !== activeParkingPoint.id)?.id || null,
+      });
+    } else if (captureSelectedPose) {
+      if (!window.confirm(`删除姿态 ${captureSelectedPose.name}？`)) return;
+      onDeletePoint(activeTask.id, activeParkingPoint.id, captureSelectedPose.id);
+      setCaptureSelection({ type: 'parking', taskId: activeTask.id, parkingPointId: activeParkingPoint.id });
+    }
   };
 
   const requestTeachingCapture = () => {
@@ -485,6 +537,7 @@ export default function VirtualTeachingPanel({
       </div>}
 
       {!isDataView && activeTask && !activeTask.mobileCapture && <>
+      <div className="teaching-capture-actions">
       <button
         type="button"
         className="teaching-capture-button"
@@ -507,6 +560,21 @@ export default function VirtualTeachingPanel({
         </div>
         <kbd>A{String(activePoses.length + 1).padStart(2, '0')}</kbd>
       </button>
+      <button
+        type="button"
+        className="teaching-capture-delete"
+        onClick={deleteCaptureSelection}
+        disabled={captureDeleteDisabled}
+        aria-label={captureDeleteLabel}
+        title={activeTask.abx && captureSelectionType !== 'task'
+          ? '原生任务的停车点与动作顺序需要在机器人端调整后重新导入'
+          : `${captureDeleteLabel}：${captureSelectionType === 'task' ? activeTask.name
+            : captureSelectedPose?.name || activeParkingPoint?.name}`}
+      >
+        <Trash2 size={13} />
+        <span>{captureDeleteLabel}</span>
+      </button>
+      </div>
 
       {captureState?.message && (
         <div
@@ -575,8 +643,9 @@ export default function VirtualTeachingPanel({
                     key={task.id}
                     role="treeitem"
                     aria-expanded={expanded}
+                    aria-selected={taskIsActive && captureSelectionType === 'task'}
                   >
-                    <div className={`teaching-capture-tree__task ${taskIsActive ? 'is-active' : ''}`}>
+                    <div className={`teaching-capture-tree__task ${taskIsActive ? 'is-active' : ''} ${taskIsActive && captureSelectionType === 'task' ? 'is-selected' : ''}`}>
                       <button
                         type="button"
                         className="teaching-capture-tree__expander"
@@ -617,10 +686,11 @@ export default function VirtualTeachingPanel({
                               role="treeitem"
                               aria-label={parkingPoint.name}
                               aria-expanded={parkingExpanded}
+                              aria-selected={parkingIsActive && captureSelectionType === 'parking'}
                             >
                               <button
                                 type="button"
-                                className={`teaching-capture-tree__parking ${parkingIsActive ? 'is-active' : ''} ${parkingIsGhostTarget ? 'is-ghost-target' : ''}`}
+                                className={`teaching-capture-tree__parking ${parkingIsActive ? 'is-active' : ''} ${parkingIsGhostTarget ? 'is-ghost-target' : ''} ${parkingIsActive && captureSelectionType === 'parking' ? 'is-selected' : ''}`}
                                 aria-label={`选择当前停车点 ${parkingPoint.name}`}
                                 aria-current={parkingIsActive ? 'true' : undefined}
                                 aria-expanded={parkingExpanded}
@@ -638,14 +708,16 @@ export default function VirtualTeachingPanel({
                                 <div className="teaching-capture-tree__pose-group" role="group" aria-label={`${parkingPoint.name} 的姿态`}>
                                   {poses.map((pose, poseIndex) => {
                                     const poseIsPreviewed = parkingIsGhostTarget && pose.id === previewPoseId;
+                                    const poseIsSelected = parkingIsActive && captureSelectionType === 'pose'
+                                      && pose.id === captureSelectedPose?.id;
                                     return (
                                       <button
                                         type="button"
                                         key={pose.id}
                                         role="treeitem"
-                                        className={`teaching-capture-tree__pose-item ${poseIsPreviewed ? 'is-previewed' : ''}`}
+                                        className={`teaching-capture-tree__pose-item ${poseIsPreviewed ? 'is-previewed' : ''} ${poseIsSelected ? 'is-selected' : ''}`}
                                         aria-label={`预览机械臂姿态 ${pose.name}`}
-                                        aria-selected={poseIsPreviewed}
+                                        aria-selected={poseIsSelected}
                                         data-pose-id={pose.id}
                                         data-ghost-preview={poseIsPreviewed ? 'true' : 'false'}
                                         title={`${parkingPoint.name} / ${pose.name} · 预览所属停车点的位置与记录的关节姿态`}
