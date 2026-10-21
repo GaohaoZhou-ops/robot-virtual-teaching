@@ -1226,7 +1226,11 @@ open ipad/AtlasTeaching.xcodeproj
 | 工作台 **工程 → 另存为工程**，或示教数据页顶部的 **导出工程** | 默认 `atlas-project-<map\|independent>-<时间>.zip`，保存时可重命名 | 地图 / 物体、各组机器人模型与依赖文件、预设姿态、路径、全部示教任务与独立示教缓存、RGB / 点云、视角及转换关系；可在其他设备直接加载 ZIP 恢复 |
 | 工作台 **工程 → 保存工程** | 最近一次成功另存为的 ZIP 文件 | 用当前工程内容覆盖该文件，无需再次选择位置；尚未另存为时不可用 |
 | 地图示教数据树的 **导出示教数据** | `robot-teaching-*.zip` | 导出任务、停车点、Pose 和完整路网，由机器人现有 v23 导入器一并恢复 |
-| 独立示教数据树的 **导出示教数据** | `atlas-teaching-independent-<时间>.json` | 保留原轻量 JSON 导出：机器人定位、关节值、停车点、Pose、关节姿态库与导航关系 |
+| 独立示教数据树的 **导出示教数据** | `atlas-teaching-independent-<时间>.json`，或绑定地图并同步路网后选择 `robot-teaching-*.zip` | JSON 保留独立模型坐标下的机器人定位、关节值、停车点、Pose、关节姿态库与导航关系；ZIP 按绑定矩阵转换当前独立示教任务，并携带地图路网 |
+
+独立示教同时具有有效地图绑定关系、可用地图路网并已开启路网同步时，点击“导出示教数据”会弹窗提供“地图示教任务 ZIP”和“独立示教任务 JSON”。ZIP 使用当前独立示教的最新任务快照，转换到地图坐标后进入现有机器人导出校验窗口，不包含地图侧其他示教任务，也不切换工作区、放置模型或修改任一侧缓存。不满足上述条件时继续直接下载原有 JSON；地图视角的导出流程不变。
+
+独立示教导出验证：`npm run test:independent-export`；界面分流、格式选择、下载内容及缓存保护：`tests/independent_teaching_export_ui_smoke.py`（使用隔离浏览器和开发服务）。
 
 示教数据树工具栏根据选中节点切换操作：选中任务显示“导出示教数据”；选中停车点显示“复制停车点”；选中姿态显示“复制姿态”。复制写入剪贴板，成功或失败会显示提示。
 
@@ -1346,7 +1350,7 @@ open ipad/AtlasTeaching.xcodeproj
 
 ## 📦 机器人示教数据导出
 
-入口：**地图示教 → 示教数据中心 → 导出示教数据 → 下载机器人导入包**。本适配仅覆盖地图示教，独立示教保持原有 JSON 导出。
+入口：**地图示教 → 示教数据中心 → 导出示教数据 → 下载机器人导入包**。已绑定地图并开启路网同步的独立示教，也可在“导出示教数据”中选择“地图示教任务 ZIP”进入同一校验窗口；“独立示教任务 JSON”保留原轻量导出。
 
 | 文件 | 用途 | 机器人侧使用方式 |
 | --- | --- | --- |
@@ -1542,6 +1546,8 @@ ATLAS_PHYSICS_BACKEND=isaac ./scripts/start.sh
 姿态计算导出的 `mobile-solve-*.json` 诊断报告，以及根目录恢复工作区的 `recovered-projects.zip` / `recovered-projects-*.zip` 打包副本保留在本机；测试夹具中的同名 JSON / ZIP 仍可跟踪。
 
 倾斜矩阵路网导出回归产生的 `atlas-tilted-route-*` 临时目录与 ZIP、`atlas-tilted-*.json` 坐标快照，以及 `atlas-current-route-height-check.json` 路网诊断副本，在根目录或 `tests/` 下忽略；回归脚本与夹具仍可跟踪。
+
+独立示教导出格式选择回归产生的 `atlas-independent-export-*` 临时目录及 ZIP 副本，在根目录或 `tests/` 下忽略；其中下载的任务 ZIP 与示教 JSON 保留在本机，嵌套测试夹具仍可跟踪。
 
 ZIP 导入、独立浏览器及机器人导入契约测试的 `atlas-import-*`、`atlas-independent-test-*`、`atlas-abx-bundle-*` 临时目录及 ZIP 副本，以及协作状态与独立示教状态快照，在根目录或 `tests/` 下忽略。根目录的 `ABXBrainSystem-*` 解压目录和重新打包副本也保留在本机。
 

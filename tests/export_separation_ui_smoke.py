@@ -144,8 +144,9 @@ def run():
                 assert restored.locator('.map-identity strong').inner_text() == f'{mode}-transfer.ply'
 
                 # A lightweight export cannot silently replace the working project.
-                restored.locator('input[type="file"][accept*=".zip"]').set_input_files(str(lightweight_path))
+                restored.locator('input[data-project-guide-input="true"]').set_input_files(str(lightweight_path))
                 restored.get_by_text('这是轻量示教数据文件', exact=False).wait_for()
+                restored.get_by_role('button', name='关闭工程加载错误', exact=True).click()
                 wait_ready(restored)
                 assert restored.locator('.map-identity strong').inner_text() == f'{mode}-transfer.ply'
                 topbar_action(restored, name='打开示教数据管理页').click()

@@ -546,6 +546,13 @@ playwright/.auth/
 /tests/atlas-route-identity-*.[zZ][iI][pP]
 /tests/atlas-insert-action-*.[zZ][iI][pP]
 
+# Independent export-choice tests download task ZIPs and teaching JSON files.
+# Cover local TMPDIR overrides and packed copies without hiding fixtures.
+/atlas-independent-export-*/
+/tests/atlas-independent-export-*/
+/atlas-independent-export-*.[zZ][iI][pP]
+/tests/atlas-independent-export-*.[zZ][iI][pP]
+
 # Tilted independent-route export tests download task bundles into temporary
 # workspaces. Keep these and local coordinate diagnostics out of commits,
 # while preserving the test runners and nested regression fixtures.

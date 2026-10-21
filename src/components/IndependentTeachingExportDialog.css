@@ -1,0 +1,23 @@
+.independent-export-dialog { width: min(610px, calc(100vw - 28px)); max-height: calc(100dvh - 28px); overflow: auto; padding: 0; border: 1px solid #51466e; background: #0a1219; color: #d4dce5; box-shadow: 0 24px 80px #0009; }
+.independent-export-dialog::backdrop { background: #02060dcc; backdrop-filter: blur(5px); }
+.independent-export-dialog header { display: flex; gap: 12px; align-items: center; padding: 22px 24px; border-bottom: 1px solid #2e2c40; color: #b3a0ff; }
+.independent-export-dialog h2 { flex: 1; margin: 0; color: #edf0f7; font-size: 20px; }
+.independent-export-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 12px; border: 1px solid #60537e; background: #161d28; color: #ddd3ed; font: inherit; font-size: 12px; cursor: pointer; }
+.independent-export-dialog header button { padding: 5px; border: 0; background: none; }
+.independent-export-dialog__body { padding: 20px 24px 24px; }
+.independent-export-dialog__body > p { margin: 0 0 14px; color: #9eabbd; font-size: 12px; line-height: 1.8; }
+.independent-export-dialog__map { display: flex; gap: 10px; align-items: baseline; }
+.independent-export-dialog__map strong { min-width: 0; color: #dfe2ed; font-weight: 500; overflow-wrap: anywhere; }
+.independent-export-dialog__options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.independent-export-dialog .independent-export-dialog__option { --option-color: #b3a0ff; display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 12px; min-width: 0; padding: 20px; text-align: left; background: #aa91ff08; border-color: #aa91ff45; }
+.independent-export-dialog .independent-export-dialog__option.is-map { --option-color: #80dce6; border-color: #59dbe845; background: #59dbe808; }
+.independent-export-dialog__icon { display: flex; justify-content: space-between; align-items: center; color: var(--option-color); }
+.independent-export-dialog__option strong { color: #edf0f7; font-size: 14px; font-weight: 500; }
+.independent-export-dialog__option > span:last-child { color: #9eabbd; font-size: 12px; line-height: 1.8; }
+.independent-export-dialog__option:hover:not(:disabled) { border-color: var(--option-color); background: #1b2532; }
+.independent-export-dialog button:focus-visible { outline: 2px solid var(--option-color, #b3a0ff); outline-offset: 3px; }
+.independent-export-dialog button:disabled { opacity: .45; cursor: default; }
+.independent-export-dialog__body > .independent-export-dialog__error { margin: 16px 0 0; color: #ffaaa0; }
+.independent-export-dialog__body > .independent-export-dialog__status { display: flex; align-items: center; gap: 8px; margin: 16px 0 0; }
+.independent-export-dialog footer { display: flex; justify-content: flex-end; padding: 14px 24px; border-top: 1px solid #2e2c40; }
+@media (max-width: 480px) { .independent-export-dialog__options { grid-template-columns: 1fr; } .independent-export-dialog header, .independent-export-dialog__body, .independent-export-dialog footer { padding-left: 18px; padding-right: 18px; } }
