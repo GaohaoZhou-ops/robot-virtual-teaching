@@ -11,6 +11,7 @@ from dual_teaching_workspace_smoke import create_project, set_color_mode, wait_f
 from export_separation_ui_smoke import CHROME, load_project, make_fixtures, wait_ready
 from project_export_save_ui_smoke import SAVE_PICKER
 from topbar_tools_helpers import topbar_action
+from archive_helpers import active_project_path
 
 
 def read_saved(page, name):
@@ -23,7 +24,8 @@ def read_saved(page, name):
     }''', name)
     data = base64.b64decode(encoded)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        return data, json.loads(archive.read('config/project.json'))
+        manifest = json.loads(archive.read('manifest.json'))
+        return data, json.loads(archive.read(active_project_path(manifest)))
 
 
 def save_as(page, name):
@@ -143,17 +145,18 @@ def run():
                 assert page.evaluate('window.__saveCalls.length') == 0
                 assert read_saved(page, second)[1]['workspace']['pointColorMode'] == 'white'
 
-                # Both workspaces remember their own destinations across page reloads.
+                # A complete backup includes even an unbound companion. Both
+                # active workspaces then share the latest Save As destination.
                 other = 'independent' if mode == 'map' else 'map'
-                other_file = f'{other}-separate.zip'
+                other_file = f'{other}-complete.zip'
                 load_project(page, other, directory / f'{other}.zip')
                 expect(topbar_action(page, '保存工程', exact=True)).to_be_disabled()
                 save_as(page, other_file)
-                other_bytes = read_saved(page, other_file)[0]
+                previous_bytes = read_saved(page, second)[0]
                 switch_mode(page, mode)
-                save(page, second)
-                assert read_saved(page, second)[1]['workspace']['teachingSpaceMode'] == mode
-                assert read_saved(page, other_file)[0] == other_bytes
+                save(page, other_file)
+                assert read_saved(page, other_file)[1]['workspace']['teachingSpaceMode'] == mode
+                assert read_saved(page, second)[0] == previous_bytes
                 switch_mode(page, other)
                 save(page, other_file)
                 assert read_saved(page, other_file)[1]['workspace']['teachingSpaceMode'] == other

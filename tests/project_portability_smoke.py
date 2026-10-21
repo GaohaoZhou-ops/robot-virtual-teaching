@@ -83,7 +83,7 @@ def run():
 
             page.goto(f"{BASE_URL.rstrip('/')}/workbench", wait_until="networkidle")
             page.locator('[data-session-state="ready"]').wait_for()
-            page.locator('input[type="file"][accept*=".zip"]').set_input_files(str(fixture))
+            page.locator('input[data-project-guide-input]').set_input_files(str(fixture))
             page.locator(".loading-curtain").wait_for(state="hidden")
             page.wait_for_function(
                 "document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'"
@@ -140,7 +140,7 @@ def run():
             page.get_by_role("button", name="返回主工作台继续示教").click()
             page.locator('[data-app-page="teaching-data"]').wait_for(state="detached")
 
-            page.locator('input[type="file"][accept*=".zip"]').set_input_files(str(tampered))
+            page.locator('input[data-project-guide-input]').set_input_files(str(tampered))
             page.get_by_text("SHA-256 校验失败", exact=False).wait_for()
             assert page.locator(".map-identity strong").inner_text() == "portable-test.ply"
             assert not errors

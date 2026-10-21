@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import HeightRange from './components/HeightRange.jsx';
 import IndependentWorkspaceDialog from './components/IndependentWorkspaceDialog.jsx';
+import NewIndependentTeachingDialog from './components/NewIndependentTeachingDialog.jsx';
 import Inspector from './components/Inspector.jsx';
 import Map2DView from './components/Map2DView.jsx';
 import MapDetailsDialog from './components/MapDetailsDialog.jsx';
@@ -63,7 +64,7 @@ import { abxRouteToProject, buildAbxRouteDocuments, readAbxRoute } from './lib/a
 import { mergeAbxImport, readAbxTeachingFile } from './lib/abxTeachingImport.js';
 import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceKey, mobileDeviceLabel } from './lib/ipadProtocol.js';
-import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
+import { createTeachingAlignment, extractTeachingWorkspace, hasLoadedMapWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
 import { mapRouteSyncStatus, syncMapRouteToIndependent } from './lib/mapRouteSync.js';
 import { connectivityCopy, connectivityTopology, inspectConnectivity } from './lib/graph.js';
 import {
@@ -124,17 +125,20 @@ import {
   loadWorkspaceViews,
   loadWorkspaceConfig,
   loadWorkspaceSnapshot,
+  loadProjectCompanions,
   listIndependentHistory,
   listIndependentWorkspaces,
   prepareWorkspaceSession,
   resetWorkspaceSession,
   restoreLinkedWorkspaces,
+  restoreWorkspaceCollection,
   saveWorkspaceConfig,
   saveWorkspaceMap,
   saveWorkspaceViews,
   switchIndependentWorkspace,
 } from './lib/sessionStore.js';
 import { linkedWorkspaceRelation, prepareLinkedProjectImport } from './lib/linkedProject.js';
+import { prepareWorkspaceCollectionImport } from './lib/projectWorkspaceCollection.js';
 import {
   clearProjectDirectoryBinding,
   loadProjectDirectoryBinding,
@@ -474,7 +478,7 @@ function suggestedSlice(positions, bounds) {
 export default function App() {
   const mapInputRef = useRef(null);
   const independentCloudInputRef = useRef(null);
-  const newIndependentInputRef = useRef(null);
+  const newIndependentDialogRevisionRef = useRef(0);
   const independentSwitchBusyRef = useRef(false);
   const independentChoiceLoadingRef = useRef(false);
   const pathInputRef = useRef(null);
@@ -531,6 +535,7 @@ export default function App() {
   const [workspaceTransfer, setWorkspaceTransfer] = useState(null);
   const [independentHistory, setIndependentHistory] = useState({ status: 'idle', entries: [] });
   const [independentWorkspaceDialog, setIndependentWorkspaceDialog] = useState(null);
+  const [newIndependentDialog, setNewIndependentDialog] = useState(null);
   const [directoryAutosaveSuspended, setDirectoryAutosaveSuspended] = useState(false);
   const [teachingTransferDialog, setTeachingTransferDialog] = useState(null);
   const [ipadTeachingOpen, setIPadTeachingOpen] = useState(false);
@@ -2139,16 +2144,39 @@ export default function App() {
     return { expectedConfig: snapshot.config, currentRobotPackage };
   };
 
-  const handleNewIndependentFile = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = '';
+  const openNewIndependentDialog = async () => {
+    if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current
+      || !isIndependentTeachingSpace || !mapData?.geometry) return;
+    const revision = ++newIndependentDialogRevisionRef.current;
+    setRobotControlEnabled(false);
+    setNewIndependentDialog({ mapLoading: true, mapSnapshot: null, busy: false, error: '' });
+    try {
+      const target = await loadWorkspaceSnapshot(sessionIdRef.current, 'map');
+      if (revision !== newIndependentDialogRevisionRef.current) return;
+      setNewIndependentDialog((current) => current ? { ...current, mapLoading: false,
+        mapSnapshot: hasLoadedMapWorkspace(target) ? target : null } : null);
+    } catch (error) {
+      if (revision !== newIndependentDialogRevisionRef.current) return;
+      setNewIndependentDialog((current) => current ? { ...current, mapLoading: false,
+        mapError: `暂时无法读取地图示教：${error.message}` } : null);
+    }
+  };
+
+  const closeNewIndependentDialog = () => {
+    if (independentSwitchBusyRef.current) return;
+    newIndependentDialogRevisionRef.current += 1;
+    setNewIndependentDialog(null);
+  };
+
+  const createIndependentTeaching = async ({ file, matrix = null }) => {
     if (!file || independentSwitchBusyRef.current || workspaceSwitchingRef.current || independentSwitchBlocked
-      || !isIndependentTeachingSpace) return;
+      || !isIndependentTeachingSpace || !newIndependentDialog) return;
     if (!file.name.toLowerCase().endsWith('.ply')) {
       notify('请选择 PLY 点云或模型文件', 'warning');
       return;
     }
     independentSwitchBusyRef.current = true;
+    setNewIndependentDialog((current) => ({ ...current, busy: true, error: '' }));
     setLoadState({ loading: true, progress: 0, phase: '新增独立示教', detail: '保存当前工作现场' });
     let geometry;
     try {
@@ -2157,6 +2185,9 @@ export default function App() {
       workspaceSwitchingRef.current = true;
       await saved;
       if (!sessionReadyRef.current) throw new Error('当前示教结果尚未保存成功，请重试');
+      const transfer = matrix ? await createTeachingAlignment(newIndependentDialog.mapSnapshot, {
+        localToMap: matrix.localToMap, matrixImports: [{ name: matrix.name, values: matrix.values }],
+      }) : null;
       const current = latestWorkspaceRef.current;
       const buffer = await readFileWithProgress(file, (progress) => {
         setLoadState({ loading: true, progress: progress * 0.65, phase: '读取新独立模型', detail: file.name });
@@ -2191,11 +2222,12 @@ export default function App() {
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
         showWaypoints3D: current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
         collapsedPanel: current.collapsedPanel, inspectorCollapsed: current.inspectorCollapsed,
-        directoryAutosaveSuspended: true,
+        directoryAutosaveSuspended: true, transfer,
       });
       setLoadState({ loading: true, progress: 0.9, phase: '缓存上一组独立示教', detail: '完整保存模型、机器人、示教结果与视角' });
       await switchIndependentWorkspace(sessionIdRef.current, {
         activeMode: 'independent', ...archived,
+        expectedMapConfig: matrix ? newIndependentDialog.mapSnapshot.config : null,
         replacement: { map, config: { schemaVersion: 1, project, ui: {
           ...project.workspace, mode: 'select', mapRouteSyncEnabled: false, selectedRobot: project.robot,
           meshRenderQuality: project.rendering.meshQuality, showSlice3D: current.showSlice3D,
@@ -2206,7 +2238,8 @@ export default function App() {
       workspaceSwitchingRef.current = false;
       independentSwitchBusyRef.current = false;
       setLoadState({ loading: false, progress: 0, phase: '' });
-      notify(error?.message || '新增独立示教失败，当前工程已保留', 'error');
+      setNewIndependentDialog((current) => current ? { ...current, busy: false,
+        error: error?.message || '新增独立示教失败，当前工程已保留' } : null);
     } finally {
       geometry?.dispose();
     }
@@ -2241,6 +2274,22 @@ export default function App() {
           phase,
           detail,
         }));
+      if (importedFile.workspaceCollection) {
+        if (!sessionReadyRef.current) throw new Error('工作会话尚未就绪，无法恢复完整工程');
+        const collection = prepareWorkspaceCollectionImport(importedFile.workspaceCollection);
+        const activeMode = collection.workspaces[normalizeTeachingSpaceMode(requestedMode)]
+          ? normalizeTeachingSpaceMode(requestedMode) : collection.activeMode;
+        setLoadState({ loading: true, progress: 0.85, phase: '恢复完整工程与独立示教列表',
+          detail: `正在恢复工作区和 ${collection.independentHistory.length} 组独立示教历史` });
+        await restoreWorkspaceCollection(sessionIdRef.current, collection, activeMode);
+        for (const mode of Object.keys(collection.workspaces)) {
+          await clearProjectDirectoryBinding(mode).catch(() => undefined);
+        }
+        reloadingLinkedProject = true;
+        sessionReadyRef.current = false;
+        window.location.assign('/workbench');
+        return;
+      }
       if (importedFile.linkedWorkspaces) {
         if (!sessionReadyRef.current) throw new Error('工作会话尚未就绪，无法恢复双边工程');
         const workspaces = prepareLinkedProjectImport(importedFile.linkedWorkspaces);
@@ -4152,7 +4201,7 @@ export default function App() {
       setProjectExportState({
         status: 'packing', operation, byteLength: 0, phase: '冻结地图资源', detail: mapData.name, progress: 0,
       });
-      notify('正在打包地图、机器人、配置与示教视觉资源…', 'info');
+      notify('正在打包地图、机器人、预设姿态、路径与独立示教列表…', 'info');
       const payload = currentExportPayload();
       const { downloadProjectArchive, saveProjectArchive } = await import('./lib/projectArchive.js');
       const mapResource = createGeometryCache(
@@ -4178,32 +4227,28 @@ export default function App() {
         : null;
       const workspaceUI = { mapRouteSyncEnabled, showSlice3D };
       let linkedWorkspace = null;
-      if (sessionReadyRef.current && sessionIdRef.current) {
-        await sessionWriteChainRef.current;
-        const otherMode = teachingSpaceMode === 'map' ? 'independent' : 'map';
-        const otherConfig = await loadWorkspaceConfig(sessionIdRef.current, otherMode);
+      if (!sessionIdRef.current) throw new Error('工作会话不可用，无法读取独立示教列表，请刷新后重试');
+      await sessionWriteChainRef.current;
+      const { companionWorkspace, independentHistory } = await loadProjectCompanions(sessionIdRef.current, teachingSpaceMode);
+      if (companionWorkspace) {
         const candidates = {
           [teachingSpaceMode]: { mode: teachingSpaceMode, map: mapResource,
             config: { mapId: mapData.mapId, config: { project: payload } } },
-          [otherMode]: { mode: otherMode,
-            map: { ...otherConfig?.config?.project?.map, mapId: otherConfig?.mapId },
-            config: otherConfig },
+          [companionWorkspace.mode]: companionWorkspace,
         };
         if (linkedWorkspaceRelation(candidates)) {
-          linkedWorkspace = await loadWorkspaceSnapshot(sessionIdRef.current, otherMode);
-          notify('正在打包已绑定的地图示教与独立示教完整工程…', 'info');
-        } else if (payload.workspace?.transfer && !otherConfig?.config?.project) {
-          throw new Error('已绑定的另一侧工程缓存缺失，请恢复对应工程后再保存双边工程');
+          linkedWorkspace = companionWorkspace;
         }
-      } else if (payload.workspace?.transfer) {
-        throw new Error('工作会话不可用，无法读取已绑定的另一侧工程');
+      } else if (payload.workspace?.transfer && (teachingSpaceMode === 'independent' || !independentHistory.length)) {
+        throw new Error('已绑定的另一侧工程缓存缺失，请恢复对应工程后再保存完整工程');
       }
-      const linkedMapIds = linkedWorkspace
-        ? { [teachingSpaceMode]: mapData.mapId, [linkedWorkspace.mode]: linkedWorkspace.map?.mapId }
+      const workspaceMapIds = companionWorkspace
+        ? { [teachingSpaceMode]: mapData.mapId, [companionWorkspace.mode]: companionWorkspace.map.mapId }
         : null;
-      if (overwrite && activeProjectSaveTarget.linkedMapIds
-        && ['map', 'independent'].some((mode) => activeProjectSaveTarget.linkedMapIds[mode] !== linkedMapIds?.[mode])) {
-        throw new Error('当前双边绑定关系已变化，请使用“另存为工程”保存');
+      const previousMapIds = activeProjectSaveTarget?.workspaceMapIds || activeProjectSaveTarget?.linkedMapIds;
+      if (overwrite && previousMapIds
+        && ['map', 'independent'].some((mode) => previousMapIds[mode] !== workspaceMapIds?.[mode])) {
+        throw new Error('当前工程工作区已变化，请使用“另存为工程”保存');
       }
       const archive = await (fileHandle ? saveProjectArchive : downloadProjectArchive)(
         payload,
@@ -4212,6 +4257,8 @@ export default function App() {
           mapResource,
           existingRobotPackage: reusableRobotPackage,
           linkedWorkspace,
+          companionWorkspace: linkedWorkspace ? null : companionWorkspace,
+          independentHistory,
           workspaceUI,
           onProgress: ({ phase, detail, progress }) => setProjectExportState({
             status: 'packing',
@@ -4224,9 +4271,9 @@ export default function App() {
         },
       );
       let targetRemembered = true;
-      if (!overwrite || linkedWorkspace) {
+      if (!overwrite || companionWorkspace) {
         const target = fileHandle
-          ? { mapId: mapData.mapId, teachingSpaceMode, handle: fileHandle, linkedMapIds } : null;
+          ? { mapId: mapData.mapId, teachingSpaceMode, handle: fileHandle, workspaceMapIds } : null;
         const current = latestWorkspaceRef.current;
         if (current.mapData?.mapId === mapData.mapId && current.teachingSpaceMode === teachingSpaceMode) {
           projectSaveTargetRevisionRef.current += 1;
@@ -4235,10 +4282,10 @@ export default function App() {
         try {
           if (target) await rememberProjectSaveTarget(target);
           else await clearProjectSaveTarget(mapData.mapId, teachingSpaceMode);
-          if (linkedWorkspace) {
+          if (companionWorkspace) {
             if (target) await rememberProjectSaveTarget({ ...target,
-              mapId: linkedWorkspace.map.mapId, teachingSpaceMode: linkedWorkspace.mode });
-            else await clearProjectSaveTarget(linkedWorkspace.map.mapId, linkedWorkspace.mode);
+              mapId: companionWorkspace.map.mapId, teachingSpaceMode: companionWorkspace.mode });
+            else await clearProjectSaveTarget(companionWorkspace.map.mapId, companionWorkspace.mode);
           }
         } catch {
           targetRemembered = false;
@@ -4254,7 +4301,8 @@ export default function App() {
       notify(
         (fileHandle ? `工程已保存 · ${fileHandle.name} · ${sizeLabel}${targetRemembered ? '' : ' · 无法记住保存位置，刷新后请重新另存为'}`
           : `工程下载已开始 · ${filename} · ${sizeLabel}`)
-          + (linkedWorkspace ? ' · 已包含地图示教与独立示教' : ''),
+          + (companionWorkspace ? ' · 已包含地图示教与独立示教' : '')
+          + (independentHistory.length ? ` · ${independentHistory.length} 组独立示教历史` : ''),
         targetRemembered ? 'success' : 'warning',
       );
     } catch (error) {
@@ -5730,14 +5778,6 @@ export default function App() {
       onChange={handleIndependentCloudFile}
     />
     <input
-      ref={newIndependentInputRef}
-      className="visually-hidden"
-      type="file"
-      accept=".ply,application/octet-stream"
-      aria-label="新增独立示教模型"
-      onChange={handleNewIndependentFile}
-    />
-    <input
       ref={pathInputRef}
       className="visually-hidden"
       type="file"
@@ -5855,9 +5895,9 @@ export default function App() {
                     <button
                       type="button"
                       className="action-button independent-teaching-action"
-                      onClick={() => newIndependentInputRef.current?.click()}
+                      onClick={openNewIndependentDialog}
                       disabled={independentSwitchBlocked || !mapData?.geometry}
-                      title="完整缓存当前独立工程，选择 PLY 模型开始下一组示教；地图中的已转换结果继续保留"
+                      title="选择独立模型，可选加载与当前地图的转换矩阵；当前独立工程将保存到历史列表"
                     >
                       <Plus size={15} /><span>新增独立示教</span>
                     </button>
@@ -6543,6 +6583,12 @@ export default function App() {
         setTeachingTransferDialog(null);
         navigateAppPage(APP_PAGE_HOME, { teachingSpaceMode: 'map' });
       }}
+    />}
+    {newIndependentDialog && <NewIndependentTeachingDialog
+      state={newIndependentDialog}
+      progress={loadState}
+      onCreate={createIndependentTeaching}
+      onClose={closeNewIndependentDialog}
     />}
     {independentWorkspaceDialog && <IndependentWorkspaceDialog
       state={independentWorkspaceDialog}

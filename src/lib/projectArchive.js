@@ -3,10 +3,13 @@ import { sha256Bytes } from './hash.js';
 import { buildAbxTeachingExport } from './abxTeachingExport.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { LINKED_WORKSPACE_MODES, validateLinkedWorkspaces } from './linkedProject.js';
+import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
 
 export const PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-project';
 export const LINKED_PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-linked-project';
 export const LINKED_PROJECT_ARCHIVE_VERSION = 1;
+export const WORKSPACE_PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-workspace-project';
+export const WORKSPACE_PROJECT_ARCHIVE_VERSION = 1;
 export const PROJECT_ARCHIVE_VERSION = 2;
 export const PROJECT_ARCHIVE_MANIFEST = 'manifest.json';
 export const PROJECT_ARCHIVE_CONFIG = 'config/project.json';
@@ -898,9 +901,77 @@ async function buildLinkedProjectEntries(payload, options) {
   return { entries, manifest, project: payload };
 }
 
+async function buildWorkspaceCollectionEntries(payload, options) {
+  const mode = payload?.workspace?.teachingSpaceMode;
+  const companion = options.companionWorkspace || options.linkedWorkspace;
+  const collection = {
+    activeMode: mode,
+    workspaces: {
+      ...(companion ? { [companion.mode]: companion } : {}),
+      [mode]: { mode, map: { ...options.mapResource, portableRobotPackage: options.existingRobotPackage },
+        config: { mapId: options.mapResource?.mapId, config: { project: payload, ui: options.workspaceUI || {} } } },
+    },
+    independentHistory: options.independentHistory || [],
+  };
+  validateWorkspaceCollection(collection, { requireRobotResources: false });
+  const entries = {};
+  const files = [];
+  const statistics = { workspaceCount: 0, independentHistoryCount: collection.independentHistory.length,
+    independentWorkspaceCount: collection.independentHistory.length + (collection.workspaces.independent ? 1 : 0) };
+  const addWorkspace = async (snapshot, prefix, label) => {
+    const project = snapshot.config.config.project;
+    const child = await buildProjectEntries(project, {
+      mapResource: snapshot.map,
+      existingRobotPackage: snapshot.map.portableRobotPackage?.relativePath === project.robot?.relativePath
+        ? snapshot.map.portableRobotPackage : null,
+      onProgress: (progress) => options.onProgress?.({ ...progress, phase: `${label} · ${progress.phase}` }),
+    });
+    Object.entries(child.entries).forEach(([path, entry]) => { entries[prefix + path] = entry; });
+    files.push(...child.manifest.files.map((record) => ({ ...record, path: prefix + record.path })));
+    const bytes = asBytes(child.entries[PROJECT_ARCHIVE_MANIFEST][0]);
+    files.push({ path: prefix + PROJECT_ARCHIVE_MANIFEST, byteLength: bytes.byteLength, sha256: await sha256Bytes(bytes) });
+    statistics.workspaceCount += 1;
+    Object.entries(child.manifest.statistics).forEach(([key, value]) => {
+      if (typeof value === 'number') statistics[key] = (statistics[key] || 0) + value;
+    });
+    // UI configuration contains no device-local handles or binary resources.
+    const { selectedRobot, ...ui } = snapshot.config.config.ui || {};
+    return { prefix, mapId: snapshot.map.mapId,
+      portableOriginalMapId: snapshot.map.portableOriginalMapId || snapshot.map.mapId, ui };
+  };
+  const workspaces = {};
+  for (const [workspaceMode, snapshot] of Object.entries(collection.workspaces)) {
+    workspaces[workspaceMode] = await addWorkspace(snapshot, `workspaces/${workspaceMode}/`,
+      workspaceMode === 'map' ? '地图示教' : '独立示教');
+  }
+  const independentHistory = [];
+  for (const [index, snapshot] of collection.independentHistory.entries()) {
+    const descriptor = await addWorkspace(snapshot, `independent-history/${index + 1}/`,
+      `独立示教历史 ${index + 1}/${collection.independentHistory.length}`);
+    independentHistory.push({ ...descriptor, archivedAt: snapshot.archivedAt });
+  }
+  const instructions = textBytes([
+    '虚拟示教平台 · 完整工程与独立示教列表',
+    '本文件包含当前工作区、另一侧已打开的工作区以及独立示教历史列表的全部模型和配置。',
+    '每组均包含地图/物体、机器人模型与资源、预设姿态、路径、示教任务、RGB/点云、视角及转换关系。',
+    '在另一台运行本平台的设备上加载整个 ZIP，即可恢复工作区和独立示教列表；坐标和转换矩阵保持不变。',
+    'workspaces/ 保存当前工作区；independent-history/ 保存历史示教组，包含同名模型的不同组。',
+    '也可解压后选择根目录加载；完整集合按快照导入，不绑定本机工程目录。',
+    '请保留整个包；manifest.json 对所有资源逐文件执行 SHA-256 校验。',
+  ].join('\n'));
+  addEntry(entries, 'README.txt', instructions);
+  files.push({ path: 'README.txt', byteLength: instructions.byteLength, sha256: await sha256Bytes(instructions) });
+  const manifest = { format: WORKSPACE_PROJECT_ARCHIVE_FORMAT, archiveVersion: WORKSPACE_PROJECT_ARCHIVE_VERSION,
+    exportedAt: new Date().toISOString(), portable: true, activeMode: mode, workspaces, independentHistory,
+    files, statistics: { ...statistics, fileCount: files.length + 1 } };
+  addEntry(entries, PROJECT_ARCHIVE_MANIFEST, jsonBytes(manifest));
+  return { entries, manifest, project: payload };
+}
+
 export async function buildProjectArchive(payload, options = {}) {
-  const { entries, manifest, project } = await (options.linkedWorkspace
-    ? buildLinkedProjectEntries(payload, options) : buildProjectEntries(payload, options));
+  const { entries, manifest, project } = await (options.companionWorkspace || options.independentHistory?.length
+    ? buildWorkspaceCollectionEntries(payload, options)
+    : options.linkedWorkspace ? buildLinkedProjectEntries(payload, options) : buildProjectEntries(payload, options));
   options.onProgress?.({ phase: '压缩便携工程', detail: `${manifest.statistics.fileCount} 个文件` });
   const bytes = await zipEntries(entries);
   return {
@@ -1048,7 +1119,7 @@ const validateArchiveEntryPaths = (files) => {
 };
 
 const verifyArchiveFiles = async (files, manifest, onProgress) => {
-  const linked = manifest.format === LINKED_PROJECT_ARCHIVE_FORMAT;
+  const linked = [LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format);
   if (!linked && Number(manifest.archiveVersion) < 2) return;
   if (!Array.isArray(manifest.files) || !manifest.files.length) {
     throw new Error('便携工程包缺少逐文件完整性清单');
@@ -1232,6 +1303,44 @@ const readProjectEntries = async (files, options = {}) => {
     PROJECT_ARCHIVE_MANIFEST,
     manifestLabel,
   );
+  if (manifest.format === WORKSPACE_PROJECT_ARCHIVE_FORMAT) {
+    if (options.nested || manifest.archiveVersion !== WORKSPACE_PROJECT_ARCHIVE_VERSION
+      || !LINKED_WORKSPACE_MODES.includes(manifest.activeMode)
+      || !Array.isArray(manifest.independentHistory)) {
+      throw new Error('完整工程包版本或结构不受支持');
+    }
+    await verifyArchiveFiles(files, manifest, onProgress);
+    const readWorkspace = async (descriptor, mode, prefix) => {
+      if (descriptor?.prefix !== prefix || typeof descriptor.mapId !== 'string' || !descriptor.mapId) {
+        throw new Error('完整工程工作区清单不完整');
+      }
+      const childFiles = Object.fromEntries(Object.entries(files)
+        .filter(([path]) => path.startsWith(prefix) && path.length > prefix.length)
+        .map(([path, bytes]) => [path.slice(prefix.length), bytes]));
+      const child = await readProjectEntries(childFiles, { ...options, nested: true });
+      if (!child.portable) throw new Error('完整工程包含缺少资源的工作区');
+      return { mode,
+        map: { ...child.resources.map, mapId: descriptor.mapId, portableRobotPackage: child.resources.robot,
+          portableOriginalMapId: descriptor.portableOriginalMapId || descriptor.mapId },
+        config: { mapId: descriptor.mapId, config: { schemaVersion: 1, project: child.payload,
+          ui: { ...child.payload.workspace, ...descriptor.ui, selectedRobot: child.payload.robot } } },
+      };
+    };
+    const workspaces = {};
+    for (const [mode, descriptor] of Object.entries(manifest.workspaces || {})) {
+      if (!LINKED_WORKSPACE_MODES.includes(mode)) throw new Error('完整工程工作区模式无效');
+      workspaces[mode] = await readWorkspace(descriptor, mode, `workspaces/${mode}/`);
+    }
+    const independentHistory = [];
+    for (const [index, descriptor] of manifest.independentHistory.entries()) {
+      independentHistory.push({ ...await readWorkspace(descriptor, 'independent', `independent-history/${index + 1}/`),
+        archivedAt: descriptor.archivedAt });
+    }
+    const workspaceCollection = { workspaces, independentHistory, activeMode: manifest.activeMode };
+    validateWorkspaceCollection(workspaceCollection);
+    return { source, manifest, portable: true, workspaceCollection,
+      archiveFileCount: Object.keys(files).filter((path) => !path.endsWith('/')).length };
+  }
   if (manifest.format === LINKED_PROJECT_ARCHIVE_FORMAT) {
     if (options.nested || manifest.archiveVersion !== LINKED_PROJECT_ARCHIVE_VERSION
       || !LINKED_WORKSPACE_MODES.includes(manifest.activeMode)) {
@@ -1372,7 +1481,7 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
   );
-  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
+  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
   const paths = manifestPaths(manifest);
@@ -1393,9 +1502,9 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
   return {
     ...imported,
     directory: {
-      handle: imported.linkedWorkspaces ? null : directoryHandle,
+      handle: imported.linkedWorkspaces || imported.workspaceCollection ? null : directoryHandle,
       name: String(directoryHandle.name || '工程目录'),
-      writable: !imported.linkedWorkspaces,
+      writable: !imported.linkedWorkspaces && !imported.workspaceCollection,
       projectFile: normalizeArchivePath(
         imported.manifest.projectFile || PROJECT_ARCHIVE_CONFIG,
         '工程配置路径',
@@ -1434,7 +1543,7 @@ export async function readProjectDirectoryFiles(fileList, options = {}) {
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
   );
-  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
+  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
   const paths = manifestPaths(manifest);

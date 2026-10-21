@@ -16,11 +16,24 @@ def history(page):
     return page.evaluate("""async () => (await import('/src/lib/sessionStore.js')).listIndependentHistory()""")
 
 
-def new_group(page, file=PLY):
+def open_new_group(page):
+    topbar_action(page, "新增独立示教", exact=True).click()
+    dialog = page.get_by_role("dialog", name="新增独立示教", exact=True)
+    expect(dialog).to_be_visible()
+    return dialog
+
+
+def choose_new_model(page, dialog, file=PLY):
     with page.expect_file_chooser() as chooser:
-        topbar_action(page, "新增独立示教", exact=True).click()
+        dialog.get_by_role("button", name="选择模型", exact=True).click()
+    chooser.value.set_files(str(file) if isinstance(file, Path) else file)
+
+
+def new_group(page, file=PLY):
+    dialog = open_new_group(page)
+    choose_new_model(page, dialog, file)
     with page.expect_navigation(wait_until="networkidle"):
-        chooser.value.set_files(str(file))
+        dialog.get_by_role("button", name="创建独立示教", exact=True).click()
     ready(page, "independent")
 
 
@@ -54,9 +67,8 @@ def run():
             source_name = source["project"]["map"]["fileName"]
 
             # Cancelling the native chooser leaves both workspaces untouched.
-            with page.expect_file_chooser() as chooser:
-                topbar_action(page, "新增独立示教", exact=True).click()
-            chooser.value.set_files([])
+            dialog = open_new_group(page)
+            choose_new_model(page, dialog, [])
             assert state(page) == original
             assert history(page) == []
 
@@ -65,6 +77,7 @@ def run():
                 "name": "broken.ply", "mimeType": "application/octet-stream",
                 "buffer": b"ply\nformat ascii 1.0\nelement vertex 0\nproperty float x\nproperty float y\nproperty float z\nend_header\n",
             })
+            dialog.get_by_role("button", name="创建独立示教", exact=True).click()
             expect(page.get_by_text("PLY 文件中没有有效的顶点坐标，当前工程已保留", exact=True)).to_be_visible()
             assert state(page) == original
             assert history(page) == []
@@ -82,10 +95,12 @@ def run():
               };
             }""")
             page.get_by_label("新增独立示教模型", exact=True).set_input_files(str(PLY))
+            dialog.get_by_role("button", name="创建独立示教", exact=True).click()
             expect(page.get_by_text("测试缓存空间不足", exact=True)).to_be_visible()
             page.evaluate("() => window.restoreHistoryPut()")
             assert state(page) == original
             assert history(page) == []
+            dialog.get_by_role("button", name="取消", exact=True).click()
 
             new_group(page)
             group_b_id = current_group_id(page)

@@ -1,5 +1,5 @@
 import { createId, normalizeProject } from './io.js';
-import { boundTeachingRelation, transferMatrix } from './teachingTransfer.js';
+import { boundTeachingRelation, isTeachingAlignmentTarget, transferMatrix } from './teachingTransfer.js';
 
 export const LINKED_WORKSPACE_MODES = ['map', 'independent'];
 
@@ -53,7 +53,8 @@ export function prepareLinkedProjectImport(workspaces) {
         ? source?.teachingGroupId === opposite.map.teachingGroupId
         : source?.mapId === opposite.map.mapId
           || (source?.sourceHash && source.sourceHash === opposite.map.sourceHash);
-      if (source && matches) source.mapId = ids[opposite.mode];
+      if (source && (matches || isTeachingAlignmentTarget(relation, opposite.map,
+        opposite.config.config.project.workspace.transfer))) source.mapId = ids[opposite.mode];
     }
     // A portable import must never reconnect to a previously remembered folder.
     project.workspace.directoryAutosaveSuspended = true;

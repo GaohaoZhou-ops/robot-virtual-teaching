@@ -33,7 +33,7 @@ export const teachingCoordinateFrame = (mode) => (
 );
 
 const normalizeWorkspaceTransfer = (value) => {
-  if (value?.version !== 1 || !['extraction', 'placement'].includes(value.kind)) return null;
+  if (value?.version !== 1 || !['extraction', 'placement', 'alignment'].includes(value.kind)) return null;
   if (!['x', 'y', 'z'].every((axis) => Number.isFinite(value.localToMap?.position?.[axis]))
     || !['roll', 'pitch', 'yaw'].every((axis) => Number.isFinite(value.localToMap?.rpy?.[axis]))
     || typeof value.sourceMap?.sourceHash !== 'string') return null;

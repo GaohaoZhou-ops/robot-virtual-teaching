@@ -1,3 +1,5 @@
+import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
+
 const DATABASE_NAME = 'atlas-route-studio';
 const DATABASE_VERSION = 1;
 const STORE_NAME = 'workspace-session';
@@ -381,6 +383,8 @@ const summarizeRecovery = ({ recoveryId, sourceSessionId, archivedAt }, map, con
     archivedAt: Number(archivedAt) || Date.now(),
     savedAt,
     mapId: map?.mapId || config?.mapId || null,
+    teachingGroupId: map?.teachingGroupId || project?.map?.teachingGroupId || null,
+    portableOriginalMapId: map?.portableOriginalMapId || null,
     mapName: map?.name || project?.map?.fileName || '未命名地图',
     activeTaskName: activeTask?.name || '',
     taskCount: teachingTasks.length,
@@ -776,6 +780,46 @@ export async function listIndependentHistory() {
   return (record?.entries || []).slice().sort((a, b) => b.archivedAt - a.archivedAt);
 }
 
+// Freeze the other active workspace and the entire history index in one read
+// transaction. Never silently skip a missing group and call the ZIP complete.
+export async function loadProjectCompanions(sessionId, currentMode) {
+  const otherMode = normalizeWorkspaceMode(currentMode) === 'map' ? 'independent' : 'map';
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readonly');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  const [meta, index, map, config, history] = await Promise.all([
+    requestResult(store.get('meta')),
+    requestResult(store.get(WORKSPACE_INDEX_KEY)),
+    requestResult(store.get(workspaceMapKey(otherMode))),
+    requestResult(store.get(workspaceConfigKey(otherMode))),
+    requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+  ]);
+  const records = await Promise.all((history?.entries || []).map(async (entry) => {
+    const [archivedMap, archivedConfig] = await Promise.all([
+      requestResult(store.get(historyMapKey(entry.historyId))),
+      requestResult(store.get(historyConfigKey(entry.historyId))),
+    ]);
+    return { mode: 'independent', map: archivedMap, config: archivedConfig, archivedAt: entry.archivedAt };
+  }));
+  await completion;
+  if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId) {
+    throw new Error('工作会话已变化，请刷新页面后重试');
+  }
+  const available = index.modes?.[otherMode]?.available;
+  if ((map || config?.config?.project || available) && (!map || !config?.config?.project
+    || map.sessionId !== sessionId || config.sessionId !== sessionId
+    || map.mapId !== config.mapId || map.mapId !== index.modes?.[otherMode]?.mapId)) {
+    throw new Error('另一侧工程缓存不完整，无法保存完整工程');
+  }
+  return {
+    companionWorkspace: map ? { mode: otherMode, map: await unpackMapRecord(map), config } : null,
+    independentHistory: await Promise.all(records.map(async (snapshot) => ({
+      ...snapshot, map: await unpackMapRecord(snapshot.map),
+    }))),
+  };
+}
+
 // Only read configuration and summaries; choosing a group must not unpack its
 // model or alter either workspace before the user makes a selection.
 export async function listIndependentWorkspaces(sessionId) {
@@ -815,13 +859,14 @@ export async function listIndependentWorkspaces(sessionId) {
 // The map workspace (including its absolute coordinates) is never rewritten.
 export async function switchIndependentWorkspace(sessionId, {
   replacement = null, historyId = null, expectedConfig = null, activeMode, currentRobotPackage,
+  expectedMapConfig = null,
 }) {
   const database = await openDatabase();
   const transaction = database.transaction(STORE_NAME, 'readwrite');
   const completion = transactionComplete(transaction);
   const store = transaction.objectStore(STORE_NAME);
   try {
-    const [meta, index, currentMap, currentConfig, history, archivedMap, archivedConfig] = await Promise.all([
+    const [meta, index, currentMap, currentConfig, history, archivedMap, archivedConfig, targetMap, targetConfig] = await Promise.all([
       requestResult(store.get('meta')),
       requestResult(store.get(WORKSPACE_INDEX_KEY)),
       requestResult(store.get(workspaceMapKey('independent'))),
@@ -829,6 +874,8 @@ export async function switchIndependentWorkspace(sessionId, {
       requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
       historyId ? requestResult(store.get(historyMapKey(historyId))) : null,
       historyId ? requestResult(store.get(historyConfigKey(historyId))) : null,
+      expectedMapConfig ? requestResult(store.get(workspaceMapKey('map'))) : null,
+      expectedMapConfig ? requestResult(store.get(workspaceConfigKey('map'))) : null,
     ]);
     if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId
       || index.activeMode !== activeMode) throw new Error('工作会话已变化，请刷新页面后重试');
@@ -841,6 +888,12 @@ export async function switchIndependentWorkspace(sessionId, {
       || (currentConfig?.config?.project && !currentMap)) {
       throw new Error('当前独立工程缓存不完整，无法创建历史副本');
     }
+    if (expectedMapConfig && (!targetMap?.positionBuffer || targetMap.sessionId !== sessionId
+      || targetConfig?.sessionId !== sessionId || targetMap.mapId !== expectedMapConfig.mapId
+      || targetConfig.mapId !== expectedMapConfig.mapId || targetConfig.savedAt !== expectedMapConfig.savedAt
+      || index.modes?.map?.mapId !== expectedMapConfig.mapId)) {
+      throw new Error('地图示教已变化，请重新打开新增独立示教窗口后加载转换矩阵');
+    }
     const entries = history?.entries || [];
     if (historyId && (!entries.some((entry) => entry.historyId === historyId)
       || !archivedConfig?.config?.project || !archivedMap || archivedConfig.mapId !== archivedMap.mapId)) {
@@ -848,6 +901,10 @@ export async function switchIndependentWorkspace(sessionId, {
     }
     const nextMap = historyId ? archivedMap : replacement?.map;
     const nextConfig = historyId ? archivedConfig?.config : replacement?.config;
+    if (!historyId && nextConfig?.project?.workspace?.transfer?.kind === 'alignment'
+      && (!expectedMapConfig || nextConfig.project.workspace.transfer.sourceMap?.mapId !== expectedMapConfig.mapId)) {
+      throw new Error('转换矩阵缺少已加载的目标地图，当前工程已保留');
+    }
     if (!nextMap?.mapId || !nextConfig?.project
       || nextConfig.project.workspace?.teachingSpaceMode !== 'independent'
       || (!nextMap.positionBuffer && !nextMap.blob)) throw new Error('新的独立工程资源不完整');
@@ -1016,6 +1073,67 @@ export async function restoreLinkedWorkspaces(sessionId, workspaces, activeMode)
     store.delete('config');
     store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode, modes, updatedAt: savedAt });
     store.put({ ...meta, activeMode });
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  clearWorkspaceViewState();
+}
+
+// Commit all active workspaces and historical groups together. A quota error
+// rolls back the whole import. Unrelated local history remains available.
+export async function restoreWorkspaceCollection(sessionId, collection, activeMode = collection.activeMode) {
+  validateWorkspaceCollection(collection);
+  if (!sessionId || !collection.workspaces[activeMode]) throw new Error('工作会话尚未就绪');
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  try {
+    const [meta, index, history] = await Promise.all([
+      requestResult(store.get('meta')),
+      requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+    ]);
+    if (meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
+    const savedAt = Date.now();
+    const modes = { ...index?.modes };
+    for (const [mode, snapshot] of Object.entries(collection.workspaces)) {
+      const map = { ...snapshot.map, key: workspaceMapKey(mode), teachingSpaceMode: mode, sessionId, savedAt };
+      const config = { ...snapshot.config, key: workspaceConfigKey(mode), teachingSpaceMode: mode, sessionId, savedAt };
+      store.put(packMapRecord(map));
+      store.put(config);
+      modes[mode] = summarizeWorkspace(mode, map, config);
+    }
+    const incoming = [collection.workspaces.independent, ...collection.independentHistory].filter(Boolean);
+    const entries = [];
+    for (const entry of history?.entries || []) {
+      // Stable group identities avoid duplicates when the same backup is loaded again.
+      const replaced = incoming.some(({ map }) => entry.teachingGroupId && map.teachingGroupId
+        ? entry.teachingGroupId === map.teachingGroupId
+        : (entry.portableOriginalMapId || entry.mapId) === (map.portableOriginalMapId || map.mapId));
+      if (replaced) {
+        store.delete(historyMapKey(entry.historyId));
+        store.delete(historyConfigKey(entry.historyId));
+      } else entries.push(entry);
+    }
+    for (const snapshot of collection.independentHistory) {
+      const id = snapshot.map.mapId;
+      const map = { ...snapshot.map, key: historyMapKey(id), teachingSpaceMode: 'independent', sessionId, savedAt };
+      const config = { ...snapshot.config, key: historyConfigKey(id), teachingSpaceMode: 'independent', sessionId, savedAt };
+      store.put(packMapRecord(map));
+      store.put(config);
+      entries.push({ ...summarizeRecovery({ sourceSessionId: sessionId, archivedAt: snapshot.archivedAt }, map, config),
+        historyId: id, teachingGroupId: map.teachingGroupId,
+        portableOriginalMapId: map.portableOriginalMapId });
+    }
+    store.put({ key: INDEPENDENT_HISTORY_KEY, entries });
+    store.delete('map');
+    store.delete('config');
+    store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode, modes, updatedAt: savedAt });
+    store.put({ ...meta, activeMode, activatedRecoveryId: null });
   } catch (error) {
     transaction.abort();
     await completion.catch(() => undefined);
