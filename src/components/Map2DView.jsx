@@ -960,7 +960,7 @@ export default function Map2DView({
             const kind = markerClass(edge);
             const selected = edge.id === selectedEdgeId;
             const boxSelected = boxEdgeIds.has(edge.id);
-            const arrowKind = boxSelected ? 'box-selected' : selected ? 'selected' : kind;
+            const arrowKind = boxSelected ? 'box-selected' : kind === 'unreachable' ? kind : selected ? 'selected' : kind;
             return (
               <g key={edge.id} className={`route-edge ${kind} ${selected ? 'is-selected' : ''} ${boxSelected ? 'is-box-selected' : ''}`}>
                 <path

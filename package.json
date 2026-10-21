@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:connectivity": "node tests/graph_connectivity_smoke.mjs",
     "test:model-editor": "node tests/model_editing_smoke.mjs",
     "test:model-composition": "node tests/model_composition_smoke.mjs",
     "test:torso": "node tests/torso_control_smoke.mjs",

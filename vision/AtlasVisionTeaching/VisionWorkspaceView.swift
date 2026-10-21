@@ -441,8 +441,15 @@ struct VisionWorkspaceView: View {
             HStack(spacing: 16) {
                 Label(completed ? "已完成" : "本地草稿", systemImage: completed ? "checkmark.seal" : "square.and.pencil")
                 Text("\(session.current?.result.samples.count ?? 0) 个 Pose").monospacedDigit().accessibilityIdentifier("pose-count")
-                if !previewing { Text(spatial.renderSummary).font(.body).foregroundStyle(.secondary) }
-                if spatial.preparing { ProgressView().controlSize(.small) }
+                if !previewing {
+                    if spatial.preparing {
+                        ProgressView(spatial.renderStatus).font(.body).controlSize(.small)
+                            .accessibilityIdentifier("render-progress")
+                    } else {
+                        Text(spatial.renderSummary).font(.body).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("render-summary")
+                    }
+                } else if spatial.preparing { ProgressView().controlSize(.small) }
             }
             if spatial.isDemo { Label("模拟演练 · 不可同步", systemImage: "testtube.2").foregroundStyle(.orange) }
             if previewing {
@@ -461,7 +468,7 @@ struct VisionWorkspaceView: View {
                 }.pickerStyle(.segmented).frame(width: 220)
                 Picker("精度", selection: $spatial.quality) {
                     ForEach(VisionQuality.allCases) { Text($0.label).tag($0) }
-                }.frame(width: 190)
+                }.pickerStyle(.menu).frame(width: 190).accessibilityIdentifier("render-quality")
                 Spacer(minLength: 0)
                 Button(spaceClosed ? "进入空间示教" : "退出空间") { Task { await toggleSpace() } }
                     .buttonStyle(.borderedProminent).tint(.cyan)
@@ -565,11 +572,12 @@ struct VisionWorkspaceView: View {
 struct VisionTeachingControls: View {
     @EnvironmentObject private var session: TeachingSession
     @EnvironmentObject private var spatial: VisionTrackingController
+    @Environment(\.dismissImmersiveSpace) private var dismissSpace
     @State private var nearby: NearbyPoseConfirmation?
     let compact: Bool
     private var readOnly: Bool { session.current?.result.completedAt != nil }
 
-    var body: some View {
+    private var controls: some View {
         VStack(alignment: .leading, spacing: 24) {
             HStack {
                 Label(spatial.tracking, systemImage: spatial.trackingNormal ? "location.fill" : "location.slash")
@@ -618,10 +626,14 @@ struct VisionTeachingControls: View {
                     } else { Label("已完成 · 空间回看", systemImage: "checkmark.seal") }
                     Button("调整模型") { nearby = nil; spatial.beginAdjustment() }.accessibilityIdentifier(compact ? "spatial-adjust-model" : "adjust-model")
                 }
-                Button("控制板移到面前") { spatial.recenterPanel() }
             }
+            Toggle("锁定当前位置", isOn: Binding(get: { spatial.panelLocked }, set: { spatial.setPanelLocked($0) }))
+                .toggleStyle(.switch).frame(minHeight: 64)
+                .accessibilityIdentifier(compact ? "spatial-lock-panel" : "lock-panel")
+            Toggle(compact ? "Zivid 视野" : "Zivid 视野 · M70 · 0.3–1.3 m", isOn: $spatial.showFrustum)
+                .toggleStyle(.switch).font(.title3).frame(minHeight: 64)
+                .accessibilityIdentifier(compact ? "spatial-zivid-fov" : "zivid-fov")
             if !compact {
-                Toggle("M70 虚拟视锥 · 0.3–1.3 m", isOn: $spatial.showFrustum).font(.title3).frame(minHeight: 64)
                 Text("以头显参考点模拟相机视角，未包含实际相机外参标定。模型始终保持 1:1。")
                     .font(.body).foregroundStyle(.secondary)
             }
@@ -629,9 +641,25 @@ struct VisionTeachingControls: View {
             if spatial.isDemo { Button("模拟向右移动 20 cm") { spatial.moveDemo() }.accessibilityIdentifier(compact ? "spatial-move-demo" : "move-demo") }
             #endif
         }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            controls.disabled(session.busy || !session.error.isEmpty || spatial.spaceState != .open)
+            if compact {
+                Button("退出示教空间", systemImage: "rectangle.portrait.and.arrow.right") {
+                    guard spatial.spaceState == .open else { return }
+                    nearby = nil
+                    session.backgroundSave()
+                    spatial.spaceState = .closing; spatial.stop()
+                    Task { await dismissSpace() }
+                }
+                .disabled(spatial.spaceState != .open)
+                .accessibilityIdentifier("spatial-exit-space")
+            }
+        }
         .font(.title3)
         .controlSize(.extraLarge)
-        .disabled(session.busy || !session.error.isEmpty || spatial.spaceState != .open)
         .alert("距离上一个 Pose 小于 10 cm", isPresented: Binding(get: { nearby != nil }, set: { if !$0 { nearby = nil } })) {
             Button("仍然记录") {
                 if let pending = nearby, spatial.canRecord,

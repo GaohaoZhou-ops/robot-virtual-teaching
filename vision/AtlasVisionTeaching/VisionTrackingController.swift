@@ -17,8 +17,10 @@ final class VisionTrackingController: ObservableObject {
     @Published private(set) var message = "进入空间后，选择水平面放置模型"
     @Published private(set) var tracking = "尚未进入空间"
     @Published private(set) var renderSummary = ""
+    @Published private(set) var renderStatus = ""
     @Published private(set) var renderError = ""
     @Published private(set) var isDemo = false
+    @Published private(set) var panelLocked = false
     @Published private(set) var modelEntity: ModelEntity?
     @Published var showFrustum = false { didSet { frustum.isEnabled = showFrustum && trackingNormal } }
     @Published var quality = VisionQuality.light
@@ -79,19 +81,23 @@ final class VisionTrackingController: ObservableObject {
         renderTask?.cancel(); renderGeneration = UUID()
         let generation = renderGeneration, mode = displayMode, quality = quality
         preparing = true; renderError = ""
+        renderStatus = "正在准备\(quality.label)\(mode.label)…"
         renderTask = Task {
             let build = Task.detached(priority: .userInitiated) { try VisionMeshData(model: model, mode: mode, quality: quality) }
             do {
                 let data = try await withTaskCancellationHandler(operation: { try await build.value }, onCancel: { build.cancel() })
                 try Task.checkCancellation()
+                let unit = data.isMesh ? "面" : "点"
+                renderStatus = "正在加载\(quality.label) · \(data.primitiveCount.formatted()) \(unit)…"
                 let entity = try await VisionModelRenderer.makeEntity(data)
                 guard !Task.isCancelled, generation == renderGeneration else { return }
                 modelEntity?.removeFromParent(); modelEntity = entity; objectRoot.addChild(entity)
-                renderSummary = "\(data.isMesh ? "Mesh" : "点云") · \(data.primitiveCount.formatted()) \(data.isMesh ? "面" : "点") · 1:1"
-                preparing = false
+                let total = data.isMesh ? model.indices / 3 : model.vertices
+                renderSummary = "\(data.isMesh ? "Mesh" : "点云") · \(quality.label) · \(data.primitiveCount.formatted()) / \(total.formatted()) \(unit) · 1:1"
+                preparing = false; renderStatus = ""
             } catch {
                 guard !Task.isCancelled, generation == renderGeneration else { return }
-                renderError = "模型显示失败：\(error.localizedDescription)"; preparing = false
+                renderError = "模型显示失败：\(error.localizedDescription)"; preparing = false; renderStatus = ""
             }
         }
     }
@@ -216,7 +222,8 @@ final class VisionTrackingController: ObservableObject {
             oldSession?.stop()
         }
         invalidatePlacement(); clearPlanes(); tracking = "尚未进入空间"
-        frustum.isEnabled = false; panelPositioned = false
+        frustum.isEnabled = false; panelPositioned = false; panelLocked = false
+        panelRoot.stopAllAnimations(recursive: false)
     }
 
     func invalidatePlacement() {
@@ -242,6 +249,7 @@ final class VisionTrackingController: ObservableObject {
         }
         trackingNormal = true; tracking = placement.isCalibrated && !anchorTracked ? "等待模型锚点定位" : "空间定位正常"
         frustum.transform = Transform(matrix: transform); frustum.isEnabled = showFrustum
+        guard !panelLocked else { return }
         if !panelPositioned { recenterPanel() }
         else {
             // Keep the controls reachable while walking around a workpiece.
@@ -256,8 +264,18 @@ final class VisionTrackingController: ObservableObject {
         }
     }
 
-    func recenterPanel(animated: Bool = false) {
-        guard let device = deviceTransform() else { return }
+    func setPanelLocked(_ locked: Bool) {
+        guard running, panelPositioned, panelLocked != locked else { return }
+        // Freeze at the currently displayed transform, including during a move.
+        let transform = panelRoot.transform
+        panelRoot.stopAllAnimations(recursive: false)
+        panelRoot.transform = transform
+        panelLocked = locked
+        if !locked { recenterPanel(animated: true) }
+    }
+
+    private func recenterPanel(animated: Bool = false) {
+        guard !panelLocked, let device = deviceTransform() else { return }
         var transform = device
         transform.columns.3 = device * SIMD4(0, -0.25, -0.85, 1)
         panelRoot.stopAllAnimations(recursive: false)

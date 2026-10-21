@@ -26,6 +26,8 @@ import {
 import { calculatePathDistances } from '../lib/pathMetrics.js';
 import { TEMPORARY_MAP_ROUTE_SOURCE } from '../lib/teachingNavigation.js';
 import { abxNodeLabel } from '../lib/abxRoute.js';
+import { connectivityCopy } from '../lib/graph.js';
+import ConnectivityResults from './ConnectivityResults.jsx';
 import FloatingRobotJointPanel from './FloatingRobotJointPanel.jsx';
 import VirtualTeachingPanel from './VirtualTeachingPanel.jsx';
 import ZividCameraPanel from './ZividCameraPanel.jsx';
@@ -169,6 +171,9 @@ export default function Inspector({
   onCreateTeachingParkingPoint,
   onSelectTeachingParkingPoint,
   onCaptureTeachingPoint,
+  onDeleteTeachingTask,
+  onDeleteTeachingParkingPoint,
+  onDeleteTeachingPoint,
   onSolveMobileTask,
   onSaveMobileTask,
   mobileSaveDisabledReason,
@@ -193,6 +198,9 @@ export default function Inspector({
   const [activeTeachingCameraSide, setActiveTeachingCameraSide] = useState('left');
   const [expandedCameraSide, setExpandedCameraSide] = useState(null);
   const [jointWindowOpen, setJointWindowOpen] = useState(false);
+  const [connectivityResultsOpen, setConnectivityResultsOpen] = useState(false);
+  const pathTestRef = useRef(null);
+  const closeConnectivityResults = useCallback(() => setConnectivityResultsOpen(false), []);
   const scrollRef = useRef(null);
   const workbenchActivityRef = useRef(isWorkbenchActive);
   const selectedWaypoint = waypoints.find((point) => point.id === selectedWaypointId);
@@ -247,13 +255,17 @@ export default function Inspector({
     }
   }, [isWorkbenchActive]);
 
-  const validationCopy =
-    validation.status === 'connected'
-      ? { title: '全图强连通', detail: '所有导航点均可往返到达', icon: CheckCircle2 }
-      : validation.status === 'partial'
-        ? { title: '存在单向断路', detail: `${validation.unreachableCount} 条路径尚未形成回路`, icon: TriangleAlert }
-        : { title: '等待连通性检测', icon: ScanSearch };
-  const ValidationIcon = validationCopy.icon;
+  const validationCopy = connectivityCopy(validation);
+  const ValidationIcon = validation.status === 'connected' ? CheckCircle2
+    : validation.status === 'partial' ? TriangleAlert : ScanSearch;
+
+  useEffect(() => {
+    setConnectivityResultsOpen(false);
+  }, [activePage, collapsed, isWorkbenchActive, teachingSpaceMode, selectedWaypointId, selectedEdgeId]);
+
+  useEffect(() => {
+    if (validation.status !== 'partial') setConnectivityResultsOpen(false);
+  }, [validation.status]);
 
   const updatePose = (key, value) => {
     onUpdateWaypoint(selectedWaypoint.id, {
@@ -311,10 +323,10 @@ export default function Inspector({
     || inspectorPages[0];
 
   useEffect(() => {
-    if (selectedEdgeId || (selectedWaypointId && !selectedWaypoint?.teachingTaskId)) {
+    if (selectedEdgeId || (selectedWaypoint && !selectedWaypoint.teachingTaskId)) {
       setActivePage('navigation');
     }
-  }, [selectedEdgeId, selectedWaypointId, selectedWaypoint?.teachingTaskId]);
+  }, [selectedEdgeId, selectedWaypointId, selectedWaypoint?.id, selectedWaypoint?.teachingTaskId]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -465,7 +477,13 @@ export default function Inspector({
               <button
                 type="button"
                 className={`inspector-route-import path-test-button is-${validation.status}`}
-                onClick={onRunConnectivity}
+                ref={pathTestRef}
+                aria-haspopup="dialog"
+                aria-expanded={connectivityResultsOpen}
+                onClick={() => {
+                  const result = onRunConnectivity();
+                  setConnectivityResultsOpen(result?.status === 'partial');
+                }}
                 disabled={!edges.length}
                 title={['运行有向图强连通检测', validationCopy.title, validationCopy.detail].filter(Boolean).join(' · ')}
               >
@@ -857,6 +875,9 @@ export default function Inspector({
               onCreateParkingPoint={onCreateTeachingParkingPoint}
               onSelectParkingPoint={onSelectTeachingParkingPoint}
               onCapturePoint={onCaptureTeachingPoint}
+              onDeleteTask={onDeleteTeachingTask}
+              onDeleteParkingPoint={onDeleteTeachingParkingPoint}
+              onDeletePoint={onDeleteTeachingPoint}
               onSolveMobileTask={onSolveMobileTask}
               onSaveMobileTask={onSaveMobileTask}
               mobileSaveDisabledReason={mobileSaveDisabledReason}
@@ -920,6 +941,11 @@ export default function Inspector({
         <span>{collapsed ? '展开控制台' : '折叠'}</span>
       </button>
       </aside>
+
+      {connectivityResultsOpen && validation.status === 'partial' && activePage === 'navigation' && !collapsed && isWorkbenchActive && (
+        <ConnectivityResults anchorRef={pathTestRef} validation={validation} waypoints={waypoints} edges={edges}
+          onClose={closeConnectivityResults} onLocateWaypoint={onSearchWaypoint} onLocateEdge={onSelectEdge} />
+      )}
 
       <FloatingRobotJointPanel
         open={jointWindowOpen}

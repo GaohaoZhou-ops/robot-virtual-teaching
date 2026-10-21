@@ -65,7 +65,7 @@ import { IPadModelMismatchError, ipadResultTask } from './lib/ipadTeaching.js';
 import { mobileDeviceKey, mobileDeviceLabel } from './lib/ipadProtocol.js';
 import { extractTeachingWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from './lib/teachingTransfer.js';
 import { mapRouteSyncStatus, syncMapRouteToIndependent } from './lib/mapRouteSync.js';
-import { inspectConnectivity } from './lib/graph.js';
+import { connectivityCopy, connectivityTopology, inspectConnectivity } from './lib/graph.js';
 import {
   buildTeachingWaypoints,
   navigationEdgesForWaypoints,
@@ -728,10 +728,7 @@ export default function App() {
     return Math.hypot(robotPose.position.x - point.pose.x, robotPose.position.y - point.pose.y) <= 0.001
       && Math.abs(yawDelta) <= 0.01 ? point.id : null;
   }, [mapData?.mapId, robotPose, robotWaypointLocation, selectedRobot, teachingSpaceMode, waypoints]);
-  const navigationTopology = useMemo(() => JSON.stringify([
-    waypoints.map((point) => point.id),
-    edges.map((edge) => [edge.id, edge.from, edge.to]),
-  ]), [waypoints, edges]);
+  const navigationTopology = useMemo(() => connectivityTopology(waypoints, edges), [waypoints, edges]);
 
   latestWorkspaceRef.current = {
     abxRoutes,
@@ -1198,8 +1195,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    invalidateConnectivity();
-  }, [invalidateConnectivity, navigationTopology]);
+    // Restoring a checked graph already provides a fresh result for this topology.
+    // Actual point/connection changes still invalidate the result and its colors.
+    if (validation.topology !== navigationTopology) invalidateConnectivity();
+  }, [invalidateConnectivity, navigationTopology, validation.topology]);
 
   const installMapGeometry = useCallback(
     async (geometry, name, options = {}) => {
@@ -1666,14 +1665,23 @@ export default function App() {
             const teachingTaskIds = new Set(
               project.teachingTasks.map((task) => task.id),
             );
-            const checked = project.edges.some((edge) => edge.status !== 'unchecked');
-            const connected = project.edges.length > 0
-              && project.edges.every((edge) => edge.status === 'connected');
             const savedValidation = snapshot?.ui?.validation;
+            const checked = savedValidation?.status !== 'idle' && (
+              ['connected', 'partial'].includes(savedValidation?.status)
+              || project.edges.some((edge) => edge.status !== 'unchecked')
+            );
+            const restoredConnectivity = checked ? inspectConnectivity(
+              buildTeachingWaypoints(project.waypoints, project.teachingTasks, {
+                mapData: stored.map || { ...project.map, name: project.map?.fileName },
+                coordinateFrame: restoredTeachingSpaceMode === 'independent' ? 'virtual_origin' : 'map',
+              }), project.edges,
+            ) : null;
 
             setWaypoints(project.waypoints);
             setAbxRoutes(project.abxRoutes);
-            setEdges(project.edges);
+            setEdges(restoredConnectivity ? project.edges.map((edge) => ({
+              ...edge, status: restoredConnectivity.edgeStatus.get(edge.id),
+            })) : project.edges);
             setTeachingTasks(project.teachingTasks);
             setJointPoses(project.jointPoses);
             const restoredTeachingTaskId = snapshot?.ui?.activeTeachingTaskId === null
@@ -1725,15 +1733,9 @@ export default function App() {
                 : 'height',
             );
             setValidation(
-              savedValidation && ['idle', 'connected', 'partial'].includes(savedValidation.status)
-                ? savedValidation
-                : {
-                    status: checked ? (connected ? 'connected' : 'partial') : 'idle',
-                    unreachableCount: project.edges.filter(
-                      (edge) => edge.status === 'unreachable',
-                    ).length,
-                    checkedAt: null,
-                  },
+              restoredConnectivity
+                ? { ...restoredConnectivity.validation, checkedAt: savedValidation?.checkedAt || null }
+                : initialValidation,
             );
             restored = restored
               || project.waypoints.length > 0
@@ -2379,16 +2381,14 @@ export default function App() {
         ? project.workspace.collapsedPanel
         : null;
       const importedInspectorCollapsed = project.workspace?.inspectorCollapsed === true;
-      const importedConnected = project.edges.length > 0
-        && project.edges.every((edge) => edge.status === 'connected');
       const importedChecked = project.edges.some((edge) => edge.status !== 'unchecked');
-      const importedValidation = importedChecked
-        ? {
-            status: importedConnected ? 'connected' : 'partial',
-            unreachableCount: project.edges.filter((edge) => edge.status === 'unreachable').length,
-            checkedAt: null,
-          }
-        : initialValidation;
+      const importedConnectivity = importedChecked ? inspectConnectivity(
+        buildTeachingWaypoints(project.waypoints, project.teachingTasks, {
+          mapData: effectiveMap || { ...project.map, name: project.map?.fileName },
+          coordinateFrame: importedTeachingSpaceMode === 'independent' ? 'virtual_origin' : 'map',
+        }), project.edges,
+      ) : null;
+      const importedValidation = importedConnectivity?.validation || initialValidation;
       const importedBounds = effectiveMap?.bounds || project.map?.bounds;
       const importedSlice = project.slice
         ? importedBounds ? clampSlice(project.slice, importedBounds) : project.slice
@@ -2397,7 +2397,9 @@ export default function App() {
           : heightRange;
       setWaypoints(project.waypoints);
       setAbxRoutes(project.abxRoutes);
-      setEdges(project.edges);
+      setEdges(importedConnectivity ? project.edges.map((edge) => ({
+        ...edge, status: importedConnectivity.edgeStatus.get(edge.id),
+      })) : project.edges);
       setTeachingTasks(project.teachingTasks);
       setJointPoses(project.jointPoses);
       setActiveTeachingTaskId(importedTaskId);
@@ -2969,25 +2971,19 @@ export default function App() {
 
   const runConnectivity = useCallback(() => {
     const result = inspectConnectivity(waypoints, edges);
-    const unreachableCount = edges.reduce(
-      (count, edge) => count + (result.edgeStatus.get(edge.id) === 'unreachable' ? 1 : 0),
-      0,
-    );
     setEdges((current) =>
       current.map((edge) => ({
         ...edge,
         status: result.edgeStatus.get(edge.id) || 'unreachable',
       })),
     );
-    setValidation({
-      status: result.stronglyConnected ? 'connected' : 'partial',
-      unreachableCount,
-      checkedAt: new Date().toISOString(),
-    });
+    const nextValidation = { ...result.validation, checkedAt: new Date().toISOString() };
+    setValidation(nextValidation);
     notify(
-      result.stronglyConnected ? '检测完成：有向图已强连通' : '检测完成：黄色路径尚未形成双向可达',
-      result.stronglyConnected ? 'success' : 'warning',
+      `检测完成：${connectivityCopy(nextValidation).detail}`,
+      nextValidation.status === 'connected' ? 'success' : 'warning',
     );
+    return nextValidation;
   }, [edges, notify, waypoints]);
 
   const teachingContextMatches = useCallback(
@@ -3108,6 +3104,7 @@ export default function App() {
       const task = teachingTasks.find((item) => item.id === id);
       const remaining = teachingTasks.filter((item) => item.id !== id);
       setTeachingTasks(remaining);
+      setRobotParkingGhost((current) => current?.taskId === id ? null : current);
       if (activeTeachingTaskId === id) {
         setActiveTeachingTaskId(remaining[0]?.id || null);
         setActiveTeachingParkingPointId(remaining[0]?.parkingPoints?.[0]?.id || null);
@@ -3319,6 +3316,9 @@ export default function App() {
       notify('原生任务的停车点与动作顺序需要在机器人端调整后重新导入', 'warning'); return;
     }
     const removed = task.parkingPoints?.find((item) => item.id === parkingPointId);
+    setRobotParkingGhost((current) => (
+      current?.taskId === taskId && current.parkingPointId === parkingPointId ? null : current
+    ));
     const remaining = (task.parkingPoints || [])
       .filter((item) => item.id !== parkingPointId)
       .map((item, index) => ({ ...item, sequence: index + 1 }));
@@ -3573,6 +3573,10 @@ export default function App() {
     if (latestWorkspaceRef.current.teachingTasks.find((task) => task.id === taskId)?.abx) {
       notify('原生任务的动作顺序需要在机器人端调整后重新导入', 'warning'); return;
     }
+    setRobotParkingGhost((current) => (
+      current?.taskId === taskId && current.parkingPointId === parkingPointId && current.poseId === pointId
+        ? null : current
+    ));
     const updatedAt = new Date().toISOString();
     setTeachingTasks((current) => current.map((task) => {
       if (task.id !== taskId) return task;
@@ -6297,6 +6301,9 @@ export default function App() {
           onCreateTeachingParkingPoint={createTeachingParkingPoint}
           onSelectTeachingParkingPoint={previewTeachingParkingPoint}
           onCaptureTeachingPoint={captureTeachingPoint}
+          onDeleteTeachingTask={deleteTeachingTask}
+          onDeleteTeachingParkingPoint={deleteTeachingParkingPoint}
+          onDeleteTeachingPoint={deleteTeachingPoint}
           onSolveMobileTask={openMobileTeachingSolve}
           onSaveMobileTask={saveMobileTeachingTask}
           mobileSaveDisabledReason={mobileSaveDisabledReason}

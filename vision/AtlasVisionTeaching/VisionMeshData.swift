@@ -2,14 +2,15 @@ import Foundation
 import simd
 
 enum VisionQuality: String, CaseIterable, Identifiable {
-    case light, balanced, detail
+    case light, balanced, detail, full
     var id: String { rawValue }
-    var label: String { switch self { case .light: "轻量"; case .balanced: "均衡"; case .detail: "精细" } }
-    var faces: Int { switch self { case .light: 40_000; case .balanced: 120_000; case .detail: 300_000 } }
-    var points: Int { switch self { case .light: 8_000; case .balanced: 20_000; case .detail: 50_000 } }
+    var label: String { switch self { case .light: "轻量"; case .balanced: "均衡"; case .detail: "精细"; case .full: "全量" } }
+    var faces: Int { switch self { case .light: 40_000; case .balanced: 120_000; case .detail: 300_000; case .full: .max } }
+    var points: Int { switch self { case .light: 8_000; case .balanced: 20_000; case .detail: 50_000; case .full: .max } }
 }
 
-/// CPU-only, cancellable conversion. Fixed budgets bound the two-eye rendering cost.
+/// CPU-only, cancellable conversion. Full quality retains every source primitive;
+/// the other qualities bound the two-eye rendering cost.
 /// The original ATLS bytes and the 1:1 model coordinates are never modified.
 struct VisionMeshData {
     var positions: [SIMD3<Float>] = []
@@ -35,6 +36,7 @@ struct VisionMeshData {
     }
 
     init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality, pointRadius: Float? = nil) throws {
+        try Task.checkCancellation()
         isMesh = mode == .mesh && model.indices > 0
         let total = isMesh ? model.indices / 3 : model.vertices
         primitiveCount = min(total, isMesh ? quality.faces : quality.points)
@@ -44,7 +46,9 @@ struct VisionMeshData {
         textureCoordinates.reserveCapacity(positions.capacity)
         triangles.reserveCapacity(primitiveCount * (isMesh ? 3 : 12))
         func gcd(_ a: Int, _ b: Int) -> Int { var a = a, b = b; while b != 0 { (a, b) = (b, a % b) }; return a }
-        var step = max(1, Int(Double(total) * 0.61803398875))
+        // Complete geometry keeps the source ordering and every triangle. Only
+        // reduced qualities need the spatially distributed sampling walk.
+        var step = primitiveCount == total ? 1 : max(1, Int(Double(total) * 0.61803398875))
         while gcd(step, total) != 1 { step += 1 }
         // Point clouds use small tetrahedra, which remain visible from every side.
         let extent = Float(max(model.maximum.x - model.minimum.x, model.maximum.y - model.minimum.y, model.maximum.z - model.minimum.z))
