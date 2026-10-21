@@ -67,28 +67,9 @@ def read_workspace_records(page):
 
 
 def simulate_service_restart(page):
-    page.evaluate(
-        """
-        async () => {
-          const database = await new Promise((resolve, reject) => {
-            const request = indexedDB.open('atlas-route-studio', 1);
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-          });
-          const transaction = database.transaction('workspace-session', 'readwrite');
-          transaction.objectStore('workspace-session').put({
-            key: 'meta',
-            sessionId: 'simulated-previous-service',
-            startedAt: 0,
-          });
-          await new Promise((resolve, reject) => {
-            transaction.oncomplete = resolve;
-            transaction.onerror = () => reject(transaction.error);
-          });
-          database.close();
-        }
-        """
-    )
+    page.route("**/__atlas/session", lambda route: route.fulfill(json={
+        "sessionId": "replacement-service-instance", "startedAt": "2026-10-21T00:00:00Z",
+    }))
 
 
 def run():
@@ -416,45 +397,12 @@ def run():
         page.reload()
         page.wait_for_load_state("networkidle")
         wait_for_session(page)
-        assert page.locator(".session-guard").get_attribute("data-session-restored") == "false"
-        assert page.locator(".map-identity strong").inner_text() == "NO MAP LOADED"
-        assert page.locator(".three-canvas").count() == 0
-        assert page.locator(".waypoint-marker").count() == 0
-        assert page.evaluate("localStorage.getItem('atlas-route-studio:view-state-v1')") is None
-        assert topbar_action(page, name="返回主页面").is_enabled()
-        assert page.locator(".session-guard").get_attribute(
-            "data-recovery-available"
-        ) == "true"
-        page.screenshot(path="/tmp/atlas-project-recovery.png", full_page=True)
-        topbar_action(page, name="打开示教数据管理页").click()
-        page.locator('[data-app-page="teaching-data"]').wait_for()
-        recovery_button = page.get_by_role("button", name="恢复上一次工程")
-        assert recovery_button.is_visible()
-        remaining_records = read_workspace_records(page)
-        remaining_by_key = {record["key"]: record for record in remaining_records}
-        assert "workspace-map:map" not in remaining_by_key
-        assert {"recovery-meta", "recovery-map", "recovery-config"}.issubset(
-            remaining_by_key
-        )
-        assert remaining_by_key["recovery-meta"]["available"]
-        assert remaining_by_key["recovery-meta"]["mapName"] == FIXTURE.name
-        assert remaining_by_key["recovery-map"]["positionByteLength"] == 24 * 3 * 4
-        assert remaining_by_key["recovery-map"]["recoveryId"] == remaining_by_key[
-            "recovery-meta"
-        ]["recoveryId"]
-        assert remaining_by_key["meta"]["sessionId"] == session_identity["sessionId"]
-
-        recovery_button.click()
-        page.locator(".loading-curtain").wait_for(state="visible")
-        page.wait_for_function(
-            "document.querySelector('.session-guard')?.dataset.sessionRestored === 'true'"
-        )
-        page.wait_for_load_state("networkidle")
-        wait_for_session(page)
         assert page.locator(".session-guard").get_attribute("data-session-restored") == "true"
-        assert page.locator(".session-guard").get_attribute(
-            "data-recovery-available"
-        ) == "false"
+        assert page.locator(".session-guard").get_attribute("data-recovery-available") == "false"
+        remaining_by_key = {record["key"]: record for record in read_workspace_records(page)}
+        assert remaining_by_key["meta"]["sessionId"] == session_identity["sessionId"]
+        assert remaining_by_key["workspace-map:map"]["positionByteLength"] == 24 * 3 * 4
+        assert not {"recovery-meta", "recovery-map", "recovery-config"}.intersection(remaining_by_key)
         assert page.locator(".map-identity strong").inner_text() == FIXTURE.name
         assert page.locator(".three-canvas").get_attribute("data-geometry-source") == "session-cache"
         assert page.locator(".waypoint-marker").count() == 2
@@ -485,7 +433,7 @@ def run():
         print("restored_map=", FIXTURE.name)
         print("restored_waypoints=", 2)
         print("restored_edges=", 1)
-        print("crash_recovery=", "passed")
+        print("service_restart_preserves_local_workspace=", "passed")
         print("page_errors=", errors)
         assert not errors
         browser.close()

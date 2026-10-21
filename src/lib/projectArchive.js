@@ -1,4 +1,4 @@
-import { strFromU8, strToU8, unzip, zip } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zip } from 'fflate';
 import { sha256Bytes } from './hash.js';
 import { buildAbxTeachingExport } from './abxTeachingExport.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
@@ -546,12 +546,44 @@ const zipEntries = (entries) => new Promise((resolve, reject) => {
   });
 });
 
-const unzipEntries = (bytes) => new Promise((resolve, reject) => {
-  unzip(bytes, (error, data) => {
-    if (error) reject(error);
-    else resolve(data);
+const unzipEntries = async (input, { onProgress } = {}) => {
+  onProgress?.({ phase: '解压工程包', detail: '正在读取压缩包', progress: 0 });
+  // fflate's async unzip creates a worker for each large member. Every member
+  // is a subarray of the same ZIP, so posting it clones the entire archive.
+  // Use one worker and transfer the results back; a File is read in that worker.
+  if (typeof Worker === 'undefined') {
+    const bytes = input instanceof Blob ? new Uint8Array(await input.arrayBuffer()) : asBytes(input);
+    return unzipSync(bytes);
+  }
+  const worker = new Worker(new URL('../workers/projectArchive.worker.js', import.meta.url), { type: 'module' });
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const finish = (error, files) => {
+      if (finished) return;
+      finished = true;
+      worker.terminate();
+      if (error) reject(error); else resolve(files);
+    };
+    worker.onerror = (event) => {
+      event.preventDefault();
+      finish(new Error(event.message || '工程包解压进程启动失败'));
+    };
+    worker.onmessageerror = () => finish(new Error('无法读取工程包解压结果'));
+    worker.onmessage = ({ data }) => {
+      if (finished) return;
+      try {
+        if (data.type === 'progress') onProgress?.(data.value);
+        else if (data.type === 'complete') finish(null, data.files);
+        else if (data.type === 'error') finish(new Error(data.message));
+      } catch (error) { finish(error); }
+    };
+    try {
+      // Preserve caller-owned byte arrays. Files/Blobs share immutable storage;
+      // byte arrays incur one copy, regardless of the number of ZIP members.
+      worker.postMessage(input instanceof Blob ? input : asBytes(input));
+    } catch (error) { finish(error); }
   });
-});
+};
 
 const addEnvironmentResource = async (entries, mapResource, projectMap) => {
   if (!mapResource?.positionBuffer) {
@@ -1118,6 +1150,11 @@ const validateArchiveEntryPaths = (files) => {
   });
 };
 
+const progressRange = (onProgress, start, end) => onProgress && ((value) => onProgress({
+  ...value,
+  progress: start + Math.min(1, Math.max(0, Number(value.progress) || 0)) * (end - start),
+}));
+
 const verifyArchiveFiles = async (files, manifest, onProgress) => {
   const linked = [LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format);
   if (!linked && Number(manifest.archiveVersion) < 2) return;
@@ -1135,15 +1172,15 @@ const verifyArchiveFiles = async (files, manifest, onProgress) => {
     if (Number(record.byteLength) !== file.byteLength) {
       throw new Error(`工程包文件长度校验失败：${path}`);
     }
+    const digest = await sha256Bytes(file);
+    if (digest !== String(record.sha256 || '').toLowerCase()) {
+      throw new Error(`工程包 SHA-256 校验失败：${path}`);
+    }
     onProgress?.({
       phase: '校验工程包完整性',
       detail: `${index + 1} / ${manifest.files.length} · ${path}`,
       progress: (index + 1) / manifest.files.length,
     });
-    const digest = await sha256Bytes(file);
-    if (digest !== String(record.sha256 || '').toLowerCase()) {
-      throw new Error(`工程包 SHA-256 校验失败：${path}`);
-    }
   }
   const extras = Object.keys(files).filter((path) => (
     !path.endsWith('/') && path !== PROJECT_ARCHIVE_MANIFEST && !declared.has(path)
@@ -1309,7 +1346,11 @@ const readProjectEntries = async (files, options = {}) => {
       || !Array.isArray(manifest.independentHistory)) {
       throw new Error('完整工程包版本或结构不受支持');
     }
-    await verifyArchiveFiles(files, manifest, onProgress);
+    // The root manifest and each child share one validation range. A child's
+    // local percentage must never restart the overall archive progress.
+    await verifyArchiveFiles(files, manifest, progressRange(onProgress, 0, 0.5));
+    const workspaceCount = Object.keys(manifest.workspaces || {}).length + manifest.independentHistory.length;
+    let workspaceIndex = 0;
     const readWorkspace = async (descriptor, mode, prefix) => {
       if (descriptor?.prefix !== prefix || typeof descriptor.mapId !== 'string' || !descriptor.mapId) {
         throw new Error('完整工程工作区清单不完整');
@@ -1317,7 +1358,9 @@ const readProjectEntries = async (files, options = {}) => {
       const childFiles = Object.fromEntries(Object.entries(files)
         .filter(([path]) => path.startsWith(prefix) && path.length > prefix.length)
         .map(([path, bytes]) => [path.slice(prefix.length), bytes]));
-      const child = await readProjectEntries(childFiles, { ...options, nested: true });
+      const start = 0.5 + workspaceIndex++ * 0.5 / workspaceCount;
+      const child = await readProjectEntries(childFiles, { ...options, nested: true,
+        onProgress: progressRange(onProgress, start, start + 0.5 / workspaceCount) });
       if (!child.portable) throw new Error('完整工程包含缺少资源的工作区');
       return { mode,
         map: { ...child.resources.map, mapId: descriptor.mapId, portableRobotPackage: child.resources.robot,
@@ -1346,16 +1389,18 @@ const readProjectEntries = async (files, options = {}) => {
       || !LINKED_WORKSPACE_MODES.includes(manifest.activeMode)) {
       throw new Error('双边工程包版本或结构不受支持');
     }
-    await verifyArchiveFiles(files, manifest, onProgress);
+    await verifyArchiveFiles(files, manifest, progressRange(onProgress, 0, 0.5));
     const workspaces = {};
-    for (const mode of LINKED_WORKSPACE_MODES) {
+    for (const [index, mode] of LINKED_WORKSPACE_MODES.entries()) {
       const descriptor = manifest.workspaces?.[mode];
       const prefix = `workspaces/${mode}/`;
       if (descriptor?.prefix !== prefix || !descriptor.mapId) throw new Error('双边工程清单不完整');
       const childFiles = Object.fromEntries(Object.entries(files)
         .filter(([path]) => path.startsWith(prefix) && path.length > prefix.length)
         .map(([path, bytes]) => [path.slice(prefix.length), bytes]));
-      const child = await readProjectEntries(childFiles, { ...options, nested: true });
+      const start = 0.5 + index * 0.5 / LINKED_WORKSPACE_MODES.length;
+      const child = await readProjectEntries(childFiles, { ...options, nested: true,
+        onProgress: progressRange(onProgress, start, start + 0.5 / LINKED_WORKSPACE_MODES.length) });
       workspaces[mode] = { mode,
         map: { ...child.resources.map, mapId: descriptor.mapId, portableRobotPackage: child.resources.robot },
         config: { mapId: descriptor.mapId, config: { schemaVersion: 1, project: child.payload,
@@ -1397,8 +1442,16 @@ const readProjectEntries = async (files, options = {}) => {
 };
 
 export async function readProjectArchive(bytes, options = {}) {
-  const files = await unzipEntries(bytes);
-  return readProjectEntries(files, { ...options, source: 'zip' });
+  const files = await unzipEntries(bytes, {
+    onProgress: progressRange(options.onProgress, 0, 0.35),
+  });
+  const imported = await readProjectEntries(files, {
+    ...options,
+    onProgress: progressRange(options.onProgress, 0.35, 1),
+    source: 'zip',
+  });
+  options.onProgress?.({ phase: '校验工程包完整性', detail: '工程资源校验完成', progress: 1 });
+  return imported;
 }
 
 const directoryFileHandle = async (rootHandle, path, create = false) => {
@@ -1490,12 +1543,13 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
     options.onProgress?.({
       phase: '读取工程目录',
       detail: `${index + 1} / ${paths.length} · ${path}`,
-      progress: paths.length ? (index + 1) / paths.length : 1,
+      progress: paths.length ? (index + 1) / paths.length * 0.35 : 0.35,
     });
     files[path] = await readDirectoryBytes(directoryHandle, path);
   });
   const imported = await readProjectEntries(files, {
     ...options,
+    onProgress: progressRange(options.onProgress, 0.35, 1),
     source: 'directory',
     manifestLabel: '工程清单',
   });
@@ -1554,12 +1608,13 @@ export async function readProjectDirectoryFiles(fileList, options = {}) {
     options.onProgress?.({
       phase: '读取工程目录',
       detail: `${index + 1} / ${paths.length} · ${path}`,
-      progress: paths.length ? (index + 1) / paths.length : 1,
+      progress: paths.length ? (index + 1) / paths.length * 0.35 : 0.35,
     });
     files[path] = new Uint8Array(await file.arrayBuffer());
   });
   const imported = await readProjectEntries(files, {
     ...options,
+    onProgress: progressRange(options.onProgress, 0.35, 1),
     source: 'directory-readonly',
     manifestLabel: '工程清单',
   });
@@ -1855,10 +1910,11 @@ const hasZipSignature = (bytes) => (
 );
 
 export async function readProjectFile(file, options = {}) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (hasZipSignature(bytes) || String(file.name || '').toLowerCase().endsWith('.zip')) {
-    return readProjectArchive(bytes, options);
+  const signature = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+  if (hasZipSignature(signature) || String(file.name || '').toLowerCase().endsWith('.zip')) {
+    return readProjectArchive(file, options);
   }
+  const bytes = new Uint8Array(await file.arrayBuffer());
   let payload;
   try {
     payload = JSON.parse(strFromU8(bytes).replace(/^\uFEFF/, ''));

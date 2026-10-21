@@ -180,8 +180,10 @@ def run():
                         if name != "workspaces/independent/environment/positions.f32le":
                             dest.writestr(name, source.read(name))
                 page.locator("input[data-project-guide-input]").set_input_files(str(bad))
-                page.get_by_text("工程文件无效：工程包缺少", exact=False).wait_for()
+                error = page.get_by_role("alertdialog", name="工程加载失败")
+                error.get_by_text("工程包缺少", exact=False).wait_for()
                 assert state(page) == expected
+                error.get_by_role("button", name="关闭", exact=True).click()
 
                 # Force a serialization failure after the first workspace has
                 # been written in the transaction, and verify complete rollback.

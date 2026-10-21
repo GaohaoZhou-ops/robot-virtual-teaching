@@ -39,12 +39,14 @@ final class VisionPairingCodeInput: UITextField, UITextFieldDelegate {
         returnKeyType = .done
         accessibilityIdentifier = "pairing-code"
         accessibilityLabel = "4 位配对码"
-        accessibilityHint = "四个独立格，轻点任一格修改；支持字母、数字及完整配对码粘贴"
+        accessibilityHint = "注视任一格并捏合即可修改；支持字母、数字及完整配对码粘贴"
         for (index, cell) in cells.enumerated() {
             cell.tag = index; cell.titleLabel?.font = font; cell.setTitleColor(.label, for: .normal)
             cell.accessibilityIdentifier = "pairing-code-cell-\(index)"
             cell.accessibilityLabel = "配对码第 \(index + 1) 位"
-            cell.addTarget(self, action: #selector(selectCellButton(_:)), for: .touchUpInside)
+            // Use the semantic action shared by indirect pinch, touch and accessibility.
+            cell.addTarget(self, action: #selector(selectCellButton(_:)), for: .primaryActionTriggered)
+            cell.hoverStyle = UIHoverStyle(effect: .highlight)
             cell.layer.cornerRadius = 18; cell.layer.masksToBounds = true
             addSubview(cell)
         }
@@ -80,6 +82,7 @@ final class VisionPairingCodeInput: UITextField, UITextFieldDelegate {
         activeIndex = min(3, max(0, index)); refreshCells()
     }
     @objc private func selectCellButton(_ sender: UIButton) {
+        guard isEnabled else { return }
         selectCell(sender.tag); becomeFirstResponder(); updateCursor(); refreshCells()
     }
     func setCode(_ code: String, replacementID: UUID? = nil) {

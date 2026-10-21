@@ -129,9 +129,11 @@ def workspaces(page):
 
 
 def assert_rejected(page, actual_mode, snapshot):
-    page.get_by_text(f"所选工程属于“{LABELS[actual_mode]}”", exact=False).wait_for()
+    error = page.get_by_role("alertdialog", name="工程加载失败")
+    error.get_by_text(f"所选工程属于“{LABELS[actual_mode]}”", exact=False).wait_for()
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     assert workspaces(page) == snapshot
+    error.get_by_role("button", name="关闭", exact=True).click()
 
 
 def install_directories(page, encoded):

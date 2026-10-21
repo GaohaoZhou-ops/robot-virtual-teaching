@@ -351,6 +351,36 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertTrue(view.characters.allSatisfy(\.isEmpty))
     }
 
+    @MainActor func testInputCellPrimaryActionsSelectTheIntendedCell() throws {
+        let code = VisionPairingCodeInput(frame: CGRect(x: 0, y: 0, width: 440, height: 68))
+        code.setCode("A1B2")
+        let codeCells = code.subviews.compactMap { $0 as? UIButton }.sorted { $0.tag < $1.tag }
+        XCTAssertEqual(codeCells.count, 4)
+        for index in 0..<4 {
+            codeCells[index].sendActions(for: .primaryActionTriggered)
+            _ = code.delegate?.textField?(code, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: "Z")
+            XCTAssertEqual(code.characters[index], "Z", "indirect confirmation must select the requested code cell")
+        }
+
+        let address = VisionIPv4AddressInput(frame: CGRect(x: 0, y: 0, width: 440, height: 68))
+        address.setHost("10.20.30.40", replacementID: UUID())
+        let addressCells = address.subviews.compactMap { $0 as? UIButton }.sorted { $0.tag < $1.tag }
+        XCTAssertEqual(addressCells.count, 4)
+        var edits = 0
+        address.onEdit = { edits += 1 }
+        for index in 0..<4 {
+            addressCells[index].sendActions(for: .primaryActionTriggered)
+            _ = address.delegate?.textField?(address, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: "8")
+            XCTAssertEqual(address.octets[index], "8", "indirect confirmation must replace the requested IPv4 segment")
+        }
+        XCTAssertEqual(edits, 4, "one confirmation must not activate twice")
+        address.isEnabled = false
+        addressCells[0].sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(edits, 4, "a disabled input cannot begin editing")
+        _ = address.delegate?.textField?(address, shouldChangeCharactersIn: NSRange(location: 0, length: 0), replacementString: "9")
+        XCTAssertEqual(address.octets, ["8", "8", "8", "8"])
+    }
+
     func testLocalTeachingLifecycle() throws {
         let app = XCUIApplication()
         app.launch()
@@ -378,10 +408,25 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertFalse(record.exists)
         app.buttons["spatial-cancel-adjustment"].tap()
         XCTAssertTrue(record.exists)
-        let lock = app.switches["spatial-lock-panel"]
-        XCTAssertEqual(lock.value as? String, "0")
+        // A button-style Toggle still exposes toggle semantics to accessibility.
+        let fieldOfView = app.descendants(matching: .any).matching(identifier: "spatial-zivid-fov").firstMatch
+        expectValue("已隐藏", in: fieldOfView)
+        XCTAssertEqual(fieldOfView.label, "Zivid 视野")
+        fieldOfView.tap()
+        expectValue("已显示", in: fieldOfView)
+        fieldOfView.tap()
+        expectValue("已隐藏", in: fieldOfView)
+        let lock = app.descendants(matching: .any).matching(identifier: "spatial-lock-panel").firstMatch
+        expectValue("自动跟随", in: lock)
+        XCTAssertEqual(lock.label, "锁定当前位置")
         lock.tap()
-        expectValue("1", in: lock)
+        expectValue("已锁定", in: lock)
+        // Use the entity-aware activation point; 2D coordinate offsets do not
+        // reliably map to a RealityView attachment's position in visionOS XCTest.
+        lock.tap()
+        expectValue("自动跟随", in: lock)
+        lock.tap()
+        expectValue("已锁定", in: lock)
         // Exit from the floating panel while pinned; the draft must survive and
         // a fresh immersive session must place an unlocked panel within reach.
         app.buttons["spatial-exit-space"].tap()
@@ -399,7 +444,7 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         // visionOS Simulator may omit RealityView attachments from its AX tree
         // after reopening. Continue through the equivalent workspace controls.
         XCTAssertTrue(front.waitForExistence(timeout: 15))
-        expectValue("0", in: app.switches["lock-panel"])
+        expectValue("自动跟随", in: app.descendants(matching: .any).matching(identifier: "lock-panel").firstMatch)
         XCTAssertFalse(app.buttons["record-pose"].exists, "reopening must require calibration")
         enter.tap()
         waitForEntry(enter)

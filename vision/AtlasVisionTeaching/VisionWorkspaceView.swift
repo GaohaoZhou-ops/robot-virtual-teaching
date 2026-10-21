@@ -104,7 +104,7 @@ struct VisionWorkspaceView: View {
 
     private var welcome: some View {
         GeometryReader { viewport in
-            let panelHeight = max(640, viewport.size.height - 180)
+            let panelHeight = max(600, viewport.size.height - 250)
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(spacing: 24) {
@@ -117,6 +117,7 @@ struct VisionWorkspaceView: View {
                         Image(systemName: "visionpro").font(.system(size: 60, weight: .ultraLight))
                             .foregroundStyle(.cyan).accessibilityHidden(true)
                     }
+                    VisionInteractionHint()
                     HStack(alignment: .top, spacing: 24) {
                         pairingPanel(minHeight: panelHeight)
                             .frame(width: min(560, (viewport.size.width - 88) * 0.5))
@@ -421,7 +422,9 @@ struct VisionWorkspaceView: View {
                         .textFieldStyle(.plain).padding(.horizontal, 8).frame(height: 68)
                         .background(.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 18))
                         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(portFocused ? .cyan : .white.opacity(0.3), lineWidth: portFocused ? 2 : 1))
-                        .contentShape(RoundedRectangle(cornerRadius: 18)).onTapGesture { portFocused = true }
+                        .contentShape([.interaction, .hoverEffect], RoundedRectangle(cornerRadius: 18))
+                        .hoverEffect(.highlight)
+                        .onTapGesture { portFocused = true }
                         .accessibilityLabel("服务端口").accessibilityIdentifier("server-port")
                 }.frame(width: 108)
             }
@@ -627,11 +630,29 @@ struct VisionTeachingControls: View {
                     Button("调整模型") { nearby = nil; spatial.beginAdjustment() }.accessibilityIdentifier(compact ? "spatial-adjust-model" : "adjust-model")
                 }
             }
-            Toggle("锁定当前位置", isOn: Binding(get: { spatial.panelLocked }, set: { spatial.setPanelLocked($0) }))
-                .toggleStyle(.switch).frame(minHeight: 64)
+            // A full-width native toggle gives gaze input a generous target and
+            // keeps system pinch, direct-touch and accessibility behavior.
+            Toggle(isOn: Binding(get: { spatial.panelLocked }, set: { spatial.setPanelLocked($0) })) {
+                HStack(spacing: 20) {
+                    Label("锁定当前位置", systemImage: spatial.panelLocked ? "pin.fill" : "pin")
+                    Spacer(minLength: 0)
+                    Text(spatial.panelLocked ? "已锁定" : "自动跟随").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }
+                .toggleStyle(.button).tint(.cyan)
+                .accessibilityLabel("锁定当前位置")
+                .accessibilityValue(spatial.panelLocked ? "已锁定" : "自动跟随")
                 .accessibilityIdentifier(compact ? "spatial-lock-panel" : "lock-panel")
-            Toggle(compact ? "Zivid 视野" : "Zivid 视野 · M70 · 0.3–1.3 m", isOn: $spatial.showFrustum)
-                .toggleStyle(.switch).font(.title3).frame(minHeight: 64)
+            Toggle(isOn: $spatial.showFrustum) {
+                HStack(spacing: 20) {
+                    Label(compact ? "Zivid 视野" : "Zivid 视野 · M70 · 0.3–1.3 m", systemImage: "viewfinder")
+                    Spacer(minLength: 0)
+                    Text(spatial.showFrustum ? "已显示" : "已隐藏").foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
+            }
+                .toggleStyle(.button).tint(.cyan)
+                .accessibilityLabel(compact ? "Zivid 视野" : "Zivid 视野 · M70 · 0.3–1.3 m")
+                .accessibilityValue(spatial.showFrustum ? "已显示" : "已隐藏")
                 .accessibilityIdentifier(compact ? "spatial-zivid-fov" : "zivid-fov")
             if !compact {
                 Text("以头显参考点模拟相机视角，未包含实际相机外参标定。模型始终保持 1:1。")
@@ -645,6 +666,7 @@ struct VisionTeachingControls: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
+            VisionInteractionHint()
             controls.disabled(session.busy || !session.error.isEmpty || spatial.spaceState != .open)
             if compact {
                 Button("退出示教空间", systemImage: "rectangle.portrait.and.arrow.right") {
@@ -692,6 +714,19 @@ struct VisionTeachingControls: View {
                 .frame(minHeight: 64)
                 .accessibilityLabel(label)
         }.disabled(spatial.calibrating)
+    }
+}
+
+struct VisionInteractionHint: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("注视按钮，拇指与食指轻捏并松开", systemImage: "hand.pinch")
+            #if targetEnvironment(simulator)
+            Text("模拟器：鼠标指向目标后单击，无需拉近面板。")
+            #endif
+        }
+        .font(.callout).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 

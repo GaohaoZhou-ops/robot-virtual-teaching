@@ -12,6 +12,7 @@ import {
   Pencil,
   ScanLine,
   ShieldCheck,
+  Trash2,
   X,
 } from 'lucide-react';
 import { independentWorkspaceLabel } from '../lib/independentTeachingName.js';
@@ -54,6 +55,7 @@ export default function ProjectLoadDialog({
   onLoadRecovery,
   onLoadHistory,
   onRenameIndependent,
+  onDeleteIndependent,
   onChooseDirectory,
   onChooseGuideFile,
 }) {
@@ -251,6 +253,10 @@ export default function ProjectLoadDialog({
                       aria-label={`恢复独立示教 ${label}`}
                       onClick={() => entry.historyId ? onLoadHistory?.(entry.historyId) : onLoadWorkspace?.()}>
                       继续示教 <ArrowRight size={14} />
+                    </button>
+                    <button type="button" className="independent-workspace-delete" disabled={busy || historyDisabled}
+                      aria-label={`删除独立示教缓存 ${label}`} onClick={() => onDeleteIndependent?.(entry)}>
+                      <Trash2 size={13} />删除
                     </button>
                     </div>
                   </li>; })}

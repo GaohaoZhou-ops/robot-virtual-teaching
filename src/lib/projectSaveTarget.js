@@ -42,6 +42,8 @@ export const clearProjectSaveTarget = (mapId, mode) => withStore('readwrite', (s
   };
 });
 
+export const clearAllProjectSaveTargets = () => withStore('readwrite', (store) => store.clear());
+
 export const ensureProjectWritePermission = async (handle) => {
   if (typeof handle.queryPermission !== 'function') return;
   const options = { mode: 'readwrite' };

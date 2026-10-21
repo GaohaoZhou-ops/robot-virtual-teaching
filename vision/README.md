@@ -14,6 +14,16 @@
 6. 下载后可离线示教。每次采样自动保存，退出任务后可从本地任务恢复。**退出空间、切换任务或定位会话中断后需重新放置校准**，已有 Pose 保留。
 7. **完成并保存在本机** 会冻结结果；回到局域网后填写当前电脑地址并同步。也可直接 **完成并同步**。同步先比较设备和电脑的实际模型文件 SHA-256，再上传结果；网络失败可重试同一结果。电脑端点击 **检查完成状态 → 接收示教结果**。
 
+## 注视与捏合操作
+
+任务窗口和空间控制板均使用 visionOS 系统确认交互：**先注视目标，看到高亮后，让拇指和食指轻捏并松开一次**。手可以保持在舒适位置、处于设备可见范围，无需伸到按钮前，也无需反复把页面拉近。按钮仍支持近距离触碰；输入地址、配对码时，注视对应格并捏合即可选中。控制板的「锁定当前位置」和「Zivid 视野」整行都可选择，并显示当前状态。
+
+空间放置手势只接收已识别水平面的输入，与控制板原生控件同时识别，不再对整个 RealityView 中的所有实体注册放置操作。UIKit 地址格和配对码格使用系统主操作事件和注视高亮，保持原有键盘输入、粘贴及禁用行为。
+
+**Mac 模拟器中**，在画面底部选择交互模式（“Select to interact with the visionOS content”），鼠标指向目标模拟注视，**单击模拟一次捏合确认**；按住并拖动模拟捏住拖动。无需把模拟器视角移到按钮跟前。模拟器输入与自动化回归可以检查操作流程，实际眼动选中、手势识别和高亮仍需佩戴 Vision Pro 验证。
+
+Apple 参考：[空间输入与高亮设计](https://developer.apple.com/videos/play/wwdc2025/303/)、[模拟器交互方式](https://developer.apple.com/documentation/xcode/interacting-with-your-visionos-app-in-device-hub)、[系统主操作事件](https://developer.apple.com/documentation/uikit/uicontrol/event/primaryactiontriggered)。
+
 ## 位姿含义
 
 - 模型与保存结果采用 `virtual_origin`，米，右手系 Z 向上，与 iPad / 电脑一致。
@@ -92,7 +102,7 @@ VISION_SIMULATOR_ID=<UDID> VISION_ARTIFACTS=/tmp/atlas-vision-check ./scripts/ch
 - `tests/model_thumbnail_smoke.mjs`：缩略图鉴权、Mesh / 点云预览、图片大小限制、缓存和完整模型保持不变。
 - `tests/vision_pairing_ui_smoke.mjs`：启动独立测试服务，验证配对后缩略图、暂不同步、预览和下载重试、本地模型复用及同名不同内容；验证同步 / 复用后的三维预览、水平 / 垂直拖动旋转、双击复位、暂不示教与本地重新打开；记录完整模型下载次数，结束后仅清理本次测试的任务文件。visionOS XCTest 不提供双手捏合 API，缩放计算由原生测试覆盖，双手操作需在头显上验证。
 - `tests/vision_teaching_smoke.mjs`：原生 Swift 与实际 LAN 服务往返、设备和轴约定校验、模拟结果拒绝、电脑导入及 ZIP 往返。
-- `vision/UITests/AtlasVisionTeachingUITests.swift`：四格配对码、IPv4 分段输入与粘贴、模拟器放置校准、连续记录、取消调整、退出重入和本地恢复。局域网自动填充测试需向测试运行器提供实际服务的 `ATLAS_DISCOVERY_SERVER_ID` 与 `ATLAS_DISCOVERY_ADDRESS`；可提供 `ATLAS_DISCOVERY_CODE` 检查所选电脑当前配对码的自动填充；可另提供 `ATLAS_DISCOVERY_OTHER_ID` 与 `ATLAS_DISCOVERY_OTHER_ADDRESS` 检查多台电脑切换。
+- `vision/UITests/AtlasVisionTeachingUITests.swift`：四格配对码、IPv4 分段输入与粘贴、输入格系统主操作选中与禁用保护、整行开关切换、模拟器放置校准、连续记录、取消调整、退出重入和本地恢复。局域网自动填充测试需向测试运行器提供实际服务的 `ATLAS_DISCOVERY_SERVER_ID` 与 `ATLAS_DISCOVERY_ADDRESS`；可提供 `ATLAS_DISCOVERY_CODE` 检查所选电脑当前配对码的自动填充；可另提供 `ATLAS_DISCOVERY_OTHER_ID` 与 `ATLAS_DISCOVERY_OTHER_ADDRESS` 检查多台电脑切换。
 
 ## 实现范围
 

@@ -1,0 +1,13 @@
+.workspace-cache-dialog { box-sizing: border-box; width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 26px; border: 1px solid #80574d; border-radius: 10px; background: #152124; color: #dbe9e6; box-shadow: 0 24px 90px #0008; }
+.workspace-cache-dialog::backdrop { background: #050c10b8; backdrop-filter: blur(3px); }
+.workspace-cache-dialog header { display: flex; align-items: center; gap: 12px; color: #f2b395; }
+.workspace-cache-dialog h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.workspace-cache-dialog p { font-size: 13px; line-height: 1.8; color: #b2c5c1; overflow-wrap: anywhere; }
+.workspace-cache-dialog strong { color: #e4e9d9; }
+.workspace-cache-dialog .workspace-cache-dialog__warning, .workspace-cache-dialog .workspace-cache-dialog__error { color: #f2b395; }
+.workspace-cache-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.workspace-cache-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 9px 16px; border: 1px solid #405a55; border-radius: 5px; background: #243530; color: #dceae5; cursor: pointer; }
+.workspace-cache-dialog button.is-danger { background: #743c33; border-color: #b87664; color: #ffe9df; }
+.workspace-cache-dialog button:focus-visible { outline: 2px solid #f2b395; outline-offset: 3px; }
+.workspace-cache-dialog button:disabled { opacity: .6; cursor: wait; }
+.project-load-history .independent-workspace-delete { --project-load-accent: 242, 179, 149; }

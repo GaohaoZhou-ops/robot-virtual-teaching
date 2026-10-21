@@ -54,14 +54,15 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
       <div className="abx-export-body">
         <p className="abx-export-map">当前地图 <strong>{snapshot.payload.map?.fileName || '未命名地图'}</strong><span>MAP · 米 / 弧度</span></p>
         <div className="abx-export-notice" role="note">
-          <strong>380B 平地巡检格式 · 任务导入包</strong>
-          <p>在大脑“示教任务 → 导入”选择此 ZIP。导航步骤使用机器人当前路网的站点编号，包内不携带路网。请核对并启用对应路网；新增或修改的路网需通过右侧“路径/导航 → 导出路径”单独导入。</p>
+          <strong>机器人示教 · 任务与路网导入包</strong>
+          <p>{result?.summary.notice || '正在检查任务和关联路网。已导入工程的路网将随任务打包，在大脑“示教任务 → 导入”中一并导入。'}</p>
         </div>
         {!result && !error && <p className="abx-export-loading" role="status"><LoaderCircle className="is-spinning" size={16} />正在校验机器人姿态与导航坐标…</p>}
         {error && <p className="abx-export-error" role="alert">{error}</p>}
         {result && <>
           <dl className="abx-export-counts"><div><dt>示教任务</dt><dd>{result.summary.taskCount}</dd></div><div><dt>机器人 Pose</dt><dd>{result.summary.poseCount}</dd></div><div><dt>导航目标</dt><dd>{new Set(targets.map((point) => point.nodeId)).size}</dd></div><div><dt>导航步骤</dt><dd>{result.summary.navigationCount}</dd></div></dl>
-          <p className="abx-export-description">保留任务、停车点和步骤顺序，关节转换为弧度。已导入路网时，停车点使用原始 N 编号与名称，导航沿用该站点的坐标和朝向；未匹配的停车点会提示修正。ZIP 包含 manifest.json、README.txt 和 tasks/ 下的任务文件。下方坐标仅供核对，可单独下载导航清单。</p>
+          <p className="abx-export-description">保留任务、停车点和步骤顺序，关节转换为弧度。已导入路网时，保留完整节点、连线、原始 N 编号、坐标、朝向及定位场景名称；未匹配的停车点会提示修正。{result.summary.routeImportIncluded ? '路网内嵌在任务中，ZIP 同时附带 routes/ 路网副本和 navigation.json 导航清单。' : 'ZIP 附带 navigation.json 导航清单，未提供的路网坐标不作推测。'}</p>
+          {result.summary.routeCount > 0 && <p className="abx-export-description" aria-label="随包路网">已携带 {result.summary.routeCount} 个路网 · {result.summary.nodeCount} 个节点 · {result.summary.edgeCount} 条有向边</p>}
           {result.summary.warnings.length > 0 && <ul className="abx-export-description" aria-label="路网导出提示">{result.summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target?.[key] == null ? '—' : point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.some((point) => !point.target) && <p>“—” 表示原任务仅包含站点编号，未提供对应地图坐标。</p>}{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
         </>}

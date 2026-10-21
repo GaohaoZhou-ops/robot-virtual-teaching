@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { strFromU8, unzipSync } from 'fflate';
-import { buildAbxTeachingArchive, buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
+import { buildAbxTeachingArchive as buildArchive, buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
 import { parseAbxTeachingTask, readAbxTeachingFile } from '../src/lib/abxTeachingImport.js';
 import { abxRouteToProject } from '../src/lib/abxRoute.js';
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
 // Exact field sets observed in 380B平地巡检.zip; independent of the serializer.
+const buildAbxTeachingArchive = (payload, options) => buildArchive(payload, { ...options, taskVersion: 11 });
 const keys = (value, expected) => assert.deepEqual(Object.keys(value).sort(), expected.split(' ').sort());
 const hash = (data) => createHash('sha256').update(data).digest('hex');
 const parse = (data) => JSON.parse(strFromU8(data));

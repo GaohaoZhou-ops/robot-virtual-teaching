@@ -1,5 +1,5 @@
 import { sha256Bytes } from './hash.js';
-import { ABX_JOINT_NAMES, abxAssert as check, abxBytes, abxEqual, abxText } from './abxFormat.js';
+import { ABX_VERSION, ABX_JOINT_NAMES, abxAssert as check, abxBytes, abxEqual, abxText } from './abxFormat.js';
 import { abxNestedRecords, parseAbxTeachingTask } from './abxTeachingImport.js';
 
 const encodeJson = (value) => abxBytes(`${JSON.stringify(value, null, 2)}\n`);
@@ -28,7 +28,30 @@ function updateJoints(record, joints) {
   }
 }
 
-export async function appendImportedAbxTasks(result, payload) {
+// Older robot tasks only name N numbers. Bind them only when the project has
+// an explicitly imported, unambiguous graph; never infer one from virtual poses.
+function legacyNavigation(task, routes) {
+  const records = task.abx.lines.flatMap((raw) => {
+    const value = JSON.parse(raw);
+    return value.type === 'point' ? [...abxNestedRecords(value.record)] : [];
+  }).filter((record) => record.type === 'route_navigation');
+  if (!records.length || !routes.length) return null;
+  const selected = new Map();
+  let defaultRouteId = null;
+  for (const record of records) {
+    check(record.route_id || routes.length === 1,
+      `任务「${task.name}」仅保存站点编号，但当前存在多个路网，无法确定 ${record.node_id} 所属路网；请只保留对应路网后导出`);
+    const route = record.route_id ? routes.find((item) => item.id === record.route_id) : routes[0];
+    check(route, `任务「${task.name}」关联的路网 ${record.route_id} 已缺失`);
+    check(route.nodes.some((node) => `N${node.id}` === record.node_id),
+      `任务「${task.name}」的导航目标 ${record.node_id} 不在已导入路网「${route.name}」中，请导入对应的原始路网后导出`);
+    selected.set(route.id, route);
+    if (!record.route_id) defaultRouteId = route.id;
+  }
+  return { routes: [...selected.values()], maps: null, default_route_id: defaultRouteId };
+}
+
+export async function appendImportedAbxTasks(result, payload, { attachLegacyRoutes = false } = {}) {
   const nativeTasks = (payload.virtualTeaching?.tasks || []).filter((task) => task.abx);
   if (!nativeTasks.length) return result;
   const files = result.files;
@@ -50,8 +73,9 @@ export async function appendImportedAbxTasks(result, payload) {
         `任务 ${task.name} 的停车定位已改变；请编辑对应路网节点，原生历史定位不能替换为虚拟测量`);
     }
     const header = { ...native.header, name: task.name };
-    const originalNavigation = native.navigation;
-    const navigation = originalNavigation ? structuredClone(originalNavigation) : null;
+    const originalNavigation = native.navigation || null;
+    const navigation = originalNavigation ? structuredClone(originalNavigation)
+      : attachLegacyRoutes ? legacyNavigation(task, payload.abxRoutes?.length ? currentRoutes : []) : null;
     if (navigation) navigation.routes = (navigation.routes || []).map((route) => {
       const edited = currentRoutes.find((r) => r.id === route.id);
       check(edited, `任务 ${task.name} 关联的路网 ${route.name} 已缺失`);
@@ -93,8 +117,9 @@ export async function appendImportedAbxTasks(result, payload) {
           check(!previousRoute?.nodes.some((n) => `N${n.id}` === record.node_id) || node,
             `任务 ${task.name} 的导航目标 ${record.node_id} 已被删除`);
           navigationCount += 1;
-          if (node) sequence.push({ type: 'route_navigation', routeId: route.id, nodeId: record.node_id, seq: value.seq,
-            target: { x_m: node.x_m, y_m: node.y_m, yaw_rad: node.yaw_rad }, name: value.label });
+          sequence.push({ type: 'route_navigation', routeId: route?.id || record.route_id || null,
+            nodeId: record.node_id, seq: value.seq,
+            target: node ? { x_m: node.x_m, y_m: node.y_m, yaw_rad: node.yaw_rad } : null, name: value.label });
         }
         if (value.record.type !== 'route_navigation') sequence.push({ type: value.record.joints_rad ? 'pose' : value.record.type,
           seq: value.seq, name: value.label });
@@ -102,6 +127,10 @@ export async function appendImportedAbxTasks(result, payload) {
       lines.push(abxEqual(value, before) ? raw : serialize(value));
     }
     if (!abxEqual(originalNavigation, navigation)) {
+      // Adding chunks requires the native navigation-capable header. The
+      // original parking/point records, action IDs and timestamps stay intact.
+      header.version = ABX_VERSION;
+      header.basic_pose_count ??= '0';
       const bytes = abxBytes(JSON.stringify(navigation));
       check(bytes.length <= 4096 * 2048, '任务路网和地图信息超过 8 MiB 上限');
       let count = 0;
@@ -109,6 +138,9 @@ export async function appendImportedAbxTasks(result, payload) {
         type: 'navigation_chunk', seq: String(++count), data: btoa(String.fromCharCode(...bytes.subarray(offset, offset + 4096))),
       }));
       header.navigation = { chunks: String(count) };
+    }
+    if (attachLegacyRoutes && navigationCount && !navigation) {
+      result.summary.warnings.push(`任务「${task.name}」仅包含站点编号，当前工程未导入对应路网；请导入原始路网后重新导出，或在机器人端核对当前启用的路网。`);
     }
     const counts = Object.fromEntries(['point_count', 'parking_count', 'basic_pose_count']
       .filter((key) => header[key] !== undefined).map((key) => [key, header[key]]));

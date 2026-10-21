@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import HeightRange from './components/HeightRange.jsx';
 import IndependentWorkspaceDialog from './components/IndependentWorkspaceDialog.jsx';
+import WorkspaceCacheDialog from './components/WorkspaceCacheDialog.jsx';
 import NewIndependentTeachingDialog from './components/NewIndependentTeachingDialog.jsx';
 import IndependentTeachingNameDialog from './components/IndependentTeachingNameDialog.jsx';
 import { defaultIndependentTeachingName, validateIndependentTeachingName } from './lib/independentTeachingName.js';
@@ -41,6 +42,7 @@ import Map2DView from './components/Map2DView.jsx';
 import MapDetailsDialog from './components/MapDetailsDialog.jsx';
 import PointCloudViewer from './components/PointCloudViewer.jsx';
 import ProjectLoadDialog from './components/ProjectLoadDialog.jsx';
+import ProjectImportErrorDialog from './components/ProjectImportErrorDialog.jsx';
 import ProjectExportButton from './components/ProjectExportButton.jsx';
 import ProjectExportDialog from './components/ProjectExportDialog.jsx';
 import RobotPicker from './components/RobotPicker.jsx';
@@ -48,6 +50,10 @@ import RobotPresetDialog from './components/RobotPresetDialog.jsx';
 import RobotPresetManagerDialog from './components/RobotPresetManagerDialog.jsx';
 import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
+import { WorkSyncControl, WorkSyncAuthorization } from './components/WorkSyncControl.jsx';
+import { useWorkSync } from './hooks/useWorkSync.js';
+import { useProjectImportProgress } from './hooks/useProjectImportProgress.js';
+import { syncDocument, retainSyncReferences } from './lib/workSyncDocument.js';
 import ModelEditorPage from './components/ModelEditorPage.jsx';
 import ModelPairEditorPage from './components/ModelPairEditorPage.jsx';
 import TeachingDataPage from './components/TeachingDataPage.jsx';
@@ -132,14 +138,18 @@ import {
   loadWorkspaceViews,
   loadWorkspaceConfig,
   loadWorkspaceSnapshot,
+  loadWorkSyncCheckpoint,
   loadProjectCompanions,
   listIndependentWorkspaces,
   renameIndependentWorkspace,
+  deleteIndependentWorkspace,
+  clearAllWorkspaceCaches,
   prepareWorkspaceSession,
   resetWorkspaceSession,
   restoreLinkedWorkspaces,
   restoreWorkspaceCollection,
   saveWorkspaceConfig,
+  saveWorkSyncCheckpoint,
   saveWorkspaceMap,
   saveWorkspaceViews,
   switchIndependentWorkspace,
@@ -153,6 +163,7 @@ import {
 } from './lib/projectDirectoryStore.js';
 import {
   clearProjectSaveTarget,
+  clearAllProjectSaveTargets,
   ensureProjectWritePermission,
   loadProjectSaveTarget,
   rememberProjectSaveTarget,
@@ -545,6 +556,7 @@ export default function App() {
   const [independentNameDialog, setIndependentNameDialog] = useState(null);
   const [independentHistory, setIndependentHistory] = useState({ status: 'idle', entries: [] });
   const [independentWorkspaceDialog, setIndependentWorkspaceDialog] = useState(null);
+  const [cacheActionDialog, setCacheActionDialog] = useState(null);
   const [newIndependentDialog, setNewIndependentDialog] = useState(null);
   const [directoryAutosaveSuspended, setDirectoryAutosaveSuspended] = useState(false);
   const [teachingTransferDialog, setTeachingTransferDialog] = useState(null);
@@ -637,6 +649,12 @@ export default function App() {
     mode: 'map',
     directory: { status: 'idle' },
   });
+  const [projectImportError, setProjectImportError] = useState(null);
+  const {
+    state: projectImportProgress, current: projectImportProgressRef,
+    begin: beginProjectImport, step: advanceProjectImport, finish: finishProjectImport,
+    cancel: cancelProjectImport, prepareReload: checkpointProjectImport,
+  } = useProjectImportProgress();
   const [teachingPlayback, setTeachingPlayback] = useState(createIdleTeachingPlayback);
   const [sessionState, setSessionState] = useState({ status: 'checking', restored: false });
   const [cachedWorkspaces, setCachedWorkspaces] = useState({
@@ -1471,12 +1489,16 @@ export default function App() {
 
     const restoreWorkspace = async () => {
       try {
-        const identity = await fetchServiceSession();
+        const service = await fetchServiceSession().catch(() => ({ sessionId: createId('workspace') }));
         if (!isCurrent()) return;
+        const stored = await prepareWorkspaceSession(service.sessionId, { preserveExisting: true });
+        if (!isCurrent()) return;
+        const identity = { sessionId: stored.sessionId };
         sessionIdRef.current = identity.sessionId;
+        if (projectImportProgressRef.current?.resuming
+          && projectImportProgressRef.current.sessionId !== identity.sessionId) cancelProjectImport();
 
-        const stored = await prepareWorkspaceSession(identity.sessionId);
-        if (!isCurrent()) return;
+        if (projectImportProgressRef.current?.resuming) advanceProjectImport(0.94, '恢复地图与机器人');
         setLastProjectRecovery(stored.recovery || null);
         setCachedWorkspaces({
           map: stored.workspaceSlots?.map || null,
@@ -1600,6 +1622,7 @@ export default function App() {
               keepLoading: true,
             });
             if (!isCurrent()) return;
+            if (projectImportProgressRef.current?.resuming) advanceProjectImport(0.97, '恢复示教结果与视角');
             restored = true;
           } else if (stored.map?.blob) {
             setLoadState({
@@ -1888,6 +1911,7 @@ export default function App() {
         sessionFailureNotifiedRef.current = false;
         setSessionState({ status: 'ready', restored });
         setLoadState({ loading: false, progress: 1, phase: '' });
+        if (projectImportProgressRef.current?.resuming) finishProjectImport();
 
         if (stored.activatedRecoveryId && restored && !repaired) {
           notify('上一次未完成工程已完整恢复', 'success');
@@ -1902,6 +1926,11 @@ export default function App() {
         }
       } catch (error) {
         if (!isCurrent()) return;
+        if (projectImportProgressRef.current?.resuming) {
+          const { sourceName, mode } = projectImportProgressRef.current;
+          cancelProjectImport();
+          setProjectImportError({ sourceName, mode, message: error?.message || '无法恢复工程现场' });
+        }
         setLoadState({ loading: false, progress: 0, phase: '' });
         reportSessionFailure(error);
       }
@@ -1911,7 +1940,8 @@ export default function App() {
     return () => {
       if (hydrationRevisionRef.current === revision) hydrationRevisionRef.current += 1;
     };
-  }, [notify, processMapBuffer, processMapCache, reportSessionFailure]);
+  }, [notify, processMapBuffer, processMapCache, reportSessionFailure,
+    advanceProjectImport, cancelProjectImport, finishProjectImport, projectImportProgressRef]);
 
   useEffect(() => {
     queueWorkspaceSave();
@@ -1964,19 +1994,6 @@ export default function App() {
       document.removeEventListener('visibilitychange', flushWhenHidden);
     };
   }, [persistWorkspaceNow]);
-
-  useEffect(() => {
-    if (sessionState.status !== 'ready') return undefined;
-    const timer = window.setInterval(async () => {
-      try {
-        const identity = await fetchServiceSession();
-        if (identity.sessionId !== sessionIdRef.current) window.location.reload();
-      } catch {
-        // A stopped service is expected; reset only after a new instance responds.
-      }
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [sessionState.status]);
 
   const detachProjectDirectory = useCallback((message = '') => {
     if (!projectDirectoryRef.current && projectDirectoryState.status === 'detached') return;
@@ -2274,8 +2291,10 @@ export default function App() {
     }
   };
 
-  const applyImportedProject = async (importProject, sourceName, requestedMode = teachingSpaceMode) => {
+  const applyImportedProject = async (importProject, sourceName, requestedMode = teachingSpaceMode, options = {}) => {
     const sourcePage = appPage;
+    setProjectImportError(null);
+    if (workSync.link && !options.fromWorkSync) await workSync.disconnect('正在加载其他工程，同步已断开');
     navigateAppPage(APP_PAGE_WORKBENCH);
     if (sessionSaveTimerRef.current) {
       window.clearTimeout(sessionSaveTimerRef.current);
@@ -2290,6 +2309,7 @@ export default function App() {
     let nextPortableResourceId = null;
     let portableResourceCommitted = false;
     let reloadingLinkedProject = false;
+    beginProjectImport(sourceName);
     setLoadState({
       loading: true,
       progress: 0.04,
@@ -2297,12 +2317,16 @@ export default function App() {
       detail: sourceName,
     });
     try {
-      const importedFile = await importProject(({ phase, detail, progress }) => setLoadState({
+      const importedFile = await importProject(({ phase, detail, progress }) => {
+        advanceProjectImport(0.04 + (Number(progress) || 0) * 0.7, phase);
+        setLoadState({
           loading: true,
           progress: 0.08 + (Number(progress) || 0) * 0.42,
           phase,
           detail,
-        }));
+        });
+      });
+      advanceProjectImport(0.74, '恢复工程数据');
       if (importedFile.workspaceCollection) {
         if (!sessionReadyRef.current) throw new Error('工作会话尚未就绪，无法恢复完整工程');
         const collection = prepareWorkspaceCollectionImport(importedFile.workspaceCollection);
@@ -2310,12 +2334,14 @@ export default function App() {
           ? normalizeTeachingSpaceMode(requestedMode) : collection.activeMode;
         setLoadState({ loading: true, progress: 0.85, phase: '恢复完整工程与独立示教列表',
           detail: `正在恢复工作区和 ${collection.independentHistory.length} 组独立示教缓存` });
+        advanceProjectImport(0.8, '恢复工作区与示教历史');
         await restoreWorkspaceCollection(sessionIdRef.current, collection, activeMode);
         for (const mode of Object.keys(collection.workspaces)) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
         }
         reloadingLinkedProject = true;
         sessionReadyRef.current = false;
+        checkpointProjectImport(sessionIdRef.current, activeMode);
         window.location.assign('/workbench');
         return;
       }
@@ -2324,6 +2350,7 @@ export default function App() {
         const workspaces = prepareLinkedProjectImport(importedFile.linkedWorkspaces);
         setLoadState({ loading: true, progress: 0.85, phase: '恢复双边完整工程',
           detail: '正在一起恢复地图示教、独立示教及绑定关系' });
+        advanceProjectImport(0.8, '恢复工作区与示教结果');
         await restoreLinkedWorkspaces(sessionIdRef.current, workspaces, normalizeTeachingSpaceMode(requestedMode));
         for (const mode of ['map', 'independent']) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
@@ -2332,6 +2359,7 @@ export default function App() {
         // Keep autosave blocked so the old UI cannot overwrite the committed pair.
         reloadingLinkedProject = true;
         sessionReadyRef.current = false;
+        checkpointProjectImport(sessionIdRef.current, normalizeTeachingSpaceMode(requestedMode));
         window.location.assign('/workbench');
         return;
       }
@@ -2403,6 +2431,7 @@ export default function App() {
           phase: '恢复归档地图',
           detail: `${portableMapRecord.pointCount.toLocaleString('zh-CN')} 点 / ${portableMapRecord.faceCount.toLocaleString('zh-CN')} 面`,
         });
+        advanceProjectImport(0.78, '恢复地图与机器人');
         effectiveMap = await processMapCache(portableMapRecord, {
           preserveGraph: true,
           teachingSpaceMode: importedTeachingSpaceMode,
@@ -2413,6 +2442,7 @@ export default function App() {
           keepLoading: true,
         });
         if (sessionReadyRef.current && sessionIdRef.current) {
+          advanceProjectImport(0.86, '保存工程结果');
           setLoadState({
             loading: true,
             progress: 0.86,
@@ -2651,7 +2681,6 @@ export default function App() {
       if (effectiveMap?.mapId) {
         await clearProjectSaveTarget(effectiveMap.mapId, importedTeachingSpaceMode).catch(() => undefined);
       }
-      setLoadState({ loading: false, progress: 1, phase: '' });
       const sourceLabel = importedFile.source === 'directory'
         ? '工程目录'
         : importedFile.source === 'directory-readonly'
@@ -2676,14 +2705,18 @@ export default function App() {
       } else if (project.slice && effectiveMap?.bounds) {
         setHeightRange(clampSlice(project.slice, effectiveMap.bounds));
       }
+      setLoadState({ loading: false, progress: 1, phase: '' });
+      finishProjectImport();
     } catch (error) {
+      cancelProjectImport();
       projectDirectoryRef.current = previousDirectoryBinding;
       if (!portableResourceCommitted && nextPortableResourceId !== previousPortableResourceId) {
         releasePortableRobotPackage(nextPortableResourceId);
       }
       setLoadState({ loading: false, progress: 0, phase: '' });
-      notify(error.code === 'PROJECT_MODE_MISMATCH' ? error.message : `工程文件无效：${error.message}`, 'error');
+      setProjectImportError({ sourceName, mode: requestedMode, message: error?.message || '无法读取所选工程' });
       if (sourcePage === APP_PAGE_HOME) navigateAppPage(APP_PAGE_HOME, { replace: true });
+      if (options.throwOnError) throw error;
     } finally {
       if (!reloadingLinkedProject) {
         workspaceSwitchingRef.current = false;
@@ -2748,7 +2781,8 @@ export default function App() {
     } catch (error) {
       if (error?.name === 'AbortError') return;
       setLoadState({ loading: false, progress: 0, phase: '' });
-      notify(`工程目录打开失败：${error?.message || '无法读取所选目录'}`, 'error');
+      setProjectImportError({ sourceName: '工程目录', mode: targetMode,
+        message: error?.message || '无法读取所选目录' });
     }
   };
 
@@ -5549,7 +5583,8 @@ export default function App() {
       } catch (error) {
         if (error?.name === 'AbortError') return;
         if (!['SecurityError', 'NotSupportedError'].includes(error?.name)) {
-          notify(`工程文件打开失败：${error?.message || '无法读取所选文件'}`, 'error');
+          setProjectImportError({ sourceName: '工程文件', mode: targetMode,
+            message: error?.message || '无法读取所选文件' });
           return;
         }
       }
@@ -5882,9 +5917,157 @@ export default function App() {
     }
   };
 
-  const progressLabel = loadState.progress < 1
-    ? `${Math.round(loadState.progress * 100)}%`
+  const loadingProgress = projectImportProgress?.progress ?? loadState.progress;
+  const progressLabel = projectImportProgress || loadingProgress < 1
+    ? `${Math.round(loadingProgress * 100)}%`
     : 'PROCESS';
+
+  const syncIdentity = () => {
+    const current = latestWorkspaceRef.current;
+    return JSON.stringify([current.teachingSpaceMode, current.mapData?.mapId,
+      current.mapData?.sourceHash, current.selectedRobot?.relativePath || '']);
+  };
+  const syncPayload = () => {
+    const current = latestWorkspaceRef.current;
+    return buildExport({ ...current, robot: current.selectedRobot, transfer: current.workspaceTransfer,
+      view2d: view2dRef.current, view3d: view3dRef.current });
+  };
+  const workSync = useWorkSync({
+    deviceName: /Mac/.test(navigator.platform) ? 'Mac 浏览器' : /Win/.test(navigator.platform) ? 'Windows 浏览器' : '浏览器设备',
+    ready: () => sessionReadyRef.current && !workspaceSwitchingRef.current && !loadState.loading
+      && teachingCaptureState.status !== 'capturing',
+    identity: syncIdentity,
+    project: () => {
+      const current = latestWorkspaceRef.current;
+      if (!sessionReadyRef.current || !current.mapData?.geometry) return null;
+      return { key: syncIdentity(), mode: current.teachingSpaceMode,
+        name: current.independentTeachingName || current.mapData.name || '当前工程' };
+    },
+    readDocument: () => syncDocument(normalizeProject(syncPayload())),
+    applyDocument: (document) => {
+      const current = latestWorkspaceRef.current;
+      const next = Object.fromEntries(Object.entries(document)
+        .map(([key, value]) => [key, retainSyncReferences(current[key], value)]));
+      const temporaryPoints = current.waypoints.filter((point) => point.source === TEMPORARY_MAP_ROUTE_SOURCE);
+      if (temporaryPoints.length) {
+        const temporaryIds = new Set(temporaryPoints.map((point) => point.id));
+        next.waypoints = [...next.waypoints, ...temporaryPoints];
+        const ids = new Set(next.waypoints.map((point) => point.id));
+        next.edges = [...next.edges, ...current.edges.filter((edge) =>
+          (edge.source === TEMPORARY_MAP_ROUTE_SOURCE || temporaryIds.has(edge.from) || temporaryIds.has(edge.to))
+          && ids.has(edge.from) && ids.has(edge.to))];
+      }
+      latestWorkspaceRef.current = { ...current, ...next };
+      setWaypoints(next.waypoints); setEdges(next.edges); setAbxRoutes(next.abxRoutes);
+      setTeachingTasks(next.teachingTasks); setJointPoses(next.jointPoses);
+      setIndependentTeachingName(next.independentTeachingName);
+      // Each operator keeps their own selection, unless that entity was deleted.
+      setSelectedWaypointId((id) => next.waypoints.some((point) => point.id === id) ? id : null);
+      setSelectedEdgeId((id) => next.edges.some((edge) => edge.id === id) ? id : null);
+      setActiveTeachingTaskId((id) => next.teachingTasks.some((task) => task.id === id) ? id : null);
+      setActiveTeachingParkingPointId((id) => next.teachingTasks.some((task) => task.parkingPoints.some((point) => point.id === id)) ? id : null);
+      queueWorkspaceSave();
+    },
+    buildInitial: async (onProgress) => {
+      const current = latestWorkspaceRef.current;
+      if (!current.mapData?.geometry || workspaceSwitchingRef.current || loadState.loading) throw new Error('请先完成当前工程加载');
+      const localIdentity = syncIdentity();
+      const payload = syncPayload();
+      // Only the active workspace is shared. A binding to the host's other
+      // local workspace would otherwise leave the peer unable to save its ZIP.
+      payload.workspace.transfer = null;
+      const document = syncDocument(normalizeProject(payload));
+      const map = current.mapData;
+      const mapResource = createGeometryCache(map.geometry, map.bounds, map.byteLength, map.sourceHash, map.sourceHashKind, {
+        fileModifiedAt: map.fileModifiedAt, mimeType: map.mimeType, loadedAt: map.loadedAt,
+        sourceKind: map.sourceKind, sourceBlob: map.sourceBlob, teachingSpaceMode: current.teachingSpaceMode,
+        teachingGroupId: map.teachingGroupId,
+      });
+      mapResource.mapId = map.mapId;
+      const existingRobotPackage = portableRobotPackageRef.current?.relativePath === current.selectedRobot?.relativePath
+        ? portableRobotPackageRef.current : null;
+      const { buildProjectArchive } = await import('./lib/projectArchive.js');
+      const archive = await buildProjectArchive(payload, { mapResource, existingRobotPackage, onProgress });
+      return { bytes: archive.bytes, document, localIdentity };
+    },
+    installInitial: async (bytes, project, isActive) => {
+      const { readProjectArchive } = await import('./lib/projectArchive.js');
+      const imported = await readProjectArchive(bytes);
+      if (!isActive()) return;
+      await applyImportedProject(async () => imported, `同步：${project.name}`, project.mode, { throwOnError: true, fromWorkSync: true });
+      await waitForPaint();
+    },
+    persist: persistWorkspaceNow,
+    loadCheckpoint: loadWorkSyncCheckpoint,
+    saveCheckpoint: saveWorkSyncCheckpoint,
+  }, JSON.stringify([sessionState.status, teachingSpaceMode, mapData?.mapId,
+    mapData?.sourceHash, mapData?.name, selectedRobot?.relativePath, independentTeachingName]));
+
+  const openCacheAction = (kind, entry = null) => {
+    if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
+    setRobotControlEnabled(false);
+    setCacheActionDialog({ kind, entry, busy: false, error: '' });
+  };
+  const confirmCacheAction = async () => {
+    if (!cacheActionDialog || independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
+    const { kind, entry } = cacheActionDialog;
+    const reset = kind === 'reset';
+    const current = latestWorkspaceRef.current;
+    const deletingLive = !reset && !entry.historyId && current.teachingSpaceMode === 'independent'
+      && current.mapData?.mapId === entry.mapId;
+    independentSwitchBusyRef.current = true;
+    setCacheActionDialog((value) => ({ ...value, busy: true, error: '' }));
+    let committed = false;
+    try {
+      if (sessionSaveTimerRef.current) {
+        window.clearTimeout(sessionSaveTimerRef.current);
+        sessionSaveTimerRef.current = null;
+      }
+      // Drain existing writes before deletion, and prevent pagehide/autosave or
+      // an in-flight synchronization from recreating the removed workspace.
+      const saved = !reset && !deletingLive ? persistWorkspaceNow() : Promise.resolve();
+      workspaceSwitchingRef.current = true;
+      if (reset || deletingLive) await workSync.disconnect(reset ? '全局重置，同步已断开' : '当前缓存已删除，同步已断开');
+      await saved;
+      await Promise.allSettled([sessionWriteChainRef.current, projectDirectoryWriteChainRef.current]);
+      if (reset) {
+        await clearProjectDirectoryBinding();
+        await clearAllProjectSaveTargets();
+        await clearAllWorkspaceCaches(sessionIdRef.current);
+        committed = true;
+        // A clean page also releases both model editors' geometry, undo stacks
+        // and workers, which intentionally live only in memory.
+        window.location.replace('/');
+        return;
+      }
+      if (!entry.historyId) {
+        await clearProjectDirectoryBinding('independent');
+        await clearProjectSaveTarget(entry.mapId, 'independent');
+      }
+      await deleteIndependentWorkspace(sessionIdRef.current, { historyId: entry.historyId, mapId: entry.mapId });
+      committed = true;
+      if (deletingLive) {
+        window.location.replace('/');
+        return;
+      }
+      const remaining = (entries) => entries.filter((item) => item.mapId !== entry.mapId);
+      setIndependentHistory((value) => ({ ...value, entries: remaining(value.entries) }));
+      setIndependentWorkspaceDialog((value) => value ? { ...value, entries: remaining(value.entries) } : null);
+      if (!entry.historyId) setCachedWorkspaces((value) => ({ ...value, independent: null }));
+      setLastProjectRecovery((value) => value?.teachingSpaceMode === 'independent' && value.mapId === entry.mapId ? null : value);
+      setCacheActionDialog(null);
+      workspaceSwitchingRef.current = false;
+      independentSwitchBusyRef.current = false;
+      notify('独立示教缓存已删除', 'success');
+    } catch (error) {
+      if (!committed) {
+        workspaceSwitchingRef.current = false;
+        independentSwitchBusyRef.current = false;
+      }
+      setCacheActionDialog((value) => value ? { ...value, busy: false,
+        error: committed ? '缓存已清理，请刷新页面。' : error.message || '清理缓存失败，请重试' } : null);
+    }
+  };
   return (
     <>
     <input ref={mapInputRef} className="visually-hidden" type="file" accept=".ply" onChange={handleMapFile} />
@@ -6130,6 +6313,7 @@ export default function App() {
             <span>LAN</span>
             <strong>:21990</strong>
           </div>
+          <WorkSyncControl sync={workSync} />
         </WorkbenchToolbar>
       </header>
 
@@ -6546,16 +6730,6 @@ export default function App() {
         <span>SCHEMA 1.3</span>
       </footer>
 
-      {appPage === APP_PAGE_WORKBENCH && loadState.loading && (
-        <div className="loading-curtain" role="status" aria-live="polite">
-          <div className="loading-module">
-            <div className="loading-module__top"><MapIcon size={18} /><span>{loadState.phase}</span><strong>{progressLabel}</strong></div>
-            <div className="loading-track"><span style={{ width: `${Math.max(loadState.progress * 100, 4)}%` }} /></div>
-            <small>{loadState.detail || '大型点云解析可能需要数秒，请保持页面开启'}</small>
-          </div>
-        </div>
-      )}
-
       {appPage === APP_PAGE_WORKBENCH && toast && (
         <div className={`toast-message ${toast.kind}`} role="status">
           <span>{toast.kind === 'error' ? <X size={14} /> : <Check size={14} />}</span>
@@ -6595,7 +6769,10 @@ export default function App() {
           workspaces={workspaceCatalog}
           sessionState={sessionState}
           projectDirectoryState={projectDirectoryState}
-          busy={loadState.loading}
+          busy={loadState.loading || Boolean(cacheActionDialog?.busy)}
+          syncControl={<WorkSyncControl sync={workSync} showIdleStatus={false} />}
+          onGlobalReset={() => openCacheAction('reset')}
+          resetDisabled={independentSwitchBlocked}
           onNewProject={beginNewProject}
           onLoadProject={showProjectLoadDialog}
           onContinue={(modeId) => continueWorkspace(modeId, APP_PAGE_WORKBENCH)}
@@ -6611,6 +6788,7 @@ export default function App() {
       </>
     )}
     <ModelEditorPage active={appPage === APP_PAGE_MODEL_EDITOR} onHome={() => navigateAppPage(APP_PAGE_HOME)} onOpenPair={() => navigateAppPage(APP_PAGE_MODEL_PAIR_EDITOR)} />
+    <WorkSyncAuthorization sync={workSync} />
     <ModelPairEditorPage active={appPage === APP_PAGE_MODEL_PAIR_EDITOR} onBack={() => navigateAppPage(APP_PAGE_MODEL_EDITOR)} />
     {appPage === APP_PAGE_TEACHING_DATA && (
       <div className="app-shell is-teaching-data-page" data-app-page="teaching-data">
@@ -6660,22 +6838,31 @@ export default function App() {
           mobileSaveDisabledReason={mobileSaveDisabledReason}
         />
 
-        {loadState.loading && (
-          <div className="loading-curtain" role="status" aria-live="polite">
-            <div className="loading-module">
-              <div className="loading-module__top"><Database size={18} /><span>{loadState.phase}</span><strong>{progressLabel}</strong></div>
-              <div className="loading-track"><span style={{ width: `${Math.max(loadState.progress * 100, 4)}%` }} /></div>
-              <small>{loadState.detail || '正在恢复示教任务与视觉快照'}</small>
-            </div>
-          </div>
-        )}
-
         {toast && (
           <div className={`toast-message ${toast.kind}`} role="status">
             <span>{toast.kind === 'error' ? <X size={14} /> : <Check size={14} />}</span>
             {toast.message}
           </div>
         )}
+      </div>
+    )}
+    {[APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA].includes(appPage) && (loadState.loading || projectImportProgress) && (
+      <div className="loading-curtain" role="status" aria-live="polite">
+        <div className={`loading-module ${projectImportProgress ? 'is-project-import' : ''}`}>
+          <div className="loading-module__top">
+            <MapIcon size={18} />
+            <span>{projectImportProgress ? '加载工程' : loadState.phase}</span>
+            <strong>{progressLabel}</strong>
+          </div>
+          <div className="loading-track" role="progressbar" aria-label={projectImportProgress ? '工程加载总进度' : loadState.phase}
+            aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(loadingProgress * 100)}>
+            <span style={{ width: `${Math.max(loadingProgress * 100, projectImportProgress ? 0 : 4)}%` }} />
+          </div>
+          {projectImportProgress ? <>
+            <small className="loading-module__source" title={projectImportProgress.sourceName}>{projectImportProgress.sourceName}</small>
+            <small className="loading-module__stage">{projectImportProgress.stage}</small>
+          </> : <small>{loadState.detail || '正在准备工作现场，请保持页面开启'}</small>}
+        </div>
       </div>
     )}
     {projectExportDialog && <ProjectExportDialog
@@ -6731,6 +6918,13 @@ export default function App() {
         if (!independentWorkspaceDialog.busy) setIndependentWorkspaceDialog(null);
       }}
     />}
+    {projectImportError && <ProjectImportErrorDialog error={projectImportError}
+      onClose={() => setProjectImportError(null)}
+      onChooseProject={() => {
+        const mode = projectImportError.mode;
+        setProjectImportError(null);
+        showProjectLoadDialog(mode);
+      }} />}
     <ProjectLoadDialog
       open={projectLoadDialog.open}
       teachingSpaceMode={projectLoadDialog.mode}
@@ -6739,13 +6933,14 @@ export default function App() {
       recovery={lastProjectRecovery}
       independentHistory={independentHistory}
       historyDisabled={independentSwitchBlocked}
-      busy={loadState.loading || Boolean(independentNameDialog)}
+      busy={loadState.loading || Boolean(independentNameDialog) || Boolean(cacheActionDialog)}
       onClose={closeProjectLoadDialog}
       onLoadDefaultDirectory={loadDefaultProjectDirectory}
       onLoadWorkspace={loadAutoSavedProject}
       onLoadRecovery={loadRecoveryProject}
       onLoadHistory={restoreIndependentHistory}
       onRenameIndependent={openIndependentNameDialog}
+      onDeleteIndependent={(entry) => openCacheAction('independent', entry)}
       onChooseDirectory={chooseProjectDirectory}
       onChooseGuideFile={chooseProjectGuideFile}
     />
@@ -6754,6 +6949,8 @@ export default function App() {
       onSave={renameIndependentTeaching}
       onClose={() => { if (!independentSwitchBusyRef.current) setIndependentNameDialog(null); }}
     />}
+    {cacheActionDialog && <WorkspaceCacheDialog state={cacheActionDialog} onConfirm={confirmCacheAction}
+      onClose={() => { if (!independentSwitchBusyRef.current) setCacheActionDialog(null); }} />}
     </>
   );
 }

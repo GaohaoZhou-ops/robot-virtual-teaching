@@ -56,8 +56,9 @@ final class VisionIPv4AddressInput: UITextField, UITextFieldDelegate {
             cell.tag = index; cell.titleLabel?.font = font
             cell.accessibilityIdentifier = "server-address-octet-\(index)"
             cell.accessibilityLabel = "IPv4 地址第 \(index + 1) 段"
-            cell.accessibilityHint = "轻点后输入可替换整段，输入三位后自动进入下一段"
-            cell.addTarget(self, action: #selector(selectCellButton(_:)), for: .touchUpInside)
+            cell.accessibilityHint = "注视并捏合后输入可替换整段，输入三位后自动进入下一段"
+            cell.addTarget(self, action: #selector(selectCellButton(_:)), for: .primaryActionTriggered)
+            cell.hoverStyle = UIHoverStyle(effect: .highlight)
             cell.layer.cornerRadius = 18; cell.layer.masksToBounds = true
             addSubview(cell)
         }
@@ -96,6 +97,7 @@ final class VisionIPv4AddressInput: UITextField, UITextFieldDelegate {
         refreshCells()
     }
     @objc private func selectCellButton(_ sender: UIButton) {
+        guard isEnabled else { return }
         selectCell(sender.tag); onEdit(); becomeFirstResponder(); updateCursor(); refreshCells()
     }
     func setHost(_ host: String, replacementID: UUID) {
