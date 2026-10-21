@@ -35,6 +35,7 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
   const context = syncContext(independentMap, independentTransfer, mapConfig);
   if (!context.available) throw new Error(context.reason);
   const inverse = transferMatrix(context.localToMap).invert();
+  const navigationUp = { x: inverse.elements[8], y: inverse.elements[9], z: inverse.elements[10] };
   const prefix = createId('map-route');
   const ids = new Map(context.project.waypoints.map((point) => [point.id, `${prefix}:${point.id}`]));
   const waypoints = context.project.waypoints.map((point) => {
@@ -45,6 +46,7 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
     // Do not retain ABX absolute-coordinate metadata or teaching-task links.
     return { id: ids.get(point.id), name: point.name, source: TEMPORARY_MAP_ROUTE_SOURCE,
       sourceWaypointId: point.id,
+      navigationUp: { ...navigationUp },
       pose: { ...pose.position, ...pose.rpy } };
   });
   const edges = context.project.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).map((edge) => {

@@ -1,5 +1,6 @@
 import { sha256Bytes } from './hash.js';
 import { abxAssert as check, abxBytes, abxEqual, parseAbxJson } from './abxFormat.js';
+import { Euler, Vector3 } from 'three';
 
 const fields = (value, names, label) => check(value && !Array.isArray(value)
   && abxEqual(Object.keys(value).sort(), names.sort()), `${label}字段不匹配`);
@@ -13,12 +14,44 @@ export const abxNodeLabel = (id, name) => {
   return name === `N${id}` ? '' : name.startsWith(prefix) ? name.slice(prefix.length) : name;
 };
 
-export function matchAbxStation(nodes, target, name = '') {
-  const matches = nodes.filter((node) => Math.hypot(node.x_m - target.x_m, node.y_m - target.y_m) <= 1e-4);
+// Older independent navigation kept local X/Y while substituting the robot's
+// calibrated Z. A saved placement proves the direction of that height offset.
+// Use it only for named teaching stations, never as a larger distance tolerance.
+export function abxStationHeightContext(payload, routeId) {
+  const transfer = payload.workspace?.transfer;
+  const placements = transfer?.kind === 'placement'
+    ? [transfer, ...(Array.isArray(transfer.previousPlacements) ? transfer.previousPlacements : [])] : [];
+  const directions = placements.flatMap((placement) => {
+    const pose = placement?.localToMap;
+    if (placement?.kind !== 'placement' || !['x', 'y', 'z'].every((axis) => Number.isFinite(pose?.position?.[axis]))
+      || !['roll', 'pitch', 'yaw'].every((axis) => Number.isFinite(pose?.rpy?.[axis]))) return [];
+    const up = new Vector3(0, 0, 1).applyEuler(new Euler(
+      ...['roll', 'pitch', 'yaw'].map((axis) => pose.rpy[axis] * Math.PI / 180), 'ZYX'));
+    return Math.abs(up.z) > 1e-6 ? [up] : [];
+  });
+  const heights = new Map((payload.waypoints || []).filter((point) => point.abx?.routeId === routeId)
+    .map((point) => [point.abx.nodeId, point.pose?.z ?? 0]));
+  return { directions, heights };
+}
+
+export function matchAbxStation(nodes, target, name = '', heightContext = null) {
+  let matches = nodes.filter((node) => Math.hypot(node.x_m - target.x_m, node.y_m - target.y_m) <= 1e-4);
   const namedId = /^N(0|[1-9]\d*)(?: · |$)/.exec(name)?.[1];
+  let heightAdjusted = false;
+  if (!matches.length && namedId !== undefined && Number.isFinite(target.z_m) && heightContext) {
+    const named = nodes.find((node) => String(node.id) === namedId);
+    if (named && heightContext.directions.some((up) => {
+      const offset = (target.z_m - (heightContext.heights.get(named.id) ?? 0)) / up.z;
+      return Math.hypot(target.x_m - up.x * offset - named.x_m,
+        target.y_m - up.y * offset - named.y_m) <= 1e-4;
+    })) {
+      matches = [named];
+      heightAdjusted = true;
+    }
+  }
   const named = matches.find((node) => String(node.id) === namedId);
   const aligned = matches.filter((node) => node.yaw_rad === null || Math.abs(wrap(node.yaw_rad - target.yaw_rad)) <= 1e-6);
-  return { matches, node: named || (matches.length === 1 ? matches[0] : aligned.length === 1 ? aligned[0] : null) };
+  return { matches, node: named || (matches.length === 1 ? matches[0] : aligned.length === 1 ? aligned[0] : null), heightAdjusted };
 }
 
 export function validateAbxRoute(route) {
@@ -163,7 +196,8 @@ export async function buildAbxRouteDocuments(payload, { includeTeachingPoints = 
     const nativeIds = new Set(original?.nodes.map((node) => node.id));
     const yaw = point.pose.yaw * (['degree', 'degrees', 'deg'].includes(unit) ? Math.PI / 180 : 1);
     const { node } = matchAbxStation(doc.nodes.filter((node) => nativeIds.has(node.id)),
-      { x_m: point.pose.x, y_m: point.pose.y, yaw_rad: yaw }, point.name);
+      { x_m: point.pose.x, y_m: point.pose.y, z_m: point.pose.z, yaw_rad: yaw }, point.name,
+      abxStationHeightContext(payload, doc.id));
     if (node) pointMap.set(point.id, { route: doc, node });
     else addPoint(point);
   }

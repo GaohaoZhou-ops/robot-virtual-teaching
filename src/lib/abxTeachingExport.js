@@ -1,6 +1,6 @@
 import { sha256Bytes } from './hash.js';
 import { zipSync } from 'fflate';
-import { abxNodeName, buildAbxRouteDocuments, matchAbxStation } from './abxRoute.js';
+import { abxNodeName, abxStationHeightContext, buildAbxRouteDocuments, matchAbxStation } from './abxRoute.js';
 import { appendImportedAbxTasks } from './abxTeachingRoundtrip.js';
 import { buildAbxV11Files } from './abxTeachingV11.js';
 import { ABX_VERSION as VERSION, ABX_JOINT_ORDER as JOINT_ORDER, ABX_JOINT_NAMES as JOINT_NAMES } from './abxFormat.js';
@@ -123,7 +123,9 @@ const createRoute = async (payload, waypoints) => {
     for (const point of waypoints) point.nodeId = `N${pointMap.get(point.sourceId).node.id}`;
     const originalIds = new Set(payload.abxRoutes.find((item) => item.id === route.id)?.nodes.map((node) => node.id));
     const stations = route.nodes.filter((node) => originalIds.has(node.id));
-    return { route, routes, pathMappings: [],
+    const heightContext = abxStationHeightContext(payload, route.id);
+    const heightAdjustedTargets = new Set();
+    return { route, routes, pathMappings: [], heightAdjustedTargets,
       nameFor: (nodeId) => {
         const node = stations.find((node) => `N${node.id}` === nodeId);
         return abxNodeName(node.id, node.label);
@@ -132,15 +134,17 @@ const createRoute = async (payload, waypoints) => {
         const node = stations.find((node) => `N${node.id}` === nodeId);
         return { x_m: node.x_m, y_m: node.y_m, yaw_rad: node.yaw_rad };
       },
-      nodeFor(name, target, parkingName = name) {
+      nodeFor(name, target, parkingName = name, sourcePose = null) {
         // Never let a synthesized teaching marker or array index become a
         // station ID in an existing robot graph. Height and tiny heading
         // differences do not change the identity of a unique XY station.
-        const { matches, node: existing } = matchAbxStation(stations, target, parkingName);
+        const { matches, node: existing, heightAdjusted } = matchAbxStation(stations,
+          { ...target, z_m: sourcePose?.position?.z }, parkingName, heightContext);
         requireExport(matches.length, `「${parkingName} / ${name}」未匹配到已导入路网的站点，请在对应导航点重新记录或更新路网后导入；不会自动新建导航编号`);
         requireExport(existing, `「${parkingName} / ${name}」对应多个同坐标站点，请使用路网中的 N 编号命名停车点以明确目标`);
         requireExport(existing.yaw_rad === null || yawDistance(existing.yaw_rad, target.yaw_rad) <= Math.PI / 1800,
           `「${parkingName} / ${name}」的底盘朝向与 N${existing.id} 相差超过 0.1°，请对齐路网站点后记录，或更新对应路网朝向`);
+        if (heightAdjusted) heightAdjustedTargets.add(`${parkingName} / ${name}`);
         return `N${existing.id}`;
       } };
   }
@@ -247,7 +251,7 @@ const compileExport = async (payload, robotPackage) => {
     target: freeTarget(point.pose, angleUnit, `导航点 ${point.name || point.id}`),
     sourcePose: point.pose,
   }));
-  const { route, routes, nodeFor, nameFor, targetFor, pathMappings } = await createRoute(payload, waypoints);
+  const { route, routes, nodeFor, nameFor, targetFor, pathMappings, heightAdjustedTargets } = await createRoute(payload, waypoints);
   const files = {};
   const exportedAt = payload.exportedAt || new Date().toISOString();
   const tasks = [];
@@ -274,7 +278,7 @@ const compileExport = async (payload, robotPackage) => {
       const parkingName = text(parking.name, '停车点名称');
       const label = `${name} / ${parkingName}`;
       const parkingTarget = freeTarget(parking.mapPose, angleUnit, label);
-      const parkingNodeId = nodeFor(parkingName, parkingTarget);
+      const parkingNodeId = nodeFor(parkingName, parkingTarget, parkingName, parking.mapPose);
       const exportedParkingName = nameFor ? nameFor(parkingNodeId) : parkingName;
       const parkingId = await stableId('atlas-abx-parking', task.id, parking.id);
       const parkingPoints = [];
@@ -291,7 +295,7 @@ const compileExport = async (payload, robotPackage) => {
         const poseName = text(pose.name, '姿态名称');
         const poseLabel = `${label} / ${poseName}`;
         const target = freeTarget(pose.mapPose, angleUnit, poseLabel);
-        const nodeId = nodeFor(poseName, target, exportedParkingName);
+        const nodeId = nodeFor(poseName, target, exportedParkingName, pose.mapPose);
         const navigationTarget = targetFor ? targetFor(nodeId) : target;
         if (!model) {
           const sourceRobot = task.robot?.relativePath || task.robot?.id;
@@ -359,6 +363,9 @@ const compileExport = async (payload, robotPackage) => {
     if (task.hasNavigation) files[`abx/${routeFile}`] = bytes(`${JSON.stringify(route)}\n`);
   }
   const warnings = [];
+  if (heightAdjustedTargets?.size) {
+    warnings.push('已按原转换矩阵识别历史示教记录中的高度偏移，并关联原路网站点。');
+  }
   if (navigationCount) {
     const incoming = new Set(route.edges.map((edge) => edge.end));
     const targets = new Set(navigationTasks.flatMap((task) => task.sequence

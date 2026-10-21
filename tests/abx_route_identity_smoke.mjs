@@ -5,7 +5,7 @@ import { abxNodeName, abxRouteToProject, buildAbxRouteDocuments } from '../src/l
 import { buildAbxTeachingArchive } from '../src/lib/abxTeachingExport.js';
 import { normalizeProject } from '../src/lib/io.js';
 import { syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
-import { teachingParkingName } from '../src/lib/teachingNavigation.js';
+import { teachingParkingName, waypointRobotPose } from '../src/lib/teachingNavigation.js';
 import { transferMatrix, transformTeachingPose } from '../src/lib/teachingTransfer.js';
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
@@ -114,6 +114,71 @@ async function checkRoute(route) {
 }
 
 await checkRoute(synthetic);
+
+// Recorded local Z is a calibrated robot height, not the route's plane. Use
+// the real tilted alignment that exposed the failure, plus a larger rotation.
+for (const localToMap of [
+  { position: { x: 4.087704, y: -7.297507, z: 0.100661 },
+    rpy: { roll: -0.27501951721487344, pitch: -0.0019406646615915792, yaw: 179.27496036793707 } },
+  { position: { x: 11, y: -4, z: 2 }, rpy: { roll: 12, pitch: -8, yaw: 137 } },
+]) {
+  const source = payloadFor(synthetic, [31]), matrix = transferMatrix(localToMap);
+  const projected = syncMapRouteToIndependent({ teachingSpaceMode: 'independent' },
+    { kind: 'extraction', sourceMap: { sourceHash: source.map.sourceHash }, localToMap },
+    { mapId: 'map', config: { project: source } });
+  const station = projected.waypoints.find((point) => point.name === 'N31 · 停车点1');
+  const calibratedHeight = 0.3;
+  const localPose = waypointRobotPose(station, calibratedHeight);
+  assert.equal(localPose.position.z, calibratedHeight, 'retain the calibrated independent robot height');
+  assert.equal(teachingParkingName(projected.waypoints, localPose, 'fallback'), station.name);
+  const returned = transformTeachingPose(localPose, matrix, 'map');
+  const original = synthetic.nodes.find((node) => node.id === 31);
+  assert(Math.hypot(returned.position.x - original.x_m, returned.position.y - original.y_m) < 1e-10,
+    'moving to a projected waypoint must reach the same map XY even with a tilted matrix');
+  const payload = payloadFor(synthetic, [31]), parking = payload.virtualTeaching.tasks[0].parkingPoints[0];
+  Object.assign(parking, { name: station.name, mapPose: returned });
+  parking.poses[0].mapPose = structuredClone(returned);
+  assert.equal(taskRecords(await buildAbxTeachingArchive(payload, { robotPackage }))
+    .find((record) => record.record?.type === 'route_navigation').record.node_id, 'N31',
+  'new captures export using strict map coordinates, with no legacy context');
+
+  // Reproduce already-saved records from the old move-to-waypoint behavior.
+  const legacyPose = transformTeachingPose({
+    position: { x: station.pose.x, y: station.pose.y, z: calibratedHeight },
+    rpy: { roll: station.pose.roll, pitch: station.pose.pitch, yaw: station.pose.yaw },
+  }, matrix, 'map');
+  assert(Math.hypot(legacyPose.position.x - original.x_m, legacyPose.position.y - original.y_m) > 1e-4);
+  parking.mapPose = legacyPose;
+  parking.poses[0].mapPose = structuredClone(legacyPose);
+  Object.assign(payload.waypoints.find((point) => point.id === parking.id),
+    { name: parking.name, pose: { ...legacyPose.position, ...legacyPose.rpy } });
+  await assert.rejects(buildAbxTeachingArchive(payload, { robotPackage }), /未匹配/,
+    'without saved frame evidence an off-station recording must still fail');
+  const placement = { version: 1, kind: 'placement', localToMap };
+  payload.workspace.transfer = { version: 1, kind: 'placement',
+    localToMap: { position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 } },
+    previousPlacements: [placement] };
+  const before = JSON.stringify(payload);
+  assert.deepEqual((await buildAbxRouteDocuments(payload)).routes, [synthetic],
+    'legacy teaching markers must reuse the original stations, never create duplicate graph nodes');
+  const recovered = await buildAbxTeachingArchive(payload, { robotPackage });
+  assert.equal(taskRecords(recovered).find((record) => record.record?.type === 'route_navigation').record.node_id, 'N31');
+  assert.deepEqual(recovered.navigation.tasks[0].sequence.find((step) => step.type === 'route_navigation').target,
+    { x_m: original.x_m, y_m: original.y_m, yaw_rad: original.yaw_rad });
+  assert.equal(JSON.stringify(payload), before, 'legacy export must preserve original cache, poses and joints');
+  const noName = structuredClone(payload);
+  noName.virtualTeaching.tasks[0].parkingPoints[0].name = '停车点1';
+  await assert.rejects(buildAbxTeachingArchive(noName, { robotPackage }), /未匹配/,
+    'repeated display labels alone are insufficient evidence for height recovery');
+  const moved = structuredClone(payload);
+  moved.virtualTeaching.tasks[0].parkingPoints[0].poses[0].mapPose.position.x += 0.01;
+  await assert.rejects(buildAbxTeachingArchive(moved, { robotPackage }), /未匹配/,
+    'moving a recorded base away must not be hidden by legacy height recovery');
+  const wrongHeading = structuredClone(payload);
+  wrongHeading.virtualTeaching.tasks[0].parkingPoints[0].poses[0].mapPose.rpy.yaw += 20;
+  await assert.rejects(buildAbxTeachingArchive(wrongHeading, { robotPackage }), /底盘朝向.*0.1°/);
+}
+
 const coincident = structuredClone(synthetic);
 Object.assign(coincident.nodes.find((node) => node.id === 62), coincident.nodes.find((node) => node.id === 31), { id: 62 });
 const ambiguous = payloadFor(coincident, [31]);

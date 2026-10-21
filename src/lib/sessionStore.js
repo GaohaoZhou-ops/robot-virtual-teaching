@@ -1001,10 +1001,11 @@ export async function clearAllWorkspaceCaches(sessionId) {
 
 // Archive the outgoing group and activate a new/restored group atomically.
 // Neither a failed write nor restoring history can discard the current group.
-// The map workspace (including its absolute coordinates) is never rewritten.
+// A requested map placement joins the same transaction; ordinary group switches
+// leave the map workspace (including its absolute coordinates) untouched.
 export async function switchIndependentWorkspace(sessionId, {
   replacement = null, historyId = null, expectedConfig = null, activeMode, currentRobotPackage,
-  expectedMapConfig = null,
+  expectedMapConfig = null, mapPlacement = null,
 }) {
   const database = await openDatabase();
   const transaction = database.transaction(STORE_NAME, 'readwrite');
@@ -1054,6 +1055,13 @@ export async function switchIndependentWorkspace(sessionId, {
       || nextConfig.project.workspace?.teachingSpaceMode !== 'independent'
       || (!nextMap.positionBuffer && !nextMap.blob)) throw new Error('新的独立工程资源不完整');
     if (nextMap.mapId === currentMap?.mapId) throw new Error('该独立工程已在当前工作区中');
+    if (mapPlacement && (historyId || !expectedMapConfig || mapPlacement.mode !== 'map'
+      || !mapPlacement.map?.mapId || !mapPlacement.map.positionBuffer
+      || mapPlacement.config?.project?.workspace?.teachingSpaceMode !== 'map'
+      || mapPlacement.config.project.workspace.transfer?.kind !== 'placement'
+      || mapPlacement.config.project.workspace.transfer.sourceMap?.mapId !== nextMap.mapId)) {
+      throw new Error('放置结果不完整，当前工程已保留');
+    }
 
     const savedAt = Date.now();
     let nextEntries = entries.filter((entry) => entry.historyId !== historyId);
@@ -1080,14 +1088,23 @@ export async function switchIndependentWorkspace(sessionId, {
         workspace: { ...nextConfig.project.workspace, directoryAutosaveSuspended: true } } } };
     store.put(packMapRecord(map));
     store.put(config);
+    const modes = { ...index.modes, independent: summarizeWorkspace('independent', map, config) };
+    const nextMode = mapPlacement ? 'map' : 'independent';
+    if (mapPlacement) {
+      const placedMap = { ...mapPlacement.map, key: workspaceMapKey('map'), teachingSpaceMode: 'map', sessionId, savedAt };
+      const placedConfig = { key: workspaceConfigKey('map'), teachingSpaceMode: 'map', sessionId, savedAt,
+        mapId: placedMap.mapId, config: mapPlacement.config };
+      store.put(packMapRecord(placedMap));
+      store.put(placedConfig);
+      modes.map = summarizeWorkspace('map', placedMap, placedConfig);
+    }
     if (historyId) {
       store.delete(historyMapKey(historyId));
       store.delete(historyConfigKey(historyId));
     }
     store.put({ key: INDEPENDENT_HISTORY_KEY, entries: nextEntries });
-    store.put({ ...index, activeMode: 'independent', updatedAt: savedAt,
-      modes: { ...index.modes, independent: summarizeWorkspace('independent', map, config) } });
-    store.put({ ...meta, activeMode: 'independent', activatedRecoveryId: null });
+    store.put({ ...index, activeMode: nextMode, updatedAt: savedAt, modes });
+    store.put({ ...meta, activeMode: nextMode, activatedRecoveryId: null });
   } catch (error) {
     transaction.abort();
     await completion.catch(() => undefined);
@@ -1095,6 +1112,7 @@ export async function switchIndependentWorkspace(sessionId, {
   }
   await completion;
   clearWorkspaceViewState('independent');
+  if (mapPlacement) clearWorkspaceViewState('map');
 }
 
 // Geometry, configuration, the reverse link and the active mode commit together.

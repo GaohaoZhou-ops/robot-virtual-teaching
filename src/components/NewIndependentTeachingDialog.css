@@ -53,7 +53,6 @@
 .new-independent-dialog__name { display: grid; gap: 9px; color: #dfe2ed; font-size: 12px; }
 .new-independent-dialog__name input { width: 100%; min-width: 0; padding: 11px 12px; border: 1px solid #60537e; background: #101a24; color: #edf0f7; font: inherit; }
 .new-independent-dialog__name input:focus-visible { outline: 2px solid var(--independent-accent); outline-offset: 2px; }
-.new-independent-dialog__name > span { color: #919db0; font-size: 11px; line-height: 1.7; }
 .new-independent-dialog__name > small { color: #ffaaa0; font-size: 11px; }
 .new-independent-dialog__section-title { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .new-independent-dialog__section-title > span { color: #9381b9; font: 10px "SFMono-Regular", Menlo, monospace; }
@@ -77,6 +76,11 @@
 .new-independent-dialog__matrix-note { display: flex; align-items: flex-start; gap: 15px; margin-top: 10px; }
 .new-independent-dialog__matrix-note p { flex: 1; margin: 0; color: #919db0; font-size: 11px; line-height: 1.8; }
 .new-independent-dialog__matrix-note button { padding: 0; border: 0; background: none; color: #b3a0d0; font-size: 11px; }
+.new-independent-dialog__options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.new-independent-dialog__options button { min-height: 38px; }
+.new-independent-dialog__options button[aria-pressed="true"] { border-color: #5ee59a80; background: #5ee59a18; color: #5ee59a; }
+.new-independent-dialog__options button[aria-pressed="true"]:hover:not(:disabled) { border-color: #5ee59a; color: #a7f5c6; }
+.new-independent-dialog__options button:focus-visible { outline-color: #5ee59a; }
 .new-independent-dialog__error { margin: 8px 0 0; color: #ffaaa0; font-size: 12px; line-height: 1.7; }
 .new-independent-dialog__progress { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--independent-accent); font-size: 12px; }
 .new-independent-dialog footer { display: flex; align-items: center; gap: 10px; padding: 17px 24px; border-top: 1px solid #2e2c40; }

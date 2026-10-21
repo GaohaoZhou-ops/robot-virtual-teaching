@@ -1,11 +1,7 @@
 .work-sync { position: relative; display: flex; flex-direction: column; gap: 3px; flex-shrink: 0; letter-spacing: 0; font-family: inherit; }
 .work-sync__actions { display: flex; align-items: center; gap: 8px; }
-.work-sync__button, .work-sync__renew { display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; white-space: nowrap; }
-.work-sync__button { min-height: 32px; padding: 5px 10px; border: 1px solid #3c6267; border-radius: 5px; background: #14292d; color: #b2ded6; font-family: inherit; font-size: 12px; font-weight: 500; }
-.work-sync__button:hover:not(:disabled) { border-color: #7cd6bc; background: #1d3c3b; }
-.work-sync__button:disabled { cursor: default; opacity: .55; }
-.work-sync__button:focus-visible, .work-sync__renew:focus-visible { outline: 2px solid #91e6c8; outline-offset: 3px; }
-.work-sync.is-connected .work-sync__button { border-color: #568575; color: #c0ecd6; }
+.work-sync__renew { display: inline-flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; white-space: nowrap; }
+.work-sync__renew:focus-visible { outline: 2px solid #91e6c8; outline-offset: 3px; }
 .work-sync__renew { padding: 5px 0; border: 0; background: none; color: #99c7bb; font-size: 11px; }
 .work-sync__status { position: absolute; top: calc(100% + 3px); right: 0; width: max-content; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9abeb1; font-size: 9px; line-height: 15px; }
 .work-sync__status.is-error { color: #f2b795; }

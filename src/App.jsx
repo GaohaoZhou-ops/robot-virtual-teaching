@@ -84,6 +84,7 @@ import {
   removeTeachingWaypoints,
   TEMPORARY_MAP_ROUTE_SOURCE,
   teachingParkingName,
+  waypointRobotPose,
   updateTeachingWaypoint,
   withoutTemporaryMapNavigation,
 } from './lib/teachingNavigation.js';
@@ -766,10 +767,12 @@ export default function App() {
       ? item.source === TEMPORARY_MAP_ROUTE_SOURCE && item.sourceWaypointId === robotWaypointLocation.sourceWaypointId
       : item.id === robotWaypointLocation.waypointId);
     if (!point) return null;
+    const target = waypointRobotPose(point, robotPose.position.z);
+    if (!target) return null;
     const yawDelta = ((robotPose.rpy.yaw - point.pose.yaw) % 360 + 540) % 360 - 180;
-    // Navigation retains the calibrated robot Z. Arm edits and height changes
-    // therefore keep the arrival marker; moving the base away clears it.
-    return Math.hypot(robotPose.position.x - point.pose.x, robotPose.position.y - point.pose.y) <= 0.001
+    // Compare against the station at the calibrated robot height. Arm edits
+    // keep the arrival marker; moving the base away in map XY clears it.
+    return Math.hypot(robotPose.position.x - target.position.x, robotPose.position.y - target.position.y) <= 0.001
       && Math.abs(yawDelta) <= 0.01 ? point.id : null;
   }, [mapData?.mapId, robotPose, robotWaypointLocation, selectedRobot, teachingSpaceMode, waypoints]);
   const navigationTopology = useMemo(() => connectivityTopology(waypoints, edges), [waypoints, edges]);
@@ -2212,7 +2215,8 @@ export default function App() {
     setNewIndependentDialog(null);
   };
 
-  const createIndependentTeaching = async ({ file, matrix = null, name = defaultIndependentTeachingName(file?.name) }) => {
+  const createIndependentTeaching = async ({ file, matrix = null, name = defaultIndependentTeachingName(file?.name),
+    syncRoute = false, placeInMap = false }) => {
     if (!file || independentSwitchBusyRef.current || workspaceSwitchingRef.current || independentSwitchBlocked
       || !isIndependentTeachingSpace || !newIndependentDialog) return;
     if (!file.name.toLowerCase().endsWith('.ply')) {
@@ -2225,6 +2229,7 @@ export default function App() {
     let geometry;
     try {
       const teachingName = validateIndependentTeachingName(name);
+      if ((syncRoute || placeInMap) && !matrix) throw new Error('请先加载转换矩阵，再同步路网或放置进入地图');
       if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
       const saved = persistWorkspaceNow();
       workspaceSwitchingRef.current = true;
@@ -2259,6 +2264,10 @@ export default function App() {
         mapId: createId('map'), name: file.name,
         portableRobotPackage: archived.currentRobotPackage,
       };
+      if (syncRoute) {
+        const status = mapRouteSyncStatus(map, transfer, newIndependentDialog.mapSnapshot?.config);
+        if (!status.available) throw new Error(status.reason);
+      }
       const project = buildExport({
         mapData: map, teachingSpaceMode: 'independent',
         independentTeachingName: teachingName,
@@ -2266,18 +2275,26 @@ export default function App() {
         waypoints: [], edges: [],
         robot: current.selectedRobot, robotPose: normalizeRobotPose(null), robotJointValues: {},
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
-        showWaypoints3D: current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
+        showWaypoints3D: syncRoute || current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
         collapsedPanel: current.collapsedPanel, inspectorCollapsed: current.inspectorCollapsed,
         directoryAutosaveSuspended: true, transfer,
       });
+      const replacement = { map, config: { schemaVersion: 1, project, ui: {
+        ...project.workspace, mode: 'select', mapRouteSyncEnabled: syncRoute, selectedRobot: project.robot,
+        meshRenderQuality: project.rendering.meshQuality, showSlice3D: current.showSlice3D,
+      } } };
+      let mapPlacement = null;
+      if (placeInMap) {
+        setLoadState({ loading: true, progress: 0.85, phase: '放置独立模型到地图', detail: '按转换矩阵合并模型，保留地图已有示教结果' });
+        mapPlacement = await placeTeachingWorkspace({ mode: 'independent', map,
+          config: { mapId: map.mapId, config: replacement.config } }, newIndependentDialog.mapSnapshot,
+        { localToMap: transfer.localToMap, matrixImports: transfer.matrixImports });
+      }
       setLoadState({ loading: true, progress: 0.9, phase: '缓存上一组独立示教', detail: '完整保存模型、机器人、示教结果与视角' });
       await switchIndependentWorkspace(sessionIdRef.current, {
         activeMode: 'independent', ...archived,
         expectedMapConfig: matrix ? newIndependentDialog.mapSnapshot.config : null,
-        replacement: { map, config: { schemaVersion: 1, project, ui: {
-          ...project.workspace, mode: 'select', mapRouteSyncEnabled: false, selectedRobot: project.robot,
-          meshRenderQuality: project.rendering.meshQuality, showSlice3D: current.showSlice3D,
-        } } },
+        replacement, mapPlacement,
       });
       window.location.assign('/workbench');
     } catch (error) {
@@ -4938,17 +4955,18 @@ export default function App() {
       notify('请等待当前姿态采集完成后再移动机器人', 'warning');
       return;
     }
+    const target = waypointRobotPose(point, latestWorkspaceRef.current.robotPose.position.z);
+    if (!target) {
+      notify('转换矩阵使地图竖直方向平行于当前高度平面，无法保持高度移动到该点，请检查转换矩阵', 'warning');
+      return;
+    }
     stopTeachingTaskPlayback(false);
     setRobotControlEnabled(false);
     clearRobotParkingGhost();
     setShowRobotModel(true);
-    const { x, y, roll, pitch, yaw } = point.pose;
     // Navigation coordinates describe the route, while the base height is
-    // calibrated independently for the loaded robot.
-    setRobotPose((current) => normalizeRobotPose({
-      position: { x, y, z: current.position.z },
-      rpy: { roll, pitch, yaw },
-    }));
+    // calibrated independently for the loaded robot. Respect both frames.
+    setRobotPose(normalizeRobotPose(target));
     setRobotWaypointLocation({
       waypointId: id,
       sourceWaypointId: point.source === TEMPORARY_MAP_ROUTE_SOURCE ? point.sourceWaypointId : null,
@@ -6770,7 +6788,7 @@ export default function App() {
           sessionState={sessionState}
           projectDirectoryState={projectDirectoryState}
           busy={loadState.loading || Boolean(cacheActionDialog?.busy)}
-          syncControl={<WorkSyncControl sync={workSync} showIdleStatus={false} />}
+          syncControl={<WorkSyncControl sync={workSync} />}
           onGlobalReset={() => openCacheAction('reset')}
           resetDisabled={independentSwitchBlocked}
           onNewProject={beginNewProject}

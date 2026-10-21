@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeftRight, Check, FileText, FolderOpen, LoaderCircle, Map, Plus, ScanLine, X } from 'lucide-react';
+import { ArrowLeftRight, Check, FileText, FolderOpen, LoaderCircle, Map, MapPin, Plus, Route, ScanLine, X } from 'lucide-react';
 import { identityTransferPose, parseTransferMatrixFile, transformTeachingPose } from '../lib/teachingTransfer.js';
 import { defaultIndependentTeachingName, INDEPENDENT_TEACHING_NAME_MAX_LENGTH, validateIndependentTeachingName } from '../lib/independentTeachingName.js';
 import './NewIndependentTeachingDialog.css';
@@ -18,8 +18,22 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
   const [matrix, setMatrix] = useState(null);
   const [matrixError, setMatrixError] = useState('');
   const [matrixLoading, setMatrixLoading] = useState(false);
+  const [syncRoute, setSyncRoute] = useState(false);
+  const [placeInMap, setPlaceInMap] = useState(false);
   const hasMap = Boolean(state.mapSnapshot);
   const busy = state.busy === true;
+  const hasRoute = Boolean(state.mapSnapshot?.config?.config?.project?.waypoints?.length);
+  const canPlace = hasMap && Boolean(matrix) && !matrixError;
+  const canSyncRoute = canPlace && hasRoute;
+  const placementDisabledReason = !hasMap ? '请先加载地图示教工程'
+    : !matrix || matrixError ? '请先加载有效的转换矩阵' : '';
+  const routeDisabledReason = !hasMap ? placementDisabledReason
+    : !hasRoute ? '请先在地图示教中导入路网' : placementDisabledReason;
+
+  useEffect(() => {
+    if (!canPlace) setPlaceInMap(false);
+    if (!canSyncRoute) setSyncRoute(false);
+  }, [canPlace, canSyncRoute]);
 
   useEffect(() => {
     const previous = document.activeElement;
@@ -83,7 +97,8 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
     onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
     <form onSubmit={(event) => {
       event.preventDefault();
-      if (canCreate) onCreate({ file: modelFile, matrix: hasMap ? matrix : null, name: name.trim() });
+      if (canCreate) onCreate({ file: modelFile, matrix: hasMap ? matrix : null, name: name.trim(),
+        syncRoute: syncRoute && canSyncRoute, placeInMap: placeInMap && canPlace });
     }}>
       <header className="new-independent-dialog__header">
         <span className="new-independent-dialog__mark"><ScanLine size={24} /></span>
@@ -98,7 +113,6 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
             aria-label="独立示教名称"
             maxLength={INDEPENDENT_TEACHING_NAME_MAX_LENGTH} required disabled={busy}
             placeholder="例如：1 号工位 · 左侧阀门" autoComplete="off" />
-          <span>选择模型后自动填写，可按工位或对象命名，便于在缓存列表中查找。</span>
           {nameEditedRef.current && nameError && <small role="alert">{nameError}</small>}
         </label>
         <section className="new-independent-dialog__section" aria-labelledby="new-independent-model-title">
@@ -147,6 +161,20 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
             <p id="new-independent-matrix-note">可先创建模型，之后通过“示教转换”加载或修改转换关系。
               {!hasMap && ' 加载矩阵前需先打开地图示教工程。'}</p>
             {(matrix || matrixError) && <button type="button" disabled={busy} onClick={clearMatrix}>移除矩阵</button>}
+          </div>
+          <div className="new-independent-dialog__options" role="group" aria-label="创建时同步与放置">
+            <button type="button" aria-pressed={syncRoute && canSyncRoute}
+              disabled={!canSyncRoute || busy || matrixLoading}
+              title={routeDisabledReason || '创建时将地图路网同步到独立模型坐标系'}
+              onClick={() => setSyncRoute((selected) => !selected)}>
+              <Route size={15} />同步路网{syncRoute && canSyncRoute && <Check size={14} />}
+            </button>
+            <button type="button" aria-pressed={placeInMap && canPlace}
+              disabled={!canPlace || busy || matrixLoading}
+              title={placementDisabledReason || '创建时按转换矩阵放置模型，并进入地图示教'}
+              onClick={() => setPlaceInMap((selected) => !selected)}>
+              <MapPin size={15} />放置进入地图{placeInMap && canPlace && <Check size={14} />}
+            </button>
           </div>
         </section>
         {state.error && <p className="new-independent-dialog__error" role="alert">{state.error}</p>}
