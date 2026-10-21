@@ -1,13 +1,36 @@
-.workspace-cache-dialog { box-sizing: border-box; width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; padding: 26px; border: 1px solid #80574d; border-radius: 10px; background: #152124; color: #dbe9e6; box-shadow: 0 24px 90px #0008; }
-.workspace-cache-dialog::backdrop { background: #050c10b8; backdrop-filter: blur(3px); }
-.workspace-cache-dialog header { display: flex; align-items: center; gap: 12px; color: #f2b395; }
-.workspace-cache-dialog h2 { margin: 0; font-size: 20px; font-weight: 600; }
-.workspace-cache-dialog p { font-size: 13px; line-height: 1.8; color: #b2c5c1; overflow-wrap: anywhere; }
-.workspace-cache-dialog strong { color: #e4e9d9; }
-.workspace-cache-dialog .workspace-cache-dialog__warning, .workspace-cache-dialog .workspace-cache-dialog__error { color: #f2b395; }
-.workspace-cache-dialog footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
-.workspace-cache-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 9px 16px; border: 1px solid #405a55; border-radius: 5px; background: #243530; color: #dceae5; cursor: pointer; }
-.workspace-cache-dialog button.is-danger { background: #743c33; border-color: #b87664; color: #ffe9df; }
-.workspace-cache-dialog button:focus-visible { outline: 2px solid #f2b395; outline-offset: 3px; }
-.workspace-cache-dialog button:disabled { opacity: .6; cursor: wait; }
+.workspace-cache-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  padding: 0;
+  border: 1px solid #29555b;
+  border-radius: 0;
+  background: #0a161b;
+  color: var(--text);
+  box-shadow: 0 24px 80px #0009;
+}
+.workspace-cache-dialog::backdrop { background: #02090dc9; backdrop-filter: blur(4px); }
+.workspace-cache-dialog header { display: flex; align-items: center; gap: 12px; padding: 20px 24px; border-bottom: 1px solid #21363c; }
+.workspace-cache-dialog header > svg { flex-shrink: 0; color: var(--amber); }
+.workspace-cache-dialog h2 { flex: 1; min-width: 0; margin: 0; color: #e0eeee; font-size: 18px; font-weight: 600; }
+.workspace-cache-dialog__body { padding: 22px 24px; }
+.workspace-cache-dialog__body p { margin: 0 0 14px; color: #a7bec1; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.workspace-cache-dialog strong { color: var(--text); }
+.workspace-cache-dialog__body .workspace-cache-dialog__warning { margin: 20px 0 0; padding: 12px 14px; border: 1px solid #f4c95d38; background: #f4c95d08; color: var(--amber); }
+.workspace-cache-dialog__body .workspace-cache-dialog__error { margin: 14px 0 0; color: var(--red); }
+.workspace-cache-dialog footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid #21363c; }
+.workspace-cache-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 9px 14px; border: 1px solid #2d464d; border-radius: 0; background: transparent; color: #aec6ca; font: inherit; font-size: 12px; cursor: pointer; }
+.workspace-cache-dialog button:hover:not(:disabled) { border-color: var(--cyan); background: #59dbe808; color: #d9f6f8; }
+.workspace-cache-dialog button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+.workspace-cache-dialog .workspace-cache-dialog__close { flex-shrink: 0; min-height: 32px; padding: 6px; border-color: transparent; }
+.workspace-cache-dialog button.is-danger { border-color: #ff706e66; background: #ff706e12; color: #ffaaa0; }
+.workspace-cache-dialog button.is-danger:hover:not(:disabled) { border-color: var(--red); background: #ff706e22; color: #ffd1cc; }
+.workspace-cache-dialog button.is-danger:focus-visible { outline-color: var(--red); }
+.workspace-cache-dialog button:disabled { opacity: .4; cursor: not-allowed; }
 .project-load-history .independent-workspace-delete { --project-load-accent: 242, 179, 149; }
+
+@media (max-width: 480px) {
+  .workspace-cache-dialog header, .workspace-cache-dialog__body, .workspace-cache-dialog footer { padding-left: 18px; padding-right: 18px; }
+  .workspace-cache-dialog h2 { font-size: 17px; }
+  .workspace-cache-dialog footer > button { flex: 1; }
+}

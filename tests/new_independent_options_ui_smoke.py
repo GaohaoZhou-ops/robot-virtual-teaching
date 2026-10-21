@@ -80,7 +80,7 @@ def run():
                 expect(button).to_have_attribute('aria-pressed', 'false')
             context.close()
 
-            # A complete map without navigation allows placement, but cannot supply a route.
+            # A complete map without navigation offers an optional route import.
             context, page = new_page(browser, errors)
             seed(page, ['map', 'independent'], 'independent')
             page.evaluate("""async () => {
@@ -92,9 +92,8 @@ def run():
             }""")
             dialog = open_new_group(page)
             choose_new_matrix(page, dialog, MATRIX)
-            route, place = options(dialog)
-            expect(route).to_be_disabled()
-            expect(place).to_be_enabled()
+            expect(dialog.get_by_role('button', name='加载路网', exact=True)).to_be_enabled()
+            expect(dialog.get_by_role('button', name='放置进入地图', exact=True)).to_be_enabled()
             context.close()
 
             for sync_route, place_map in [(False, False), (True, False), (False, True), (True, True)]:

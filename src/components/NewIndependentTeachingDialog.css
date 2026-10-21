@@ -82,6 +82,7 @@
 .new-independent-dialog__options button[aria-pressed="true"]:hover:not(:disabled) { border-color: #5ee59a; color: #a7f5c6; }
 .new-independent-dialog__options button:focus-visible { outline-color: #5ee59a; }
 .new-independent-dialog__error { margin: 8px 0 0; color: #ffaaa0; font-size: 12px; line-height: 1.7; }
+.new-independent-dialog__route-status { margin: 10px 0 0; color: #8abcb4; font-size: 11px; line-height: 1.7; }
 .new-independent-dialog__progress { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--independent-accent); font-size: 12px; }
 .new-independent-dialog footer { display: flex; align-items: center; gap: 10px; padding: 17px 24px; border-top: 1px solid #2e2c40; }
 .new-independent-dialog footer > span { flex: 1; color: #8d97aa; font-size: 11px; }

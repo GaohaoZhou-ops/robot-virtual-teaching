@@ -3,7 +3,7 @@ from topbar_tools_helpers import topbar_action
 import os
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import expect, sync_playwright
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990").rstrip("/")
@@ -103,14 +103,19 @@ def run():
         add_waypoints(page, 1)
         set_color_mode(page, "source")
         switch_mode(page, "independent")
-        wait_for_home(page)
+        dialog = page.get_by_role("dialog", name="新增独立示教", exact=True)
+        expect(dialog).to_be_visible()
+        wait_for_workbench(page, "map")
+        expect(dialog.get_by_role("button", name="加载转换矩阵", exact=True)).to_be_enabled()
         home = page.locator('[data-app-page="home"]')
-        assert home.get_attribute("data-selected-teaching-mode") == "independent"
-        assert home.get_attribute("data-map-workspace") == "cached"
-        assert home.get_attribute("data-independent-workspace") == "empty"
         assert len(file_choosers) == 1
 
-        create_project(page, "independent")
+        with page.expect_file_chooser() as chooser_info:
+            dialog.get_by_role("button", name="选择模型", exact=True).click()
+        chooser_info.value.set_files(str(FIXTURE))
+        with page.expect_navigation(wait_until="networkidle"):
+            dialog.get_by_role("button", name="创建独立示教", exact=True).click()
+        wait_for_workbench(page, "independent")
         assert page.locator(".visual-workspace").get_attribute(
             "data-workspace-layout"
         ) == "spatial-only"

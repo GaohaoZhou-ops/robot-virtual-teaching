@@ -59,7 +59,8 @@ def check_layout(page):
     assert ruler["x"] + ruler["width"] <= view["x"] + view["width"]
     assert ruler["y"] + ruler["height"] <= view["y"] + view["height"]
     if legend:
-        assert legend["y"] + legend["height"] < ruler["y"]
+        assert ruler["x"] + ruler["width"] < legend["x"]
+        assert math.isclose(legend["y"] + legend["height"], ruler["y"] + ruler["height"], abs_tol=1)
 
 
 def run():
