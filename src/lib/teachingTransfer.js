@@ -1,6 +1,7 @@
 import { Euler, Matrix4, Quaternion, Vector3, MathUtils } from 'three';
 import { buildExport, createId, normalizeProject, teachingCoordinateFrame } from './io.js';
 import { sha256Bytes } from './hash.js';
+import { appendPlacedObjectLayers } from './placedObjectRendering.js';
 
 const axes = ['x', 'y', 'z'];
 const rotationAxes = ['roll', 'pitch', 'yaw'];
@@ -409,7 +410,7 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
     .filter((item) => source.map.teachingGroupId
       ? item.sourceMap.teachingGroupId !== source.map.teachingGroupId
       : item.sourceMap.mapId !== source.map.mapId)
-    .map(({ previousPlacements: earlier, mapFrameSources: earlierFrames, ...placement }) => placement);
+    .map(({ previousPlacements: earlier, mapFrameSources: earlierFrames, geometryLayers: earlierLayers, ...placement }) => placement);
   map.portableRobotPackage = [source.map.portableRobotPackage, target.map.portableRobotPackage]
     .find((candidate) => candidate?.relativePath === sourceRobot?.relativePath) || null;
   const result = snapshotResult({ ...background,
@@ -423,6 +424,7 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
       activeTeachingParkingPointId: importedTasks[0]?.parkingPoints[0]?.id || null,
     },
   }, map, 'map', { version: 1, kind: 'placement', id: createId('transfer'),
+    geometryLayers: appendPlacedObjectLayers(map, target.map, previousTransfer, source.map.pointCount),
     sourceMap: await mapIdentity(source.map), localToMap, createdAt: new Date().toISOString(),
     mapFrameSources: mapFrameSources.filter((item, index, all) => all.findIndex(
       (candidate) => candidate.sourceHash === item.sourceHash && candidate.mapId === item.mapId,

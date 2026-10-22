@@ -574,6 +574,17 @@ playwright/.auth/
 /atlas-copy-ui-*.[zZ][iI][pP]
 /tests/atlas-copy-ui-*.[zZ][iI][pP]
 
+# Locally retained display-regression workspaces and packed copies contain
+# exported projects. Scope these to output roots so sources and fixtures remain visible.
+/atlas-layer-colors-*/
+/tests/atlas-layer-colors-*/
+/atlas-layer-colors-*.[zZ][iI][pP]
+/tests/atlas-layer-colors-*.[zZ][iI][pP]
+/atlas-height-legend-*/
+/tests/atlas-height-legend-*/
+/atlas-height-legend-*.[zZ][iI][pP]
+/tests/atlas-height-legend-*.[zZ][iI][pP]
+
 # Python bytecode, environments, and test caches
 __pycache__/
 *.py[cod]
