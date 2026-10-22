@@ -7,6 +7,37 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    /// Start the desktop live-screen fixture while this test waits for USB.
+    func testLiveScreenCollaboration() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_LIVE"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_ATLAS_SCREEN_LIVE=1 and run the desktop USB camera fixture")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        print("ATLAS_SCREEN_WAITING_FOR_DESKTOP")
+        let view = app.buttons["screen-collaboration-stop"]
+        XCTAssertTrue(view.waitForExistence(timeout: 150))
+        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            let left = app.descendants(matching: .any)["screen-camera-left"].firstMatch
+            let right = app.descendants(matching: .any)["screen-camera-right"].firstMatch
+            XCTAssertTrue(left.waitForExistence(timeout: 10)); XCTAssertTrue(right.exists)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(left.frame))
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(right.frame))
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "USB stereo cameras - \(orientation.rawValue)"; capture.lifetime = .keepAlways; add(capture)
+            left.tap()
+            XCTAssertFalse(right.exists)
+            let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            expanded.name = "USB left camera expanded - \(orientation.rawValue)"; expanded.lifetime = .keepAlways; add(expanded)
+            left.tap(); XCTAssertTrue(right.waitForExistence(timeout: 5))
+        }
+        app.buttons["screen-collaboration-stop"].tap()
+        XCTAssertTrue(view.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["library-content"].exists)
+    }
+
     func testReadOnlyParkingReferences() throws {
         continueAfterFailure = false
         guard let id = ProcessInfo.processInfo.environment["ATLAS_PARKING_REFERENCE_FIXTURE_ID"], UUID(uuidString: id) != nil else {

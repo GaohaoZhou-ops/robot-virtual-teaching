@@ -168,6 +168,20 @@ iPhone 保留深色卡片、青色操作按钮及控制分组：首页通过「�
 
 旧 iPad 项目、传输协议和 Pose 来源字段保持兼容；新 iPhone 结果记录 `device.platform = "iOS"`，电脑导入后的任务标为 iPhone 示教。模拟器可以验证界面、模型预览和文件流程，AR / LiDAR 定位需在真机验证。原生手机 UI 回归为 `testPhoneLibraryConnectionsAndRotation` 和 `testPhoneTeachingReviewAndCompletion`；后者使用 `node tests/iphone_layout_fixture.mjs <临时目录>` 生成的专用项目，复制到测试设备应用容器的 `Library/Application Support/AtlasTeaching/` 后运行。真机 AR 回归为 `testPhoneLiveLiDARPlacementAndCapture`，使用生成器第三个参数 `UI-iPhone-LiveAR` 创建另一份专用项目；运行时需让镜头朝向明亮、有纹理的表面并缓慢移动。测试项目可用 `testRemoveDisposablePhoneFixtures` 清理，必须通过 `ATLAS_PHONE_CLEANUP_IDS` 明确传入本次生成的项目 UUID（逗号分隔），且只接受名称带 `UI-iPhone-` 的项目。
 
+### iPad / iPhone 有线画面协作
+
+在电脑上操作虚拟机器人时，可把左右臂的 Zivid 2 M70 仿真画面显示到通过数据线连接的 iPad / iPhone。无需传输模型到移动设备，也不依赖 Wi-Fi。
+
+1. 更新并启动电脑服务（`./scripts/restart.sh`），通过 `http://127.0.0.1:21990` 或 `http://localhost:21990` 打开地图示教或独立示教工程，加载带左右臂末端相机的机器人。
+2. 用数据线连接并解锁设备，打开新版 Atlas App。首次更新 App 可运行 `./scripts/deploy_ipad.sh`（iPhone 使用 `./scripts/deploy_iphone.sh`）。
+3. 点击 **设备 → iPad / iPhone → 画面协作**。只有一台就绪设备时自动连接；有多台时选择设备后点击 **开始协作**。
+4. 设备自动进入双臂画面：横屏并排、竖屏上下排列。轻点画面或使用顶部切换按钮可放大单臂，再次轻点返回双臂。
+5. 电脑端关闭协作窗口、切换相机面板后继续共享；点击任一端的 **结束协作** 停止。切换工程、关闭工作台、电脑标签页进入后台或设备 App 退出前台会停止协作，恢复后可重新连接。
+
+画面来自当前虚拟工程，保留完整相机视野；电脑相机面板的数字缩放不改变共享画面。设备等待超过 2.5 秒会明确显示画面暂停，连接停止后自动退出。模型、Pose 和本机项目均不由此功能修改。
+
+实现使用 macOS 的 USB 多路复用连接与 Python 3 标准库，移动端只监听回环地址。每臂画面为 960 × 600 JPEG，最多约每 150 毫秒发送一组；实际刷新速度受渲染和设备性能影响，发送过程只保留最新画面。服务回归：`npm run test:ipad:screen`；真机界面验证：`ATLAS_SCREEN_LIVE=1 BASE_URL=http://127.0.0.1:21990 uv run --with playwright python tests/ipad_screen_ui_smoke.py`。原生界面回归 `testLiveScreenCollaboration` 需为 `xcodebuild test` 设置 `TEST_RUNNER_ATLAS_SCREEN_LIVE=1`，在等待期间同时运行电脑真机测试脚本，并设置 `ATLAS_SCREEN_NATIVE_STOP=1 ATLAS_SCREEN_HOLD=120` 保持发送、检查设备端结束协作。
+
 ### 服务管理
 
 | 操作 | 命令 |

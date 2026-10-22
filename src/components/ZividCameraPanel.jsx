@@ -1653,6 +1653,8 @@ export default function ZividCameraPanel({
   onOpenJointControl,
   onCameraTeachingMove,
   onCaptureProviderChange,
+  streamOnly = false,
+  onStreamFrame,
 }) {
   const enabled = isM70Robot(robot, robotLoadState);
   const viewEnabled = active && enabled;
@@ -1691,6 +1693,8 @@ export default function ZividCameraPanel({
   const [rendererStatus, setRendererStatus] = useState('waiting');
   const [cameraMeshStats, setCameraMeshStats] = useState(EMPTY_CAMERA_MESH_STATS);
   const mountRef = useRef(null);
+  const onStreamFrameRef = useRef(onStreamFrame);
+  onStreamFrameRef.current = onStreamFrame;
   const poseRef = useRef(null);
   const cameraPosesRef = useRef(cameraPoses);
   const renderModeRef = useRef(renderMode);
@@ -2104,7 +2108,7 @@ export default function ZividCameraPanel({
       detail: 1.45,
       full: 1.75,
     }[qualityPlan.effectiveId] || 1.15;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, pixelRatioCap));
+    renderer.setPixelRatio(streamOnly ? 1 : Math.min(window.devicePixelRatio || 1, pixelRatioCap));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.domElement.className = 'zivid-camera-canvas';
     renderer.domElement.tabIndex = 0;
@@ -2164,6 +2168,7 @@ export default function ZividCameraPanel({
     const handleContextLost = (event) => {
       event.preventDefault();
       contextAvailable = false;
+      onStreamFrameRef.current?.(null);
       renderer.domElement.dataset.contextState = 'lost';
       setRendererStatus('context-lost');
     };
@@ -2271,7 +2276,12 @@ export default function ZividCameraPanel({
     resize();
 
     let frameId = 0;
+    let lastStreamRenderAt = -Infinity;
     const render = () => {
+      if (streamOnly && performance.now() - lastStreamRenderAt < 100) {
+        frameId = requestAnimationFrame(render);
+        return;
+      }
       const pose = poseRef.current;
       const currentView = viewRef.current;
       const renderSignature = [
@@ -2356,6 +2366,9 @@ export default function ZividCameraPanel({
       if (contextAvailable) {
         try {
           renderer.render(scene, camera);
+          lastStreamRenderAt = performance.now();
+          // Copy synchronously before WebGL discards its drawing buffer.
+          if (pose?.position && pose?.quaternion) onStreamFrameRef.current?.(renderer.domElement);
           if (!announcedReady) {
             announcedReady = true;
             renderer.domElement.dataset.contextState = 'ready';
@@ -2374,6 +2387,7 @@ export default function ZividCameraPanel({
 
     return () => {
       cancelAnimationFrame(frameId);
+      onStreamFrameRef.current?.(null);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener('webglcontextlost', handleContextLost, false);
       renderer.domElement.removeEventListener('webglcontextrestored', handleContextRestored, false);
@@ -2398,9 +2412,11 @@ export default function ZividCameraPanel({
     mapData?.geometry,
     meshRenderQuality,
     settledCameraMeshRegionKey,
+    streamOnly,
   ]);
 
   if (!active) return null;
+  if (streamOnly) return <div ref={mountRef} className="ipad-screen-renderer" data-screen-side={side} data-renderer-status={rendererStatus} />;
   if (!enabled) {
     if (side === 'right') return null;
     return (

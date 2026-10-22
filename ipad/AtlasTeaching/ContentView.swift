@@ -1001,6 +1001,7 @@ private struct TeachingResultSyncView: View {
 }
 
 struct TeachingView: View {
+    @Environment(\.screenCollaborationActive) private var screenCollaborationActive
     @EnvironmentObject private var session: TeachingSession
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var ar = ARController()
@@ -1218,6 +1219,8 @@ struct TeachingView: View {
             }
             if !completed { await ar.start() }
         }.onDisappear {
+            // A USB camera overlay returns to the same calibrated AR workspace.
+            guard !screenCollaborationActive else { return }
             guard !review || session.current?.id != projectID else { return }
             loadedProjectID = nil
             nearbyPoseConfirmation = nil; ar.stop(); renderer.cancel(); coverage.cancel()

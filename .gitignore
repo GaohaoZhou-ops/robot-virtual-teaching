@@ -24,6 +24,8 @@ node_modules/
 # ipad/build/{device,simulator}/, iphone/build/{device,simulator}/ and vision/build/{device,simulator}/.
 # The build/ rule also covers deploy_ipad.sh's ipad/build/deploy-device/ logs,
 # device/signing reports, products, and native UI verification attachments.
+# Camera collaboration checks use build/{screen-validation,ipad-screen-test}/
+# and ipad/build/screen-tests/, including captured frames and Xcode results.
 dist/
 build/
 out/
@@ -186,6 +188,22 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# USB camera collaboration diagnostics copied from /tmp or build/.
+# Keep reports, frame captures, review bundles and local environments scoped
+# to output locations so source files and nested regression fixtures stay visible.
+/atlas-screen-*/
+/tests/atlas-screen-*/
+/ipad/atlas-screen-*/
+/atlas-screen-*.[zZ][iI][pP]
+/tests/atlas-screen-*.[zZ][iI][pP]
+/ipad/atlas-screen-*.[zZ][iI][pP]
+/atlas-screen-*.json
+/tests/atlas-screen-*.json
+/ipad/atlas-screen-*.json
+/atlas-screen-*.bin
+/tests/atlas-screen-*.bin
+/ipad/atlas-screen-*.bin
+/ipad/atlas-screen-*.png
 # Grouped inspector layout / button-size captures and packed review copies.
 # Scope these to local output roots; source artwork and fixtures stay visible.
 /atlas-inspector-*/

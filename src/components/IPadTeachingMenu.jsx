@@ -1,11 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowDownToLine, ArrowLeftRight, Bot, Check, ChevronDown, ChevronRight, FileUp, Glasses, History, Plus, QrCode, RefreshCw, Tablet, Wifi } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeftRight, Bot, Check, ChevronDown, ChevronRight, FileUp, Glasses, History, Monitor, Plus, QrCode, RefreshCw, Tablet, Wifi } from 'lucide-react';
 import { ipadRequest, readDeviceTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
 import './IPadTeachingMenu.css';
 
 const transferStatus = { preparing: '准备模型', ready: '等待配对', paired: '设备示教中', completed: '待接收', imported: '已接收', cancelled: '已结束' };
-export default function IPadTeachingMenu({ device = 'ipad', mapData, source, desktopCount, deviceCount, disabled, onSourceChange, onOpenSync, isActive = true, menuAnchorRef }) {
+export default function IPadTeachingMenu({ device = 'ipad', mapData, source, desktopCount, deviceCount, disabled, onSourceChange, onOpenSync, onOpenScreen, allowTeaching = true, isActive = true, menuAnchorRef }) {
   const vision = device === 'vision';
   const deviceLabel = vision ? 'Vision Pro' : 'iPad / iPhone';
   const DeviceIcon = vision ? Glasses : Tablet;
@@ -29,11 +29,11 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
   };
   const run = (action) => { close(true); action(); };
   const sync = (action, ticketId = currentTicket?.id) => run(() => onOpenSync({ action, ticketId, device }));
-  const sections = [
+  const sections = allowTeaching ? [
     { id: 'source', label: '示教来源', detail: currentSourceLabel, icon: Bot },
     { id: 'sync', label: '同步与接收', detail: currentTicket ? transferStatus[currentTicket.status] : vision ? '配对码 / 局域网' : '文件 / 扫码 / Wi-Fi', icon: ArrowLeftRight },
     { id: 'history', label: '传输任务', detail: `${tickets.length} 个任务`, icon: History },
-  ];
+  ] : [];
 
   useEffect(() => { if (!isActive || disabled) { setOpen(false); setSection(null); } }, [isActive, disabled]);
   useEffect(() => {
@@ -132,6 +132,10 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
     </button>
     {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label={deviceLabel} tabIndex={-1} style={position} onKeyDown={keyDown}>
       <p className="ipad-nav-title"><DeviceIcon size={14}/>{deviceLabel}</p>
+      {!vision && onOpenScreen && <button type="button" role="menuitem" aria-label="画面协作"
+        onPointerMove={() => setSection(null)} onClick={() => run(onOpenScreen)}>
+        <Monitor size={14}/><span><strong>画面协作</strong><small>数据线连接 · 左右臂相机</small></span><ChevronRight size={13}/>
+      </button>}
       {sections.map(({ id, label, detail, icon: Icon }) => <button key={id} type="button" role="menuitem" data-section={id}
         aria-label={label} aria-haspopup="menu" aria-expanded={section === id} aria-controls={section === id ? `${menuId}-${id}` : undefined}
         onPointerMove={(event) => { if (event.pointerType === 'mouse') setSection(id); }} onClick={() => focusChild(id)}>
