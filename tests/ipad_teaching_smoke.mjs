@@ -8,7 +8,7 @@ import { BufferGeometry, Float32BufferAttribute, Matrix4, Vector3 } from 'three'
 import { IPadModelMismatchError, packIPadModel, ipadResultTask } from '../src/lib/ipadTeaching.js';
 import { IPAD_PROTOCOL, MAX_MODEL_VERTICES, MAX_MODEL_INDICES, validateIPadResult, validateModelBytes } from '../src/lib/ipadProtocol.js';
 import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
+import { buildExport, normalizeProject, normalizeTeachingTasks } from '../src/lib/io.js';
 import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
 import { transformTeachingTasks, transferMatrix, placeTeachingWorkspace, writeBackTeachingWorkspace, extractTeachingWorkspace } from '../src/lib/teachingTransfer.js';
 import { createIPadCaptureLayer, disposeIPadCaptureLayer, mobileSamplePosition } from '../src/lib/ipadCaptureDisplay.js';
@@ -118,6 +118,23 @@ try {
   const received = await request(sessionPath + '/result', { token: owner }); assert.deepEqual(received, result);
   const ticket = { ...created, manifest: packed.manifest };
   const task = await ipadResultTask(result, ticket, map);
+  const captured = { ...result, samples: [result.samples[1]] };
+  assert.deepEqual(task.mobileCapture, captured, 'only iPad recordings enter the device teaching task');
+  assert.deepEqual(normalizeTeachingTasks([{ ...task, mobileCapture: result }])[0].mobileCapture, captured,
+    'previously saved mixed-source tasks are filtered when reopened');
+  const desktopOnly = { ...result, samples: [result.samples[0]] };
+  await assert.rejects(ipadResultTask(desktopOnly, ticket, map), /没有可接收的 iPad 示教 Pose/);
+  assert.deepEqual(normalizeTeachingTasks([{ ...task, mobileCapture: desktopOnly }]), [],
+    'old desktop-only reference tasks do not create an empty iPad group');
+  const legacy = structuredClone(result);
+  legacy.samples.forEach((sample) => { delete sample.origin; });
+  assert.deepEqual((await ipadResultTask(legacy, ticket, map)).mobileCapture, legacy,
+    'untagged recordings from older iPad versions remain available');
+  const report = { version: 1, rows: [{ sampleId: result.samples[1].id, solutions: {} }],
+    mapPose: { position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 } } };
+  assert.ok(normalizeTeachingTasks([{ ...task, mobileSolve: report }])[0].mobileSolve);
+  assert.equal(normalizeTeachingTasks([{ ...task, mobileCapture: result, mobileSolve: report }])[0].mobileSolve, undefined,
+    'reports calculated with desktop references must be recomputed against the remaining iPad samples');
   assert.equal((await ipadResultTask(result, ticket, { ...map, mapId: 'reopened-project', name: 'renamed.ply', sourceHash: 'different-metadata' })).id,
     task.id, 'identical model bytes match regardless of names or project metadata');
   for (const field of ['position', 'color', 'index']) {
@@ -148,24 +165,24 @@ try {
   const withBoth = normalizeProject(buildExport({ mapData: map, teachingSpaceMode: 'independent', heightRange: [0, 4], waypoints: [], edges: [],
     teachingTasks: [...desktopTasks, await ipadResultTask(result, ticket, withDesktopPoses)] }));
   assert.equal(withBoth.teachingTasks.length, desktopTasks.length + 1, 'different desktop and iPad poses coexist');
-  assert.deepEqual(withBoth.teachingTasks.at(-1).mobileCapture, result);
+  assert.deepEqual(withBoth.teachingTasks.at(-1).mobileCapture, captured);
   assert.deepEqual(desktopTasks, desktopBefore, 'model checking never changes desktop poses');
   assert.deepEqual(result, ipadBefore, 'model checking never changes iPad poses');
   const exported = buildExport({ mapData: map, teachingSpaceMode: 'independent', heightRange: [0, 4], waypoints: [], edges: [], teachingTasks: [task] });
   const normalized = normalizeProject(JSON.parse(JSON.stringify(exported)));
-  assert.deepEqual(normalized.teachingTasks[0].mobileCapture, result);
+  assert.deepEqual(normalized.teachingTasks[0].mobileCapture, captured);
   const archive = await buildProjectArchive(exported, { mapResource: {
     positionBuffer: geometry.getAttribute('position').array.buffer, indexBuffer: geometry.index.array.buffer,
     indexComponentType: 'uint16', pointCount: 3, faceCount: 1, bounds: map.bounds, sourceHash: map.sourceHash,
   } });
   const restored = await readProjectArchive(archive.bytes);
-  assert.deepEqual(normalizeProject(restored.payload).teachingTasks[0].mobileCapture, result, 'full ZIP preserves Pose names, orientations and calibrations');
+  assert.deepEqual(normalizeProject(restored.payload).teachingTasks[0].mobileCapture, captured, 'full ZIP preserves iPad Pose names, orientations and calibrations');
   assert.equal(normalized.teachingTasks[0].parkingPoints.length, 0, 'iPad poses are never fabricated robot poses');
   const transform = transferMatrix({ position: { x: 10, y: 20, z: 5 }, rpy: { roll: 10, pitch: 20, yaw: 90 } });
   const moved = transformTeachingTasks(normalized.teachingTasks, transform, 'map', map)[0];
-  const expected = new Vector3(1, 2, 3).applyMatrix4(transform);
-  assert.ok(mobileSamplePosition(result.samples[0], moved).distanceTo(expected) < 1e-6);
-  assert.deepEqual(moved.mobileCapture, result, 'raw capture remains immutable across workspace transforms');
+  const expected = new Vector3(2, 2, 3).applyMatrix4(transform);
+  assert.ok(mobileSamplePosition(captured.samples[0], moved).distanceTo(expected) < 1e-6);
+  assert.deepEqual(moved.mobileCapture, captured, 'iPad recordings remain immutable across workspace transforms');
   const layer = createIPadCaptureLayer([moved]); assert.equal(layer.children.length, 3); disposeIPadCaptureLayer(layer);
   // Real transfer pipeline: new mobile tasks survive placement and extraction/write-back.
   const independent = teachingTransferFixture('independent'), background = teachingTransferFixture('map');

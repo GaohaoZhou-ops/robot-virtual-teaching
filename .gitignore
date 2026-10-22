@@ -175,6 +175,10 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Pose-solver dialog captures copied from /tmp for local UI review.
+# Keep same-named source artwork and nested regression fixtures trackable.
+/mobile-solve-*.png
+/tests/mobile-solve-*.png
 # Grouped robot-preset preview captures and locally packed review copies.
 # Restrict output paths to the root/tests so reusable fixture media stays visible.
 /atlas-robot-preset-*/

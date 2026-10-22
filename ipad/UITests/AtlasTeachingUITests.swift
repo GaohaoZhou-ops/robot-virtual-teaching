@@ -1631,16 +1631,27 @@ final class AtlasTeachingUITests: XCTestCase {
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-pose-"))
         XCTAssertGreaterThan(rows.count, 0)
         if rows.count > 6 { rows.element(boundBy: 6).tap() }
-        for mode in ["2d", "3d"] {
+        for (orientation, mode) in [(UIDeviceOrientation.landscapeLeft, "2d"), (.landscapeLeft, "3d"),
+                                    (.portrait, "3d"), (.landscapeLeft, "3d")] {
+            XCUIDevice.shared.orientation = orientation
             app.buttons["pose-preview-mode-\(mode)"].tap()
             let pending = app.staticTexts["正在提取当前 Pose 点云…"]
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == false"), object: pending)], timeout: 30), .completed)
             let preview = app.otherElements["pose-review-preview"]
             XCTAssertTrue(preview.exists)
-            XCTAssertEqual(preview.frame.width / preview.frame.height, ZividFieldOfView.nativeAspect, accuracy: 0.01)
+            if mode == "2d" {
+                XCTAssertEqual(preview.frame.width / preview.frame.height, ZividFieldOfView.nativeAspect, accuracy: 0.01)
+            } else {
+                let viewport = app.otherElements["pose-review-viewport"]
+                let thumbnail = app.descendants(matching: .any)["pose-global-thumbnail"].firstMatch
+                XCTAssertTrue(thumbnail.isHittable)
+                XCTAssertEqual(viewport.frame.maxX - thumbnail.frame.maxX, 12, accuracy: 2)
+                XCTAssertEqual(viewport.frame.maxY - thumbnail.frame.maxY, 12, accuracy: 2)
+            }
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            shot.name = "Existing Pose M70 \(mode)"; shot.lifetime = .keepAlways; add(shot)
+            shot.name = "Existing Pose M70 \(mode) \(orientation.isLandscape ? "landscape" : "portrait")"
+            shot.lifetime = .keepAlways; add(shot)
             XCTAssertEqual(app.staticTexts["pose-review-count"].label, count)
         }
     }

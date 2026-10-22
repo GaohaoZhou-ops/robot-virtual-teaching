@@ -8,6 +8,14 @@ export const VISION_HEAD_FRAME = 'visionpro_head_optical_frame';
 export const mobileDeviceKey = (result) => result?.device?.platform === 'visionOS' ? 'vision' : 'ipad';
 export const mobileDeviceLabel = (result) => mobileDeviceKey(result) === 'vision' ? 'Vision Pro' : 'iPad';
 
+export function withoutDesktopPoseReferences(result) {
+  if (mobileDeviceKey(result) !== 'ipad') return result;
+  // Desktop optical poses travel with the iPad model as references. Legacy
+  // results without an origin tag contain recordings made on the iPad.
+  const samples = result.samples.filter((sample) => sample.origin !== 'desktop');
+  return samples.length === result.samples.length ? result : { ...result, samples };
+}
+
 const check = (condition, message) => { if (!condition) throw new Error(message); };
 const finiteVector = (v, keys) => v && keys.every((key) => Number.isFinite(v[key]));
 const xyz = ['x', 'y', 'z'];

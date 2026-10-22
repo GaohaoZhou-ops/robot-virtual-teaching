@@ -142,7 +142,7 @@ def run():
             assert len(tasks[1]['parkingPoints'][0]['poses']) == 1, 'unreachable samples must not be saved'
             assert tasks[1]['parkingPoints'][0]['poses'][0]['mobileSampleId'] == original_capture['samples'][0]['id']
             assert tasks[1]['parkingPoints'][0]['poses'][0]['opticalTargets']['left']['position'] == archive['result']['samples'][0]['cameraPose']['position']
-            expect(sources.get_by_role('button', name='机器人示教', exact=True)).to_have_attribute('aria-pressed', 'true')
+            expect(sources.get_by_role('button', name='电脑端示教', exact=True)).to_have_attribute('aria-pressed', 'true')
             page.get_by_role('button', name='查看来源采样', exact=True).click()
             sample.click()
             expect(page.get_by_label('采样 Pose 详情', exact=True)).to_contain_text('已保存 · 可精修')

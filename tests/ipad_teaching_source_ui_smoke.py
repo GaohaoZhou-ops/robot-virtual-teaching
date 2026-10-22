@@ -112,13 +112,22 @@ def import_result(page, archive):
     dialog.locator('[data-ipad-result-input]').set_input_files({
         'name': 'test.atlas-teaching.json', 'mimeType': 'application/json', 'buffer': json.dumps(archive).encode(),
     })
-    expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text(f"已接收 {len(archive['result']['samples'])} 个 Pose")
+    result = archive['result']
+    count = sum(result['device'].get('platform') == 'visionOS' or sample.get('origin') != 'desktop'
+                for sample in result['samples'])
+    expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text(f"已接收 {count} 个 Pose")
     page.get_by_role('button', name='关闭设备示教窗口').click()
 
 
 def run():
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     project, archive = fixture_data()
+    archive['result']['samples'][0]['origin'] = 'ipad'
+    captured_result = copy.deepcopy(archive['result'])
+    for side in ['left', 'right']:
+        reference = copy.deepcopy(archive['result']['samples'][0])
+        reference.update(id=f'desktop-reference-{side}', name=f'电脑参考 {side}', origin='desktop', arm=side)
+        archive['result']['samples'].append(reference)
     mobile_id = 'ipad-' + archive['result']['id']
     errors, lan_requests = [], []
     with sync_playwright() as playwright:
@@ -190,6 +199,10 @@ def run():
             expect(mobile).to_have_attribute('aria-checked', 'true')
             expect(tree).to_have_attribute('data-task-count', '1')
             expect(tree).to_contain_text('iPad · 2 个 Pose')
+            expect(tree.locator('[data-mobile-sample-id]')).to_have_count(2)
+            expect(tree).not_to_contain_text('电脑参考')
+            expect(page.get_by_role('button', name='电脑端示教', exact=True)).to_be_visible()
+            expect(page.get_by_role('button', name='机器人示教', exact=True)).to_have_count(0)
             expect(canvas).to_have_attribute('data-mobile-capture-visible', 'true')
             saved_workspace(page, mobile_id, 3)
             view = camera_view(canvas)
@@ -207,7 +220,7 @@ def run():
             select_teaching_source(page, '查看独立示教')
             saved = saved_workspace(page, 'desktop-task-1', 3)
             assert saved['project']['virtualTeaching']['tasks'][:2] == original
-            assert saved['project']['virtualTeaching']['tasks'][2]['mobileCapture'] == archive['result']
+            assert saved['project']['virtualTeaching']['tasks'][2]['mobileCapture'] == captured_result
             page.reload(wait_until='networkidle')
             ready(page)
             open_ipad_menu(page, '示教来源')
@@ -227,7 +240,29 @@ def run():
                 start_project_download(page)
             exported = read_exported_project(download.value)['virtualTeaching']['tasks']
             assert exported[:2] == original
-            assert exported[2]['mobileCapture'] == archive['result'], 'hidden device data must remain in project exports'
+            assert exported[2]['mobileCapture'] == captured_result, 'exports contain only the iPad recordings'
+
+            # Reopen an older project that already contains the returned desktop references.
+            legacy_project = copy.deepcopy(project)
+            legacy_task = copy.deepcopy(exported[2])
+            legacy_task['mobileCapture'] = copy.deepcopy(archive['result'])
+            legacy_project['virtualTeaching']['tasks'].append(legacy_task)
+            legacy_project['workspace'].update(activeTeachingTaskId=mobile_id, activeTeachingParkingPointId=None)
+            page.get_by_role('button', name='继续工作 · 返回主工作台继续示教').click()
+            page.locator('[data-project-guide-input]').set_input_files({
+                'name': 'legacy-mixed-origins.json', 'mimeType': 'application/json', 'buffer': json.dumps(legacy_project).encode(),
+            })
+            expect(tree).to_have_attribute('data-active-task', mobile_id)
+            expect(tree.locator('[data-mobile-sample-id]')).to_have_count(2)
+            legacy_saved = saved_workspace(page, mobile_id, 3)['project']['virtualTeaching']['tasks']
+            assert legacy_saved[:2] == original
+            assert legacy_saved[2]['mobileCapture'] == captured_result
+            page.reload(wait_until='networkidle')
+            ready(page)
+            expect(tree.locator('[data-mobile-sample-id]')).to_have_count(2)
+            expect(tree).not_to_contain_text('电脑参考')
+            import_result(page, archive)
+            assert len(saved_workspace(page, mobile_id, 3)['project']['virtualTeaching']['tasks']) == 3
 
             # With no desktop tasks yet, the desktop view must remain usable and survive reload.
             empty = browser.new_page(viewport={'width': 1280, 'height': 800})
@@ -256,6 +291,7 @@ def run():
             second_ipad['result'].update(id=str(uuid.uuid4()), sessionId=str(uuid.uuid4()))
             import_result(empty, second_ipad)
             vision = copy.deepcopy(archive)
+            vision['result']['samples'] = copy.deepcopy(captured_result['samples'])
             vision['result'].update(id=str(uuid.uuid4()), sessionId=str(uuid.uuid4()),
                                     device={'platform': 'visionOS', 'model': 'Apple Vision Pro',
                                             'lidar': False, 'poseSource': 'deviceAnchor'})
@@ -332,7 +368,7 @@ def run():
             large.screenshot(path=str(ARTIFACTS / 'vision-poses-paginated.png'), full_page=True)
             sources = large.get_by_role('group', name='示教来源', exact=True)
             view = camera_view(large_canvas)
-            sources.get_by_role('button', name='机器人示教', exact=True).click()
+            sources.get_by_role('button', name='电脑端示教', exact=True).click()
             expect(large_canvas).to_have_attribute('data-mobile-capture-visible', 'false')
             assert large_canvas.get_attribute('data-mobile-selected-sample') is None
             assert camera_view(large_canvas) == view

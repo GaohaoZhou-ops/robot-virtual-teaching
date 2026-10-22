@@ -2,7 +2,7 @@ import { calculatePathDistances } from './pathMetrics.js';
 import { normalizeRobotJointLocks } from './robotJointLocks.js';
 import { normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
 import { getSliceControlBounds } from './sliceRange.js';
-import { validateIPadResult } from './ipadProtocol.js';
+import { validateIPadResult, withoutDesktopPoseReferences } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { ZIVID_M70_PROFILE } from './zividCamera.js';
@@ -475,7 +475,12 @@ export function normalizeTeachingTasks(payload) {
         : [];
     const robot = task?.robot && typeof task.robot === 'object' ? task.robot : {};
     const map = task?.map && typeof task.map === 'object' ? task.map : {};
-    const mobileSolve = task.mobileCapture ? normalizeMobileSolveReport(task.mobileSolve) : null;
+    const mobileCapture = task.mobileCapture ? withoutDesktopPoseReferences(validateIPadResult(
+      task.mobileCapture, { modelHash: task.mobileCapture.modelHash }, task.mobileCapture.sessionId)) : null;
+    if (mobileCapture && !mobileCapture.samples.length) return null;
+    // A report may pair iPad samples with desktop references. Recompute it after
+    // removing references; already saved robot tasks remain independent.
+    const mobileSolve = mobileCapture === task.mobileCapture ? normalizeMobileSolveReport(task.mobileSolve) : null;
     return {
       id: String(task?.id || createId('teach-task')),
       name: String(task?.name || `示教任务 ${String(taskIndex + 1).padStart(2, '0')}`),
@@ -498,13 +503,13 @@ export function normalizeTeachingTasks(payload) {
       ...(task.abx ? { abx: structuredClone(task.abx) } : {}),
       ...(task.mobileSolveSource && typeof task.mobileSolveSource === 'object' ? { mobileSolveSource: structuredClone(task.mobileSolveSource) } : {}),
       ...(task.mobileCapture ? {
-        mobileCapture: validateIPadResult(task.mobileCapture, { modelHash: task.mobileCapture.modelHash }, task.mobileCapture.sessionId),
+        mobileCapture,
         mobileTransform: Array.isArray(task.mobileTransform) && task.mobileTransform.length === 16 && task.mobileTransform.every(Number.isFinite)
           ? [...task.mobileTransform] : [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
         ...(mobileSolve ? { mobileSolve } : {}),
       } : {}),
     };
-  });
+  }).filter(Boolean);
 }
 
 export function normalizeJointPoses(payload) {

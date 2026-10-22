@@ -41,6 +41,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
   const dialog = useRef(null), operation = useRef(false), initialized = useRef(false);
   const mismatchConfirm = useRef(null), operationFocus = useRef(null);
   const resultInput = useRef(null);
+  const receivedCapture = teachingTasks.find((task) => task.mobileCapture?.sessionId === ticket?.id)?.mobileCapture;
   useEffect(() => {
     if (vision || !lanVisible) return;
     const controller = new AbortController();
@@ -147,9 +148,9 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
     setBusy('正在校验地图并接收示教结果…');
     setFileReceipt('');
     const result = await ipadRequest(`/sessions/${selectedTicket.id}/result`, { token: selectedTicket.ownerToken });
-    await onImport(result, selectedTicket);
+    const task = await onImport(result, selectedTicket);
     const next = await ipadRequest(`/sessions/${selectedTicket.id}/imported`, { method: 'POST', token: selectedTicket.ownerToken });
-    update({ ...selectedTicket, ...next });
+    update({ ...selectedTicket, ...next, receivedSampleCount: task.mobileCapture.samples.length });
   };
   const receive = () => perform('正在校验地图并接收示教结果…', () => receiveTicket(ticket));
   const renew = () => prepare(false, 'renew');
@@ -171,8 +172,8 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
     return perform('正在校验模型并导入结果文件…', async () => {
       setFileReceipt('');
       const imported = await readIPadResultFile(file);
-      await onImport(imported.result, imported.ticket);
-      setFileReceipt(`已接收 ${imported.result.samples.length} 个 Pose，已保存到当前工程。重复导入会自动去重。`);
+      const task = await onImport(imported.result, imported.ticket);
+      setFileReceipt(`已接收 ${task.mobileCapture.samples.length} 个 Pose，已保存到当前工程。重复导入会自动去重。`);
     });
   };
   const keyDown = (event) => {
@@ -253,7 +254,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
         {ticket && (!['ready', 'preparing'].includes(ticket.status) || legacyCode) && <div className={`ipad-pairing is-${ticket.status}`} data-ipad-status={ticket.status}>
           <div><span>{statusText[ticket.status]}</span>{ticket.status === 'ready' && <p>此任务使用旧版配对码，请点击「{refreshPairingLabel}」生成 4 位码。</p>}
             {ticket.status === 'paired' && <p>{ticket.deviceName} 已配对；{vision ? '示教完成后在设备端同步，再点击「检查完成状态」。' : '示教完成后可扫描上方二维码同步结果。'}若要更换采集设备，请点击「新建传输」。</p>}
-            {['completed', 'imported'].includes(ticket.status) && <p>{ticket.sampleCount} 个 Pose · {ticket.status === 'imported' ? '已经加入示教数据，可在三维场景查看 Pose。' : '接收后保存为独立的设备示教任务。'}</p>}
+            {['completed', 'imported'].includes(ticket.status) && <p>{receivedCapture?.samples.length ?? ticket.receivedSampleCount ?? ticket.sampleCount} 个 Pose · {ticket.status === 'imported' ? '已经加入示教数据，可在三维场景查看 Pose。' : '接收后保存为独立的设备示教任务。'}</p>}
             <small>{ticket.manifest.vertices.toLocaleString()} 个顶点{ticket.manifest.indices > 0 ? ` · ${(ticket.manifest.indices / 3).toLocaleString()} 个三角面` : ''} · {(ticket.manifest.byteLength / 1048576).toFixed(1)} MiB{ticket.manifest.sampled ? ' · 旧版抽样点云；新建传输可携带完整网格' : ' · 设备可在本机调节点云密度与 Mesh 质量'}</small>
           </div>
         </div>}

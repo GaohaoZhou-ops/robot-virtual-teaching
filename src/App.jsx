@@ -752,7 +752,7 @@ export default function App() {
   }), [mobileTeachingTasks]);
   const workbenchTeachingTasks = teachingDevice === 'desktop' ? desktopTeachingTasks : mobileTasksByDevice[teachingDevice];
   const teachingSources = useMemo(() => [
-    { id: 'desktop', label: '机器人示教', tasks: desktopTeachingTasks },
+    { id: 'desktop', label: '电脑端示教', tasks: desktopTeachingTasks },
     { id: 'ipad', label: 'iPad 示教', tasks: mobileTasksByDevice.ipad },
     { id: 'vision', label: 'Vision Pro 示教', tasks: mobileTasksByDevice.vision },
   ].filter((source) => source.id === 'desktop' || source.tasks.length).map((source) => ({
@@ -6161,7 +6161,8 @@ export default function App() {
     setTeachingTasks(next); setActiveTeachingTaskId(task.id); setActiveTeachingParkingPointId(null);
     await persistWorkspaceNow();
     if (!sessionReadyRef.current) throw new Error('接收结果尚未保存成功，请重试；请保留设备端结果或原始结果文件');
-    notify(`已接收 ${mobileDeviceLabel(result)} 示教：${result.samples.length} 个 Pose`, 'success');
+    notify(`已接收 ${mobileDeviceLabel(result)} 示教：${task.mobileCapture.samples.length} 个 Pose`, 'success');
+    return task;
   };
 
   const applyTeachingTransfer = async (options) => {
