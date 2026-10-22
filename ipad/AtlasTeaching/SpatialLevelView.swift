@@ -3,12 +3,13 @@ import simd
 
 struct SpatialLevelView: View {
     let reading: SpatialLevelReading?
+    var compact = false
     private let tint = Color(red: 0.35, green: 0.86, blue: 0.91)
     private var aligned: Bool { reading?.isAligned == true }
     private var status: String { reading == nil ? "等待定位" : aligned ? "已对齐" : "调整姿态" }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: compact ? 4 : 10) {
             HStack {
                 Text("姿态坐标轴").font(.caption.weight(.semibold))
                 Spacer()
@@ -19,21 +20,23 @@ struct SpatialLevelView: View {
             }
             HStack(spacing: 8) {
                 CoordinateAxesView(orientation: reading?.deviceAxesInReference)
-                    .frame(width: 112, height: 116)
+                    .frame(width: compact ? 70 : 112, height: compact ? 70 : 116)
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Z 轴偏差").font(.caption2).foregroundStyle(.secondary)
                     Text(reading.map { String(format: "%.2f°", $0.zDeviationDegrees) } ?? "—")
-                        .font(.system(size: 23, weight: .medium, design: .monospaced)).monospacedDigit()
+                        .font(.system(size: compact ? 18 : 23, weight: .medium, design: .monospaced)).monospacedDigit()
                         .lineLimit(1).minimumScaleFactor(0.65)
                         .foregroundStyle(reading == nil ? Color.secondary : aligned ? .green : tint)
                         .accessibilityIdentifier("spatial-level-angle")
                     Text("≤ 1.5° 变绿").font(.system(size: 10)).foregroundStyle(.secondary)
                 }
             }
-            Text("半透明：标准  ·  实色：iPad").font(.system(size: 10)).foregroundStyle(.secondary)
-            Text("X 前  ·  Y 左  ·  Z 上").font(.system(size: 10)).foregroundStyle(.secondary)
+            if !compact {
+                Text("半透明：标准  ·  实色：\(TeachingDevice.storageName)").font(.system(size: 10)).foregroundStyle(.secondary)
+                Text("X 前  ·  Y 左  ·  Z 上").font(.system(size: 10)).foregroundStyle(.secondary)
+            }
         }
-        .padding(14)
+        .padding(compact ? 10 : 14)
         .background(aligned ? Color(red: 0.03, green: 0.24, blue: 0.10).opacity(0.94) : Color.black.opacity(0.73),
             in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(aligned ? Color.green : .white.opacity(0.12), lineWidth: aligned ? 1.5 : 1))

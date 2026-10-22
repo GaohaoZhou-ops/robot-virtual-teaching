@@ -7,7 +7,7 @@ import './IPadTeachingMenu.css';
 const transferStatus = { preparing: '准备模型', ready: '等待配对', paired: '设备示教中', completed: '待接收', imported: '已接收', cancelled: '已结束' };
 export default function IPadTeachingMenu({ device = 'ipad', mapData, source, desktopCount, deviceCount, disabled, onSourceChange, onOpenSync, isActive = true, menuAnchorRef }) {
   const vision = device === 'vision';
-  const deviceLabel = vision ? 'Vision Pro' : 'iPad';
+  const deviceLabel = vision ? 'Vision Pro' : 'iPad / iPhone';
   const DeviceIcon = vision ? Glasses : Tablet;
   const savedTickets = () => readDeviceTickets(device);
   const menuId = useId();

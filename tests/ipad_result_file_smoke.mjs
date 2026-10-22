@@ -40,6 +40,13 @@ try {
   assert.deepEqual(Object.keys(archive).sort(), ['format', 'manifest', 'result', 'version']);
   assert.ok(!bytes.includes('deviceToken') && !bytes.includes('serverURL') && !bytes.includes('ownerToken'));
   const { result, ticket } = await readIPadResultFile(new Blob([bytes]));
+  const phoneArchive = structuredClone(archive);
+  phoneArchive.result.device = { model: 'iPhone 15 Pro Max', platform: 'iOS', lidar: true, poseSource: 'camera' };
+  const phoneImport = await readIPadResultFile(blob(phoneArchive));
+  const phoneTask = await ipadResultTask(phoneImport.result, phoneImport.ticket, map);
+  assert.deepEqual(phoneTask.mobileCapture.device, phoneArchive.result.device, 'iPhone identity survives file import');
+  phoneArchive.result.device.lidar = false;
+  await assert.rejects(readIPadResultFile(blob(phoneArchive)), /LiDAR/);
   const task = await ipadResultTask(result, ticket, map);
   assert.equal(task.mobileCapture.samples[0].name, 'Pose 001');
   assert.deepEqual(task.mobileCapture.samples.slice(1).map((sample) => sample.name),

@@ -6,7 +6,8 @@ export const MAX_MODEL_INDICES = 30000000;
 export const MAX_SAMPLES = 50000;
 export const VISION_HEAD_FRAME = 'visionpro_head_optical_frame';
 export const mobileDeviceKey = (result) => result?.device?.platform === 'visionOS' ? 'vision' : 'ipad';
-export const mobileDeviceLabel = (result) => mobileDeviceKey(result) === 'vision' ? 'Vision Pro' : 'iPad';
+export const mobileDeviceLabel = (result) => mobileDeviceKey(result) === 'vision' ? 'Vision Pro'
+  : result?.device?.platform === 'iOS' ? 'iPhone' : 'iPad';
 
 export function withoutDesktopPoseReferences(result) {
   if (mobileDeviceKey(result) !== 'ipad') return result;
@@ -56,7 +57,7 @@ export function validateIPadResult(result, manifest, sessionId) {
   if (vision) {
     check(result.device.poseSource === 'deviceAnchor' && result.device.lidar === false, 'Vision Pro 结果必须标明头显参考位姿来源');
   } else {
-    check((result.device.platform == null || result.device.platform === 'iPadOS') && result.device.lidar === true,
+    check((result.device.platform == null || ['iPadOS', 'iOS'].includes(result.device.platform)) && result.device.lidar === true,
       '结果缺少 LiDAR 设备信息或设备平台不支持');
   }
   check(validDate(result.createdAt) && validDate(result.completedAt), '示教时间无效');

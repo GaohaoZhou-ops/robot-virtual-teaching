@@ -45,7 +45,7 @@ export default function MobileTeachingComputeDock({ computation, inWorkbench, on
           {status === 'paused' ? <Play size={13} /> : <Pause size={13} />}{status === 'paused' ? '继续' : status === 'pausing' ? '暂停中' : '暂停'}</button>}
         {active && <button type="button" onClick={onCancel} aria-label="取消姿态计算"><Square size={11} />取消</button>}
         <button type="button" onClick={onRestart} aria-label="重新计算姿态"><RotateCcw size={13} />重新计算</button>
-        <button type="button" onClick={onConfigure}>{status === 'completed' ? '查看结果' : '计算配置'}</button>
+        <button type="button" onClick={onConfigure}>{status === 'completed' ? '查看结果' : '计算详情'}</button>
       </div>
     </div>}
   </section>, target);

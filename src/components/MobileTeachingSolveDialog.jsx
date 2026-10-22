@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Check, Download, Play, Save, X } from 'lucide-react';
 import { DEFAULT_MOBILE_SOLVE_OPTIONS, MOBILE_SOLVE_VERSION, mobileReportSolveOptions, validateMobileSolveOptions } from '../lib/mobileTeachingSolver.js';
@@ -12,7 +12,10 @@ const sideName = (side) => side === 'left' ? '左臂' : '右臂';
 const groups = [['positionTolerance', ['x', 'y', 'z'], '位置容差', 'cm', 100], ['rotationTolerance', ['roll', 'pitch', 'yaw'], '角度容差', '°', 1]];
 const format = (value, scale = 1) => Number.isFinite(value) ? (value * scale).toFixed(2) : '—';
 
-export default function MobileTeachingSolveDialog({ task, robot, robotPose, robotPresets = [], robotLoadState, ready, readinessMessage, onSelectRobot, robotSelectionDisabled, initialOptions, initialSampleId, running, computationStatus, computationError, onClose, onCalculate, onApply, onSave, onPlay }) {
+export default function MobileTeachingSolveDialog({ task, robot, robotPose, robotPresets = [], robotLoadState, ready, readinessMessage, onSelectRobot, robotSelectionDisabled, initialSampleId, computation, onClose, onCalculate, onApply, onSave, onPlay }) {
+  const computationStatus = computation?.status, computationError = computation?.error;
+  const running = ['running', 'pausing', 'paused'].includes(computationStatus);
+  const initialOptions = computation?.options;
   const [options, setOptions] = useState(() => {
     const initial = { ...DEFAULT_MOBILE_SOLVE_OPTIONS, ...(initialOptions || task.mobileSolve?.options),
       ...(!initialOptions && task.mobileSolve?.version === 1 ? { parkingMode: 'auto', checkCollisions: true } : {}),
@@ -22,7 +25,18 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
     if (initial.allowTorsoHeight) initial.lockChestVertical = true;
     return structuredClone(initial);
   });
-  const report = task.mobileSolve || null;
+  const report = useMemo(() => {
+    if (!running) return task.mobileSolve || null;
+    const rows = computation.rows, feasible = rows.filter((row) => row.feasible);
+    // Render streamed rows with the same table and details as the final report.
+    // This view stays transient and cannot be applied, saved or exported.
+    return { version: MOBILE_SOLVE_VERSION, rows, options: computation.options,
+      mapPose: computation.mapPose, computedAt: computation.startedAt,
+      feasibleCount: feasible.length, parkingCount: new Set(feasible.map((row) => row.parkingId)).size,
+      motionCount: new Set(feasible.map((row) => row.motionGroupId)).size,
+      dualMotionCount: new Set(feasible.filter((row) => row.pairedSampleId).map((row) => row.motionGroupId)).size };
+  }, [running, task.mobileSolve, computation?.rows, computation?.options, computation?.mapPose, computation?.startedAt]);
+  const resultKey = running || computationStatus === 'completed' ? computation.id : report?.computedAt;
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(0);
@@ -41,7 +55,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
   useEffect(() => {
     const index = Math.max(0, report?.rows.findIndex((item) => item.sampleId === initialSampleId) ?? 0);
     setSelected(index); setPage(Math.floor(index / 50));
-  }, [report?.computedAt, initialSampleId]);
+  }, [resultKey, initialSampleId]);
   let validation = '';
   try { validateMobileSolveOptions(options); } catch (cause) { validation = cause.message; }
   const referenceId = options.referencePose?.type === 'preset' ? options.referencePose.id : 'current';
@@ -147,12 +161,16 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
             <p className="mobile-solve-help">XYZ 误差按工程坐标计算；RPY 为目标局部坐标系中的相对旋转（ZYX）。未找到解时，可检查底盘高度、关节锁定和干涉原因。</p>
           </fieldset>
           <section className="mobile-solve-results" aria-label="姿态计算结果">
-            <div className="mobile-solve-results-heading"><h3>{report?.version < MOBILE_SOLVE_VERSION ? '旧版计算结果' : report && (optionsChanged || running || ['error', 'cancelled'].includes(computationStatus)) ? '上次计算结果' : '计算结果'}</h3>{report && <span>{report.feasibleCount} / {report.rows.length} 可达 · {report.parkingCount ?? (report.feasibleCount ? 1 : 0)} 个停车点</span>}</div>
-            {report && <p className="mobile-solve-help">计算于 {Number.isFinite(Date.parse(report.computedAt)) ? new Date(report.computedAt).toLocaleString('zh-CN', { hour12: false }) : '时间未记录'} · 本报告自动升降{storedOptions.allowTorsoHeight ? '已开启' : '未开启'}</p>}
+            <div className="mobile-solve-results-heading"><h3>{running ? '本轮计算结果' : report?.version < MOBILE_SOLVE_VERSION ? '旧版计算结果' : report && (optionsChanged || ['error', 'cancelled'].includes(computationStatus)) ? '上次计算结果' : '计算结果'}</h3>{report && <span>{report.feasibleCount} / {report.rows.length} 可达 · {report.parkingCount ?? (report.feasibleCount ? 1 : 0)} 个停车点</span>}</div>
+            {report && <p className="mobile-solve-help">{running ? '本轮开始于' : '计算于'} {Number.isFinite(Date.parse(report.computedAt)) ? new Date(report.computedAt).toLocaleString('zh-CN', { hour12: false }) : '时间未记录'} · 本报告自动升降{storedOptions.allowTorsoHeight ? '已开启' : '未开启'}</p>}
             {report && <p className="mobile-solve-help">本报告参考起始姿态 · {storedOptions.referencePose.type === 'preset' ? storedOptions.referencePose.name : '计算开始时的当前姿态'}</p>}
             {report?.version >= 4 && <p className="mobile-solve-help">拍摄分工：左臂 {report.rows.filter((item) => item.feasible && item.selectedSide === 'left').length} 个 · 右臂 {report.rows.filter((item) => item.feasible && item.selectedSide === 'right').length} 个 · 每个姿态拍摄一次</p>}
             {report?.version >= 5 && <p className="mobile-solve-help">执行动作：{report.motionCount} 组 · 双臂同步 {report.dualMotionCount} 组 · 单臂 {report.motionCount - report.dualMotionCount} 组</p>}
-            {running && <p className="mobile-solve-notice">后台计算尚未结束，可关闭此窗口查看进度和虚影。重新计算会替换当前计算；已有报告在本轮完成后更新。</p>}
+            {running && <p className="mobile-solve-notice" role="status">
+              {computationStatus === 'paused' ? '计算已暂停' : computationStatus === 'pausing' ? '正在暂停' : '正在计算'} · 已完成 {report.rows.length} / {computation.total} 个 Pose
+              {computation.name && <> · {computation.name}{computation.side ? ` · ${computation.side === 'both' ? '双臂同步' : sideName(computation.side)}` : ''}</>}<br />
+              结果逐条更新，全部完成后可应用、预览或保存。重新计算会替换当前计算。
+            </p>}
             {computationStatus === 'error' && <p className="mobile-solve-notice" role="alert">本次计算未完成：{computationError || '后台计算发生错误'}。{report ? '下方保留上次报告，不是本次结果。' : '尚未生成计算报告。'}</p>}
             {computationStatus === 'cancelled' && report && <p className="mobile-solve-notice">本次计算已取消，下方为上次完成的报告。</p>}
             {optionsChanged && report && <p className="mobile-solve-notice">配置已修改，请重新计算后应用或保存。</p>}
@@ -162,6 +180,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
             {report && report.version < 5 && <p className="mobile-solve-notice">已有报告按单臂依次执行。重新计算可在同一停车点生成双臂同步动作。</p>}
             {report && report.version < 6 && <p className="mobile-solve-notice">已有报告未检查躯干避让间距。重新计算后会调整手臂姿态及停车点，为躯干留出余量。</p>}
             {!report ? <div className="mobile-solve-empty"><Bot size={40} /><strong>将空间采样转换为机器人姿态</strong><p>开始后自动收起窗口，后台计算并逐点显示姿态虚影。可在 3D 窗口暂停、取消或重新计算。</p></div> : <>
+              {running && !report.rows.length && <p className="mobile-solve-notice">{computationStatus === 'paused' ? '继续计算后将在此显示逐条结果。' : '正在计算首个结果…'}</p>}
               <div className="mobile-solve-table"><table><thead><tr><th>采样点</th><th>停车点</th><th>左臂</th><th>右臂</th>{report.version >= 5 && <th>动作组</th>}<th>结果</th></tr></thead><tbody>
                 {report.rows.slice(page * 50, (page + 1) * 50).map((item, i) => <tr key={item.sampleId} className={selected === page * 50 + i ? 'is-selected' : ''}>
                   <td><button type="button" aria-pressed={selected === page * 50 + i} onClick={() => setSelected(page * 50 + i)}>{item.name}</button></td>
@@ -206,7 +225,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
             {report && <button type="button" disabled={!usable || !report.feasibleCount}
               title={!report.feasibleCount ? '本次计算没有可达姿态' : !usable ? '请等待机器人就绪，并使用已完成计算的配置' : '按停车点和姿态顺序播放计算结果'}
               onClick={() => act(() => onPlay(task.id, report))}><Play size={14} />动态预览</button>}
-            <button type="button" disabled={!report} onClick={() => act(exportReport)}><Download size={14} />导出计算报告</button>
+            <button type="button" disabled={!report || running} onClick={() => act(exportReport)}><Download size={14} />导出计算报告</button>
             <button type="button" disabled={!usable || !report?.feasibleCount} onClick={() => act(() => onSave(task.id, report))}><Save size={14} />{report?.savedTaskId ? '查看已保存任务' : '保存可达姿态'}</button>
             <button className="is-primary" type="submit" disabled={!ready || !!validation || !sampleCount}><Bot size={15} />{report || running ? '重新计算' : '开始计算'}</button>
           </div>

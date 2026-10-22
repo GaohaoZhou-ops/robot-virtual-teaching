@@ -42,7 +42,7 @@ export default function IPadPairingQRCode({ device = 'ipad', ticket, address, di
         <li>打开「Atlas 空间示教」，点击「自动检测局域网服务器」。</li>
         <li>选择这台电脑，配对码自动填入后点击「配对并检查模型」。多个任务时可点选物体名称。</li>
         <li>确认同步模型，预览后进入空间示教。</li>
-      </ol> : <p>iPad 首页扫码接收物体；已有示教结果时，点击「同步数据」，选择「扫码」后扫描此码。</p>}
+      </ol> : <p>iPhone / iPad 首页扫码接收物体；已有示教结果时，点击「同步数据」，选择「扫码」后扫描此码。</p>}
       {vision && ticket.status === 'ready' && !expired && <p role="status">{automaticPairingStatus}</p>}
       <div className="ipad-qr__manual"><div><strong className="ipad-code">{ticket.pairingCode}</strong></div>
         <button aria-label="复制配对码" disabled={disabled || expired} onClick={onCopy}>{copied ? <Check size={16} /> : <Copy size={16} />}</button>

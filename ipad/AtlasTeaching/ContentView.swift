@@ -3,6 +3,20 @@ import SceneKit
 
 private let accent = Color(red: 0.35, green: 0.86, blue: 0.91)
 
+private struct PhoneCaptureButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 84, height: 84)
+            .foregroundStyle(enabled ? Color(red: 0.02, green: 0.12, blue: 0.14) : .white.opacity(0.45))
+            .background(enabled ? accent : .white.opacity(0.12), in: Circle())
+            .overlay(Circle().strokeBorder(enabled ? .white.opacity(0.4) : .white.opacity(0.16), lineWidth: 1))
+            .contentShape(Circle())
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 private extension TeachingPoseCategory {
     var color: Color { Color(red: Double(rgb.x), green: Double(rgb.y), blue: Double(rgb.z)) }
 }
@@ -45,6 +59,7 @@ struct ContentView: View {
     @State private var deleteActionFrames: [String: CGRect] = [:]
     @State private var refreshingUSB = false
     @State private var usbRefreshTask: Task<Void, Never>?
+    @State private var phonePairingMethod = 0
     var body: some View {
         GeometryReader { viewport in
         Group {
@@ -60,11 +75,28 @@ struct ContentView: View {
             let padding: CGFloat = viewport.size.width >= 700 ? 28 : 20
             // Include the home-indicator safe area in the page's bottom margin.
             let bottomPadding = max(0, padding - bottomSafeArea)
+            Group {
+            if TeachingDevice.isPhone {
+                // One scroll surface keeps every connection method and project
+                // reachable with the keyboard open or in a short landscape window.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        libraryHeader
+                        if !ARController.supported {
+                            Label("当前设备可接收、查看物体和已有 Pose；AR 示教需要配备 LiDAR 的真机。", systemImage: "info.circle")
+                                .font(.caption).foregroundStyle(.orange)
+                        }
+                        pairingPanel
+                        localProjectsPanel
+                    }.padding(16)
+                }.scrollBounceBehavior(.basedOnSize)
+                    .accessibilityIdentifier("library-phone-scroll")
+            } else {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 24) {
                     libraryHeader
                     if !ARController.supported {
-                        Label("空间定位需要配备 LiDAR 的 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
+                        Label("空间定位需要配备 LiDAR 的 iPhone Pro 或 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
                             .font(.callout).foregroundStyle(.orange).padding().frame(maxWidth: .infinity, alignment: .leading)
                             .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
@@ -85,7 +117,10 @@ struct ContentView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
             .frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
-            .accessibilityElement(children: .contain).accessibilityIdentifier("library-content")
+            }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(TeachingDevice.isPhone ? "library-phone-scroll" : "library-content")
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .coordinateSpace(name: LocalProjectSwipeLayout.coordinateSpace)
@@ -104,7 +139,7 @@ struct ContentView: View {
                 pairingServer = nil
             }
         }
-        .alert("从此 iPad 删除模型？", isPresented: Binding(
+        .alert("从此 \(TeachingDevice.storageName) 删除模型？", isPresented: Binding(
             get: { projectToDelete != nil }, set: { if !$0 { projectToDelete = nil } }
         ), presenting: projectToDelete) { project in
             Button("删除模型与全部 Pose", role: .destructive) {
@@ -112,7 +147,7 @@ struct ContentView: View {
             }.accessibilityIdentifier("confirm-delete-local-project")
             Button("取消", role: .cancel) {}.accessibilityIdentifier("cancel-delete-local-project")
         } message: { project in
-            Text("将删除「\(project.session.manifest.name)」在此 iPad 上的模型、全部 \(project.result.samples.count) 个 Pose 和应用生成的导出副本。电脑上的工程和已同步结果不受影响。")
+            Text("将删除「\(project.session.manifest.name)」在此 \(TeachingDevice.storageName) 上的模型、全部 \(project.result.samples.count) 个 Pose 和应用生成的导出副本。电脑上的工程和已同步结果不受影响。")
         }
         .onAppear { usbReceiver.start(); if !scanning && pairingServer == nil { searchConfiguredServer() } }
         .onDisappear { stopUSBRefresh(); usbReceiver.stop(); discovery.stop() }
@@ -187,11 +222,11 @@ struct ContentView: View {
     private var libraryHeader: some View {
         HStack(alignment: .center, spacing: 24) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("虚拟示教").font(.largeTitle.weight(.medium))
-                Text("ATLAS / IPAD PRO").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
+                Text("虚拟示教").font(TeachingDevice.isPhone ? .title.weight(.medium) : .largeTitle.weight(.medium))
+                Text(TeachingDevice.isPhone ? "ATLAS / IPHONE PRO" : "ATLAS / IPAD PRO").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
             }
             Spacer(minLength: 0)
-            Image(systemName: "ipad.landscape").font(.system(size: 60, weight: .ultraLight)).foregroundStyle(accent)
+            Image(systemName: TeachingDevice.isPhone ? "iphone" : "ipad.landscape").font(.system(size: TeachingDevice.isPhone ? 44 : 60, weight: .ultraLight)).foregroundStyle(accent)
                 .accessibilityHidden(true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -199,14 +234,16 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("与电脑配对", systemImage: "desktopcomputer").font(.title2.weight(.medium))
             Divider().padding(.vertical, 8)
-            ScrollView {
+            if TeachingDevice.isPhone {
                 pairingContents
+            } else {
+                ScrollView { pairingContents }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .accessibilityIdentifier("library-pairing-scroll")
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .accessibilityIdentifier("library-pairing-scroll")
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(TeachingDevice.isPhone ? 16 : 24)
+        .frame(maxWidth: .infinity, maxHeight: TeachingDevice.isPhone ? nil : .infinity, alignment: .topLeading)
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
@@ -214,17 +251,31 @@ struct ContentView: View {
     private var pairingContents: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let progress = session.transferProgress { modelTransferProgress(progress) }
+            if TeachingDevice.isPhone {
+                Picker("连接方式", selection: $phonePairingMethod) {
+                    Text("扫码").tag(0)
+                    Text("Wi-Fi").tag(1)
+                    Text("数据线").tag(2)
+                }.pickerStyle(.segmented).disabled(session.busy)
+                    .accessibilityIdentifier("phone-pairing-method")
+            }
+            if !TeachingDevice.isPhone || phonePairingMethod == 0 {
             pairingMethodHeader("方式一", title: "扫码配对", symbol: "qrcode")
             Button(action: beginScanning) {
                 pairingActionLabel("扫码配对", systemImage: "qrcode.viewfinder")
             }.buttonStyle(.bordered)
                 .disabled(session.busy).accessibilityIdentifier("scan-pairing-code")
-            Divider().padding(.vertical, 4)
+            }
+            if !TeachingDevice.isPhone { Divider().padding(.vertical, 4) }
+            if !TeachingDevice.isPhone || phonePairingMethod == 1 {
             pairingMethodHeader("方式二", title: "Wifi连接", symbol: "globe")
             LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(session.busy)
             discoveryPanel
-            Divider().padding(.vertical, 4)
+            }
+            if !TeachingDevice.isPhone { Divider().padding(.vertical, 4) }
+            if !TeachingDevice.isPhone || phonePairingMethod == 2 {
             usbReceivingPanel
+            }
             if session.busy && session.transferProgress == nil { ProgressView() }
             if !session.error.isEmpty { Text(session.error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
             if session.error.hasPrefix("接收失败：") {
@@ -256,7 +307,7 @@ struct ContentView: View {
                 }
             }
             if usbReceiver.transfers.isEmpty {
-                Text("在 Mac 打开示教服务，用数据线连接并信任此电脑。在电脑「iPad 示教」窗口点击「通过数据线发送」，物体会显示在这里。")
+                Text("在 Mac 打开示教服务，用数据线连接并信任此电脑。在电脑「iPad / iPhone 示教」窗口点击「通过数据线发送」，物体会显示在这里。")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 if usbReceiver.connection == nil {
@@ -394,19 +445,22 @@ struct ContentView: View {
     private var localProjectsPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Label("保存在此 iPad", systemImage: "square.stack.3d.up").font(.title2.weight(.medium))
+                Label("保存在此 \(TeachingDevice.storageName)", systemImage: "square.stack.3d.up")
+                    .font(TeachingDevice.isPhone ? .headline : .title2.weight(.medium))
                 Spacer()
                 Text("\(session.projects.count) 个物体").font(.caption).foregroundStyle(.secondary)
             }
             Divider()
-            ScrollView {
+            if TeachingDevice.isPhone {
                 localProjectContents
+            } else {
+                ScrollView { localProjectContents }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .accessibilityIdentifier("library-projects-scroll")
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .accessibilityIdentifier("library-projects-scroll")
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(TeachingDevice.isPhone ? 16 : 24)
+        .frame(maxWidth: .infinity, maxHeight: TeachingDevice.isPhone ? nil : .infinity, alignment: .topLeading)
         .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 18))
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.06)))
@@ -427,7 +481,7 @@ struct ContentView: View {
                         LocalProjectSwipeRow(projectID: project.id, revealedProjectID: $revealedProjectID,
                                              disabled: session.busy, onDelete: { projectToDelete = project }) {
                             Button { Task { await session.open(project) } } label: {
-                                HStack(spacing: 18) {
+                                HStack(spacing: TeachingDevice.isPhone ? 10 : 18) {
                                     VStack(alignment: .leading, spacing: 10) {
                                         Text(project.session.manifest.name).font(.headline).multilineTextAlignment(.leading).lineLimit(3)
                                         Text("\(project.result.samples.count) 个 Pose · \(project.syncedAt != nil ? "已同步" : project.result.completedAt != nil ? "已完成，待同步" : "本地草稿")")
@@ -442,14 +496,14 @@ struct ContentView: View {
                                     }
                                     Spacer(minLength: 4)
                                     ProjectThumbnailView(project: project)
-                                        .frame(width: 150, height: 100)
+                                        .frame(width: TeachingDevice.isPhone ? 88 : 150, height: TeachingDevice.isPhone ? 76 : 100)
                                         .overlay(alignment: .topTrailing) {
                                             Image(systemName: "arrow.up.right").font(.caption.weight(.medium)).foregroundStyle(accent)
                                                 .padding(7).background(.black.opacity(0.5), in: Circle()).padding(6)
                                         }
                                         .allowsHitTesting(false)
                                 }
-                                .padding(20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                .padding(TeachingDevice.isPhone ? 12 : 20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                                 .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
                             }.buttonStyle(.plain).disabled(session.busy).accessibilityIdentifier("local-project-\(project.id)")
                         }
@@ -494,7 +548,7 @@ private struct LocalProjectSwipeRow<Content: View>: View {
                     content
                         .containerRelativeFrame(.horizontal)
                         .id("card")
-                        .accessibilityAction(named: Text("从此 iPad 删除")) {
+                        .accessibilityAction(named: Text("从此 \(TeachingDevice.storageName) 删除")) {
                             guard !disabled else { return }
                             close(using: proxy)
                             onDelete()
@@ -514,7 +568,7 @@ private struct LocalProjectSwipeRow<Content: View>: View {
                     }
                     .buttonStyle(.plain).disabled(disabled)
                     .accessibilityIdentifier("swipe-delete-local-project-\(projectID)")
-                    .accessibilityLabel("从此 iPad 删除模型和全部 Pose")
+                    .accessibilityLabel("从此 \(TeachingDevice.storageName) 删除模型和全部 Pose")
                     .accessibilityHidden(!showingAction)
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -892,7 +946,7 @@ private struct TeachingResultSyncView: View {
     private var scanContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("扫码同步", systemImage: "qrcode.viewfinder").font(.title3)
-            Text("电脑与 iPad 连接同一局域网后，打开电脑「iPad 示教」窗口，扫描其中的二维码。核对模型后将自动上传示教结果。")
+            Text("电脑与设备 连接同一局域网后，打开电脑「iPad / iPhone 示教」窗口，扫描其中的二维码。核对模型后将自动上传示教结果。")
                 .font(.callout).foregroundStyle(.secondary)
             Button { scanning = true } label: {
                 Label("开始扫码", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity).padding(10)
@@ -903,7 +957,7 @@ private struct TeachingResultSyncView: View {
     private var wifiContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("Wi-Fi 同步", systemImage: "wifi").font(.title3)
-            Text("电脑与 iPad 需连接同一局域网。确认电脑的 IPv4 地址与端口后，上传到已配对的传输任务。")
+            Text("电脑与设备 需连接同一局域网。确认电脑的 IPv4 地址与端口后，上传到已配对的传输任务。")
                 .font(.callout).foregroundStyle(.secondary)
             LANAddressFields(address: $session.serverConnection).disabled(session.busy)
             if session.current?.requiresResultPairing == true {
@@ -921,7 +975,7 @@ private struct TeachingResultSyncView: View {
     private var airDropContent: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("AirDrop 导出", systemImage: "square.and.arrow.up").font(.title3)
-            Text("导出结果文件后，在系统分享面板选择 AirDrop 发送到 Mac，或存储到「文件」。收到后，在电脑「iPad 示教」窗口导入结果文件。")
+            Text("导出结果文件后，在系统分享面板选择 AirDrop 发送到 Mac，或存储到「文件」。收到后，在电脑「iPad / iPhone 示教」窗口导入结果文件。")
                 .font(.callout).foregroundStyle(.secondary)
             Button {
                 Task {
@@ -959,7 +1013,7 @@ struct TeachingView: View {
     @State private var levelVisible = true
     @State private var zividFieldOfViewEnabled = true
     @State private var tiltControlsOpen = false
-    @State private var sidebarCollapsed = false
+    @State private var sidebarCollapsed = TeachingDevice.isPhone
     @State private var nearbyPoseConfirmation: NearbyPoseConfirmation?
     @State private var loadedProjectID: String?
     @State private var sidebarContentHeight: CGFloat = 0
@@ -992,6 +1046,9 @@ struct TeachingView: View {
 
     var body: some View {
         GeometryReader { viewport in
+        if TeachingDevice.isPhone {
+            phoneWorkspace(size: viewport.size)
+        } else {
         let sidebarWidth: CGFloat = sidebarCollapsed ? 0 : 340
         let controlsWidth = max(0, viewport.size.width - sidebarWidth)
         let renderSize = CGSize(width: liveCamera ? viewport.size.width : controlsWidth, height: viewport.size.height)
@@ -1111,8 +1168,8 @@ struct TeachingView: View {
                         Divider()
                         calibrationPanel
                         if !sidebarCollapsed && !ar.adjustingPlacement { recordPoseButton }
-                        reviewPosesButton
-                        finishTeachingButton
+                        reviewPosesButton()
+                        finishTeachingButton()
                     }
                     if session.busy { ProgressView() }
                     if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.secondary) }
@@ -1136,6 +1193,7 @@ struct TeachingView: View {
                 .opacity(sidebarCollapsed ? 0 : 1).allowsHitTesting(!sidebarCollapsed)
                 .accessibilityHidden(sidebarCollapsed)
             }
+        }
         }
         }.task(id: projectID) {
             // Returning from full-screen review must retain the live AR session
@@ -1194,21 +1252,244 @@ struct TeachingView: View {
             Text(confirmation.message)
         }
     }
+    private func phoneWorkspace(size: CGSize) -> some View {
+        let portrait = size.width < size.height
+        let panelWidth = portrait ? size.width : min(300, size.width * 0.42)
+        let panelHeight = portrait ? min(540, size.height * 0.66) : size.height
+        let controlsWidth = !portrait && !sidebarCollapsed ? size.width - panelWidth : size.width
+        return ZStack(alignment: .topLeading) {
+            // This surface never moves between stacks when rotating or folding
+            // the controls: AR tracking, calibration and raycasts stay alive.
+            ZStack {
+                Color.black
+                modelViewport(in: size)
+                if liveCamera {
+                    Image(systemName: ar.placed && !ar.repositioning ? "plus" : "viewfinder")
+                        .font(.system(size: ar.placed && !ar.repositioning ? 24 : 44, weight: .ultraLight))
+                        .foregroundStyle(ar.groundAssistance && ar.groundTargetAvailable ? accent : .white)
+                        .shadow(color: .black, radius: 2).allowsHitTesting(false)
+                        .accessibilityLabel("模型放置准星").accessibilityIdentifier("teaching-placement-target")
+                }
+            }.frame(width: size.width, height: size.height).clipped()
+                .accessibilityElement(children: .contain).accessibilityIdentifier("teaching-viewport")
+
+            VStack(spacing: 8) {
+                phoneToolbar
+                if liveCamera && levelVisible && (sidebarCollapsed || !portrait) && (portrait || !ar.adjustingPlacement) {
+                    HStack {
+                        SpatialLevelView(reading: ar.levelReading, compact: true)
+                            .frame(width: 180).allowsHitTesting(false)
+                        Spacer(minLength: 0)
+                    }.padding(.horizontal, 12)
+                }
+                Spacer(minLength: 0)
+                if sidebarCollapsed && portrait {
+                    VStack(spacing: 10) {
+                        Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading).lineLimit(3)
+                        HStack {
+                            Text("\(count) 个 Pose").accessibilityIdentifier("floating-pose-count")
+                            Spacer()
+                            Text("\(coverage.coverageTitle) \(coverage.coveragePercentage)")
+                                .foregroundStyle(accent).accessibilityIdentifier("floating-coverage-percentage")
+                        }.font(.caption.monospacedDigit())
+                        if ar.adjustingPlacement { placementAdjustmentControls }
+                        else { phoneActionBar }
+                    }.padding(12).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.12)))
+                        .padding(12)
+                        .accessibilityElement(children: .contain).accessibilityIdentifier("floating-pose-controls")
+                }
+            }.frame(width: controlsWidth, height: size.height)
+
+            if sidebarCollapsed && !portrait {
+                phoneLandscapeControls
+                    .padding(.trailing, 12).padding(.top, 80).padding(.bottom, 12)
+                    .frame(width: size.width, height: size.height, alignment: .trailing)
+                if !canRecordPose || !session.error.isEmpty {
+                    Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(2).padding(.horizontal, 12).padding(.vertical, 8)
+                        .frame(maxWidth: min(320, size.width - 164), alignment: .leading)
+                        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+                        .allowsHitTesting(false).accessibilityIdentifier("phone-landscape-hint")
+                        .padding(12)
+                        .frame(width: size.width, height: size.height, alignment: .bottomLeading)
+                }
+            }
+
+            if !sidebarCollapsed {
+            phoneInspector
+                .frame(width: panelWidth, height: panelHeight)
+                .background(Color(red: 0.025, green: 0.05, blue: 0.065))
+                .clipShape(RoundedRectangle(cornerRadius: portrait ? 18 : 0))
+                .overlay(alignment: .top) { Rectangle().fill(accent.opacity(0.25)).frame(height: 1) }
+                .frame(width: size.width, height: size.height, alignment: portrait ? .bottom : .trailing)
+            }
+        }.frame(width: size.width, height: size.height)
+            .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
+    }
+
+    private var phoneLandscapeControls: some View {
+        VStack(spacing: 12) {
+            VStack(spacing: 3) {
+                Text("\(count) 个 Pose").font(.subheadline.weight(.medium).monospacedDigit())
+                    .accessibilityIdentifier("floating-pose-count")
+                Text("覆盖 \(coverage.coveragePercentage)").font(.caption.monospacedDigit()).foregroundStyle(accent)
+                    .accessibilityLabel("\(coverage.coverageTitle) \(coverage.coveragePercentage)")
+                    .accessibilityIdentifier("floating-coverage-percentage")
+            }.lineLimit(1).minimumScaleFactor(0.8)
+            if ar.adjustingPlacement {
+                placementAdjustmentControls
+            } else {
+                Button {
+                    if completed {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                        resultSyncOpen = true
+                    } else { recordPose() }
+                } label: {
+                    VStack(spacing: 5) {
+                        Image(systemName: completed ? "arrow.triangle.2.circlepath" : "plus.viewfinder")
+                            .font(.system(size: 25, weight: .medium))
+                        Text(completed ? "同步数据" : "记录 Pose").font(.caption.weight(.semibold)).lineLimit(1)
+                    }
+                }.buttonStyle(PhoneCaptureButtonStyle())
+                    .disabled(completed ? session.busy : !canRecordPose || nearbyPoseConfirmation != nil)
+                    .accessibilityLabel(completed ? "同步数据" : "记录 Pose")
+                    .accessibilityIdentifier(completed ? "sync-teaching-result" : "capture-pose")
+                HStack(spacing: 8) {
+                    reviewPosesButton(compact: true).frame(width: 52)
+                    if !completed { finishTeachingButton(compact: true).frame(width: 52) }
+                }
+            }
+        }.frame(width: 112).padding(8)
+            .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 24))
+            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.12)))
+            .accessibilityElement(children: .contain).accessibilityIdentifier("phone-landscape-controls")
+    }
+
+    private var phoneToolbar: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Button { ar.stop(); Task { await session.close() } } label: {
+                    Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                }.accessibilityLabel("本地项目").accessibilityIdentifier("back-to-library").disabled(session.busy)
+                Text(session.current?.session.manifest.name ?? "虚拟示教")
+                    .font(.subheadline.weight(.medium)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                if liveCamera {
+                    Button { levelVisible.toggle() } label: {
+                        Image(systemName: "move.3d").frame(width: 44, height: 44)
+                    }.tint(levelVisible ? accent : .secondary)
+                        .accessibilityLabel(levelVisible ? "隐藏姿态坐标轴" : "显示姿态坐标轴")
+                        .accessibilityIdentifier("toggle-spatial-level")
+                }
+                Button { displaySettingsOpen = true } label: {
+                    Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44)
+                }.accessibilityLabel("显示设置").accessibilityIdentifier("display-settings")
+                Button { setSidebarCollapsed(!sidebarCollapsed) } label: {
+                    Image(systemName: "sidebar.right").frame(width: 44, height: 44)
+                }.accessibilityLabel(sidebarCollapsed ? "展开面板" : "收起面板")
+                    .accessibilityIdentifier(sidebarCollapsed ? "expand-teaching-panel" : "phone-toggle-panel")
+            }
+            HStack(spacing: 8) {
+                Label(completed ? "已完成 · 结果预览" : ar.tracking,
+                      systemImage: completed ? "checkmark.circle" : ar.trackingNormal ? "location.fill" : "location.slash")
+                    .foregroundStyle(completed || ar.trackingNormal ? accent : .orange)
+                    .accessibilityIdentifier("teaching-tracking-status")
+                Spacer(minLength: 0)
+                Text(liveCamera ? (ar.depthAvailable ? "LiDAR 已就绪" : "等待 LiDAR") : "三维预览")
+                    .foregroundStyle(.secondary).accessibilityIdentifier("teaching-depth-status")
+            }.font(.caption).lineLimit(1).minimumScaleFactor(0.8).padding(.horizontal, 12)
+        }.padding(.horizontal, 4).padding(.bottom, 10).background(.black.opacity(0.8))
+    }
+
+    private var phoneInspector: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("示教面板").font(.headline)
+                Spacer()
+                Button { setSidebarCollapsed(true) } label: {
+                    Label("收起", systemImage: "chevron.down").font(.subheadline).frame(minHeight: 44)
+                }.accessibilityIdentifier("collapse-teaching-panel")
+            }.padding(.horizontal, 16)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(session.current?.session.manifest.name ?? "独立示教物体").font(.headline).lineLimit(2)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("\(count)").font(.system(size: 36, weight: .light, design: .monospaced))
+                        Text("POSES").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text(TeachingPoseCounts(session.current?.result.samples ?? []).summary)
+                        .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("teaching-pose-counts")
+                    if completed {
+                        Button { Task { await session.continueTeaching() } } label: {
+                            teachingActionLabel("继续示教", systemImage: "camera.fill")
+                        }.buttonStyle(.bordered).disabled(session.busy || !ARController.supported)
+                            .accessibilityIdentifier("continue-teaching")
+                    }
+                    if liveCamera && !ar.calibrated { groundAssistanceControl }
+                    if liveCamera { fieldOfViewControl }
+                    coverageControl(additionalRowSpacing: 0)
+                    if !completed {
+                        Divider()
+                        calibrationPanel
+                        if liveCamera && (ar.calibrated || ar.adjustingPlacement) { placementAdjustmentControls }
+                    }
+                    Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
+                    if session.busy { ProgressView() }
+                    if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.secondary) }
+                    if !renderer.error.isEmpty { Text(renderer.error).font(.caption).foregroundStyle(.orange) }
+                    if !session.error.isEmpty {
+                        Text(session.error).font(.caption).foregroundStyle(.orange)
+                        Button("重试保存") { Task { do { try await session.saveNow(); session.error = "" } catch { session.error = error.localizedDescription } } }
+                    }
+                }.padding(16)
+            }.scrollDismissesKeyboard(.interactively).accessibilityIdentifier("phone-teaching-panel-scroll")
+            Divider()
+            phoneActionBar.padding(12)
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("phone-teaching-panel")
+    }
+
+    private var phoneActionBar: some View {
+        HStack(spacing: 8) {
+            if completed {
+                reviewPosesButton()
+                syncResultButton
+            } else {
+                recordPoseButton
+                reviewPosesButton(compact: true).frame(width: 52)
+                finishTeachingButton(compact: true).frame(width: 52)
+            }
+        }
+    }
+
+    private var syncResultButton: some View {
+        Button {
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            resultSyncOpen = true
+        } label: {
+            teachingActionLabel("同步数据", systemImage: "arrow.triangle.2.circlepath")
+        }.buttonStyle(.borderedProminent).disabled(session.busy)
+            .accessibilityIdentifier("sync-teaching-result")
+    }
+
     private func teachingActionLabel(_ title: String, systemImage: String) -> some View {
         Label(title, systemImage: systemImage).font(.body)
             .frame(maxWidth: .infinity).frame(height: teachingActionLabelHeight)
             .padding(.horizontal, 7)
     }
-    private var reviewPosesButton: some View {
+    private func reviewPosesButton(compact: Bool = false) -> some View {
         Button { review = true } label: {
-            teachingActionLabel("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle")
+            if compact {
+                Image(systemName: "list.bullet.rectangle").frame(width: 22, height: 34)
+            } else { teachingActionLabel("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle") }
         }.buttonStyle(.bordered).disabled(count == 0)
-            .accessibilityIdentifier("review-poses")
+            .accessibilityLabel("查看 / 编辑 Pose").accessibilityIdentifier("review-poses")
     }
     private var completedActions: some View {
         VStack(spacing: 19) {
             Divider()
-            reviewPosesButton
+            reviewPosesButton()
             Button {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 resultSyncOpen = true
@@ -1222,15 +1503,17 @@ struct TeachingView: View {
         .padding(.bottom, max(0, sidebarPadding - bottomSafeArea))
         .fixedSize(horizontal: false, vertical: true)
     }
-    private var finishTeachingButton: some View {
+    private func finishTeachingButton(compact: Bool = false) -> some View {
         Button {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             finishing = true
         } label: {
-            teachingActionLabel("完成示教", systemImage: "checkmark.circle")
+            if compact {
+                Image(systemName: "checkmark.circle").frame(width: 22, height: 34)
+            } else { teachingActionLabel("完成示教", systemImage: "checkmark.circle") }
         }
         .buttonStyle(.bordered).disabled(count == 0 || session.busy || ar.adjustingPlacement)
-        .accessibilityIdentifier("finish-teaching")
+        .accessibilityLabel("完成示教").accessibilityIdentifier("finish-teaching")
         // On iPad the confirmation is a popover. Anchor it to the tapped button,
         // rather than the whole AR viewport and its other presentation modifiers.
         .confirmationDialog("完成示教？", isPresented: $finishing, titleVisibility: .visible) {
@@ -1241,27 +1524,29 @@ struct TeachingView: View {
                     if session.error.isEmpty && completed { resultSyncOpen = true }
                 }
             }
-            Button("仅完成并保存在 iPad") { ar.stop(); Task { await session.finish(sync: false) } }
+            Button("仅完成并保存在 \(TeachingDevice.storageName)") { ar.stop(); Task { await session.finish(sync: false) } }
             Button("继续示教", role: .cancel) {}
         } message: {
-            Text("已记录 \(count) 个 Pose。完成后将锁定本次示教；可以现在同步，或仅保存在 iPad 后再同步。")
+            Text("已记录 \(count) 个 Pose。完成后将锁定本次示教；可以现在同步，或仅保存在 \(TeachingDevice.storageName) 后再同步。")
         }
     }
     private func setSidebarCollapsed(_ collapsed: Bool) {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         sidebarCollapsed = collapsed
     }
+    private func recordPose() {
+        guard canRecordPose, nearbyPoseConfirmation == nil, let sample = ar.captureKeyframe() else { return }
+        if let confirmation = NearbyPoseConfirmation(sample: sample, previousSample: session.current?.result.samples.last) {
+            nearbyPoseConfirmation = confirmation
+        } else {
+            ar.recordKeyframe(sample)
+        }
+    }
     private var recordPoseButton: some View {
-        Button {
-            guard canRecordPose, nearbyPoseConfirmation == nil, let sample = ar.captureKeyframe() else { return }
-            if let confirmation = NearbyPoseConfirmation(sample: sample, previousSample: session.current?.result.samples.last) {
-                nearbyPoseConfirmation = confirmation
-            } else {
-                ar.recordKeyframe(sample)
-            }
-        } label: {
-            Label("记录 Pose", systemImage: "plus.viewfinder").font(.title3)
-                .frame(maxWidth: .infinity).padding(.vertical, 16)
+        Button(action: recordPose) {
+            Label("记录 Pose", systemImage: "plus.viewfinder").font(TeachingDevice.isPhone ? .body : .title3)
+                .lineLimit(1).minimumScaleFactor(0.85)
+                .frame(maxWidth: .infinity).padding(.vertical, TeachingDevice.isPhone ? 12 : 16)
         }.buttonStyle(.borderedProminent).disabled(!canRecordPose || nearbyPoseConfirmation != nil)
             .accessibilityIdentifier("capture-pose")
     }
@@ -1321,7 +1606,7 @@ struct TeachingView: View {
             if zividFieldOfViewEnabled {
                 Text("水平 56.6° · 垂直 35.6°").font(.caption).monospacedDigit().foregroundStyle(accent)
                 if fieldOfView?.fullyVisible != true {
-                    Text(fieldOfView == nil ? "正在获取相机视野…" : "iPad 相机视野不足，仅显示可见部分")
+                    Text(fieldOfView == nil ? "正在获取相机视野…" : "设备相机视野不足，仅显示可见部分")
                         .font(.caption).foregroundStyle(fieldOfView?.fullyVisible == false ? .orange : .secondary)
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("zivid-fov-status")
                 }
@@ -1582,6 +1867,7 @@ struct PoseReviewView: View {
     @State private var overviewExpanded = false
     @State private var poseEditorHeight: CGFloat = 0
     @State private var previewToolbarHeight: CGFloat = 0
+    @State private var phoneDetailsOpen = false
     @StateObject private var previewPreparation = PosePreviewPreparation()
     @FocusState private var poseNameFocused: Bool
     let geometry: ModelGeometry
@@ -1593,7 +1879,26 @@ struct PoseReviewView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { viewport in
-                if viewport.size.width >= 1000 && viewport.size.width > viewport.size.height {
+                if TeachingDevice.isPhone {
+                    let landscape = viewport.size.width > viewport.size.height
+                    let layout = landscape ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
+                    layout {
+                        posePreview
+                            .frame(height: landscape ? nil : max(180, viewport.size.height * 0.53))
+                        VStack(spacing: 0) {
+                            poseList()
+                            Button { phoneDetailsOpen = true } label: {
+                                HStack {
+                                    Image(systemName: selectingForDeletion ? "trash" : "info.circle")
+                                    Text(selectingForDeletion ? "管理所选（\(deletionIDs.count)）" : "Pose 详情 / 编辑")
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.up")
+                                }.font(.subheadline).frame(minHeight: 44).padding(.horizontal, 14)
+                            }.disabled(selected == nil).accessibilityIdentifier("phone-pose-details")
+                                .background(accent.opacity(0.08))
+                        }.frame(width: landscape ? 240 : nil)
+                    }
+                } else if viewport.size.width >= 1000 && viewport.size.width > viewport.size.height {
                     HStack(spacing: 0) {
                         VStack(spacing: 0) {
                             poseList(headerHeight: previewToolbarHeight)
@@ -1624,6 +1929,17 @@ struct PoseReviewView: View {
             .background(Color(red: 0.025, green: 0.05, blue: 0.065))
             .accessibilityElement(children: .contain).accessibilityIdentifier("pose-review-page")
             .toolbar(.hidden, for: .navigationBar)
+        }.sheet(isPresented: $phoneDetailsOpen) {
+            NavigationStack {
+                ScrollView { poseEditor.padding(20) }
+                    .scrollDismissesKeyboard(.interactively)
+                    .background(Color(red: 0.025, green: 0.05, blue: 0.065))
+                    .navigationTitle("Pose 详情").navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) {
+                        Button("完成") { poseNameFocused = false; phoneDetailsOpen = false }
+                            .accessibilityIdentifier("close-phone-pose-details")
+                    } }
+            }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
         }.onAppear { poseName = selected?.name ?? "" }
             .onChange(of: samples.map(\.id)) { _, ids in
                 deletionIDs.formIntersection(ids)
@@ -1662,8 +1978,10 @@ struct PoseReviewView: View {
                     .accessibilityIdentifier(selectingForDeletion ? "cancel-pose-selection" : "select-poses")
             }.padding(.horizontal, 16).padding(.vertical, 12)
                 .frame(minHeight: headerHeight)
-            PoseOriginLegend(samples: samples, coveragePercentages: coverage.categoryPercentages,
-                             coverageTitle: coverage.coverageTitle).padding(.horizontal, 16).padding(.bottom, 12)
+            if !TeachingDevice.isPhone {
+                PoseOriginLegend(samples: samples, coveragePercentages: coverage.categoryPercentages,
+                                 coverageTitle: coverage.coverageTitle).padding(.horizontal, 16).padding(.bottom, 12)
+            }
             Divider()
             if selectingForDeletion {
                 HStack {
@@ -1731,6 +2049,19 @@ struct PoseReviewView: View {
 
     private var previewToolbar: some View {
         VStack(spacing: 0) {
+            if TeachingDevice.isPhone {
+                VStack(spacing: 6) {
+                    HStack(spacing: 6) {
+                        previewModeButtons
+                        Spacer(minLength: 0)
+                        resetPreviewButton.labelStyle(.iconOnly)
+                        Button { poseNameFocused = false; dismiss() } label: {
+                            Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44)
+                        }.accessibilityLabel("返回示教").accessibilityIdentifier("close-pose-review")
+                    }
+                    previewQualityControl
+                }.padding(.horizontal, 10).padding(.vertical, 6)
+            } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
                     previewModeButtons; Spacer(minLength: 0); previewQualityControl; previewActions
@@ -1745,6 +2076,7 @@ struct PoseReviewView: View {
                     previewActions
                 }
             }.padding(12)
+            }
             if !renderer.error.isEmpty {
                 Text(renderer.error).font(.caption).foregroundStyle(.orange)
                     .padding(.horizontal, 12).padding(.bottom, 8)

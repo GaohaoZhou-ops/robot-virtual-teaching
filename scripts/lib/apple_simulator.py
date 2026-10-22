@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared singleton launcher for the Atlas iPad and visionOS applications."""
+"""Shared singleton launcher for the Atlas iPhone, iPad and visionOS applications."""
 
 import argparse
 from dataclasses import dataclass
@@ -28,6 +28,7 @@ class Simulator:
     sdk: str
     app_name: str
     instructions: str
+    project_directory: str = ''
 
 
 VISION = Simulator(
@@ -39,6 +40,12 @@ IPAD = Simulator(
     'ipad', 'iPad Pro', r'iOS', 'iOS', 'com.apple.CoreSimulator.SimDeviceType.iPad-Pro-',
     'AtlasTeaching', 'com.atlasroute.teaching', 'iphonesimulator', 'Atlas 示教',
     '可调试配对、模型预览与已有数据；AR / LiDAR 空间示教需在真机验证。',
+)
+IPHONE = Simulator(
+    'iphone', 'iPhone', r'iOS', 'iOS', 'com.apple.CoreSimulator.SimDeviceType.iPhone-',
+    'AtlasTeaching', 'com.atlasroute.teaching', 'iphonesimulator', 'Atlas 示教',
+    '可调试手机界面、配对、模型预览与已有数据；AR / LiDAR 空间示教需在真机验证。',
+    project_directory='ipad',
 )
 
 
@@ -55,7 +62,7 @@ def select_device(config, devices, requested):
                 device_type = entry.get('deviceTypeIdentifier', '')
                 matches = not config.device_type_prefix or device_type.startswith(config.device_type_prefix)
                 if not device_type and config.device_type_prefix:
-                    matches = entry.get('name', '').startswith('iPad Pro')
+                    matches = entry.get('name', '').startswith(config.name)
                 if entry.get('isAvailable') and matches:
                     candidates.append((tuple(map(int, version[1].split('-'))), entry))
     if not candidates:
@@ -106,7 +113,7 @@ def launch(config, rebuild):
     print(f'编译 {config.app_name}…\n日志：{build_log}', flush=True)
     with build_log.open('w') as output:
         result = subprocess.run([
-            'xcodebuild', '-project', str(REPO / config.key / f'{config.scheme}.xcodeproj'),
+            'xcodebuild', '-project', str(REPO / (config.project_directory or config.key) / f'{config.scheme}.xcodeproj'),
             '-scheme', config.scheme, '-configuration', 'Debug',
             '-destination', f'platform={config.runtime_name} Simulator,id={udid}',
             '-derivedDataPath', str(artifacts / 'DerivedData'),

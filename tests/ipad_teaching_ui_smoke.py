@@ -42,7 +42,7 @@ with sync_playwright() as playwright:
     page.locator('[data-independent-teaching-input="true"]').set_input_files(str(Path(__file__).parent / 'fixtures/rotation-map.ply'))
     ready(page)
     open_ipad_dialog(page)
-    dialog = page.get_by_role('dialog', name='iPad 示教')
+    dialog = page.get_by_role('dialog', name='iPad / iPhone 示教')
     expect(dialog).to_be_visible()
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     expect(dialog.locator('.ipad-code')).to_have_text(re.compile(r'^[A-Z0-9]{4}$'))

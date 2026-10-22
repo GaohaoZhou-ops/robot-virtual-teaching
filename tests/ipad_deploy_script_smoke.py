@@ -171,6 +171,22 @@ class DeploymentCLI(unittest.TestCase):
                     self.assertFalse(any('launch' in c['args'] for c in self.calls()))
 
 
+class DeviceSelection(unittest.TestCase):
+    def test_phone_and_ipad_are_selected_independently(self):
+        def device(family, identifier, transport='wired'):
+            return {'identifier': identifier, 'hardwareProperties': {'deviceType': family, 'reality': 'physical', 'udid': identifier},
+                    'connectionProperties': {'transportType': transport, 'pairingState': 'paired', 'tunnelState': 'connected'},
+                    'deviceProperties': {'name': identifier}}
+        ipad, phone = device('iPad', 'pad'), device('iPhone', 'phone')
+        devices = [phone, ipad, device('iPhone', 'wireless', 'localNetwork')]
+        self.assertEqual(DEPLOY.select_device(devices, None), ipad)
+        self.assertEqual(DEPLOY.select_device(devices, None, 'iPhone'), phone)
+        with self.assertRaises(RuntimeError):
+            DEPLOY.select_device(devices, 'pad', 'iPhone')
+        with self.assertRaisesRegex(RuntimeError, '--device'):
+            DEPLOY.select_device([phone, device('iPhone', 'phone2')], None, 'iPhone')
+
+
 class SigningTeam(unittest.TestCase):
     def test_existing_profile_and_ambiguity(self):
         with tempfile.TemporaryDirectory() as temporary:

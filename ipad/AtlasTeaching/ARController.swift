@@ -20,7 +20,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
     @Published var groundAssistance = true {
         didSet {
             updateGroundPreview()
-            if !calibrated { message = groundAssistance ? "缓慢移动 iPad 扫描水平地面，再点击青色网格放置物体" : "对准现场基准点，点击或拖动放置物体；可自由调整倾斜" }
+            if !calibrated { message = groundAssistance ? "缓慢移动设备扫描水平地面，再点击青色网格放置物体" : "对准现场基准点，点击或拖动放置物体；可自由调整倾斜" }
         }
     }
     @Published private(set) var groundCount = 0
@@ -28,7 +28,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
     @Published var referenceX: Float = 0
     @Published var referenceY: Float = 0
     @Published var referenceZ: Float = 0
-    @Published var message = "缓慢移动 iPad，扫描物体附近的地面与表面"
+    @Published var message = "缓慢移动设备，扫描物体附近的地面与表面"
     let view = ARSCNView(frame: .zero)
     private let objectRoot = SCNNode()
     private let modelNode = SCNNode()
@@ -59,7 +59,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
     var onSample: ((TeachingSample) -> Bool)?
     var onCalibration: ((Calibration) -> Void)?
     static var supported: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad && ARWorldTrackingConfiguration.isSupported
+        ARWorldTrackingConfiguration.isSupported
             && ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)
             && ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
     }
@@ -98,7 +98,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
     func display(_ geometry: SCNGeometry?) { modelNode.geometry = geometry }
     func start() async {
         guard !running else { return }
-        guard Self.supported else { tracking = "需要配备 LiDAR 的 iPad Pro 真机"; return }
+        guard Self.supported else { tracking = "需要配备 LiDAR 的 iPhone Pro 或 iPad Pro 真机"; return }
         let allowed = await AVCaptureDevice.requestAccess(for: .video)
         guard allowed else { tracking = "相机权限未开启"; message = "请在系统设置中允许 Atlas 示教访问相机"; return }
         guard !running else { return }
@@ -125,7 +125,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
         removeCalibrationAnchor()
         adoptCurrentPlacement()
         updateGroundPreview()
-        message = groundAssistance ? "缓慢移动 iPad 扫描水平地面，再点击青色网格放置物体" : "将屏幕中心对准现实中的物体基准点，再点击「放置物体」"
+        message = groundAssistance ? "缓慢移动设备扫描水平地面，再点击青色网格放置物体" : "将屏幕中心对准现实中的物体基准点，再点击「放置物体」"
     }
     private func removeCalibrationAnchor() {
         if let id = anchorID, let anchor = view.session.currentFrame?.anchors.first(where: { $0.identifier == id }) { view.session.remove(anchor: anchor) }
@@ -214,7 +214,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
               referenceX.isFinite, referenceY.isFinite, referenceZ.isFinite, yaw.isFinite, roll.isFinite, pitch.isFinite else { return }
         let updating = placed
         hitPoint = hit; placed = true; repositioning = false; updatePlacement()
-        message = updating ? "已更新物体位置，可继续调整方向与倾斜" : "调整物体的方向与倾斜，使模型与现场一致；坐标轴辅助观察 iPad 姿态"
+        message = updating ? "已更新物体位置，可继续调整方向与倾斜" : "调整物体的方向与倾斜，使模型与现场一致；坐标轴辅助观察设备姿态"
         if !adjustingPlacement && !placementDragActive { confirmCalibration() }
     }
     @objc private func tapToPlace(_ gesture: UITapGestureRecognizer) { if !calibrated { placeObject(at: gesture.location(in: view)) } }
@@ -332,7 +332,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
     }
     var groundStatus: String {
         if !groundAssistance { return "已关闭 · 可在实测表面自由放置" }
-        if !trackingNormal { return "等待空间定位，缓慢移动 iPad" }
+        if !trackingNormal { return "等待空间定位，缓慢移动设备" }
         if groundCount == 0 { return "扫描水平地面，识别后显示青色网格" }
         return groundTargetAvailable ? "准星已对准地面 · 可放置" : "已识别 \(groundCount) 处地面 · 点击网格或移动准星"
     }

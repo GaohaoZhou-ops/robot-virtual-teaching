@@ -48,7 +48,7 @@ def run():
                 samples.append(sample)
             archive['result']['samples'] = samples
             open_ipad_dialog(page, '导入结果文件')
-            ipad = page.get_by_role('dialog', name='iPad 示教')
+            ipad = page.get_by_role('dialog', name='iPad / iPhone 示教')
             ipad.locator('[data-ipad-result-input]').set_input_files({
                 'name': 'background.atlas-teaching.json', 'mimeType': 'application/json', 'buffer': json.dumps(archive).encode(),
             })
@@ -96,14 +96,32 @@ def run():
             expect(dock.get_by_role('button', name='跟随最新', exact=True)).to_have_attribute('aria-pressed', 'false')
             dock.get_by_role('button', name='跟随最新', exact=True).click()
             expect(canvas).to_have_attribute('data-parking-ghost-state', 'visible')
-            dock.get_by_role('button', name='计算配置', exact=True).click()
+            dock.get_by_role('button', name='计算详情', exact=True).click()
+            rows = dialog.locator('.mobile-solve-table tbody tr')
+            expect(rows).to_have_count(int(frozen))
+            expect(dialog.get_by_role('heading', name='本轮计算结果', exact=True)).to_be_visible()
+            expect(dialog.get_by_role('status')).to_contain_text(f'计算已暂停 · 已完成 {frozen} / 36 个 Pose')
+            expect(dialog.get_by_role('button', name='导出计算报告', exact=True)).to_be_disabled()
+            expect(dialog.get_by_role('button', name='保存可达姿态', exact=True)).to_be_disabled()
+            expect(dialog.get_by_role('button', name=re.compile(r'^应用(?:左臂|右臂|双臂)解$')).first).to_be_disabled()
             expect(dialog.get_by_role('button', name='重新计算', exact=True)).to_be_enabled()
+            page.screenshot(path=str(ARTIFACTS / 'background-live-paused-details.png'), full_page=True)
             dialog.get_by_role('button', name='关闭姿态计算').click()
             expect(dock).to_have_attribute('data-compute-status', 'paused')
 
             dock.get_by_role('button', name='继续姿态计算', exact=True).click()
             page.wait_for_function("old => Number(document.querySelector('.mobile-compute-dock')?.dataset.completed) > old", arg=int(frozen))
             expect(dock).to_have_attribute('data-compute-status', 'running')
+            dock.get_by_role('button', name='计算详情', exact=True).click()
+            rows.nth(1).get_by_role('button').click()
+            selected_name = rows.nth(1).get_by_role('button').inner_text()
+            visible_count = rows.count()
+            page.wait_for_function("old => document.querySelectorAll('.mobile-solve-table tbody tr').length > old", arg=visible_count)
+            expect(dialog.locator('.mobile-solve-detail h4')).to_contain_text(selected_name)
+            expect(dialog.locator('.mobile-solve-badge').filter(has_text='未通过').first).to_be_attached()
+            assert not workspace(page)['project']['virtualTeaching']['tasks'][0].get('mobileSolve'), 'partial results must not be persisted as a complete report'
+            page.screenshot(path=str(ARTIFACTS / 'background-live-growing-results.png'), full_page=True)
+            dialog.get_by_role('button', name='关闭姿态计算').click()
             # Orbit the live viewport while the real worker is still solving.
             expect(canvas).to_have_attribute('data-synchronized-focus-state', 'settled')
             before_view = camera_view(canvas)
@@ -126,6 +144,10 @@ def run():
             page.wait_for_timeout(500)
             expect(dock).to_have_attribute('data-compute-run', second_run)
             expect(dock).to_have_attribute('data-completed', second_completed)
+            dock.get_by_role('button', name='计算详情', exact=True).click()
+            expect(rows).to_have_count(int(second_completed))
+            expect(dialog.get_by_role('heading', name='本轮计算结果', exact=True)).to_be_visible()
+            dialog.get_by_role('button', name='关闭姿态计算').click()
             dock.get_by_role('button', name='取消姿态计算', exact=True).click()
             expect(dock).to_have_attribute('data-compute-status', 'cancelled')
             expect(canvas).to_have_attribute('data-parking-ghost-state', 'hidden')
@@ -135,6 +157,11 @@ def run():
 
             dock.get_by_role('button', name='重新计算姿态', exact=True).click()
             started = time.monotonic()
+            dock.get_by_role('button', name='计算详情', exact=True).click()
+            opened_dialog = dialog.element_handle()
+            expect(rows.nth(1)).to_be_visible(timeout=120000)
+            rows.nth(1).get_by_role('button').click()
+            selected_name = rows.nth(1).get_by_role('button').inner_text()
             expect(dock).to_have_attribute('data-compute-status', 'completed', timeout=120000)
             print('36-pose background calculation seconds:', round(time.monotonic() - started, 2))
             expect(dock).to_have_attribute('data-completed', '36')
@@ -144,6 +171,21 @@ def run():
             report = config['project']['virtualTeaching']['tasks'][0]['mobileSolve']
             assert len(report['rows']) == 36
             assert report['feasibleCount'] == 14
+            assert opened_dialog.evaluate('(el) => el.isConnected'), 'the same details dialog remains open through completion'
+            expect(rows).to_have_count(36)
+            expect(dialog.locator('.mobile-solve-badge.is-pass')).to_have_count(14)
+            expect(dialog.locator('.mobile-solve-badge:not(.is-pass)')).to_have_count(22)
+            expect(dialog.get_by_role('heading', name='计算结果', exact=True)).to_be_visible()
+            expect(dialog.locator('.mobile-solve-detail h4')).to_contain_text(selected_name)
+            expect(dialog.get_by_role('button', name='导出计算报告', exact=True)).to_be_enabled()
+            expect(dialog.get_by_role('button', name='保存可达姿态', exact=True)).to_be_enabled()
+            expect(dialog.get_by_role('status')).to_have_count(0)
+            final_table = dialog.locator('.mobile-solve-table').inner_text()
+            page.screenshot(path=str(ARTIFACTS / 'background-details-completed.png'), full_page=True)
+            dialog.get_by_role('button', name='关闭姿态计算').click()
+            dock.get_by_role('button', name='查看结果', exact=True).click()
+            assert dialog.locator('.mobile-solve-table').inner_text() == final_table
+            dialog.get_by_role('button', name='关闭姿态计算').click()
             assert canvas.get_attribute('data-parking-ghost-pose-id') == [row for row in report['rows'] if row['feasible']][-1]['sampleId']
             assert canvas.get_attribute('data-robot-joint-values') == live_joints
             page.set_viewport_size({'width': 1280, 'height': 800})
@@ -176,7 +218,7 @@ def run():
             expect(dock).to_have_attribute('data-compute-status', 'cancelled')
             page.wait_for_timeout(600)
             assert workspace(page)['project']['virtualTeaching']['tasks'][0]['mobileSolve'] == report
-            dock.get_by_role('button', name='计算配置', exact=True).click()
+            dock.get_by_role('button', name='计算详情', exact=True).click()
             expect(dialog.get_by_role('spinbutton', name='X 位置容差 (cm)')).to_have_value('6')
             expect(dialog.get_by_role('button', name=re.compile(r'^应用(?:左臂|右臂|双臂)解$')).first).to_be_disabled()
             expect(dialog.get_by_role('button', name='查看已保存任务', exact=True)).to_be_disabled()
@@ -199,7 +241,7 @@ def run():
             assert not errors, errors
         finally:
             browser.close()
-    print('Background UI: worker, progressive ghosts, orbit, pause/resume, history, restart, cancel, report isolation, data-page controls and workspace cleanup passed.')
+    print('Background UI: live results, failures, stable selection, open-dialog completion, worker, ghosts, pause/resume, restart, cancel, report isolation and workspace cleanup passed.')
 
 
 if __name__ == '__main__':

@@ -1,4 +1,4 @@
-"""Browser USB controls; optionally send one disposable model to a real iPad."""
+"""Browser USB controls; optionally send one disposable model to a real iPhone or iPad."""
 import json
 import os
 from pathlib import Path
@@ -31,7 +31,7 @@ with sync_playwright() as playwright:
         page.locator('[data-session-state="ready"]').wait_for(state='attached')
         page.locator('.loading-curtain').wait_for(state='hidden')
         open_ipad_dialog(page)
-        dialog = page.get_by_role('dialog', name='iPad 示教')
+        dialog = page.get_by_role('dialog', name='iPad / iPhone 示教')
         panel = dialog.get_by_role('region', name='通过数据线发送物体')
         expect(panel).to_be_visible()
         send = panel.get_by_role('button', name='通过数据线发送', exact=True)
@@ -43,8 +43,8 @@ with sync_playwright() as playwright:
 
         if DEVICE:
             page.unroute('**/__atlas/ipad/usb', mocked_status)
-            expect(panel.get_by_role('combobox', name='数据线连接的 iPad')).to_be_visible(timeout=20000)
-            panel.get_by_role('combobox', name='数据线连接的 iPad').select_option(DEVICE)
+            expect(panel.get_by_role('combobox', name='数据线连接的 iPhone / iPad')).to_be_visible(timeout=20000)
+            panel.get_by_role('combobox', name='数据线连接的 iPhone / iPad').select_option(DEVICE)
             expect(send).to_be_enabled(timeout=20000)
             with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/usb'), timeout=180000) as response:
                 send.click()

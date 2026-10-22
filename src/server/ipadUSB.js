@@ -11,7 +11,7 @@ const inbox = 'Documents/Atlas USB';
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 
 export function wiredIPads(devices) {
-  return devices.filter((device) => device.hardwareProperties?.deviceType === 'iPad'
+  return devices.filter((device) => ['iPad', 'iPhone'].includes(device.hardwareProperties?.deviceType)
     && device.hardwareProperties?.reality === 'physical'
     && device.connectionProperties?.transportType === 'wired'
     && device.connectionProperties?.pairingState === 'paired'
@@ -64,9 +64,9 @@ export function createIPadUSBBridge({ directory, serverId, serverName, platform 
         const connected = await list();
         const next = [];
         for (const device of connected) {
-          const entry = { id: device.identifier, name: device.deviceProperties?.name || 'iPad', ready: false };
+          const entry = { id: device.identifier, name: device.deviceProperties?.name || device.hardwareProperties?.deviceType || 'iOS 设备', ready: false };
           try { await ping(device); entry.ready = true; }
-          catch { entry.message = '请解锁 iPad、信任此电脑，并确认已安装 Atlas 示教。'; }
+          catch { entry.message = '请解锁 iPhone / iPad、信任此电脑，并确认已安装 Atlas 示教。'; }
           next.push(entry);
         }
         devices = next; message = '';
@@ -84,10 +84,10 @@ export function createIPadUSBBridge({ directory, serverId, serverName, platform 
     },
     close() { closed = true; clearInterval(timer); timer = undefined; },
     async send({ deviceId, session, modelPath }) {
-      if (!supported) fail(503, '数据线接收需要在连接 iPad 的 Mac 上运行示教服务。');
+      if (!supported) fail(503, '数据线接收需要在连接 iPhone / iPad 的 Mac 上运行示教服务。');
       return serialize(async () => {
         const device = (await list()).find((item) => item.identifier === deviceId);
-        if (!device) fail(409, '这台 iPad 的数据线连接已断开，请重新连接后重试。');
+        if (!device) fail(409, '这台设备的数据线连接已断开，请重新连接后重试。');
         // The same frozen desktop session always maps to one distinct USB project.
         // A retry can reopen that project without replacing LAN credentials or Pose data.
         const digest = createHash('sha256').update(`atlas-usb-model:${session.id}`).digest('hex');
@@ -104,11 +104,11 @@ export function createIPadUSBBridge({ directory, serverId, serverName, platform 
           // Commit metadata last. The iPad ignores incomplete or interrupted copies.
           await copy(deviceId, ready, `${inbox}/Inbox/${id}/ready.json`);
           await ping(device);
-          return { id, deviceName: device.deviceProperties?.name || 'iPad', name: session.manifest.name,
+          return { id, deviceName: device.deviceProperties?.name || device.hardwareProperties?.deviceType || 'iOS 设备', name: session.manifest.name,
             byteLength: session.manifest.byteLength };
         } catch (error) {
           if (error.status) throw error;
-          fail(502, '数据线发送未完成，请保持 iPad 解锁并连接，稍后重试；原有示教项目不受影响。');
+          fail(502, '数据线发送未完成，请保持设备解锁并连接，稍后重试；原有示教项目不受影响。');
         } finally { await rm(temporary, { recursive: true, force: true }); }
       });
     },

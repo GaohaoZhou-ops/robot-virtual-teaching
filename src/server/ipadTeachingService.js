@@ -122,8 +122,8 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
       const route = pathname.slice('/__atlas/ipad'.length);
       const localUSB = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
       if (route === '/usb' && req.method === 'GET') {
-        if (!localUSB) return json(res, 200, { supported: false, devices: [], message: '请在连接 iPad 的 Mac 上使用 http://127.0.0.1:' + req.socket.localPort + ' 打开工作台。' });
-        return json(res, 200, usbBridge?.status() || { supported: false, devices: [], message: '请在连接 iPad 的 Mac 上运行示教服务。' });
+        if (!localUSB) return json(res, 200, { supported: false, devices: [], message: '请在连接 iPhone / iPad 的 Mac 上使用 http://127.0.0.1:' + req.socket.localPort + ' 打开工作台。' });
+        return json(res, 200, usbBridge?.status() || { supported: false, devices: [], message: '请在连接 iPhone / iPad 的 Mac 上运行示教服务。' });
       }
       if (route === '/info' && req.method === 'GET') {
         const port = req.socket.localPort;
@@ -217,13 +217,13 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
           || (['verify-model', 'result'].includes(action) && req.method === 'POST') ? 'device' : 'owner';
         authorize(req, session, role);
         if (action === 'usb' && req.method === 'POST') {
-          if (!localUSB) fail(403, '请在连接 iPad 的 Mac 本机工作台发送数据线文件。');
+          if (!localUSB) fail(403, '请在连接 iPhone / iPad 的 Mac 本机工作台发送数据线文件。');
           if (!usbBridge) fail(503, '当前服务未启用 Mac 数据线传输。');
           if (session.targetDevice === 'vision' || !['ready', 'paired', 'completed', 'imported'].includes(session.status)) {
-            fail(409, '请先为 iPad 准备好当前物体。');
+            fail(409, '请先为 iPhone / iPad 准备好当前物体。');
           }
           const { deviceId } = await readBody(req, 4096);
-          if (typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/i.test(deviceId)) fail(400, '请选择已连接的 iPad。');
+          if (typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/i.test(deviceId)) fail(400, '请选择已连接的 iPhone / iPad。');
           await verifyModel(session, session.manifest);
           return json(res, 200, await usbBridge.send({ deviceId, session, modelPath: path.join(directory, id, 'model.atls') }));
         }

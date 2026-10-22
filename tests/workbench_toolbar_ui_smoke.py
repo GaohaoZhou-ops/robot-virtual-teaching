@@ -65,7 +65,7 @@ def run():
             expect(toolbar.get_by_role('button', name='机器人菜单')).to_be_focused()
 
             if mode == 'independent':
-                for device in ('iPad', 'Vision Pro'):
+                for device in ('iPad / iPhone', 'Vision Pro'):
                     topbar_action(page, device, exact=True).click()
                     mobile = page.get_by_role('menu', name=device, exact=True)
                     expect(mobile).to_be_visible()
@@ -85,7 +85,7 @@ def run():
                     status=503, content_type='application/json', body='{"error":"测试：局域网暂不可用"}'))
                 for device, action, title, retry in (
                     ('Vision Pro', '配对 Vision Pro', 'Vision Pro 空间示教', '重试准备配对信息'),
-                    ('iPad', '扫码配对', 'iPad 示教', '重试生成二维码'),
+                    ('iPad / iPhone', '扫码配对', 'iPad / iPhone 示教', '重试生成二维码'),
                 ):
                     topbar_action(page, device, exact=True).click()
                     page.get_by_role('menuitem', name='同步与接收', exact=True).click()
@@ -158,7 +158,7 @@ def run():
                 assert not any(path.endswith('/pairing-qr') for _, path in requests), 'Vision Pro pairs without scanning'
                 for device, transfer_id, excluded_id in (
                     ('Vision Pro', 'vision-ui-transfer', 'ipad-ui-transfer'),
-                    ('iPad', 'ipad-ui-transfer', 'vision-ui-transfer'),
+                    ('iPad / iPhone', 'ipad-ui-transfer', 'vision-ui-transfer'),
                 ):
                     topbar_action(page, device, exact=True).click()
                     page.get_by_role('menuitem', name='传输任务', exact=True).click()
