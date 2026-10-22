@@ -91,11 +91,13 @@ export default function TeachingPoseRobotPreview({
   pose,
   robot,
   teachingSpaceMode = 'map',
+  variant = 'teaching',
 }) {
   const viewportRef = useRef(null);
   const canvasRef = useRef(null);
   const sceneContextRef = useRef(null);
   const robotRef = useRef(null);
+  const fittedRobotRef = useRef(null);
   const [modelRevision, setModelRevision] = useState(0);
   const [loadState, setLoadState] = useState({ status: 'idle', detail: '' });
   const [relativeArmPoseSnapshot, setRelativeArmPoseSnapshot] = useState({
@@ -108,8 +110,9 @@ export default function TeachingPoseRobotPreview({
   const recordedPose = useMemo(() => normalizeRobotPose(pose?.mapPose), [pose?.mapPose]);
   const jointValues = pose?.fullBodyJoints?.values || EMPTY_JOINT_VALUES;
   const jointCount = Object.keys(jointValues).length;
-  const isIndependentTeachingSpace = teachingSpaceMode === 'independent'
-    || task?.coordinateFrame === 'virtual_origin';
+  const isPresetPreview = variant === 'preset';
+  const isIndependentTeachingSpace = !isPresetPreview && (teachingSpaceMode === 'independent'
+    || task?.coordinateFrame === 'virtual_origin');
   const relativeArmPoses = relativeArmPoseSnapshot.poseId === pose?.id
     ? relativeArmPoseSnapshot.poses
     : {};
@@ -149,7 +152,11 @@ export default function TeachingPoseRobotPreview({
     context.camera.near = Math.max(radius / 120, 0.002);
     context.camera.far = Math.max(radius * 90, 120);
     context.camera.up.set(0, 0, 1);
-    context.camera.position.copy(center).addScaledVector(direction, radius * 2.65);
+    const halfFov = Math.tan(THREE.MathUtils.degToRad(context.camera.fov / 2));
+    const distance = isPresetPreview
+      ? Math.max(size.z / (2 * halfFov), size.y / (2 * halfFov * context.camera.aspect)) * 1.18 + size.x / 2
+      : radius * 2.65;
+    context.camera.position.copy(center).addScaledVector(direction, Math.max(distance, 0.5));
     context.controls.target.copy(center);
     context.controls.minDistance = Math.max(radius * 0.22, 0.05);
     context.controls.maxDistance = Math.max(radius * 16, 20);
@@ -159,7 +166,7 @@ export default function TeachingPoseRobotPreview({
     const gridSize = Math.max(2, Math.ceil(maximumDimension * 2.8));
     context.grid.scale.setScalar(gridSize / 10);
     context.axes.scale.setScalar(Math.max(maximumDimension * 0.22, 0.25));
-  }, []);
+  }, [isPresetPreview]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -387,10 +394,19 @@ export default function TeachingPoseRobotPreview({
       delete canvas.dataset.relativeArmPoseSource;
       canvas.dataset.relativeArmPoseCount = '0';
     }
-    window.requestAnimationFrame(fitRobot);
+    // Keep the user's viewing angle while editing; the reset button fits the
+    // current pose when an arm moves beyond the initial framing.
+    if (!isPresetPreview || fittedRobotRef.current !== loadedRobot) {
+      const frame = window.requestAnimationFrame(() => {
+        fitRobot();
+        fittedRobotRef.current = loadedRobot;
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
   }, [
     fitRobot,
     isIndependentTeachingSpace,
+    isPresetPreview,
     jointValues,
     modelRevision,
     pose,
@@ -402,8 +418,8 @@ export default function TeachingPoseRobotPreview({
 
   return (
     <section
-      className={`teaching-pose-robot-preview is-${loadState.status} ${hasPose ? 'has-pose' : 'is-empty'} ${isIndependentTeachingSpace && hasPose ? 'shows-object-relative-poses' : ''}`}
-      aria-label="机器人示教姿态三维预览"
+      className={`teaching-pose-robot-preview is-${loadState.status} ${hasPose ? 'has-pose' : 'is-empty'} ${isPresetPreview ? 'is-preset-preview' : ''} ${isIndependentTeachingSpace && hasPose ? 'shows-object-relative-poses' : ''}`}
+      aria-label={isPresetPreview ? '预设姿态三维预览' : '机器人示教姿态三维预览'}
       data-preview-state={loadState.status}
       data-pose-id={pose?.id || ''}
       data-robot-id={descriptorKey}
@@ -420,14 +436,16 @@ export default function TeachingPoseRobotPreview({
         <div>
           <span><Bot size={15} /></span>
           <div>
-            <small>ROBOT POSE / ISOLATED VIEW</small>
-            <strong>机器人 3D 姿态</strong>
+            <small>{isPresetPreview ? 'ROBOT / LIVE PREVIEW' : 'ROBOT POSE / ISOLATED VIEW'}</small>
+            <strong>{isPresetPreview ? '姿态实时预览' : '机器人 3D 姿态'}</strong>
           </div>
         </div>
         <span className={`teaching-pose-robot-preview__state is-${loadState.status}`}>
           {loadState.status === 'loading' && <LoaderCircle className="is-spinning" size={10} />}
           {loadState.status === 'error' && <TriangleAlert size={10} />}
-          {ready ? 'MODEL READY' : loadState.status === 'loading' ? 'LOADING' : loadState.status === 'error' ? 'MODEL ERROR' : 'WAITING'}
+          {isPresetPreview
+            ? (ready ? '已就绪' : loadState.status === 'loading' ? '加载中' : loadState.status === 'error' ? '加载失败' : '待加载')
+            : (ready ? 'MODEL READY' : loadState.status === 'loading' ? 'LOADING' : loadState.status === 'error' ? 'MODEL ERROR' : 'WAITING')}
         </span>
         <button
           type="button"
@@ -444,7 +462,7 @@ export default function TeachingPoseRobotPreview({
         <canvas
           ref={canvasRef}
           className="teaching-pose-robot-canvas"
-          aria-label="所选示教姿态机器人三维模型"
+          aria-label={isPresetPreview ? '预设姿态机器人三维模型' : '所选示教姿态机器人三维模型'}
           tabIndex={0}
         />
         {!hasPose && (
@@ -470,9 +488,9 @@ export default function TeachingPoseRobotPreview({
         {hasPose && ready && (
           <>
             <div className="teaching-pose-robot-preview__identity">
-              <small>{task?.name || '示教任务'}</small>
-              <strong>{parkingPoint?.name || '停车点'} / {pose.name}</strong>
-              <span>{jointCount} JOINT VALUES</span>
+              <small>{isPresetPreview ? descriptor?.name : task?.name || '示教任务'}</small>
+              <strong>{isPresetPreview ? pose.name : `${parkingPoint?.name || '停车点'} / ${pose.name}`}</strong>
+              {!isPresetPreview && <span>{jointCount} JOINT VALUES</span>}
             </div>
             <div className="teaching-pose-robot-preview__axis" aria-label="ROS 坐标轴图例">
               <span className="is-x">X</span><span className="is-y">Y</span><span className="is-z">Z</span>
@@ -548,7 +566,7 @@ export default function TeachingPoseRobotPreview({
         </section>
       )}
 
-      <footer className="teaching-pose-robot-preview__footer">
+      {!isPresetPreview && <footer className="teaching-pose-robot-preview__footer">
         <div>
           <span>{isIndependentTeachingSpace ? 'OBJECT BASE XYZ' : 'MAP XYZ'}</span>
           <strong>
@@ -569,7 +587,7 @@ export default function TeachingPoseRobotPreview({
           <span>SCENE</span>
           <strong><Box size={9} /> ROBOT ONLY</strong>
         </div>
-      </footer>
+      </footer>}
     </section>
   );
 }

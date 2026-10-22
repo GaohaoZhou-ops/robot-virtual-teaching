@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, FolderOpen, LoaderCircle, Save, X } from 'lucide-react';
+import { Bot, Crosshair, FolderOpen, LoaderCircle, Play, RotateCcw, Save, X } from 'lucide-react';
+import TeachingPoseRobotPreview from './TeachingPoseRobotPreview.jsx';
 import {
   groupPresetJoints,
   jointPresetErrors,
@@ -19,7 +20,7 @@ function limitLabel(joint, unit) {
   return `${format(joint.lower, '−∞')} ～ ${format(joint.upper, '+∞')} ${unitLabel(joint, unit)}`;
 }
 
-export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFocusRef }) {
+export default function RobotPresetDialog({ snapshot, currentJointValues = snapshot.values, onSave, onClose, returnFocusRef }) {
   const panelRef = useRef(null);
   const nameInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -30,14 +31,23 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
   const [unit, setUnit] = useState(snapshot.unit || 'degree');
   const [drafts, setDrafts] = useState(() => Object.fromEntries(snapshot.joints.map((joint) => {
     const value = snapshot.values[joint.name] ?? Math.max(joint.lower ?? -Infinity, Math.min(joint.upper ?? Infinity, 0));
-    return [joint.name, { value, text: formatValue(jointValueToInput(value, joint, snapshot.unit || 'degree')) }];
+    const previewValue = Math.max(joint.lower ?? -Infinity, Math.min(joint.upper ?? Infinity, Number.isFinite(value) ? value : 0));
+    return [joint.name, { value, previewValue, text: formatValue(jointValueToInput(value, joint, snapshot.unit || 'degree')) }];
   })));
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [saving, setSaving] = useState(null);
   const [importing, setImporting] = useState(false);
-  const busy = saving || importing;
+  const busy = Boolean(saving || importing);
   const groups = useMemo(() => groupPresetJoints(snapshot.joints), [snapshot.joints]);
+  const previewValues = useMemo(() => ({ ...currentJointValues,
+    ...Object.fromEntries(Object.entries(drafts).map(([joint, draft]) => [joint, draft.previewValue])),
+  }), [drafts, currentJointValues]);
+  const previewPose = useMemo(() => ({ id: snapshot.id, name: name.trim() || '未命名姿态',
+    fullBodyJoints: { values: previewValues },
+  }), [name, previewValues, snapshot.id]);
+  const hasInvalidValues = Object.keys(jointPresetErrors(snapshot.joints,
+    Object.fromEntries(Object.entries(drafts).map(([joint, draft]) => [joint, draft.value])))).length > 0;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -63,7 +73,8 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
       if (!mountedRef.current) return;
       setDrafts((current) => Object.fromEntries(snapshot.joints.map((joint) => {
         const value = imported.values[joint.name] ?? current[joint.name].value;
-        return [joint.name, { value, text: formatValue(jointValueToInput(value, joint, imported.unit)) }];
+        return [joint.name, { value, previewValue: imported.values[joint.name] ?? current[joint.name].previewValue,
+          text: formatValue(jointValueToInput(value, joint, imported.unit)) }];
       })));
       setName((current) => current.trim() ? current : imported.name);
       setUnit(imported.unit);
@@ -81,15 +92,29 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
     if (unit === nextUnit) return;
     // Keep canonical degrees/meters so repeated unit switches never accumulate rounding.
     setDrafts((current) => Object.fromEntries(snapshot.joints.map((joint) => [joint.name, {
-      value: current[joint.name].value,
+      ...current[joint.name],
       text: formatValue(jointValueToInput(current[joint.name].value, joint, nextUnit)),
     }])));
     setUnit(nextUnit);
   };
 
+  const replacePoseValues = (source) => {
+    if (savingRef.current || importingRef.current) return;
+    const values = Object.fromEntries(snapshot.joints.map((joint) => [joint.name, source[joint.name] ?? 0]));
+    const nextErrors = jointPresetErrors(snapshot.joints, values);
+    setDrafts((current) => Object.fromEntries(snapshot.joints.map((joint) => {
+      const value = values[joint.name];
+      return [joint.name, { value, text: formatValue(jointValueToInput(value, joint, unit)),
+        previewValue: nextErrors[joint.name] ? current[joint.name].previewValue : value }];
+    })));
+    setErrors(nextErrors);
+    setError('');
+  };
+
   const save = async (event) => {
     event.preventDefault();
     if (savingRef.current || importingRef.current) return;
+    const apply = event.nativeEvent.submitter?.value === 'apply';
     const values = Object.fromEntries(Object.entries(drafts).map(([key, draft]) => [key, draft.value]));
     const nextErrors = jointPresetErrors(snapshot.joints, values);
     setErrors(nextErrors);
@@ -97,14 +122,14 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
     if (!name.trim()) { setError('请输入预设姿态名称'); return; }
     if (Object.keys(nextErrors).length) { setError('请修正标出的关节值后保存'); return; }
     savingRef.current = true;
-    setSaving(true);
+    setSaving(apply ? 'apply' : 'save');
     try {
-      await onSave({ name, values });
+      await onSave({ name, values, apply });
     } catch (reason) {
-      setError(reason.message || '预设姿态保存失败，请重试');
+      if (mountedRef.current) setError(reason.message || '预设姿态保存失败，请重试');
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      if (mountedRef.current) setSaving(null);
     }
   };
 
@@ -114,7 +139,7 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
       event.preventDefault();
       if (!savingRef.current && !importingRef.current) onClose();
     } else if (event.key === 'Tab') {
-      const controls = [...panelRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="file"])')];
+      const controls = [...panelRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="file"]), canvas[tabindex="0"]')];
       if (event.shiftKey && [controls[0], panelRef.current].includes(document.activeElement)) {
         event.preventDefault(); controls.at(-1)?.focus();
       } else if (!event.shiftKey && document.activeElement === controls.at(-1)) {
@@ -136,59 +161,81 @@ export default function RobotPresetDialog({ snapshot, onSave, onClose, returnFoc
           <button type="button" aria-label="关闭预设姿态窗口" disabled={busy} onClick={onClose}><X size={18} /></button>
         </header>
         <div className="robot-preset-dialog__body">
-          <div className="robot-preset-dialog__settings">
-            <label className="robot-preset-dialog__name">预设姿态名称
-              <input ref={nameInputRef} aria-label="预设姿态名称" placeholder="例如：准备姿态" maxLength={80}
-                value={name} disabled={busy} onChange={(event) => { setName(event.target.value); setError(''); }} />
-            </label>
-            <div className="robot-preset-dialog__controls">
-              <div className="robot-preset-dialog__units" role="group" aria-label="关节角度单位">
-                <span>输入单位</span>
-                <div>{[['degree', '角度 °'], ['radian', '弧度 rad']].map(([value, label]) => (
-                  <button type="button" key={value} aria-pressed={unit === value} disabled={busy}
-                    onClick={() => changeUnit(value)}>{label}</button>
-                ))}</div>
-              </div>
-              <span className="robot-preset-dialog__divider" aria-hidden="true" />
-              <input ref={fileInputRef} type="file" hidden tabIndex={-1} disabled={busy}
-                accept=".json,application/json" aria-label="预设姿态文件" onChange={importFile} />
-              <button type="button" disabled={busy} onClick={() => fileInputRef.current?.click()}>
-                {importing ? <LoaderCircle size={14} className="is-spinning" /> : <FolderOpen size={14} />}
-                {importing ? '正在读取…' : '导入预设姿态'}
-              </button>
-            </div>
+          <div className="robot-preset-dialog__preview">
+            <TeachingPoseRobotPreview variant="preset" robot={snapshot.robot} pose={previewPose} />
+            <p className={hasInvalidValues ? 'is-warning' : ''} role="status">
+              {hasInvalidValues ? '部分关节输入无效，预览保留这些关节上次有效的位置。'
+                : '修改或导入后实时预览；点击“保存并应用”后，工作台机器人使用该姿态。'}
+            </p>
           </div>
-          <div className="robot-preset-dialog__groups">
-            {groups.map((group) => <fieldset key={group.id} data-preset-group={group.id} disabled={busy}>
-              <legend>{group.label}<span>{group.joints.length} 个关节</span></legend>
-              {group.joints.map((joint) => <label key={joint.name} className="robot-preset-joint">
-                <span><strong title={joint.name}>{joint.name}</strong><small>{limitLabel(joint, unit)}</small>
-                  {errors[joint.name] && <em>{errors[joint.name]}</em>}</span>
-                <span className="robot-preset-joint__input">
-                  <input type="number" step="any" aria-label={`${joint.name} 预设关节值`}
-                    aria-invalid={Boolean(errors[joint.name])} value={drafts[joint.name].text}
-                    onChange={(event) => {
-                      const text = event.target.value;
-                      setDrafts((current) => ({ ...current, [joint.name]: {
-                        text, value: jointValueFromInput(text, joint, unit),
-                      } }));
-                      setErrors((current) => ({ ...current, [joint.name]: undefined }));
-                      setError('');
-                    }} />
-                  <small>{unitLabel(joint, unit)}</small>
-                </span>
-              </label>)}
-            </fieldset>)}
+          <div className="robot-preset-dialog__editor">
+            <div className="robot-preset-dialog__settings">
+              <label className="robot-preset-dialog__name">预设姿态名称
+                <input ref={nameInputRef} aria-label="预设姿态名称" placeholder="例如：准备姿态" maxLength={80}
+                  value={name} disabled={busy} onChange={(event) => { setName(event.target.value); setError(''); }} />
+              </label>
+              <div className="robot-preset-dialog__controls">
+                <div className="robot-preset-dialog__units" role="group" aria-label="关节角度单位">
+                  <span>输入单位</span>
+                  <div>{[['degree', '角度 °'], ['radian', '弧度 rad']].map(([value, label]) => (
+                    <button type="button" key={value} aria-pressed={unit === value} disabled={busy}
+                      onClick={() => changeUnit(value)}>{label}</button>
+                  ))}</div>
+                </div>
+                <input ref={fileInputRef} type="file" hidden tabIndex={-1} disabled={busy}
+                  accept=".json,application/json" aria-label="预设姿态文件" onChange={importFile} />
+                <div className="robot-preset-dialog__pose-actions">
+                  <button type="button" disabled={busy} onClick={() => replacePoseValues({})}>
+                    <RotateCcw size={14} />重置姿态
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => replacePoseValues(currentJointValues)}>
+                    <Crosshair size={14} />当前姿态
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                    {importing ? <LoaderCircle size={14} className="is-spinning" /> : <FolderOpen size={14} />}
+                    {importing ? '正在读取…' : '导入预设姿态'}
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div className="robot-preset-dialog__groups">
+              {groups.map((group) => <fieldset key={group.id} data-preset-group={group.id} disabled={busy}>
+                <legend>{group.label}<span>{group.joints.length} 个关节</span></legend>
+                {group.joints.map((joint) => <label key={joint.name} className="robot-preset-joint">
+                  <span><strong title={joint.name}>{joint.name}</strong><small>{limitLabel(joint, unit)}</small>
+                    {errors[joint.name] && <em>{errors[joint.name]}</em>}</span>
+                  <span className="robot-preset-joint__input">
+                    <input type="number" step="any" aria-label={`${joint.name} 预设关节值`}
+                      aria-invalid={Boolean(errors[joint.name])} value={drafts[joint.name].text}
+                      onChange={(event) => {
+                        const text = event.target.value;
+                        const value = jointValueFromInput(text, joint, unit);
+                        const valid = !Object.keys(jointPresetErrors([joint], { [joint.name]: value })).length;
+                        setDrafts((current) => ({ ...current, [joint.name]: {
+                          text, value, previewValue: valid ? value : current[joint.name].previewValue,
+                        } }));
+                        setErrors((current) => ({ ...current, [joint.name]: undefined }));
+                        setError('');
+                      }} />
+                    <small>{unitLabel(joint, unit)}</small>
+                  </span>
+                </label>)}
+              </fieldset>)}
+            </div>
           </div>
         </div>
         <footer>
           <span className={error ? 'is-error' : ''} role={error ? 'alert' : undefined}>
-            {error || '保存到当前工程，之后可从机器人菜单一键应用。'}
+            {error || '保存到当前工程；选择“保存并应用”可立即使用该姿态。'}
           </span>
           <div><button type="button" disabled={busy} onClick={onClose}>取消</button>
-            <button type="submit" className="robot-preset-dialog__save" disabled={busy}>
-              {saving ? <LoaderCircle size={14} className="is-spinning" /> : <Save size={14} />}
-              {saving ? '正在保存' : '保存预设姿态'}
+            <button type="submit" name="action" value="save" className="robot-preset-dialog__save" disabled={busy}>
+              {saving === 'save' ? <LoaderCircle size={14} className="is-spinning" /> : <Save size={14} />}
+              {saving === 'save' ? '正在保存' : '保存姿态'}
+            </button>
+            <button type="submit" name="action" value="apply" className="robot-preset-dialog__apply" disabled={busy}>
+              {saving === 'apply' ? <LoaderCircle size={14} className="is-spinning" /> : <Play size={14} />}
+              {saving === 'apply' ? '正在保存并应用' : '保存并应用'}
             </button></div>
         </footer>
       </form>

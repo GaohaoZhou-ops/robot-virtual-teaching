@@ -12,7 +12,8 @@
 .robot-preset-dialog {
   display: flex;
   flex-direction: column;
-  width: min(840px, 100%);
+  width: min(1280px, 100%);
+  height: min(920px, calc(100dvh - 48px));
   max-height: calc(100dvh - 48px);
   border: 1px solid #59dbe84d;
   border-radius: 6px;
@@ -31,20 +32,28 @@
 }
 .robot-preset-dialog__icon { display: grid; place-items: center; width: 45px; height: 45px; color: var(--cyan); border: 1px solid #59dbe833; background: #59dbe808; }
 .robot-preset-dialog > header > div { flex: 1; min-width: 0; }
-.robot-preset-dialog header small { color: var(--muted); font: 9px Menlo, monospace; letter-spacing: 1.5px; }
+.robot-preset-dialog > header small { color: var(--muted); font: 9px Menlo, monospace; letter-spacing: 1.5px; }
 .robot-preset-dialog h2 { margin: 5px 0; font-size: 19px; font-weight: 500; }
-.robot-preset-dialog header p { margin: 0; color: #96aeac; font-size: 11px; overflow-wrap: anywhere; }
+.robot-preset-dialog > header p { margin: 0; color: #96aeac; font-size: 11px; overflow-wrap: anywhere; }
 .robot-preset-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .robot-preset-dialog button:disabled { opacity: 0.4; cursor: default; }
 .robot-preset-dialog button:hover:not(:disabled) { background: #59dbe810; }
 .robot-preset-dialog button:focus-visible, .robot-preset-dialog input:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
-.robot-preset-dialog__body { min-height: 0; overflow-y: auto; padding: 22px 24px; }
-.robot-preset-dialog__settings { display: flex; gap: 24px; align-items: flex-end; margin-bottom: 24px; }
+.robot-preset-dialog__body { flex: 1; display: grid; grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.6fr); gap: 22px; min-height: 0; overflow: hidden; padding: 22px 24px; }
+.robot-preset-dialog__preview { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 10px; min-width: 0; min-height: 0; }
+.robot-preset-dialog .is-preset-preview { position: relative; grid-template-rows: 56px minmax(0, 1fr); min-height: 0; border-radius: 3px; }
+.robot-preset-dialog .teaching-pose-robot-preview__header > button { height: 30px; padding: 0 8px; font-size: 10px; white-space: nowrap; }
+.robot-preset-dialog .teaching-pose-robot-preview__state { font-size: 10px; white-space: nowrap; }
+.robot-preset-dialog .teaching-pose-robot-canvas:focus-visible { outline: 1px solid var(--cyan); outline-offset: -2px; }
+.robot-preset-dialog__preview > p { margin: 0; color: #8aa8a4; font-size: 11px; line-height: 1.7; }
+.robot-preset-dialog__preview > p.is-warning { color: var(--amber); }
+.robot-preset-dialog__editor { min-width: 0; min-height: 0; overflow-y: auto; padding: 2px 4px 4px 2px; }
+.robot-preset-dialog__settings { display: flex; flex-direction: column; gap: 16px; align-items: stretch; margin-bottom: 24px; }
 .robot-preset-dialog__name { flex: 1; min-width: 0; display: grid; gap: 9px; font-size: 12px; color: #b4c9c6; }
 .robot-preset-dialog input { min-width: 0; padding: 10px 12px; border: 1px solid #31514f; border-radius: 3px; background: #061015; color: #e0efec; font: inherit; font-size: 13px; }
-.robot-preset-dialog__controls { display: flex; flex-shrink: 0; align-items: flex-end; gap: 12px; }
+.robot-preset-dialog__controls { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.robot-preset-dialog__pose-actions { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; }
 .robot-preset-dialog__controls button { min-height: 38px; white-space: nowrap; }
-.robot-preset-dialog__divider { flex: 0 0 1px; height: 20px; margin-bottom: 9px; background: #31514f; }
 .robot-preset-dialog__units > span { display: block; margin-bottom: 9px; font-size: 12px; color: #b4c9c6; }
 .robot-preset-dialog__units > div { display: flex; gap: 4px; }
 .robot-preset-dialog__units button[aria-pressed="true"] { border-color: #59dbe877; color: var(--cyan); background: #59dbe810; }
@@ -65,17 +74,31 @@
 .robot-preset-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 17px 24px; border-top: 1px solid var(--line); }
 .robot-preset-dialog footer > span { font-size: 11px; color: #8aa8a4; line-height: 1.7; }
 .robot-preset-dialog footer > span.is-error { color: #f4a999; }
-.robot-preset-dialog footer > div { flex-shrink: 0; display: flex; gap: 8px; }
+.robot-preset-dialog footer > div { flex-shrink: 0; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 100%; }
+.robot-preset-dialog footer button { white-space: nowrap; }
 .robot-preset-dialog .robot-preset-dialog__save { border-color: #59dbe866; color: var(--cyan); background: #59dbe812; }
+.robot-preset-dialog .robot-preset-dialog__apply { border-color: #f4c95d73; color: var(--amber); background: #f4c95d1f; }
+.robot-preset-dialog .robot-preset-dialog__apply:hover:not(:disabled) { border-color: var(--amber); background: #f4c95d33; }
+.robot-preset-dialog .robot-preset-dialog__apply:focus-visible { outline-color: var(--amber); }
 .workbench-menu-section > .robot-presets-empty { margin: 10px; font-size: 11px; line-height: 1.6; }
 .robot-presets-list .action-button > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+@media (max-width: 1100px) {
+  .robot-preset-dialog__groups { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .robot-preset-dialog__body { grid-template-columns: minmax(0, 1fr); align-content: start; overflow-y: auto; }
+  .robot-preset-dialog__preview { height: 360px; }
+  .robot-preset-dialog__editor { overflow: visible; }
+}
+
 @media (max-width: 640px) {
   .robot-preset-modal { padding: 10px; }
-  .robot-preset-dialog { max-height: calc(100dvh - 20px); }
+  .robot-preset-dialog { height: calc(100dvh - 20px); max-height: calc(100dvh - 20px); }
   .robot-preset-dialog > header, .robot-preset-dialog__body, .robot-preset-dialog footer { padding: 16px; }
+  .robot-preset-dialog__preview { height: 320px; }
   .robot-preset-dialog__groups { grid-template-columns: minmax(0, 1fr); }
-  .robot-preset-dialog__settings { flex-direction: column; align-items: stretch; gap: 16px; }
   .robot-preset-dialog__controls { gap: 10px; }
   .robot-preset-dialog__controls button { padding-inline: 10px; }
   .robot-preset-dialog footer { flex-wrap: wrap; gap: 10px; }
