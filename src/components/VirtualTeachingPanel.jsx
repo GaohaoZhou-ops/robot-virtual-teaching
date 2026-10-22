@@ -577,7 +577,7 @@ export default function VirtualTeachingPanel({
       </button>
       <button
         type="button"
-        className="teaching-pose-action"
+        className="teaching-pose-action waypoint-move-button"
         disabled={!canUseSelectedPose || !onApplyPoint}
         onClick={() => onApplyPoint(activeTask.id, activeParkingPoint.id, previewedPose.id)}
         title={previewedPose ? `移动到 ${activeParkingPoint.name} 并执行 ${previewedPose.name} 的完整姿态` : '请先选择已保存的姿态'}

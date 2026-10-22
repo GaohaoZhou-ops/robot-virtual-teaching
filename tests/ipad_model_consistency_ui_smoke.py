@@ -104,7 +104,9 @@ def run():
                     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
                     ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
                     page.get_by_role('button', name='关闭设备示教窗口').click()
-                    open_ipad_dialog(page, '更新配对码')
+                    open_ipad_dialog(page)
+                    expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+                    dialog.get_by_role('button', name='刷新二维码', exact=True).click()
                     expect(dialog.locator('.ipad-code')).not_to_have_text(ticket['pairingCode'])
                     expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
                     renewed = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
@@ -166,12 +168,15 @@ def run():
                     unchanged(mobile_id, 3)
                     page.get_by_role('button', name='关闭设备示教窗口').click()
                     open_ipad_dialog(page, '再次接收（去重）')
+                    expect(dialog.get_by_role('button', name='查看示教')).to_be_enabled()
+                    dialog.get_by_role('button', name='继续同步').click()
                     expect(dialog.get_by_label('电脑局域网地址')).to_be_visible()
                     expect(dialog.get_by_role('button', name='再次接收（去重）')).to_be_enabled()
                     unchanged(mobile_id, 3)
                     assert len(receipts) == 2, receipts
 
                     # File picker and drag/drop share the same validation, including after success.
+                    dialog.get_by_role('tab', name='文件导入').click()
                     for dropped in [False, True]:
                         if dropped:
                             transfer = page.evaluate_handle('''archive => {
@@ -195,7 +200,10 @@ def run():
                     expect(warning).not_to_be_visible()
                     unchanged(mobile_id, 3)
                     page.get_by_role('button', name='关闭设备示教窗口').click()
-                    open_ipad_dialog(page, '新建传输')
+                    open_ipad_dialog(page)
+                    expect(dialog.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
+                    dialog.locator('.ipad-sync-details > summary').click()
+                    dialog.get_by_role('button', name='新建传输', exact=True).click()
                     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
                     expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
                     assert mutations.count('/__atlas/ipad/sessions') == 2, 'one explicit new transfer, even under StrictMode'

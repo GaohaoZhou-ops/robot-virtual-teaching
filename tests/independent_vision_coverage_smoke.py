@@ -133,6 +133,9 @@ def run():
 
         canvas = page.locator(".three-canvas")
         assert canvas.get_attribute("data-vision-coverage-state") == "empty"
+        page.get_by_role("button", name="显示设置", exact=True).click()
+        page.get_by_role("button", name="显示表面覆盖率", exact=True).click()
+        page.get_by_role("button", name="关闭显示设置", exact=True).click()
         assert surface_coverage(page, 0) == 0
         topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role(
@@ -578,6 +581,9 @@ def run():
             """
         )
         restored = coverage_metrics(page.locator(".three-canvas"))
+        page.get_by_role("button", name="显示设置", exact=True).click()
+        page.get_by_role("button", name="显示表面覆盖率", exact=True).click()
+        page.get_by_role("button", name="关闭显示设置", exact=True).click()
         assert surface_coverage(page, 4) == first_area_coverage
         assert restored["state"] == "visible"
         assert restored["poses"] == 2

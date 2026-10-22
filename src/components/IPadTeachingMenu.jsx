@@ -31,7 +31,7 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
   const sync = (action, ticketId = currentTicket?.id) => run(() => onOpenSync({ action, ticketId, device }));
   const sections = [
     { id: 'source', label: '示教来源', detail: currentSourceLabel, icon: Bot },
-    { id: 'sync', label: '同步与接收', detail: currentTicket ? transferStatus[currentTicket.status] : vision ? '配对码 / 局域网' : '扫码 / 文件', icon: ArrowLeftRight },
+    { id: 'sync', label: '同步与接收', detail: currentTicket ? transferStatus[currentTicket.status] : vision ? '配对码 / 局域网' : '文件 / 扫码 / Wi-Fi', icon: ArrowLeftRight },
     { id: 'history', label: '传输任务', detail: `${tickets.length} 个任务`, icon: History },
   ];
 
@@ -148,16 +148,17 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
           </button> : <p className="ipad-nav-empty">暂无 {deviceLabel} 示教，接收该设备的示教结果后可在这里切换</p>}
         </>}
         {section === 'sync' && <>
+          {!vision && <button type="button" role="menuitem" aria-label="导入结果文件" onClick={() => sync('file')}><FileUp size={14}/><span><strong>文件导入</strong><small>AirDrop / Type-C</small></span></button>}
           <button type="button" role="menuitem" aria-label={vision ? '配对 Vision Pro' : '扫码配对'} onClick={() => sync('pairing')}>
-            {vision ? <Wifi size={14}/> : <QrCode size={14}/>}<span><strong>{vision ? '配对 Vision Pro' : '扫码配对'}</strong><small>{vision ? '搜索电脑后输入 4 位配对码' : '二维码 / 配对码'}</small></span>
+            {vision ? <Wifi size={14}/> : <QrCode size={14}/>}<span><strong>{vision ? '配对 Vision Pro' : '扫码配对'}</strong><small>{vision ? '搜索电脑后输入 4 位配对码' : '扫描二维码连接'}</small></span>
           </button>
-          {!vision && <button type="button" role="menuitem" aria-label="导入结果文件" onClick={() => sync('file')}><FileUp size={14}/><span><strong>导入结果文件</strong><small>AirDrop / Type-C</small></span></button>}
+          {!vision && <button type="button" role="menuitem" aria-label="Wi-Fi 同步" onClick={() => sync('wifi')}><Wifi size={14}/><span><strong>Wi-Fi 同步</strong><small>同一网络 · 配对码连接</small></span></button>}
           {currentTicket && <button type="button" role="menuitem" aria-label={canReceive ? currentTicket.status === 'imported' ? '再次接收（去重）' : '接收示教结果' : '检查完成状态'} onClick={() => sync(canReceive ? 'receive' : 'status')}>
             {canReceive ? <ArrowDownToLine size={14}/> : <RefreshCw size={14}/>}<span><strong>{canReceive ? currentTicket.status === 'imported' ? '再次接收（去重）' : '接收示教结果' : '检查完成状态'}</strong>
               <small>{currentTicket.manifest.name}</small></span>
           </button>}
-          {canRenew && <button type="button" role="menuitem" aria-label="更新配对码" onClick={() => sync('renew')}><RefreshCw size={14}/><span><strong>更新配对码</strong></span></button>}
-          <button type="button" role="menuitem" aria-label="新建传输" onClick={() => sync('new')}><Plus size={14}/><span><strong>新建传输</strong></span></button>
+          {vision && canRenew && <button type="button" role="menuitem" aria-label="更新配对码" onClick={() => sync('renew')}><RefreshCw size={14}/><span><strong>更新配对码</strong></span></button>}
+          {vision && <button type="button" role="menuitem" aria-label="新建传输" onClick={() => sync('new')}><Plus size={14}/><span><strong>新建传输</strong></span></button>}
         </>}
         {section === 'history' && (tickets.length ? tickets.map((item) => <button key={item.id} type="button" role="menuitem"
           data-transfer-id={item.id} onClick={() => sync('history', item.id)} title={item.manifest.name}>

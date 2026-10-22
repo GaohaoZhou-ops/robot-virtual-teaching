@@ -68,6 +68,7 @@ with sync_playwright() as p:
         ready(page)
         dialog = open_ipad_dialog(page)
         expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+        dialog.locator('.ipad-sync-details:not([open]) > summary').click()
         expect(dialog.locator('.ipad-pose-summary')).to_contain_text('携带 0 个相机 Pose')
         assert len(created) == 1
         old = created[0]
@@ -85,6 +86,7 @@ with sync_playwright() as p:
         import_poses()
         dialog = open_ipad_dialog(page)
         expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+        dialog.locator('.ipad-sync-details:not([open]) > summary').click()
         expect(dialog.locator('.ipad-pose-summary')).to_contain_text('携带 6 个相机 Pose：左臂 3 个（青色）')
         expect(dialog.locator('.ipad-pose-summary')).to_contain_text('右臂 3 个（金黄色）')
         assert len(created) == 2
@@ -110,6 +112,7 @@ with sync_playwright() as p:
         assert len(created) == 2
 
         # Choosing a historical zero-Pose snapshot must remain an explicit choice.
+        dialog.locator('.ipad-sync-details > summary').click()
         dialog.locator('.ipad-history select').select_option(old['id'])
         expect(dialog.locator('.ipad-pose-summary')).to_contain_text('携带 0 个相机 Pose')
         dialog.get_by_role('button', name='刷新二维码').click()
@@ -121,6 +124,7 @@ with sync_playwright() as p:
         import_poses()
         dialog = open_ipad_dialog(page)
         expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+        dialog.locator('.ipad-sync-details:not([open]) > summary').click()
         expect(dialog.locator('.ipad-pose-summary')).to_contain_text('携带 6 个相机 Pose')
         assert len(created) == 3, 'same-count edits must also produce a current QR'
         assert created[-1]['referencePoseHash'] != current['referencePoseHash']

@@ -115,12 +115,14 @@ export default function TeachingArchiveTree({
   onRenameTask,
   onDeleteTask,
   onSelectParkingPoint,
+  onViewParkingPoint,
   onRenameParkingPoint,
   onDeleteParkingPoint,
   onApplyParkingPoint,
   onRenamePoint,
   onDeletePoint,
   onApplyPoint,
+  onViewPose,
   onInsertPreset,
   onMovePoint,
   onPlayTask,
@@ -131,7 +133,6 @@ export default function TeachingArchiveTree({
   onImportTeachingData,
   teachingImportDisabled = false,
   canExportTeachingData = false,
-  onOpenCapturePage,
   onSelectionChange,
 }) {
   const initialTask = tasks.find((task) => task.id === activeTaskId) || tasks[0] || null;
@@ -692,7 +693,15 @@ export default function TeachingArchiveTree({
               ))}
             </>
           )}
-          <button type="button" onClick={onOpenCapturePage}>继续示教</button>
+          {selectedPoint ? (
+            <button type="button" onClick={() => onViewPose(selectedParkingPoint.id, selectedPoint.id)}>
+              <Bot size={13} />查看姿态
+            </button>
+          ) : selectedParkingPoint && (
+            <button type="button" onClick={() => onViewParkingPoint(selectedParkingPoint.id)}>
+              <MapPin size={13} />查看停车点
+            </button>
+          )}
           {selection?.type === 'task' && selectedTask && onImportTeachingData && <button
             type="button"
             onClick={onImportTeachingData}
