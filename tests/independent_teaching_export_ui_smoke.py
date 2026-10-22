@@ -15,13 +15,19 @@ def seed(page, variant='linked'):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     fixture = page.evaluate("""async variant => {
       const { independentTeachingExportFixture } = await import('/tests/independent_teaching_export_helpers.mjs');
+      const { abxTeachingPresetFixture } = await import('/tests/abx_teaching_helpers.mjs');
       const store = await import('/src/lib/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = independentTeachingExportFixture();
+      fixture.local.config.config.project.virtualTeaching.jointPoses = abxTeachingPresetFixture().payload.virtualTeaching.jointPoses;
       if (variant === 'no-sync') fixture.local.config.config.ui.mapRouteSyncEnabled = false;
       if (variant === 'unbound') delete fixture.local.config.config.project.workspace.transfer;
       if (variant === 'no-route') Object.assign(fixture.map.config.config.project, {waypoints: [], paths: [], abxRoutes: []});
-      if (variant === 'invalid') delete fixture.local.config.config.project.virtualTeaching.tasks[0].parkingPoints[0].poses[0].fullBodyJoints.values.head_yaw_J;
+      if (variant === 'invalid') {
+        const joints = fixture.local.config.config.project.virtualTeaching.tasks[0].parkingPoints[0].poses[0].fullBodyJoints;
+        delete joints.values.head_yaw_J;
+        joints.count = Object.keys(joints.values).length;
+      }
       for (const entry of variant === 'no-map' ? [fixture.local] : [fixture.map, fixture.local]) {
         await store.saveWorkspaceMap(sessionId, entry.map.mapId, entry.map.name, entry.map, entry.mode);
         await store.saveWorkspaceConfig(sessionId, entry.map.mapId, entry.config.config, entry.mode);
@@ -29,7 +35,9 @@ def seed(page, variant='linked'):
       await store.activateWorkspaceMode(sessionId, variant === 'map' ? 'map' : 'independent');
       return {route: fixture.route, local: fixture.local.config.config.project};
     }""", variant)
-    page.goto(BASE_URL + '/teaching-data', wait_until='networkidle')
+    # Background coverage workers can keep the network busy after the task
+    # tree is usable; wait for the actual workspace and task below instead.
+    page.goto(BASE_URL + '/teaching-data', wait_until='domcontentloaded')
     page.locator('[data-app-page="teaching-data"]').wait_for()
     page.locator('.loading-curtain').wait_for(state='hidden')
     name = '地图已有旧任务' if variant == 'map' else '当前独立任务'
@@ -47,6 +55,8 @@ def json_download(page, button, folder, fixture):
     assert data['source']['teachingSpaceMode'] == 'independent'
     assert data['coordinateSystem']['frameId'] == 'virtual_origin'
     assert len(data['tasks']) == 1 and data['statistics']['poseCount'] == 3
+    assert [preset['name'] for preset in data['jointPoses']] == [
+        preset['name'] for preset in fixture['local']['virtualTeaching']['jointPoses']]
     actual = data['tasks'][0]['parkingPoints'][0]
     original = fixture['local']['virtualTeaching']['tasks'][0]['parkingPoints'][0]
     assert actual['mapPose']['position'] == original['mapPose']['position']
@@ -107,6 +117,7 @@ def run():
                         expect(download).to_be_disabled()
                     else:
                         expect(download).to_be_enabled()
+                        expect(native.get_by_label('随包预设姿态')).to_contain_text('已携带 2 个预设 / 基础姿态')
                         with page.expect_download() as pending:
                             download.click()
                         path = Path(folder) / 'map-teaching.zip'
@@ -116,6 +127,7 @@ def run():
                             assert len(manifest['tasks']) == 1
                             assert manifest['tasks'][0]['name'] == '当前独立任务'
                             records = [json.loads(line) for line in bundle.read(manifest['tasks'][0]['file']).splitlines()]
+                            assert [row['name'] for row in records if row['type'] == 'basic_pose'] == ['准备姿态', '未插入任务的预设']
                             actions = [row['record'] for row in records if row['type'] == 'point']
                             assert [row['node_id'] for row in actions if row.get('type') == 'route_navigation'] == ['N31', 'N0']
                             poses = [row for row in actions if 'joints_rad' in row]

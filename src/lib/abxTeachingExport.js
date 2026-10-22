@@ -2,7 +2,9 @@ import { sha256Bytes } from './hash.js';
 import { zipSync } from 'fflate';
 import { abxNodeName, abxStationHeightContext, buildAbxRouteDocuments, matchAbxStation } from './abxRoute.js';
 import { appendImportedAbxTasks } from './abxTeachingRoundtrip.js';
+import { abxNestedRecords, parseAbxTeachingTask } from './abxTeachingImport.js';
 import { buildAbxV11Files } from './abxTeachingV11.js';
+import { teachingActionPresets } from './teachingPresetInsertion.js';
 import { ABX_VERSION as VERSION, ABX_JOINT_ORDER as JOINT_ORDER, ABX_JOINT_NAMES as JOINT_NAMES } from './abxFormat.js';
 
 // Contract: supplied ABXBrainSystem.zip, teaching_store.py v23.
@@ -219,7 +221,7 @@ const instructions = [
   '',
   '1. 在大脑“示教任务 → 导入”选择 robot-teaching-*.zip；完整工程备份中的本目录仅供提取参考。',
   '   适用于提供的 ABXBrainSystem 源码（teaching_store.py v23），ZIP 清单为 abx-teaching-export v1。',
-  '   任务使用支持内嵌路网的 v23；没有附加路网的旧版原生任务保持原格式与原始记录。',
+  '   任务使用支持内嵌路网和预设的 v23；没有附加路网或预设的旧版原生任务保持原格式与原始记录。',
   '2. ' + navigationNotice,
   '   每个非空停车点的首个 Pose 前，以及同一停车点内底盘目标变化处，插入 route_navigation 步骤。',
   '   路网以 navigation_chunk 内嵌在任务文件中；routes/ 为副本，navigation.json 保存节点及步骤映射。',
@@ -234,7 +236,8 @@ const instructions = [
   '   component=auto 由大脑根据实况判断执行部位；轮组不作为上身关节执行，缺失关节不会补零。',
   '   虚拟 Pose 没有实测定位，parking.location=null，不伪造 SLAM 或里程计。',
   '   robot_received_ns=1 为原生格式占位，robot_sequence 为导出序号，不代表硬件反馈。',
-  '5. 基础姿态库不额外新增模板；任务、停车点与 Pose 的名称、顺序以及关节目标保留。',
+  '5. 每个任务携带对应机器人的全部预设姿态，包括未插入任务的预设；原生任务已有的基础姿态保留。',
+  '   预设按 basic_pose 记录写入任务文件，导入时合并到机器人的基础动作库，不增加任务执行步骤。',
   '   导入由大脑分配新任务 ID，source-mapping.json 记录源项目到包内任务和 Pose 的对应关系。',
   '   RGB/XYZ 视觉参考仍在完整工程中，不作为真机拍摄记录，也不自动触发相机。',
   '   移动设备 Pose（iPad / Vision Pro） 须先求解为机器人关节姿态，独立示教须先转换到地图坐标后再导出。',
@@ -420,6 +423,89 @@ const compileExport = async (payload, robotPackage) => {
     notice: navigationNotice, manifestFile: 'abx/manifest.json', navigationFile: 'abx/navigation.json' } };
 };
 
+const taskRobot = (payload, task) => (task.robot?.id || task.robot?.relativePath) ? task.robot : payload.robot;
+const taskPresets = (payload, task) => teachingActionPresets(payload.virtualTeaching?.jointPoses, taskRobot(payload, task));
+
+export function abxTeachingNeedsRobot(payload) {
+  return (payload.virtualTeaching?.tasks || []).some((task) => task.abx
+    ? taskPresets(payload, task).length > 0 && !task.abx.models?.length
+    : task.parkingPoints?.some((parking) => parking.poses?.length) || taskPresets(payload, task).length > 0);
+}
+
+// teaching-tasks.zip stores the shared library after points and before any
+// trajectory/navigation chunks. Library entries are not executable steps.
+async function appendRobotPresets(result, payload, robotPackage) {
+  const files = result.files;
+  const decode = (data) => new TextDecoder().decode(data);
+  const manifest = JSON.parse(decode(files['abx/manifest.json']));
+  const mapping = JSON.parse(decode(files['abx/source-mapping.json']));
+  const sourceTasks = new Map((payload.virtualTeaching?.tasks || []).map((task) => [task.id, task]));
+  const taskSources = new Map(mapping.tasks.map((task) => [task.id, sourceTasks.get(task.sourceId)]));
+  const basicIds = new Set();
+  for (const entry of manifest.tasks) {
+    const task = taskSources.get(entry.id);
+    const presets = ordered(taskPresets(payload, task), '预设姿态');
+    const file = `abx/${entry.file}`;
+    const rawLines = decode(files[file]).trimEnd().split('\n');
+    const header = JSON.parse(rawLines[0]);
+    const body = rawLines.slice(1, -1).map((raw) => ({ raw, value: JSON.parse(raw) }));
+    const basics = body.filter(({ value }) => value.type === 'basic_pose');
+    if (presets.length) {
+      requireExport(header.parking_count !== undefined,
+        `任务「${task.name}」缺少停车点分组，无法携带预设姿态，请在机器人端重新导出任务`);
+      let model;
+      if (task.abx) {
+        const pointModels = body.flatMap(({ value }) => value.type === 'point' ? abxNestedRecords(value.record) : [])
+          .map((record) => record.robot_model).filter(Boolean);
+        // The robot's shared library may also contain other models. Prefer
+        // the task's executed poses when identifying its robot.
+        const models = [...new Set(pointModels.length ? pointModels : basics.map(({ value }) => value.record.robot_model).filter(Boolean))];
+        requireExport(models.length <= 1, `任务「${task.name}」包含多个机器人型号，无法确定预设姿态对应的型号`);
+        [model] = models;
+      }
+      if (!model) {
+        const robot = taskRobot(payload, task);
+        requireExport((robot?.relativePath || robot?.id) === robotPackage?.relativePath,
+          `任务「${task.name}」的预设姿态缺少对应机器人 URDF，请加载该机器人后导出`);
+        model = abxRobotModel(robotPackage);
+      }
+      for (const preset of presets) {
+        const label = `预设姿态「${text(preset.name, '预设姿态名称')}」`;
+        const id = await stableId('atlas-abx-preset', preset.id);
+        const existing = basics.find(({ value }) => value.id === id);
+        const created = timestamp(preset.createdAt, manifest.exported_utc, label);
+        const updated = timestamp(preset.updatedAt, preset.createdAt || manifest.exported_utc, label);
+        const value = { type: 'basic_pose', id, name: preset.name, created_ns: created, updated_ns: updated,
+          record: { captured_ns: updated, robot_model: model,
+            // No hardware feedback exists for a virtual preset. A constant
+            // placeholder also keeps library reordering from changing it.
+            robot_sequence: '1', robot_received_ns: '1',
+            joints_rad: bodyJoints({ fullBodyJoints: preset.joints }, label) },
+          seq: existing?.value.seq || String(basics.length + 1) };
+        if (existing) {
+          existing.value = value; existing.raw = line(value).trimEnd();
+        } else basics.push({ value, raw: line(value).trimEnd() });
+      }
+      const records = body.filter(({ value }) => value.type !== 'basic_pose');
+      const chunkIndex = records.findIndex(({ value }) => ['trajectory', 'trajectory_chunk', 'navigation_chunk'].includes(value.type));
+      records.splice(chunkIndex < 0 ? records.length : chunkIndex, 0, ...basics);
+      const counts = { point_count: header.point_count, parking_count: header.parking_count,
+        basic_pose_count: String(basics.length) };
+      Object.assign(header, { version: Math.max(header.version, VERSION), ...counts });
+      header.navigation ??= null;
+      const content = records.map(({ raw }) => `${raw}\n`).join('');
+      const raw = line(header) + content + line({ type: 'end', ...counts, sha256: await sha256Bytes(bytes(content)) });
+      await parseAbxTeachingTask(raw);
+      files[file] = bytes(raw);
+      entry.basic_pose_count = counts.basic_pose_count;
+    }
+    basics.forEach(({ value }) => basicIds.add(value.id));
+  }
+  files['abx/manifest.json'] = jsonBytes(manifest);
+  result.summary.basicPoseCount = basicIds.size;
+  return result;
+}
+
 // Conversion is atomic: an incompatible task never leaves a partial native
 // bundle, while the existing Atlas backup remains available to the operator.
 export async function buildAbxTeachingExport(payload, { robotPackage = null, attachLegacyRoutes = false } = {}) {
@@ -428,7 +514,8 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null, att
   try {
     const virtualPayload = { ...payload, virtualTeaching: { ...payload.virtualTeaching,
       tasks: (payload.virtualTeaching?.tasks || []).filter((task) => !task.abx) } };
-    return await appendImportedAbxTasks(await compileExport(virtualPayload, robotPackage), payload, { attachLegacyRoutes });
+    const result = await appendImportedAbxTasks(await compileExport(virtualPayload, robotPackage), payload, { attachLegacyRoutes });
+    return await appendRobotPresets(result, payload, robotPackage);
   } catch (error) {
     const summary = { status: 'blocked', message: error.message };
     return { summary, files: {

@@ -48,3 +48,20 @@ export function abxTeachingFixture() {
   }] };
   return { payload, robotPackage, robotPath, model, stamp, values, a, b };
 }
+
+export function abxTeachingPresetFixture() {
+  const fixture = abxTeachingFixture();
+  const { payload, stamp, values } = fixture;
+  const preset = { id: 'preset-ready', name: '准备姿态', sequence: 1, createdAt: stamp, updatedAt: stamp,
+    robot: payload.robot, joints: { angularUnit: 'degree', linearUnit: 'meter', source: 'robot-preset', values } };
+  payload.virtualTeaching.jointPoses = [preset,
+    { ...structuredClone(preset), id: 'preset-unused', name: '未插入任务的预设', sequence: 2,
+      joints: { ...preset.joints, angularUnit: 'rad',
+        values: Object.fromEntries(Object.entries(values).map(([name, value]) => [name, value * Math.PI / 180])) } },
+    { ...structuredClone(preset), id: 'other-robot', name: '其他机器人的预设', sequence: 3,
+      robot: { id: 'other.urdf', relativePath: 'other.urdf' }, joints: { ...preset.joints, values: {} } },
+    { ...structuredClone(preset), id: 'recorded-pose', name: '普通关节记录', sequence: 4,
+      joints: { ...preset.joints, source: 'urdf-movable-joints' } },
+  ];
+  return fixture;
+}

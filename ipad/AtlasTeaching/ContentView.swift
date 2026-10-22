@@ -1535,12 +1535,12 @@ struct ObjectPreviewView: UIViewRepresentable {
         let direction = simd_normalize(SIMD3<Float>(1.2, -1.8, 1))
         var distance = size * simd_length(SIMD3<Float>(1.2, -1.8, 1))
         if let viewport = initialViewport, viewport.width > 0, viewport.height > 0 {
-            // Fit the completed model to 78% of the visible left canvas. Using
+            // Fit the completed model to 86% of the visible left canvas. Using
             // both viewport axes avoids a tiny landscape preview or clipped
             // sides when the same model is first opened in portrait.
             let right = simd_normalize(simd_cross(SIMD3<Float>(0, 0, 1), direction))
             let up = simd_cross(direction, right)
-            let tangentY = tan(Float(ZividFieldOfView.previewVerticalDegrees) * .pi / 360) * 0.78
+            let tangentY = tan(Float(ZividFieldOfView.previewVerticalDegrees) * .pi / 360) * 0.86
             let tangentX = tangentY * Float(viewport.width / viewport.height)
             distance = size * 0.05
             for x in [minimum.x, maximum.x] {
