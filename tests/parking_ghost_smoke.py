@@ -31,6 +31,14 @@ def wait_for_pose(page, expected):
     )
 
 
+def open_parking_preview_actions(page):
+    parking_id = page.get_by_label("示教任务与停车点树", exact=True).get_attribute("data-active-parking-point")
+    page.get_by_role("tab", name="路径与导航", exact=True).click()
+    page.get_by_label("搜索导航点", exact=True).select_option(parking_id)
+    page.get_by_role("tab", name="示教", exact=True).click()
+    expect(page.get_by_label("停车点机器人虚影", exact=True)).to_be_visible()
+
+
 def run():
     errors = []
     with sync_playwright() as playwright:
@@ -96,7 +104,7 @@ def run():
 
         first_stop.click()
         ghost_card = page.get_by_label("停车点机器人虚影", exact=True)
-        ghost_card.wait_for()
+        expect(ghost_card).to_have_count(0)
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.parkingGhostState === 'visible'"
         )
@@ -105,8 +113,7 @@ def run():
         )
         assert first_stop.get_attribute("data-ghost-preview") == "true"
         assert second_stop.get_attribute("data-ghost-preview") == "false"
-        assert ghost_card.get_attribute("data-parking-point-id")
-        assert int(ghost_card.get_attribute("data-frozen-joint-count")) > 0
+        assert canvas.get_attribute("data-parking-ghost-target-id")
         assert int(canvas.get_attribute("data-parking-ghost-mesh-count")) > 0
         assert int(canvas.get_attribute("data-parking-ghost-joint-count")) > 0
         assert float(canvas.get_attribute("data-parking-ghost-opacity")) == 0.24
@@ -122,7 +129,9 @@ def run():
         after_preview = read_robot_pose(canvas)
         for axis, value in before_preview.items():
             assert abs(after_preview[axis] - value) < 1e-5, (axis, after_preview[axis], value)
-        assert ghost_card.get_by_text("停车点 P02", exact=True).is_visible()
+        # Parking actions remain available from the navigation page.
+        open_parking_preview_actions(page)
+        assert ghost_card.get_by_text("当前机器人", exact=True).is_visible()
         assert ghost_card.get_by_text("停车点 P01", exact=True).is_visible()
         page.screenshot(path="/tmp/atlas-parking-robot-ghost.png", full_page=True)
 
@@ -164,6 +173,7 @@ def run():
         assert tree.get_attribute("data-active-parking-point") == active_parking_id
 
         first_stop.click()
+        open_parking_preview_actions(page)
         ghost_card.wait_for()
         page.get_by_role("button", name="清除停车点机器人虚影").click()
         ghost_card.wait_for(state="detached")
@@ -178,6 +188,7 @@ def run():
         # Moving applies the selected parking pose, while keeping joints edited
         # after the ghost was created, and allows capture under that stop.
         first_stop.click()
+        open_parking_preview_actions(page)
         ghost_card.wait_for()
         target_id = ghost_card.get_attribute("data-parking-point-id")
         page.get_by_role("button", name="打开全关节浮动窗口").click()
@@ -210,6 +221,7 @@ def run():
         assert second_stop.locator("small").inner_text() == "0 姿态"
 
         second_stop.click()
+        open_parking_preview_actions(page)
         ghost_card.get_by_role("button", name="移动到当前停车点", exact=True).click()
         wait_for_pose(page, before_preview)
         capture_button.click()
@@ -227,6 +239,7 @@ def run():
         dock.wait_for()
         assert dock.get_attribute("data-playback-status") == "playing"
         second_stop.click()
+        open_parking_preview_actions(page)
         ghost_card.get_by_role("button", name="移动到当前停车点", exact=True).click()
         dock.wait_for(state="detached")
         ghost_card.wait_for(state="detached")

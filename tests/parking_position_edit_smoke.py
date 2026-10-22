@@ -8,7 +8,7 @@ from playwright.sync_api import expect, sync_playwright
 
 from archive_helpers import start_project_download, read_exported_project
 from chassis_drag_smoke import read_camera
-from parking_ghost_smoke import read_robot_pose, wait_for_pose
+from parking_ghost_smoke import open_parking_preview_actions, read_robot_pose, wait_for_pose
 from teaching_capture_pose_ghost_smoke import capture, set_joints
 from viewer_tools_helpers import viewer_tool
 
@@ -118,6 +118,8 @@ def run():
         second_stop = tree.get_by_role("button", name="选择当前停车点 停车点 P02", exact=True)
         first_stop.click()
         card = page.get_by_label("停车点机器人虚影", exact=True)
+        expect(card).to_have_count(0)
+        open_parking_preview_actions(page)
         edit_box = card.get_by_role("button", name="修改停车点", exact=True).bounding_box()
         move_box = card.get_by_role("button", name="移动到当前停车点", exact=True).bounding_box()
         assert edit_box["x"] + edit_box["width"] < move_box["x"]
@@ -151,6 +153,7 @@ def run():
         expect(canvas).to_have_attribute("data-parking-ghost-state", "hidden")
         wait_for_pose(page, moved)
         first_stop.click()
+        open_parking_preview_actions(page)
         expect(card).to_be_visible()
         print("WASD and turn keys moved the robot with a fixed ghost; new position recorded", flush=True)
 
@@ -182,7 +185,7 @@ def run():
         begin_edit(page, canvas, card)
         move_with_frozen_ghost(page, canvas, keys=("w", "d"))
         second_stop.click()
-        expect(card).to_have_attribute("data-parking-edit-state", "idle")
+        expect(card).to_have_count(0)
         expect_control_released(canvas)
         first_stop.click()
         expect(first_stop).to_have_attribute("aria-expanded", "true")

@@ -577,7 +577,7 @@ playwright/.auth/
 /tests/atlas-result-file-*/
 /ipad/atlas-result-file-*/
 # Download copied by tests/parking_merge_server_smoke.py.
-/atlas-parking-merge-server-job.zip
+/atlas-parking-merge-server-job.[zZ][iI][pP]
 
 # Pairing/discovery smoke-test workspaces when TMPDIR is inside the repository.
 /atlas-pairing-code-*/
@@ -890,13 +890,13 @@ Desktop.ini
 # Scope the recovery workspace to the root, preserving nested fixture inputs.
 /recovered-projects/
 # Packed copies of the recovery workspace contain the same local project data.
-/recovered-projects.zip
-/recovered-projects-*.zip
+/recovered-projects.[zZ][iI][pP]
+/recovered-projects-*.[zZ][iI][pP]
 # Local Save As destination and its packed copy; keep nested fixtures visible.
 /saved-project/
 /saved-project.[zZ][iI][pP]
 *.atlas-project/
-*.atlas-project.zip
+*.atlas-project.[zZ][iI][pP]
 
 # Complete project ZIPs and lightweight teaching-data exports.
 # Keep arbitrary source ZIP/JSON files trackable; only ignore export names.
@@ -912,18 +912,19 @@ mobile-solve-*.json
 
 # Exported robot routes, teaching archives and parking-merge jobs/results
 # Robot route filenames use arbitrary IDs; fixture JSON exceptions follow below.
+# Match ZIP extension case variants, including local renamed archive copies.
 *.route.json
-virtual-teaching-*.zip
+virtual-teaching-*.[zZ][iI][pP]
 virtual-teaching-*.json
-robot-teaching-*.zip
+robot-teaching-*.[zZ][iI][pP]
 robot-free-navigation-*.json
 robot-navigation-*.json
 /robot-teaching-*/
 *.abxteach.ndjson
 /virtual-teaching-*/
-parking-merge-server-*.zip
+parking-merge-server-*.[zZ][iI][pP]
 parking-merge-server-*/
-parking-merge-*-result.zip
+parking-merge-*-result.[zZ][iI][pP]
 parking-merge-*-result.json
 /merge-job/
 

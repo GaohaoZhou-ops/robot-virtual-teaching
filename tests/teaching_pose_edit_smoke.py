@@ -8,7 +8,7 @@ from playwright.sync_api import expect, sync_playwright
 
 from archive_helpers import start_project_download, read_exported_project
 from end_effector_control_smoke import double_click_tool, number_attr
-from parking_ghost_smoke import read_robot_pose, wait_for_pose
+from parking_ghost_smoke import open_parking_preview_actions, read_robot_pose, wait_for_pose
 from parking_position_edit_smoke import assert_map_pose
 from teaching_capture_pose_ghost_smoke import capture, set_joints
 from torso_control_ui_smoke import enter_torso, set_value
@@ -254,6 +254,8 @@ def run():
         canvas.focus()
         page.keyboard.press("Escape")
         stop.click()
+        expect(card).to_have_count(0)
+        open_parking_preview_actions(page)
         assert card.get_by_role("button", name="修改停车点", exact=True).is_enabled()
         assert card.get_by_role("button", name="移动到当前停车点", exact=True).is_enabled()
         assert card.get_by_role("button", name="调整姿态", exact=True).count() == 0

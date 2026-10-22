@@ -177,13 +177,13 @@ def run():
         assert read_robot_pose(canvas) == live_pose
         assert json.loads(canvas.get_attribute("data-robot-joint-values")) == live_joints
 
-        # Selecting the parent switches back to the parking-only action. Selecting
+        # Selecting the parent keeps its ghost without the action card. Selecting
         # a pose again applies its joints and the owning stop in a single click.
         assert_preview(page, canvas, second_node, first_pose, second_joints, live_pose, live_joints)
         first_stop.click()
-        expect(card).to_have_attribute("data-pose-id", "")
-        assert card.get_by_role("button", name="移动到当前停车点", exact=True).is_enabled()
-        assert card.get_by_role("button", name="使用当前姿态", exact=True).count() == 0
+        expect(card).to_have_count(0)
+        expect(canvas).to_have_attribute("data-parking-ghost-state", "visible")
+        expect(canvas).to_have_attribute("data-parking-ghost-pose-id", "")
         assert read_robot_pose(canvas) == live_pose
         assert json.loads(canvas.get_attribute("data-robot-joint-values")) == live_joints
         first_stop.click()

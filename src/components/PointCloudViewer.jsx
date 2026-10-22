@@ -7706,7 +7706,7 @@ export default function PointCloudViewer({
             <strong data-axis-code>X</strong>
             <span data-axis-label>前进 / 后退</span>
           </div>
-          {robotParkingGhostVisible && robotParkingGhostMetrics && (
+          {robotParkingGhostVisible && robotParkingGhostMetrics && robotParkingGhost.showReadout !== false && (
             <aside
               className="robot-parking-ghost-readout"
               role="status"

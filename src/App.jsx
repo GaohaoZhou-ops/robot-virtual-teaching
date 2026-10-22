@@ -3464,7 +3464,7 @@ export default function App() {
     setTeachingCaptureState({ status: 'idle', message: '' });
   }, []);
 
-  const previewTeachingParkingPoint = useCallback((id, poseId = null) => {
+  const previewTeachingParkingPoint = useCallback((id, poseId = null, options = {}) => {
     setMobileComputation((current) => current ? { ...current, preview: null, followLatest: false } : current);
     const task = teachingTasks.find((item) => (
       (item.parkingPoints || []).some((parkingPoint) => parkingPoint.id === id)
@@ -3523,6 +3523,7 @@ export default function App() {
       parkingPointName: parkingPoint.name,
       poseId: pose?.id || null,
       poseName: pose?.name || '',
+      showReadout: options.showReadout !== false,
       sourceParkingPointId: sourceParkingDistance <= 0.15 ? currentParkingPoint?.id || '' : '',
       sourceName: sourceParkingDistance <= 0.15
         ? currentParkingPoint?.name || '当前机器人'
@@ -6962,7 +6963,9 @@ export default function App() {
           onCreateTeachingTask={createTeachingTask}
           onSelectTeachingTask={selectTeachingTask}
           onCreateTeachingParkingPoint={createTeachingParkingPoint}
-          onSelectTeachingParkingPoint={previewTeachingParkingPoint}
+          onSelectTeachingParkingPoint={(id, poseId) => previewTeachingParkingPoint(id, poseId, {
+            showReadout: Boolean(poseId),
+          })}
           onCaptureTeachingPoint={captureTeachingPoint}
           onDeleteTeachingTask={deleteTeachingTask}
           onDeleteTeachingParkingPoint={deleteTeachingParkingPoint}
