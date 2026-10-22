@@ -470,12 +470,13 @@ def run():
         # Escape stops playback before the preview handler can clear a ghost.
         page.get_by_role("button", name="选择当前停车点 停车点 P01", exact=True).click()
         ghost = page.get_by_label("停车点机器人虚影", exact=True)
-        expect(ghost).to_be_visible()
+        expect(ghost).to_have_count(0)
+        expect(page.locator(".three-canvas")).to_have_attribute("data-parking-ghost-state", "visible")
         page.keyboard.down("Escape")
         dock.wait_for(state="detached")
-        expect(ghost).to_be_visible()
+        expect(page.locator(".three-canvas")).to_have_attribute("data-parking-ghost-state", "visible")
         page.keyboard.down("Escape")
-        expect(ghost).to_be_visible()
+        expect(page.locator(".three-canvas")).to_have_attribute("data-parking-ghost-state", "visible")
         page.keyboard.up("Escape")
         assert page.locator(".point-cloud-view").get_attribute(
             "data-robot-trajectory-active"
