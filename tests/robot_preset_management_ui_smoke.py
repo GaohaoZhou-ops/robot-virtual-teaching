@@ -1,4 +1,5 @@
 """Exercise preset CRUD, focus, persistence and portable export in both workspaces."""
+import math
 import tempfile
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from playwright.sync_api import expect, sync_playwright
 from archive_helpers import read_exported_project, start_project_download
 from dual_teaching_workspace_smoke import BASE_URL, create_project, wait_for_home
 from export_separation_ui_smoke import load_project
-from robot_presets_ui_smoke import scene_values, wait_for_robot
+from robot_presets_ui_smoke import scene_values, wait_for_preview, wait_for_robot
 from teaching_preset_insertion_ui_smoke import saved_project
 from teaching_transfer_ui_smoke import CHROME
 from topbar_tools_helpers import topbar_action
@@ -72,7 +73,7 @@ def close_manager(dialog):
 
 
 def save_editor(page, manager):
-    page.get_by_role('dialog', name='编辑预设姿态', exact=True).get_by_role('button', name='保存预设姿态', exact=True).click()
+    page.get_by_role('dialog', name='编辑预设姿态', exact=True).get_by_role('button', name='保存姿态', exact=True).click()
     expect(page.get_by_role('dialog', name='编辑预设姿态', exact=True)).to_have_count(0)
     expect(manager).to_be_visible()
 
@@ -115,7 +116,23 @@ def run():
                 expect(manager).to_be_hidden()
                 expect(editor.get_by_role('textbox', name='预设姿态名称')).to_have_value('准备姿态')
                 expect(editor.get_by_role('spinbutton', name='left_J1 预设关节值')).to_have_value('-20')
+                wait_for_preview(page, dict(left_J1=-20, right_J1=30, head_pitch_J=10, torso_lift=0.3))
+                editor.get_by_role('button', name='弧度 rad', exact=True).click()
+                editor.get_by_role('button', name='当前姿态', exact=True).click()
+                wait_for_preview(page, robot_before)
+                assert abs(float(editor.get_by_role('spinbutton', name='left_J1 预设关节值').input_value())
+                           - math.radians(robot_before['left_J1'])) < 1e-9
+                expect(editor.get_by_role('spinbutton', name='torso_lift 预设关节值')).to_have_value('0.2')
+                editor.get_by_role('button', name='重置姿态', exact=True).click()
+                wait_for_preview(page, {joint: 0 for joint in robot_before})
+                assert editor.get_by_role('spinbutton').evaluate_all('(inputs) => inputs.every(input => Number(input.value) === 0)')
+                expect(editor.get_by_role('textbox', name='预设姿态名称')).to_have_value('准备姿态')
+                expect(editor.get_by_role('button', name='弧度 rad', exact=True)).to_have_attribute('aria-pressed', 'true')
+                assert scene_values(page) == robot_before
+                editor.get_by_role('button', name='角度 °', exact=True).click()
                 editor.get_by_role('spinbutton', name='left_J1 预设关节值').fill('80')
+                editor.get_by_role('spinbutton', name='torso_lift 预设关节值').fill('0.6')
+                wait_for_preview(page, dict(left_J1=80, torso_lift=0.6))
                 editor.get_by_role('textbox', name='预设姿态名称').fill('取消的修改')
                 page.keyboard.press('Escape')
                 expect(manager).to_be_visible()
@@ -124,7 +141,7 @@ def run():
 
                 row(manager, 'prepare').get_by_role('button', name='编辑预设姿态', exact=False).click()
                 editor.get_by_role('spinbutton', name='left_J1 预设关节值').fill('999')
-                editor.get_by_role('button', name='保存预设姿态', exact=True).click()
+                editor.get_by_role('button', name='保存姿态', exact=True).click()
                 expect(editor.get_by_role('alert')).to_contain_text('请修正')
                 editor.get_by_role('spinbutton', name='left_J1 预设关节值').fill('-40')
                 editor.get_by_role('textbox', name='预设姿态名称').fill('准备姿态 · 已编辑')
@@ -151,6 +168,7 @@ def run():
                 row(manager, 'finish').get_by_role('button', name='编辑预设姿态', exact=False).click()
                 expect(editor.get_by_role('spinbutton', name='left_J1 预设关节值')).to_have_value('25')
                 expect(editor.get_by_role('spinbutton', name='torso_lift 预设关节值')).to_have_value('0.4')
+                wait_for_preview(page, dict(left_J1=25, right_J1=-35, head_pitch_J=15, torso_lift=0.4))
                 save_editor(page, manager)
                 rename(manager, 'other', '工位 A · 预备')  # Same name is allowed for a different robot.
 
@@ -158,7 +176,7 @@ def run():
                 new_editor = page.get_by_role('dialog', name='新建预设姿态', exact=True)
                 new_editor.get_by_role('textbox', name='预设姿态名称').fill('检测姿态')
                 new_editor.get_by_role('spinbutton', name='left_J1 预设关节值').fill('42')
-                new_editor.get_by_role('button', name='保存预设姿态', exact=True).click()
+                new_editor.get_by_role('button', name='保存姿态', exact=True).click()
                 expect(new_editor).to_have_count(0)
                 expect(manager.locator('li')).to_have_count(4)
                 expect(manager.get_by_role('button', name='新建预设姿态', exact=True)).to_be_focused()
@@ -214,6 +232,7 @@ def run():
                     expect(imported_manager).to_contain_text('检测姿态')
                     imported_manager.get_by_role('button', name='编辑预设姿态 工位 A · 预备', exact=True).click()
                     expect(target.get_by_role('dialog', name='编辑预设姿态').get_by_role('spinbutton', name='left_J1 预设关节值')).to_have_value('-40')
+                    wait_for_preview(target, dict(left_J1=-40, torso_lift=0.3))
                     restored.close()
 
                 manager = open_manager(page, 2)

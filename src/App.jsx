@@ -4197,17 +4197,18 @@ export default function App() {
   }, [jointPoses, notify]);
 
   const applyJointPose = useCallback(
-    (id) => {
-      const pose = jointPoses.find((item) => item.id === id);
+    (id, { announce = true } = {}) => {
+      // A newly saved preset may not be in the render that started the save.
+      const pose = latestWorkspaceRef.current.jointPoses.find((item) => item.id === id);
       if (!pose || !selectedRobot || robotLoadState.status !== 'loaded') {
         notify('机器人尚未就绪，无法执行关节姿态', 'warning');
-        return;
+        return false;
       }
       const poseRobotKey = pose.robot?.id || pose.robot?.relativePath;
       const currentRobotKey = selectedRobot.id || selectedRobot.relativePath;
       if (!poseRobotKey || poseRobotKey !== currentRobotKey) {
         notify('该关节姿态绑定了不同的机器人模型', 'warning');
-        return;
+        return false;
       }
       const definitionByName = new Map(
         (robotLoadState.movableJoints || []).map((joint) => [joint.name, joint]),
@@ -4220,9 +4221,10 @@ export default function App() {
       );
       setRobotControlEnabled(false);
       setRobotJointValues((current) => ({ ...current, ...values }));
-      notify(`${pose.name} 已应用到机器人`, 'success');
+      if (announce) notify(`${pose.name} 已应用到机器人`, 'success');
+      return true;
     },
-    [jointPoses, notify, robotLoadState.movableJoints, robotLoadState.status, selectedRobot],
+    [notify, robotLoadState.movableJoints, robotLoadState.status, selectedRobot],
   );
 
   const currentExportPayload = () => buildExport({
@@ -5063,7 +5065,7 @@ export default function App() {
       .map((pose, index) => ({ ...pose, sequence: index + 1 })));
   };
 
-  const saveRobotPreset = async ({ name, values }) => {
+  const saveRobotPreset = async ({ name, values, apply = false }) => {
     const current = latestWorkspaceRef.current;
     if (!robotPresetDraft || !robotPresetReady || !sessionReadyRef.current
       || !presetMatchesRobot(robotPresetDraft, current.selectedRobot)
@@ -5086,16 +5088,26 @@ export default function App() {
       ? current.jointPoses.map((item) => item.id === pose.id ? pose : item)
       : [...current.jointPoses, pose];
     await persistRobotPresetChanges(current, next);
+    if (apply) {
+      const latest = latestWorkspaceRef.current;
+      if (latest.mapData?.mapId !== current.mapData?.mapId || latest.teachingSpaceMode !== current.teachingSpaceMode
+        || !applyRobotPreset(pose.id, { announce: false })) {
+        throw new Error('姿态已保存，但当前工程或机器人已变化，请从机器人菜单重新应用');
+      }
+    }
     closeRobotPreset();
-    notify(`${pose.name} 已保存，可从机器人菜单直接应用`, 'success');
+    notify(apply ? `${pose.name} 已保存并应用到机器人` : `${pose.name} 已保存，可从机器人菜单直接应用`, 'success');
   };
 
-  const applyRobotPreset = (id) => {
-    if (!robotPresetReady || !robotPresets.some((pose) => pose.id === id)) return;
+  const applyRobotPreset = (id, { announce = true } = {}) => {
+    const current = latestWorkspaceRef.current;
+    if (!robotPresetReady || !sessionReadyRef.current || workspaceSwitchingRef.current
+      || !current.jointPoses.some((pose) => pose.id === id && pose.joints?.source === 'robot-preset'
+        && presetMatchesRobot(pose, current.selectedRobot))) return false;
     stopTeachingTaskPlayback(false);
     setRobotParkingGhost(null);
     setShowRobotModel(true);
-    applyJointPose(id);
+    return applyJointPose(id, { announce });
   };
 
   const applyTeachingParkingPoint = useCallback(
@@ -6982,6 +6994,7 @@ export default function App() {
       )}
       {appPage === APP_PAGE_WORKBENCH && robotPresetDraft && (
         <RobotPresetDialog key={robotPresetDraft.id} snapshot={robotPresetDraft} onSave={saveRobotPreset}
+          currentJointValues={robotJointValues}
           onClose={closeRobotPreset} returnFocusRef={robotPresetReturnFocusRef} />
       )}
     </div>

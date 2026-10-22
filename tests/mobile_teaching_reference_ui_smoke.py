@@ -59,7 +59,7 @@ def run():
                 preset_dialog.get_by_role('textbox', name='预设姿态名称').fill(name)
                 preset_dialog.get_by_role('spinbutton', name='head_yaw_J 预设关节值', exact=True).fill(str(head))
                 preset_dialog.get_by_role('spinbutton', name='right_J1 预设关节值', exact=True).fill(str(idle_arm))
-                preset_dialog.get_by_role('button', name='保存预设姿态', exact=True).click()
+                preset_dialog.get_by_role('button', name='保存姿态', exact=True).click()
                 expect(preset_dialog).to_have_count(0)
 
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()

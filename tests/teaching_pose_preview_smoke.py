@@ -1,4 +1,5 @@
 from topbar_tools_helpers import topbar_action
+from dual_teaching_workspace_smoke import wait_for_home
 
 import json
 import os
@@ -22,7 +23,7 @@ def run():
             launch_options["executable_path"] = CHROMIUM_EXECUTABLE
         browser = playwright.chromium.launch(**launch_options)
         page = browser.new_page(viewport={"width": 1600, "height": 1000})
-        page.set_default_timeout(180_000)
+        page.set_default_timeout(30_000)
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on(
             "console",
@@ -31,11 +32,18 @@ def run():
             else None,
         )
 
-        page.goto(f"{BASE_URL.rstrip('/')}/workbench", wait_until="networkidle")
-        page.locator('[data-session-state="ready"]').wait_for()
-        page.locator(".loading-curtain").wait_for(state="hidden")
-        page.locator('input[type="file"][accept*=".json"]').set_input_files(str(FIXTURE))
-        page.get_by_text("工程配置已加载", exact=False).wait_for()
+        # This fixture contains archived poses and map metadata, not a workbench
+        # model. Import it through the current independent-workspace entry point.
+        page.add_init_script('window.showOpenFilePicker = undefined;')
+        page.goto(f"{BASE_URL.rstrip('/')}/", wait_until='networkidle')
+        wait_for_home(page)
+        page.get_by_role('radio', name='独立示教').click()
+        page.get_by_role('button', name='加载工程', exact=True).click()
+        with page.expect_file_chooser() as chooser:
+            page.get_by_role('button', name='加载工程引导文件', exact=True).click()
+        chooser.value.set_files(str(FIXTURE))
+        page.wait_for_url(f"{BASE_URL.rstrip('/')}/workbench")
+        page.locator('.loading-curtain').wait_for(state='hidden')
         topbar_action(page, name="打开示教数据管理页").click()
         page.locator('[data-app-page="teaching-data"]').wait_for(timeout=15_000)
 
@@ -64,7 +72,8 @@ def run():
 
         page.get_by_role("button", name="查看机械臂姿态 A01 检查姿态").click()
         page.wait_for_function(
-            "document.querySelector('.teaching-pose-robot-preview')?.dataset.previewState === 'ready'"
+            "document.querySelector('.teaching-pose-robot-preview')?.dataset.previewState === 'ready'",
+            timeout=180_000,
         )
         page.wait_for_function(
             "document.querySelector('.teaching-pose-robot-canvas')?.dataset.poseId === 'preview-pose'"
