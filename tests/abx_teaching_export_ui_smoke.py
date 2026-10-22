@@ -20,11 +20,11 @@ def seed(page, invalid=False):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate('''async invalid => {
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
+      const { abxTeachingPresetFixture } = await import('/tests/abx_teaching_helpers.mjs');
       const store = await import('/src/lib/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransferFixture('map');
-      const { payload, robotPackage } = abxTeachingFixture();
+      const { payload, robotPackage } = abxTeachingPresetFixture();
       for (const task of payload.virtualTeaching.tasks) {
         task.parkingPoints.sort((a, b) => a.sequence - b.sequence);
         for (const parking of task.parkingPoints) parking.poses.sort((a, b) => a.sequence - b.sequence);
@@ -34,7 +34,8 @@ def seed(page, invalid=False):
       fixture.map.portableRobotPackage = robotPackage;
       fixture.config.config.project = payload;
       fixture.config.config.ui.selectedRobot = payload.robot;
-      if (invalid) delete payload.virtualTeaching.tasks[0].parkingPoints[0].poses[0].fullBodyJoints.values.head_yaw_J;
+      if (invalid === true) delete payload.virtualTeaching.tasks[0].parkingPoints[0].poses[0].fullBodyJoints.values.head_yaw_J;
+      if (invalid === 'preset') delete payload.virtualTeaching.jointPoses[0].joints.values.head_yaw_J;
       await store.saveWorkspaceMap(sessionId, fixture.map.mapId, fixture.map.name, fixture.map, 'map');
       await store.saveWorkspaceConfig(sessionId, fixture.map.mapId, fixture.config.config, 'map');
       await store.activateWorkspaceMode(sessionId, 'map');
@@ -67,6 +68,7 @@ def run():
             expect(dialog.get_by_role('note')).to_contain_text('任务与路网导入包')
             expect(dialog.get_by_role('note')).to_contain_text('任务及其路网会一并导入并自动关联')
             expect(dialog.get_by_label('随包路网')).to_contain_text('1 个路网')
+            expect(dialog.get_by_label('随包预设姿态')).to_contain_text('已携带 2 个预设 / 基础姿态')
             expect(dialog.get_by_label('路网导出提示')).to_contain_text('没有入向连线')
             page.screenshot(path=str(SHOTS / 'robot-export-desktop.png'), full_page=True)
             with page.expect_download() as waiting:
@@ -84,7 +86,13 @@ def run():
                 records = [json.loads(line) for line in lines]
                 assert records[0]['version'] == 23 and records[0]['point_count'] == '5'
                 assert 'navigation.json' in bundle.namelist()
-                assert records[0]['basic_pose_count'] == '0'
+                assert records[0]['basic_pose_count'] == records[-1]['basic_pose_count'] == '2'
+                basics = [entry for entry in records if entry['type'] == 'basic_pose']
+                assert [entry['name'] for entry in basics] == ['准备姿态', '未插入任务的预设']
+                assert all(entry['record']['robot_model'] == 'botx_abx_zivid_m70' for entry in basics)
+                assert all(math.isclose(entry['record']['joints_rad']['head'][0], math.radians(20)) for entry in basics)
+                empty_task = [json.loads(line) for line in bundle.read(manifest['tasks'][1]['file']).splitlines()]
+                assert [entry for entry in empty_task if entry['type'] == 'basic_pose'] == basics
                 chunks = [entry for entry in records if entry['type'] == 'navigation_chunk']
                 assert records[0]['navigation']['chunks'] == str(len(chunks))
                 navigation = json.loads(b''.join(base64.b64decode(chunk['data']) for chunk in chunks))
@@ -129,18 +137,25 @@ def run():
                     original_entry = json.loads(original.read('manifest.json'))['tasks'][0]
                     output_entry = next(entry for entry in json.loads(output.read('manifest.json'))['tasks']
                                         if entry['name'] == original_entry['name'])
-                    assert output.read(output_entry['file']) == original.read(original_entry['file'])
+                    original_rows = [json.loads(line) for line in original.read(original_entry['file']).splitlines()]
+                    output_rows = [json.loads(line) for line in output.read(output_entry['file']).splitlines()]
+                    assert [row for row in output_rows if row['type'] in ('parking', 'point')] == [
+                        row for row in original_rows if row['type'] in ('parking', 'point')]
+                    assert int(output_rows[0]['basic_pose_count']) == int(original_rows[0].get('basic_pose_count', '0')) + 2
                 page.keyboard.press('Escape')
-            seed(page, invalid=True)
-            page.get_by_role('button', name='导出示教数据', exact=True).click()
-            dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)
-            expect(dialog.get_by_role('alert')).to_contain_text('head_yaw_J')
-            expect(dialog.get_by_role('button', name='下载机器人导入包', exact=True)).to_be_disabled()
-            expect(dialog.get_by_role('button', name='下载导航清单', exact=True)).to_be_disabled()
+            for invalid in [True, 'preset']:
+                seed(page, invalid=invalid)
+                page.get_by_role('button', name='导出示教数据', exact=True).click()
+                dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)
+                expect(dialog.get_by_role('alert')).to_contain_text('head_yaw_J')
+                if invalid == 'preset':
+                    expect(dialog.get_by_role('alert')).to_contain_text('预设姿态「准备姿态」')
+                expect(dialog.get_by_role('button', name='下载机器人导入包', exact=True)).to_be_disabled()
+                expect(dialog.get_by_role('button', name='下载导航清单', exact=True)).to_be_disabled()
             assert not errors, errors
         finally:
             browser.close()
-    print('Teaching Data Center export UI, native ZIP, route/Pose sequence, navigation JSON, compact layout and invalid Pose rejection passed')
+    print('Teaching Data Center export UI, preset library ZIP, route/Pose sequence, navigation JSON, compact layout and invalid Pose/preset rejection passed')
 
 
 if __name__ == '__main__':

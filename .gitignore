@@ -758,6 +758,14 @@ Desktop.ini
 /position_[0-9]*.txt
 /1014平地路网终版.json
 /1019平地路网终版测试.json
+# Robot-export reference bundles contain local tasks, routes and model metadata.
+# Include extracted, dated and duplicate-download copies, only at the root.
+/teaching-tasks.[zZ][iI][pP]
+/teaching-tasks-*.[zZ][iI][pP]
+/teaching-tasks (*).[zZ][iI][pP]
+/teaching-tasks/
+/teaching-tasks-*/
+/teaching-tasks (*)/
 # Supplied robot source, extracted copies and locally repackaged variants.
 /ABXBrainSystem/
 /ABXBrainSystem.[zZ][iI][pP]

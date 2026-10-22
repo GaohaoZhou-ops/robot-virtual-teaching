@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Download, LoaderCircle, X } from 'lucide-react';
-import { buildAbxTeachingArchive, readAbxRobotPackage } from '../lib/abxTeachingExport.js';
+import { abxTeachingNeedsRobot, buildAbxTeachingArchive, readAbxRobotPackage } from '../lib/abxTeachingExport.js';
 import './AbxTeachingExportDialog.css';
 
 function download(blob, name) {
@@ -23,8 +23,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
     const controller = new AbortController();
     (async () => {
       try {
-        const needsRobot = snapshot.payload.virtualTeaching?.tasks?.some((task) => !task.abx
-          && task.parkingPoints?.some((parking) => parking.poses?.length));
+        const needsRobot = abxTeachingNeedsRobot(snapshot.payload);
         const robotPackage = needsRobot
           ? await readAbxRobotPackage(snapshot.robot, snapshot.robotPackage, { signal: controller.signal }) : null;
         const archive = await buildAbxTeachingArchive(snapshot.payload, { robotPackage });
@@ -63,6 +62,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
           <dl className="abx-export-counts"><div><dt>示教任务</dt><dd>{result.summary.taskCount}</dd></div><div><dt>机器人 Pose</dt><dd>{result.summary.poseCount}</dd></div><div><dt>导航目标</dt><dd>{new Set(targets.map((point) => point.nodeId)).size}</dd></div><div><dt>导航步骤</dt><dd>{result.summary.navigationCount}</dd></div></dl>
           <p className="abx-export-description">保留任务、停车点和步骤顺序，关节转换为弧度。已导入路网时，保留完整节点、连线、原始 N 编号、坐标、朝向及定位场景名称；未匹配的停车点会提示修正。{result.summary.routeImportIncluded ? '路网内嵌在任务中，ZIP 同时附带 routes/ 路网副本和 navigation.json 导航清单。' : 'ZIP 附带 navigation.json 导航清单，未提供的路网坐标不作推测。'}</p>
           {result.summary.routeCount > 0 && <p className="abx-export-description" aria-label="随包路网">已携带 {result.summary.routeCount} 个路网 · {result.summary.nodeCount} 个节点 · {result.summary.edgeCount} 条有向边</p>}
+          <p className="abx-export-description" aria-label="随包预设姿态">已携带 {result.summary.basicPoseCount} 个预设 / 基础姿态。按任务对应机器人匹配，包含未插入任务的预设；导入后加入机器人的基础动作库。</p>
           {result.summary.warnings.length > 0 && <ul className="abx-export-description" aria-label="路网导出提示">{result.summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
           {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target?.[key] == null ? '—' : point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.some((point) => !point.target) && <p>“—” 表示原任务仅包含站点编号，未提供对应地图坐标。</p>}{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
         </>}

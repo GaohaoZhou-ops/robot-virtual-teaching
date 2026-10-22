@@ -79,9 +79,11 @@ camera.record = { type: 'zivid_capture', sides: ['left', 'right'], formats: ['pn
 const body = rows.map((row) => `${JSON.stringify(row)}\n`).join('');
 const nativeText = `${JSON.stringify(source.header)}\n${body}${JSON.stringify({ type: 'end',
   point_count: source.header.point_count, parking_count: source.header.parking_count,
+  basic_pose_count: source.header.basic_pose_count,
   sha256: await sha256Bytes(new TextEncoder().encode(body)) })}\n`;
 const imported = await readAbxTeachingFile(new File([nativeText], 'native.abxteach.ndjson'),
   { robot: payload.robot, robotModel: model });
+const importedGraph = { abxRoutes: imported.abxRoutes, waypoints: imported.waypoints, paths: imported.edges };
 let nativeTask = imported.tasks[0];
 const nativeSnapshot = JSON.stringify(nativeTask);
 const nativeParking = nativeTask.parkingPoints[0], nativeAnchor = nativeParking.poses[0];
@@ -91,7 +93,7 @@ nativeTask = insertTeachingPreset(nativeTask, { parkingPointId: nativeParking.id
 nativeTask = insertTeachingPreset(nativeTask, { parkingPointId: nativeParking.id, poseId: nativeAnchor.id,
   preset: { ...nativePreset, name: '巡检结束姿态' }, position: 'after', id: 'native-after', capturedAt: stamp });
 assert.equal(JSON.stringify(imported.tasks[0]), nativeSnapshot);
-const nativeZip = await buildAbxTeachingArchive({ virtualTeaching: {
+const nativeZip = await buildAbxTeachingArchive({ ...importedGraph, virtualTeaching: {
   tasks: normalizeProject({ virtualTeaching: { tasks: [nativeTask] } }).teachingTasks,
 } });
 const nativeManifest = JSON.parse(strFromU8(nativeZip.files['manifest.json']));
@@ -135,7 +137,7 @@ const nativeBeforeMove = JSON.stringify(nativeTask);
 const reorderedNative = moveTeachingPose(nativeTask, { parkingPointId: nativeParking.id,
   poseId: 'native-before', direction: 'down', updatedAt: stamp });
 assert.equal(JSON.stringify(nativeTask), nativeBeforeMove);
-const reorderedZip = await buildAbxTeachingArchive({ virtualTeaching: { tasks: [reorderedNative] } });
+const reorderedZip = await buildAbxTeachingArchive({ ...importedGraph, virtualTeaching: { tasks: [reorderedNative] } });
 const reorderedManifest = JSON.parse(strFromU8(reorderedZip.files['manifest.json']));
 const reorderedExported = await parseAbxTeachingTask(strFromU8(reorderedZip.files[reorderedManifest.tasks[0].file]));
 assert.deepEqual(reorderedExported.points.map((point) => point.record.type || point.label),
@@ -155,6 +157,7 @@ const mergedRows = rows.filter((row) => row.type !== 'parking' || row.id === sou
 const mergedBody = mergedRows.map((row) => `${JSON.stringify(row)}\n`).join('');
 const mergedText = `${JSON.stringify({ ...source.header, parking_count: '1' })}\n${mergedBody}${JSON.stringify({
   type: 'end', point_count: source.header.point_count, parking_count: '1',
+  basic_pose_count: source.header.basic_pose_count,
   sha256: await sha256Bytes(new TextEncoder().encode(mergedBody)),
 })}\n`;
 const crossing = (await readAbxTeachingFile(new File([mergedText], 'navigation-boundary.abxteach.ndjson'))).tasks[0];
