@@ -22,7 +22,8 @@ node_modules/
 # Build output and frontend tool caches
 # build_local.sh writes dist/ and build/local/; the native entry points use
 # ipad/build/{device,simulator}/ and vision/build/{device,simulator}/.
-# The build/ rule covers all three logs, products and intermediate directories.
+# The build/ rule also covers deploy_ipad.sh's ipad/build/deploy-device/ logs,
+# device/signing reports, products, and native UI verification attachments.
 dist/
 build/
 out/
@@ -499,6 +500,28 @@ playwright/.auth/
 /tests/atlas-pairing-code-*/
 /tests/atlas-pairing-qr-*/
 /tests/atlas-discovery-*/
+
+# Deployment, USB transfer and directed-probe regressions also honor TMPDIR.
+# Their workspaces include mock signing data, device containers and executables.
+# Scope local workspaces and packed copies to output roots, preserving fixtures.
+/atlas-ipad-deploy-test-*/
+/ipad/atlas-ipad-deploy-test-*/
+/tests/atlas-ipad-deploy-test-*/
+/atlas-ipad-usb-*/
+/ipad/atlas-ipad-usb-*/
+/tests/atlas-ipad-usb-*/
+/atlas-directed-probe-*/
+/ipad/atlas-directed-probe-*/
+/tests/atlas-directed-probe-*/
+/atlas-ipad-deploy-test-*.[zZ][iI][pP]
+/ipad/atlas-ipad-deploy-test-*.[zZ][iI][pP]
+/tests/atlas-ipad-deploy-test-*.[zZ][iI][pP]
+/atlas-ipad-usb-*.[zZ][iI][pP]
+/ipad/atlas-ipad-usb-*.[zZ][iI][pP]
+/tests/atlas-ipad-usb-*.[zZ][iI][pP]
+/atlas-directed-probe-*.[zZ][iI][pP]
+/ipad/atlas-directed-probe-*.[zZ][iI][pP]
+/tests/atlas-directed-probe-*.[zZ][iI][pP]
 
 # iPad transfer-progress and desktop model-consistency checks create temporary
 # model/result stores. Keep them local when TMPDIR points into these directories.

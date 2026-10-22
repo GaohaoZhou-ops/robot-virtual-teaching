@@ -16,6 +16,7 @@ final class LANServiceDiscovery: ObservableObject {
     @Published private(set) var message = "可搜索同一局域网内的电脑"
     private var browser: NWBrowser?
     private var deadline: Task<Void, Never>?
+    private var directedProbe: Task<Void, Never>?
     private var connections: [NWEndpoint: NWConnection] = [:]
     private var tasks: [NWEndpoint: Task<Void, Never>] = [:]
     private var attempted: Set<NWEndpoint> = []
@@ -29,6 +30,55 @@ final class LANServiceDiscovery: ObservableObject {
         // The teaching protocol currently accepts LAN IPv4 and .local hosts.
         (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version = .v4
         return parameters
+    }
+    // iPad probes exactly the address in its input fields. Bonjour browsing
+    // remains available through start() for the Vision Pro workflow.
+    func probe(address: String) {
+        resetProbe()
+        let input = LANAddressInput(address: address)
+        let client = input.canConnect ? try? LANClient(address: input.address) : nil
+        let generation = self.generation
+        let feedbackDeadline = ContinuousClock.now.advanced(by: .milliseconds(1500))
+        isSearching = true
+        message = client == nil ? "正在检查电脑地址和端口…" : "正在检测 \(input.displayAddress)…"
+        // An overall deadline also covers a server that keeps sending a partial
+        // response, which can continually reset a request's inactivity timeout.
+        deadline = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            guard let self, self.generation == generation else { return }
+            self.stop()
+            self.message = "检测超时，请检查地址、端口和电脑服务。"
+        }
+        directedProbe = Task { [weak self] in
+            var server: DiscoveredTeachingServer?
+            let resultMessage: String
+            if let client {
+                do {
+                    let info = try await client.identify()
+                    server = DiscoveredTeachingServer(id: info.serverId, name: info.serverName,
+                                                      address: client.baseURL.absoluteString)
+                    resultMessage = "已找到电脑，点击下方卡片输入配对码。"
+                } catch {
+                    resultMessage = "未连接到该地址的 Atlas 服务，请检查地址、端口和电脑服务。"
+                }
+            } else {
+                resultMessage = "请先填写有效的电脑地址和端口。"
+            }
+            // Keep both the globe and the searching message stable for at least
+            // 1.5 seconds, including fast failures. Slow requests add no delay.
+            do {
+                try await ContinuousClock().sleep(until: feedbackDeadline)
+                try Task.checkCancellation()
+            } catch { return }
+            guard let self, self.generation == generation else { return }
+            self.stop()
+            self.servers = server.map { [$0] } ?? []
+            self.message = resultMessage
+        }
+    }
+    func resetProbe() {
+        stop(); servers = []
+        message = "仅检测上方填写的电脑地址和端口。"
     }
     func start() {
         guard !isSearching else { return }
@@ -71,6 +121,7 @@ final class LANServiceDiscovery: ObservableObject {
         generation = UUID()
         browser?.cancel(); browser = nil
         deadline?.cancel(); deadline = nil
+        directedProbe?.cancel(); directedProbe = nil
         connections.values.forEach { $0.cancel() }; connections.removeAll()
         tasks.values.forEach { $0.cancel() }; tasks.removeAll()
         isSearching = false
@@ -138,7 +189,7 @@ final class LANServiceDiscovery: ObservableObject {
         servers = unique.values.sorted { $0.name == $1.name ? $0.address < $1.address : $0.name < $1.name }
     }
     deinit {
-        browser?.cancel(); deadline?.cancel()
+        browser?.cancel(); deadline?.cancel(); directedProbe?.cancel()
         connections.values.forEach { $0.cancel() }
         tasks.values.forEach { $0.cancel() }
     }

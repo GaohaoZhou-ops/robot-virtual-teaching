@@ -47,4 +47,12 @@
 .vision-pairing-mark span { font: 10px Menlo, monospace; letter-spacing: 3px; }
 .vision-pairing-steps { margin: 14px 0; padding-left: 20px; font-size: 12px; line-height: 1.9; color: var(--muted); }
 .vision-pairing-steps li + li { margin-top: 8px; }
+.ipad-usb { display: grid; gap: 12px; padding: 18px; margin-top: 16px; border: 1px solid #59dbe83b; border-radius: 8px; background: #59dbe808; }
+.ipad-usb__heading { display: flex; align-items: center; gap: 10px; color: var(--cyan); }
+.ipad-usb__heading h3 { margin: 0; font-size: 14px; font-weight: 500; }
+.ipad-usb__heading span { margin-left: auto; font-size: 11px; color: var(--muted); }
+.ipad-usb p { margin: 0; font-size: 12px; line-height: 1.8; color: var(--muted); }
+.ipad-usb select { min-width: 0; width: 100%; }
+.ipad-usb button { justify-self: start; }
+.ipad-usb .ipad-usb__receipt { color: var(--cyan); }
 @media (max-width: 650px) { .ipad-qr { grid-template-columns: 1fr; justify-items: center; gap: 16px; }.ipad-qr__instructions { width: 100%; } }

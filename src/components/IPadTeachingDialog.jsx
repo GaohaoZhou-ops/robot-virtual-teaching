@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, FileUp, Glasses, QrCode, RefreshCw, ShieldAlert, Tablet, Wifi, X } from 'lucide-react';
+import { ArrowDownToLine, Cable, FileUp, Glasses, QrCode, RefreshCw, ShieldAlert, Tablet, Wifi, X } from 'lucide-react';
 import { IPadModelMismatchError, ipadRequest, mobileTicketDevice, packIPadModel, readDeviceTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
 import { readIPadResultFile } from '../lib/ipadResultFile.js';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
@@ -25,6 +25,9 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   const [error, setError] = useState('');
   const [modelMismatch, setModelMismatch] = useState(null);
   const [fileReceipt, setFileReceipt] = useState('');
+  const [usb, setUSB] = useState({ supported: false, devices: [], message: '正在检测数据线连接…' });
+  const [usbDevice, setUSBDevice] = useState('');
+  const [usbReceipt, setUSBReceipt] = useState('');
   const [copied, setCopied] = useState(false);
   const [preparationPending, setPreparationPending] = useState(false);
   const canShowQR = ['ready', 'paired'].includes(ticket?.status);
@@ -32,6 +35,29 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   const dialog = useRef(null), operation = useRef(false), initialized = useRef(false);
   const mismatchConfirm = useRef(null), operationFocus = useRef(null);
   const resultInput = useRef(null);
+  useEffect(() => {
+    if (vision || !lanVisible) return;
+    const controller = new AbortController();
+    let checking = false;
+    const refreshUSB = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        const status = await ipadRequest('/usb', { signal: controller.signal });
+        if (!controller.signal.aborted) {
+          setUSB(status);
+          setUSBDevice((selected) => status.devices.some((item) => item.id === selected) ? selected
+            : status.devices.length === 1 ? status.devices[0].id : '');
+        }
+      } catch {
+        if (!controller.signal.aborted) setUSB({ supported: false, devices: [], message: '数据线服务暂不可用，请检查 Mac 示教服务。' });
+      } finally { checking = false; }
+    };
+    void refreshUSB();
+    const timer = setInterval(refreshUSB, 3000);
+    return () => { controller.abort(); clearInterval(timer); };
+  }, [vision, lanVisible]);
+  useEffect(() => { setUSBReceipt(''); }, [ticket?.id, usbDevice]);
   const update = (next) => {
     rememberIPadTicket(next); setTickets(readDeviceTickets(device)); setCopied(false);
     if (mobileTicketDevice(next) !== device) {
@@ -138,6 +164,13 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
     update({ ...selectedTicket, ...next });
   };
   const renew = () => perform(`正在${refreshPairingLabel}…`, () => renewTicket(ticket));
+  const sendUSB = () => perform('正在通过数据线发送物体，请保持 iPad 解锁并连接…', async () => {
+    setUSBReceipt('');
+    const receipt = await ipadRequest(`/sessions/${ticket.id}/usb`, {
+      method: 'POST', token: ticket.ownerToken, body: { deviceId: usbDevice },
+    });
+    setUSBReceipt(`已传至 ${receipt.deviceName}。请在 iPad 欢迎页「方式三 · 数据线连接」点击接收物体。`);
+  });
   const importFile = (file) => {
     if (!file) return;
     return perform('正在校验模型并导入结果文件…', async () => {
@@ -195,6 +228,23 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
           device={device} ticket={ticket} address={address} disabled={!!busy} copied={copied}
           onCopy={() => perform('复制配对码…', async () => { await navigator.clipboard.writeText(ticket.pairingCode); setCopied(true); })} />}
         <div className="ipad-connection"><Wifi size={17}/><div>{addresses.length ? <select id="ipad-lan-address" aria-label="电脑局域网地址" value={address} disabled={!!busy} onChange={(event) => setAddress(event.target.value)}>{addresses.map((item) => <option key={item}>{item}</option>)}</select> : <p>尚未发现局域网地址，请连接 Wi-Fi 或以太网后重新打开。</p>}</div></div>
+        {!vision && <section className="ipad-usb" aria-label="通过数据线发送物体">
+          <div className="ipad-usb__heading"><Cable size={20}/><h3>数据线连接</h3>
+            <span>{usb.devices.some((item) => item.ready) ? '已检测到 iPad' : '等待连接'}</span></div>
+          <p>通过 USB 将当前物体发送到 iPad，无需连接同一 Wi-Fi。发送后在 iPad 欢迎页的「方式三」接收。</p>
+          {usb.devices.length > 0 && <select aria-label="数据线连接的 iPad" value={usbDevice} disabled={!!busy}
+            onChange={(event) => setUSBDevice(event.target.value)}>
+            <option value="" disabled>选择接收物体的 iPad</option>
+            {usb.devices.map((item) => <option key={item.id} value={item.id}>{item.name}{item.ready ? '' : ' · 请解锁并信任电脑'}</option>)}
+          </select>}
+          {usb.message && <p>{usb.message}</p>}
+          {!usb.message && usb.devices.length === 0 && <p>请用数据线连接 iPad，解锁并信任此电脑。</p>}
+          {usb.devices.find((item) => item.id === usbDevice)?.message && <p>{usb.devices.find((item) => item.id === usbDevice).message}</p>}
+          <button className="ipad-primary" onClick={sendUSB} disabled={!!busy || preparationPending || !ticket
+            || !['ready', 'paired', 'completed', 'imported'].includes(ticket.status) || !usb.devices.some((item) => item.id === usbDevice && item.ready)}>
+            <Cable size={15}/>通过数据线发送</button>
+          {usbReceipt && <p className="ipad-usb__receipt" role="status">{usbReceipt}</p>}
+        </section>}
         {tickets.length > 0 && <label className="ipad-history">传输任务<select disabled={!!busy} value={ticket?.id || ''} onChange={(e) => { setTicket(tickets.find((item) => item.id === e.target.value)); setError(''); }}><option value="" disabled>选择任务</option>{tickets.map((item) => <option key={item.id} value={item.id}>{item.manifest.name} · {new Date(item.createdAt).toLocaleString()} · {statusText[item.status]}</option>)}</select></label>}
         {ticket && (!['ready', 'preparing'].includes(ticket.status) || legacyCode) && <div className={`ipad-pairing is-${ticket.status}`} data-ipad-status={ticket.status}>
           <div><span>{statusText[ticket.status]}</span>{ticket.status === 'ready' && <p>此任务使用旧版配对码，请点击「{refreshPairingLabel}」生成 4 位码。</p>}
