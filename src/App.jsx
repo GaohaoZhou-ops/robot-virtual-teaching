@@ -63,6 +63,7 @@ import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
 import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
+import IPadScreenCollaboration from './components/IPadScreenCollaboration.jsx';
 import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
@@ -569,6 +570,8 @@ export default function App() {
   const [directoryAutosaveSuspended, setDirectoryAutosaveSuspended] = useState(false);
   const [teachingTransferDialog, setTeachingTransferDialog] = useState(null);
   const [ipadTeachingOpen, setIPadTeachingOpen] = useState(false);
+  const [ipadScreenOpen, setIPadScreenOpen] = useState(false);
+  useEffect(() => { if (appPage !== APP_PAGE_WORKBENCH) setIPadScreenOpen(false); }, [appPage]);
   const [mobileSolveTaskId, setMobileSolveTaskId] = useState(null);
   const [mobileSolveSampleId, setMobileSolveSampleId] = useState(null);
   const [mobilePoseSelection, setMobilePoseSelection] = useState(null);
@@ -6600,14 +6603,15 @@ export default function App() {
                     isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
                   />
                 </section>
-                {isIndependentTeachingSpace && <section className="workbench-menu-section">
+                <section className="workbench-menu-section">
                   <p>移动示教设备</p>
-                  {['ipad', 'vision'].map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
+                  {(isIndependentTeachingSpace ? ['ipad', 'vision'] : ['ipad']).map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
                     desktopCount={desktopTeachingTasks.length} deviceCount={mobileTasksByDevice[device].length}
                     disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
                     isActive={appPage === APP_PAGE_WORKBENCH && !robotPresetModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
-                    onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} />)}
-                </section>}
+                    onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} allowTeaching={isIndependentTeachingSpace}
+                    onOpenScreen={() => setIPadScreenOpen(true)} />)}
+                </section>
               </>,
             },
           ]}
@@ -7214,6 +7218,8 @@ export default function App() {
       onSelectRobot={(value) => { dismissMobileTeaching(); handleSelectRobot(value); setShowRobotModel(true); }}
       onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
       onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} onPlay={playMobileTeachingSolutions} />}
+    {appPage === APP_PAGE_WORKBENCH && <IPadScreenCollaboration open={ipadScreenOpen} onClose={() => setIPadScreenOpen(false)}
+      mapData={mapData} robot={selectedRobot} robotLoadState={robotLoadState} cameraPoses={zividCameraPoses} meshRenderQuality={meshRenderQuality} />}
     {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog

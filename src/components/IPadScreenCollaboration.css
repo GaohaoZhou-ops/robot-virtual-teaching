@@ -1,0 +1,41 @@
+.ipad-screen-renderers { position: fixed; left: -20000px; top: 0; width: 960px; pointer-events: none; }
+.ipad-screen-renderer { width: 960px; height: 600px; }
+.ipad-screen-renderer canvas { display: block; width: 100%; height: 100%; }
+.ipad-screen-backdrop { position: fixed; inset: 0; z-index: 1600; display: grid; place-items: center; padding: 24px; background: #02080bbf; backdrop-filter: blur(7px); }
+.ipad-screen-dialog { width: min(520px, 100%); max-height: 90vh; overflow: auto; border: 1px solid #334951; border-radius: 18px; background: #102027; color: #e2edf0; box-shadow: 0 24px 80px #0009; padding: 24px; font-size: 13px; outline: none; }
+.ipad-screen-dialog header { display: flex; align-items: center; gap: 14px; }
+.ipad-screen-mark { padding: 12px; border: 1px solid #60d7df44; border-radius: 12px; background: #60d7df12; color: #60d7df; }
+.ipad-screen-dialog header small { color: #86a3ad; font-size: 10px; letter-spacing: .14em; }
+.ipad-screen-dialog h2 { margin: 5px 0 0; font-size: 22px; }
+.ipad-screen-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; cursor: pointer; color: inherit; border: 1px solid #50687366; border-radius: 8px; background: #ffffff08; padding: 8px 10px; font: inherit; }
+.ipad-screen-dialog button:disabled { opacity: .4; cursor: default; }
+.ipad-screen-dialog button:focus-visible, .ipad-screen-dialog select:focus-visible { outline: 2px solid #60d7df; outline-offset: 3px; }
+.ipad-screen-dialog header > button { margin-left: auto; padding: 7px; }
+.ipad-screen-intro { color: #a5bbc3; line-height: 1.8; margin: 22px 0 16px; }
+.ipad-screen-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.ipad-screen-pair > div { padding: 18px 14px; background: #020b10; border: 1px solid #60d7df38; border-radius: 10px; font-weight: 600; }
+.ipad-screen-pair > div + div { border-color: #ffbd6138; }
+.ipad-screen-pair i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px; background: #60d7df; }
+.ipad-screen-pair > div + div i { background: #ffbd61; }
+.ipad-screen-pair small { display: block; font-size: 9px; letter-spacing: .1em; margin: 10px 0 0 15px; color: #68828d; }
+.ipad-screen-device-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.ipad-screen-device-heading > span { display: flex; align-items: center; gap: 8px; }
+.ipad-screen-devices select { width: 100%; border: 1px solid #415962; border-radius: 8px; background: #0a171d; color: #e2edf0; padding: 10px; }
+.ipad-screen-devices p { color: #9db3bc; line-height: 1.7; }
+.ipad-screen-connection { display: flex; align-items: center; gap: 12px; color: #60d7df; padding: 18px 0; }
+.ipad-screen-connection div { display: grid; gap: 7px; }
+.ipad-screen-connection strong { color: #e2edf0; }
+.ipad-screen-connection span { font-size: 12px; }
+.ipad-screen-live { margin-left: auto; border: 1px solid #60d7df55; padding: 4px 8px; border-radius: 5px; }
+.ipad-screen-notice, .ipad-screen-error { background: #ffbd6110; border: 1px solid #ffbd6133; border-radius: 8px; color: #ffcd87; padding: 12px; line-height: 1.7; }
+.ipad-screen-error { color: #ffa7a0; border-color: #ff857133; }
+.ipad-screen-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #2d434d; }
+.ipad-screen-dialog footer small, .ipad-screen-footnote { color: #7f9ba5; font-size: 11px; line-height: 1.6; }
+.ipad-screen-dialog .ipad-screen-primary { background: #60d7df; color: #092027; font-weight: 600; border-color: transparent; padding: 10px 14px; }
+.ipad-screen-footnote { margin: 15px 0 0; text-align: right; }
+.ipad-screen-dock { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 1400; display: flex; align-items: center; gap: 12px; max-width: 90vw; background: #102027; border: 1px solid #60d7df66; box-shadow: 0 8px 24px #0006; color: #8be5eb; padding: 11px 15px; border-radius: 10px; font-size: 12px; }
+.ipad-screen-dock button { background: #ffffff0d; border: 1px solid #ffffff22; border-radius: 6px; padding: 6px 8px; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ipad-screen-dock.is-error { border-color: #ff857166; color: #ffa7a0; }
+.ipad-screen-dialog .is-spinning { animation: ipad-screen-spin 1s linear infinite; }
+@keyframes ipad-screen-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ipad-screen-dialog .is-spinning { animation: none; } }

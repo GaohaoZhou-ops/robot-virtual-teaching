@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { ipadTeachingPlugin } from './src/server/ipadTeachingService.js';
+import { ipadScreenPlugin } from './src/server/ipadScreenService.js';
 import { workSyncPlugin } from './src/server/workSyncService.js';
 
 const ROBOT_FILE_PREFIX = '/__atlas/robot-files/';
@@ -430,7 +431,7 @@ function atlasWorkspacePlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), atlasPhysicsPlugin(), atlasWorkspacePlugin(), ipadTeachingPlugin(), workSyncPlugin()],
+  plugins: [react(), atlasPhysicsPlugin(), atlasWorkspacePlugin(), ipadTeachingPlugin(), ipadScreenPlugin(), workSyncPlugin()],
   publicDir: 'maps',
   server: {
     hmr: process.env.ATLAS_DEV_HMR === '1',

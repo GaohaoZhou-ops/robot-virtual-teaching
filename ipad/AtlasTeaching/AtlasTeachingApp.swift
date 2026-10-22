@@ -4,6 +4,6 @@ import SwiftUI
 struct AtlasTeachingApp: App {
     @StateObject private var session = TeachingSession()
     var body: some Scene {
-        WindowGroup { ContentView().environmentObject(session).preferredColorScheme(.dark) }
+        WindowGroup { ScreenCollaborationHost().environmentObject(session).preferredColorScheme(.dark) }
     }
 }
