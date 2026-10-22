@@ -35,6 +35,7 @@ import EndEffectorControlPanel from './EndEffectorControlPanel.jsx';
 import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
+import TeachingSurfaceCoverage from './TeachingSurfaceCoverage.jsx';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
 import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
@@ -1572,6 +1573,7 @@ export default function PointCloudViewer({
   robotParkingGhost = null,
   teachingCaptureBusy = false,
   teachingSpaceMode = 'map',
+  teachingDevice = 'desktop',
   teachingTasks = [],
   selectedMobilePose = null,
   spaceMouseInputRef,
@@ -7636,6 +7638,9 @@ export default function PointCloudViewer({
       )}
       {mapData?.geometry && (
         <>
+          {teachingSpaceMode === 'independent' && teachingDevice === 'desktop' && (
+            <TeachingSurfaceCoverage geometry={mapData.geometry} tasks={teachingTasks} />
+          )}
           {teachingSpaceMode === 'independent' && mapOriginPose && (
             <div className="coordinate-reference-layer" role="group" aria-label="地图坐标原点参考">
               <span ref={mapOriginLabelRef} className="map-origin-label">地图原点 · (0, 0, 0)</span>

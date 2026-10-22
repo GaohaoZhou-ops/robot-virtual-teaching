@@ -71,13 +71,23 @@ import simd
         let store = ProjectStore(directory: directory.appendingPathComponent("device"))
         let calibration = Calibration(worldFromModel: TeachingCoordinates.zUpToAR.elements, referencePoint: Point3(.zero), yawDegrees: 0)
         var result = TeachingResult(sessionId: paired.id, modelHash: paired.manifest.modelHash)
-        result.calibrations = [calibration]
-        result.samples = [TeachingSample(name: "QR Pose", segmentId: calibration.id, kind: "keyframe",
-            cameraPose: TeachingCoordinates.opticalPose(camera: matrix_identity_float4x4, worldFromModel: TeachingCoordinates.zUpToAR))]
+        precondition(paired.poseSeed?.samples.count == 3, "QR model pairing receives all three Mac poses")
+        try paired.poseSeed?.apply(to: &result)
+        precondition(result.samples.count == 3 && result.samples.allSatisfy { $0.resolvedOrigin == .desktop },
+                     "imported Mac poses keep their source and enter the local teaching result")
+        precondition(TeachingPoseCounts(result.samples)[.leftArm] == 2 && TeachingPoseCounts(result.samples)[.rightArm] == 1,
+                     "left/right metadata survives native QR pairing and seed application")
+        result.calibrations.append(calibration)
+        result.samples.append(TeachingSample(name: "QR Pose", segmentId: calibration.id, kind: "keyframe",
+            cameraPose: TeachingCoordinates.opticalPose(camera: matrix_identity_float4x4, worldFromModel: TeachingCoordinates.zUpToAR)))
         result.completedAt = timestamp()
         let originalResult = try encoder.encode(result)
         var project = LocalProject(serverURL: address, session: paired, result: result)
         try await store.saveModel(expected, id: project.id); try await store.save(project)
+        let savedProject = try await store.projects()[0]
+        precondition(savedProject.result.samples.count == 4
+                     && savedProject.result.samples.filter { $0.resolvedOrigin == .desktop }.count == 3,
+                     "the three downloaded poses and new iPad pose survive local storage")
         let modelURL = try await store.modelURL(project.id)
         func rejected(_ text: String, _ run: () async throws -> Void) async throws {
             do { try await run(); preconditionFailure("accepted invalid sync: \(text)") }

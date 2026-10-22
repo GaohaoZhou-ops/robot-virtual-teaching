@@ -77,7 +77,8 @@ final class TeachingSession: ObservableObject {
                 geometry = loaded; current = existing; pendingModel = nil
                 await reload()
             } else {
-                try await acceptModel(data, paired: PairedSession(id: transfer.id, deviceToken: "", manifest: transfer.manifest), serverURL: "")
+                try await acceptModel(data, paired: PairedSession(id: transfer.id, deviceToken: "", manifest: transfer.manifest,
+                                                                 poseSeed: transfer.poseSeed), serverURL: "")
             }
             try? await inbox.removeReceived(transfer)
             status = "物体已通过数据线接收并保存，可以拔下数据线开始示教"
@@ -152,8 +153,11 @@ final class TeachingSession: ObservableObject {
         let existing = try await ProjectStore.shared.projects().first { $0.id == paired.id }
         var project = existing ?? LocalProject(serverURL: serverURL, session: paired,
             result: TeachingResult(sessionId: paired.id, modelHash: paired.manifest.modelHash))
+        // Re-receiving a transfer must preserve edits/deletions in its local copy.
+        if existing == nil { try paired.poseSeed?.apply(to: &project.result) }
         project.displaySettings = project.displaySettings ?? ModelDisplaySettings().forOpening()
         project.session = paired; project.serverURL = serverURL
+        project.session.poseSeed = nil
         project.resultSyncDestination = nil
         transferProgress = .saving; status = "正在将模型保存到 \(TeachingDevice.storageName)…"
         try await ProjectStore.shared.saveModel(data, id: paired.id)
@@ -237,6 +241,7 @@ final class TeachingSession: ObservableObject {
               project.result.calibrations.contains(where: { $0.id == sample.segmentId }),
               !project.result.samples.contains(where: { $0.id == sample.id }) else { return false }
         var named = sample
+        named.origin = .ipad
         named.name = String(format: "Pose %03d", project.result.samples.count + 1)
         current?.result.samples.append(named); scheduleSave(force: true)
         return true
@@ -244,7 +249,11 @@ final class TeachingSession: ObservableObject {
     func renameSample(_ id: String, name: String) {
         guard current?.result.completedAt == nil, let index = current?.result.samples.firstIndex(where: { $0.id == id }) else { return }
         let value = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
-        if !value.isEmpty { current?.result.samples[index].name = value; scheduleSave(force: true) }
+        if !value.isEmpty {
+            // Preserve legacy arm recognition before the user changes its name.
+            current?.result.samples[index].arm = current?.result.samples[index].resolvedArm
+            current?.result.samples[index].name = value; scheduleSave(force: true)
+        }
     }
     func deleteSample(_ id: String) {
         deleteSamples([id])

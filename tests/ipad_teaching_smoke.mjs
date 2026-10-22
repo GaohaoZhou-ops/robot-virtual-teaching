@@ -53,7 +53,14 @@ try {
   assert.match(info.serverId, /^[a-f0-9-]{36}$/);
   assert.ok(info.serverName);
   assert.deepEqual(Object.keys(info).sort(), ['addresses', 'maxModelBytes', 'port', 'protocol', 'serverId', 'serverName'].sort(), 'discovery never exposes pairing codes or credentials');
-  const created = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest }, expected: 201 });
+  const poseSeed = { samples: [{ id: 'mac-test', name: 'Mac Pose', origin: 'desktop', segmentId: 'mac-reference',
+    capturedAt: new Date().toISOString(), kind: 'keyframe', tracking: 'normal',
+    cameraPose: { frameName: 'ipad_camera_optical_frame', position: { x: 1, y: 2, z: 3 }, quaternion: { x: 0, y: 0, z: 0, w: 1 } } }] };
+  poseSeed.samples.push({ ...poseSeed.samples[0], id: 'ipad-returning', name: 'Returning iPad Pose', origin: 'ipad' });
+  const created = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest, poseSeed }, expected: 201 });
+  assert.equal(created.referencePoseCount, 2);
+  assert.equal(created.referenceIPadPoseCount, 1);
+  assert.equal(created.poseSeed, undefined, 'polling/ticket metadata does not duplicate the full Pose payload');
   assert.match(created.pairingCode, /^[A-Z0-9]{4}$/);
   const sessionPath = `/sessions/${created.id}`, owner = created.ownerToken;
   await request(sessionPath, { expected: 401 });
@@ -62,6 +69,7 @@ try {
   await request(sessionPath + '/model', { method: 'PUT', token: owner, body: packed.buffer, expected: 409 });
   const pairing = { code: created.pairingCode, deviceId: randomUUID(), deviceName: 'Test iPad Pro' };
   const paired = await request('/pair', { method: 'POST', body: pairing });
+  assert.deepEqual(paired.poseSeed, poseSeed, 'Wi-Fi pairing delivers the frozen Mac optical poses and source');
   await request('/pair', { method: 'POST', body: { ...pairing, deviceId: randomUUID() }, expected: 409 });
   await request(sessionPath, { token: paired.deviceToken, expected: 401 });
   const model = await fetch(base + sessionPath + '/model', { headers: { Authorization: `Bearer ${paired.deviceToken}` } });
@@ -73,6 +81,7 @@ try {
     samples: [0, 1].map((index) => ({ id: `sample-${index}`, name: `Pose ${index + 1}`, segmentId: 'segment-1', capturedAt: new Date().toISOString(), kind: 'keyframe', tracking: 'normal',
       cameraPose: { frameName: 'ipad_camera_optical_frame', position: { x: index + 1, y: 2, z: 3 }, quaternion: { x: 0, y: 0, z: 0, w: 1 } }, surfacePoint: { x: 1, y: 1, z: 1 } })) };
   result.samples[1].name = '👨‍👩‍👧‍👦'.repeat(80); // A valid Swift Character boundary must also pass LAN receipt and retries.
+  result.samples[0].origin = 'desktop'; result.samples[1].origin = 'ipad';
   const identity = { modelHash: packed.manifest.modelHash, byteLength: packed.buffer.byteLength };
   const verify = (body = identity, expected = 200) => request(sessionPath + '/verify-model', { method: 'POST', token: paired.deviceToken, body, expected });
   await request(sessionPath + '/verify-model', { method: 'POST', body: identity, expected: 401 });

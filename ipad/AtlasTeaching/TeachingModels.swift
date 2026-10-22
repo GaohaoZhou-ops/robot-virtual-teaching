@@ -117,6 +117,40 @@ struct Calibration: Codable, Identifiable {
     var rollDegrees: Float? = nil
     var pitchDegrees: Float? = nil
 }
+enum TeachingPoseOrigin: String, Codable {
+    case ipad, desktop
+    var label: String { self == .desktop ? "Mac 同步" : "iPad 示教" }
+    var symbol: String { self == .desktop ? "desktopcomputer" : "ipad" }
+    var rgb: SIMD3<Float> { (self == .ipad ? TeachingPoseCategory.ipad : .desktop).rgb }
+}
+enum TeachingPoseArm: String, Codable { case left, right }
+enum TeachingPoseCategory: String, CaseIterable {
+    case leftArm, rightArm, ipad, desktop
+    var label: String {
+        switch self {
+        case .leftArm: return "Mac 左臂"
+        case .rightArm: return "Mac 右臂"
+        case .ipad: return "iPad 示教"
+        case .desktop: return "Mac 同步"
+        }
+    }
+    var symbol: String { self == .ipad ? "ipad" : "desktopcomputer" }
+    // Keep the arm palette identical to CAMERA_SIDE_COLORS in visionCoverage.js.
+    // iPad purple is distinct from both the cyan left arm and golden right arm.
+    var rgb: SIMD3<Float> {
+        switch self {
+        case .leftArm: return SIMD3(89, 219, 232) / 255
+        case .rightArm: return SIMD3(244, 201, 93) / 255
+        case .ipad: return SIMD3(179, 157, 255) / 255
+        case .desktop: return SIMD3(45, 240, 152) / 255
+        }
+    }
+    var linearRGB: SIMD3<Float> {
+        let c = rgb
+        func linear(_ v: Float) -> Float { v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4) }
+        return SIMD3(linear(c.x), linear(c.y), linear(c.z))
+    }
+}
 struct TeachingSample: Codable, Identifiable {
     var id = UUID().uuidString
     var name = ""
@@ -129,6 +163,75 @@ struct TeachingSample: Codable, Identifiable {
     var previewCameraTransform: [Float]?
     var previewProjection: [Float]?
     var previewAspect: Float?
+    // Missing in older local archives, which only supported iPad recording.
+    var origin: TeachingPoseOrigin? = nil
+    var arm: TeachingPoseArm? = nil
+    var resolvedOrigin: TeachingPoseOrigin { origin ?? .ipad }
+    var resolvedArm: TeachingPoseArm? {
+        guard resolvedOrigin == .desktop else { return nil }
+        if let arm { return arm }
+        // Compatibility with the six optical poses already downloaded before
+        // explicit arm metadata was added. Never infer an iPad pose's arm.
+        if name.hasSuffix(" · 左相机") { return .left }
+        if name.hasSuffix(" · 右相机") { return .right }
+        return nil
+    }
+    var category: TeachingPoseCategory {
+        guard resolvedOrigin == .desktop else { return .ipad }
+        switch resolvedArm {
+        case .left: return .leftArm
+        case .right: return .rightArm
+        case nil: return .desktop
+        }
+    }
+}
+
+struct TeachingPoseCounts {
+    private var counts: [TeachingPoseCategory: Int] = [:]
+    init(_ samples: [TeachingSample]) { for sample in samples { counts[sample.category, default: 0] += 1 } }
+    subscript(_ category: TeachingPoseCategory) -> Int { counts[category, default: 0] }
+    var summary: String {
+        "左臂 \(self[.leftArm]) · 右臂 \(self[.rightArm]) · iPad \(self[.ipad])"
+        + (self[.desktop] > 0 ? " · Mac 未标注 \(self[.desktop])" : "")
+    }
+}
+
+/// Mac references already use model coordinates. This is a model-space segment,
+/// not a previously established AR world placement.
+struct TeachingPoseSeed: Codable {
+    var samples: [TeachingSample]
+
+    func validatedSamples() throws -> [TeachingSample] {
+        guard !samples.isEmpty, samples.count <= maximumSamples else { throw TeachingError("Mac Pose 数量无效") }
+        var ids = Set<String>()
+        let date = ISO8601DateFormatter(), fractionalDate = ISO8601DateFormatter()
+        fractionalDate.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        for sample in samples {
+            let p = sample.cameraPose.position.simd, q = sample.cameraPose.quaternion
+            let v = SIMD4(q.x, q.y, q.z, q.w)
+            guard sample.origin != nil, (sample.arm == nil || sample.origin == .desktop), !sample.id.isEmpty, ids.insert(sample.id).inserted,
+                  sample.name.count <= 80, sample.kind == "keyframe", sample.tracking == "normal",
+                  sample.cameraPose.frameName == "ipad_camera_optical_frame",
+                  (0..<3).allSatisfy({ p[$0].isFinite }), (0..<4).allSatisfy({ v[$0].isFinite }),
+                  abs(simd_length(v) - 1) < 0.002,
+                  date.date(from: sample.capturedAt) != nil
+                    || fractionalDate.date(from: sample.capturedAt) != nil else { throw TeachingError("Mac Pose 数据无效，请在电脑重新发送") }
+            if let point = sample.surfacePoint, !(0..<3).allSatisfy({ point.simd[$0].isFinite }) {
+                throw TeachingError("Mac Pose 表面点无效")
+            }
+        }
+        return samples
+    }
+    func apply(to result: inout TeachingResult) throws {
+        let seed = try validatedSamples()
+        let calibration = Calibration(worldFromModel: matrix_identity_float4x4.elements,
+            referencePoint: Point3(.zero), yawDegrees: 0)
+        result.calibrations.append(calibration)
+        result.samples = seed.map { sample in
+            var imported = sample; imported.segmentId = calibration.id
+            return imported
+        }
+    }
 }
 // Camera positions are stored in the same model frame, including across
 // calibration segments. Keep the entire captured sample while asking the user.
@@ -206,7 +309,10 @@ struct ModelManifest: Codable {
     var byteLength: Int
     var bounds: ModelBounds?
 }
-struct PairedSession: Codable { var id: String; var deviceToken: String; var manifest: ModelManifest }
+struct PairedSession: Codable {
+    var id: String; var deviceToken: String; var manifest: ModelManifest
+    var poseSeed: TeachingPoseSeed? = nil
+}
 struct ResultSyncDestination: Codable {
     var serverURL: String
     var session: PairedSession

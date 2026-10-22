@@ -62,8 +62,12 @@ try {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3)); geometry.setIndex([0, 1, 2]);
   const packed = await packIPadModel({ geometry, name: 'USB fixture.ply', mapId: 'usb-test', sourceHash: 'usb-fixture' });
+  const poseSeed = { samples: [{ id: 'mac-usb-test', name: 'Mac USB Pose', origin: 'desktop', segmentId: 'mac-reference',
+    capturedAt: new Date().toISOString(), kind: 'keyframe', tracking: 'normal',
+    cameraPose: { frameName: 'ipad_camera_optical_frame', position: { x: 0, y: 0, z: 1 }, quaternion: { x: 1, y: 0, z: 0, w: 0 } } }] };
+  poseSeed.samples.push({ ...poseSeed.samples[0], id: 'ipad-usb-returning', name: 'Returning iPad Pose', origin: 'ipad' });
   const prepare = async () => {
-    const session = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest }, expected: 201 });
+    const session = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest, poseSeed }, expected: 201 });
     await request(`/sessions/${session.id}/model`, { method: 'PUT', token: session.ownerToken, body: packed.buffer });
     return session;
   };
@@ -81,6 +85,7 @@ try {
   assert.deepEqual(await readFile(path.join(transferred, 'model.atls')), Buffer.from(packed.buffer));
   const descriptor = JSON.parse(await readFile(path.join(transferred, 'ready.json'), 'utf8'));
   assert.equal(descriptor.manifest.modelHash, packed.manifest.modelHash);
+  assert.deepEqual(descriptor.poseSeed, poseSeed, 'USB preserves exactly the same references as Wi-Fi');
   assert.notEqual(descriptor.id, session.id, 'USB imports must not replace a LAN project and its credentials');
   assert.ok(!JSON.stringify(descriptor).includes(session.ownerToken));
   assert.equal((await request(`/sessions/${session.id}`, { token: session.ownerToken })).status, 'ready');

@@ -523,6 +523,15 @@ playwright/.auth/
 /ipad/atlas-directed-probe-*.[zZ][iI][pP]
 /tests/atlas-directed-probe-*.[zZ][iI][pP]
 
+# Mac-to-iPad Pose snapshot tests create model/session stores with this prefix.
+# Cover repository-local TMPDIR overrides and packed copies; keep nested fixtures.
+/atlas-ipad-snapshot-*/
+/ipad/atlas-ipad-snapshot-*/
+/tests/atlas-ipad-snapshot-*/
+/atlas-ipad-snapshot-*.[zZ][iI][pP]
+/ipad/atlas-ipad-snapshot-*.[zZ][iI][pP]
+/tests/atlas-ipad-snapshot-*.[zZ][iI][pP]
+
 # iPad transfer-progress and desktop model-consistency checks create temporary
 # model/result stores. Keep them local when TMPDIR points into these directories.
 /atlas-transfer-progress-*/

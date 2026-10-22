@@ -28,6 +28,7 @@ struct USBModelTransfer: Codable, Identifiable {
     let serverName: String
     let sourceSessionId: String
     let manifest: ModelManifest
+    var poseSeed: TeachingPoseSeed? = nil
 
     func validate() throws {
         guard self.protocol == usbProtocol, UUID(uuidString: id) != nil, UUID(uuidString: sourceSessionId) != nil,
@@ -38,6 +39,7 @@ struct USBModelTransfer: Codable, Identifiable {
               manifest.modelHash.range(of: "^[a-f0-9]{64}$", options: .regularExpression) != nil else {
             throw TeachingError("数据线文件格式不支持，请在电脑重新发送物体")
         }
+        _ = try poseSeed?.validatedSamples()
     }
 }
 
@@ -61,8 +63,8 @@ actor USBModelInbox {
         }
         return size
     }
-    private func decode<T: Decodable>(_ type: T.Type, at url: URL) throws -> T {
-        _ = try regularFile(url, maximum: 65536)
+    private func decode<T: Decodable>(_ type: T.Type, at url: URL, maximum: Int = 65536) throws -> T {
+        _ = try regularFile(url, maximum: maximum)
         return try JSONDecoder().decode(type, from: Data(contentsOf: url))
     }
     private func folder(_ id: String) throws -> URL {
@@ -76,7 +78,7 @@ actor USBModelInbox {
     }
     private func transfer(_ id: String) throws -> USBModelTransfer {
         let folder = try folder(id)
-        let record = try decode(USBModelTransfer.self, at: folder.appendingPathComponent("ready.json"))
+        let record = try decode(USBModelTransfer.self, at: folder.appendingPathComponent("ready.json"), maximum: 32 * 1024 * 1024)
         try record.validate()
         guard record.id == id,
               try regularFile(folder.appendingPathComponent("model.atls"), maximum: maximumModelBytes) == record.manifest.byteLength else {

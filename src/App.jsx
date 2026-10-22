@@ -6703,6 +6703,7 @@ export default function App() {
                 robotParkingGhost={mobileComputation?.preview || robotParkingGhost}
                 teachingCaptureBusy={teachingCaptureState.status === 'capturing'}
                 teachingSpaceMode={teachingSpaceMode}
+                teachingDevice={teachingDevice}
                 teachingTasks={workbenchTeachingTasks}
                 selectedMobilePose={selectedMobilePose}
                 spaceMouseInputRef={spaceMouseInputRef}
@@ -7150,7 +7151,7 @@ export default function App() {
       onSelectRobot={(value) => { dismissMobileTeaching(); handleSelectRobot(value); setShowRobotModel(true); }}
       onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
       onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} onPlay={playMobileTeachingSolutions} />}
-    {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
+    {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog
       state={teachingTransferDialog}

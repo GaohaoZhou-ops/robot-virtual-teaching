@@ -68,6 +68,8 @@ export function validateIPadResult(result, manifest, sessionId) {
   check(Array.isArray(result.samples) && result.samples.length > 0 && result.samples.length <= MAX_SAMPLES, '示教点数量无效');
   const ids = new Set();
   for (const sample of result.samples) {
+    check(sample.origin == null || ['ipad', 'desktop'].includes(sample.origin), 'Pose 来源无效');
+    check(sample.arm == null || (sample.origin === 'desktop' && ['left', 'right'].includes(sample.arm)), 'Pose 左右臂标记无效');
     check(typeof sample.id === 'string' && !ids.has(sample.id), '示教点标识重复');
     ids.add(sample.id);
     check(validPoseName(sample.name), 'Pose 名称过长');
@@ -84,4 +86,25 @@ export function validateIPadResult(result, manifest, sessionId) {
     check(sample.surfacePoint == null || finiteVector(sample.surfacePoint, xyz), '表面点无效');
   }
   return result;
+}
+
+export function validateIPadPoseSeed(seed, manifest) {
+  if (seed == null) return undefined;
+  check(Array.isArray(seed.samples) && seed.samples.every((sample) => ['desktop', 'ipad'].includes(sample?.origin)
+    && sample.kind === 'keyframe' && sample.segmentId === 'mac-reference'), '同步 Pose 来源无效');
+  const now = new Date().toISOString();
+  validateIPadResult({ protocol: IPAD_PROTOCOL, id: 'mac-reference', sessionId: 'mac-reference',
+    modelHash: manifest.modelHash, coordinateFrame: 'virtual_origin', createdAt: now, completedAt: now,
+    device: { model: 'iPad Pro', lidar: true },
+    calibrations: [{ id: 'mac-reference', worldFromModel: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }],
+    samples: seed.samples }, manifest, 'mac-reference');
+  return { samples: seed.samples };
+}
+
+export function ipadPoseArm(sample) {
+  if (sample.origin !== 'desktop') return undefined;
+  if (sample.arm != null) return sample.arm;
+  if (sample.name?.endsWith(' · 左相机')) return 'left';
+  if (sample.name?.endsWith(' · 右相机')) return 'right';
+  return undefined;
 }

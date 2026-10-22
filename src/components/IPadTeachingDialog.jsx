@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, Cable, FileUp, Glasses, QrCode, RefreshCw, ShieldAlert, Tablet, Wifi, X } from 'lucide-react';
-import { IPadModelMismatchError, ipadRequest, mobileTicketDevice, packIPadModel, readDeviceTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
+import { IPadModelMismatchError, ipadRequest, mobileTicketDevice, readDeviceTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
 import { readIPadResultFile } from '../lib/ipadResultFile.js';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
 import './IPadTeaching.css';
+import { prepareIPadTransfer } from '../lib/ipadTransferPreparation.js';
 
 const statusText = { preparing: '准备模型', ready: '等待设备配对', paired: '已配对 · 在设备本机示教', completed: '示教完成 · 可以接收', imported: '已保存到当前工程', cancelled: '任务已结束' };
 
-export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, onImport, initialAction = 'pairing', initialTicketId }) {
+export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingTasks = [], onClose, onImport, initialAction = 'pairing', initialTicketId }) {
   const vision = device === 'vision';
   const DeviceIcon = vision ? Glasses : Tablet;
   const pairingInfo = vision ? '配对信息' : '配对二维码';
@@ -29,9 +30,14 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   const [usbDevice, setUSBDevice] = useState('');
   const [usbReceipt, setUSBReceipt] = useState('');
   const [copied, setCopied] = useState(false);
-  const [preparationPending, setPreparationPending] = useState(false);
-  const canShowQR = ['ready', 'paired'].includes(ticket?.status);
-  const legacyCode = canShowQR && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
+  const [preparationPending, setPreparationPending] = useState(initialAction !== 'file');
+  const [viewingHistory, setViewingHistory] = useState(['history', 'receive', 'status'].includes(initialAction));
+  const preparedInputs = useRef(null), attemptedInputs = useRef(null);
+  const inputsChanged = !vision && !viewingHistory && preparedInputs.current
+    && (preparedInputs.current.mapData !== mapData || preparedInputs.current.teachingTasks !== teachingTasks);
+  const pairable = ['ready', 'paired'].includes(ticket?.status);
+  const canShowQR = pairable && !preparationPending && !inputsChanged;
+  const legacyCode = pairable && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
   const dialog = useRef(null), operation = useRef(false), initialized = useRef(false);
   const mismatchConfirm = useRef(null), operationFocus = useRef(null);
   const resultInput = useRef(null);
@@ -109,35 +115,16 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
   };
   const prepare = (newTransfer = false, action = '') => perform(`正在准备${pairingInfo}…`, async () => {
     setPreparationPending(true);
+    attemptedInputs.current = { mapData, teachingTasks };
+    if (newTransfer) setViewingHistory(false);
     const info = await ipadRequest('/info');
     setAddresses(info.addresses); setAddress(info.addresses.includes(address) ? address : info.addresses[0] || '');
-    let next = newTransfer ? null : ticket;
-    if (next) {
-      next = { ...next, ...await ipadRequest(`/sessions/${next.id}`, { token: next.ownerToken }) };
-      update(next);
-    }
-    if (!next || (next.status === 'cancelled' && action !== 'history') || next.status === 'preparing') {
-      setBusy('正在准备物体…');
-      const { buffer, manifest } = await packIPadModel(mapData);
-      if (next?.status === 'preparing') {
-        if (next.manifest.modelHash !== manifest.modelHash || next.manifest.byteLength !== manifest.byteLength) {
-          throw new Error('当前物体已改变，请点击「新建传输」重新准备模型。');
-        }
-      } else {
-        next = { ...await ipadRequest('/sessions', { method: 'POST', body: { manifest, targetDevice: device } }), targetDevice: device };
-        update(next);
-      }
-      setBusy(`正在准备模型与${pairingInfo}…`);
-      next = { ...next, ...await ipadRequest(`/sessions/${next.id}/model`, { token: next.ownerToken, method: 'PUT', body: buffer }) };
-      update(next);
-    }
-    if (action !== 'renew' && ['ready', 'paired'].includes(next.status) && (Date.now() >= next.pairingExpiresAt || !/^[A-Z0-9]{4}$/.test(next.pairingCode || ''))) {
-      next = { ...next, ...await ipadRequest(`/sessions/${next.id}/renew`, { token: next.ownerToken, method: 'POST' }) };
-      update(next);
-    }
+    const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, device, forceNew: newTransfer,
+      preserveSnapshot: !newTransfer && (viewingHistory || ['history', 'receive', 'status'].includes(action)),
+      renew: action === 'renew', onUpdate: update, onProgress: setBusy });
+    preparedInputs.current = { mapData, teachingTasks };
     setPreparationPending(false);
     if (action === 'receive' && ['completed', 'imported'].includes(next.status)) await receiveTicket(next);
-    if (action === 'renew' && ['ready', 'paired'].includes(next.status)) await renewTicket(next);
   });
   useEffect(() => {
     // StrictMode replays effects; preparing a transfer must only start once per opening.
@@ -145,6 +132,13 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
     initialized.current = true;
     if (initialAction !== 'file') prepare(initialAction === 'new', initialAction);
   }, []);
+  useEffect(() => {
+    // A background workspace sync can change poses while this modal is open.
+    // Hide the old QR immediately, then attempt each new input snapshot once.
+    if (!inputsChanged || !lanVisible || operation.current || modelMismatch
+      || (attemptedInputs.current?.mapData === mapData && attemptedInputs.current?.teachingTasks === teachingTasks)) return;
+    prepare();
+  }, [mapData, teachingTasks, busy, lanVisible, viewingHistory]);
   const refresh = () => perform('检查完成状态…', async () => {
     const next = await ipadRequest(`/sessions/${ticket.id}`, { token: ticket.ownerToken });
     update({ ...ticket, ...next });
@@ -158,16 +152,17 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
     update({ ...selectedTicket, ...next });
   };
   const receive = () => perform('正在校验地图并接收示教结果…', () => receiveTicket(ticket));
-  const renewTicket = async (selectedTicket) => {
-    setBusy(`正在${refreshPairingLabel}…`);
-    const next = await ipadRequest(`/sessions/${selectedTicket.id}/renew`, { token: selectedTicket.ownerToken, method: 'POST' });
-    update({ ...selectedTicket, ...next });
-  };
-  const renew = () => perform(`正在${refreshPairingLabel}…`, () => renewTicket(ticket));
+  const renew = () => prepare(false, 'renew');
   const sendUSB = () => perform('正在通过数据线发送物体，请保持 iPad 解锁并连接…', async () => {
     setUSBReceipt('');
-    const receipt = await ipadRequest(`/sessions/${ticket.id}/usb`, {
-      method: 'POST', token: ticket.ownerToken, body: { deviceId: usbDevice },
+    setPreparationPending(true);
+    const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, device,
+      preserveSnapshot: viewingHistory, onUpdate: update, onProgress: setBusy });
+    preparedInputs.current = { mapData, teachingTasks };
+    setPreparationPending(false);
+    setBusy('正在通过数据线发送物体与 Pose，请保持 iPad 解锁并连接…');
+    const receipt = await ipadRequest(`/sessions/${next.id}/usb`, {
+      method: 'POST', token: next.ownerToken, body: { deviceId: usbDevice },
     });
     setUSBReceipt(`已传至 ${receipt.deviceName}。请在 iPad 欢迎页「方式三 · 数据线连接」点击接收物体。`);
   });
@@ -216,7 +211,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
           {fileReceipt && <p className="ipad-result-file__receipt" role="status">{fileReceipt}</p>}
         </section>}
         {lanVisible && <>
-        {(!ticket || ticket.status === 'preparing') && <div className="ipad-qr" aria-busy={!!busy}>
+        {(!ticket || ticket.status === 'preparing' || preparationPending || inputsChanged) && <div className="ipad-qr" aria-busy={!!busy}>
           <div className={vision ? 'vision-pairing-mark' : 'ipad-qr__image'}>{vision ? <Glasses size={64} strokeWidth={1} aria-hidden="true" /> : <QrCode size={64} strokeWidth={1} aria-hidden="true" />}</div>
           <div className="ipad-qr__instructions"><span className="ipad-qr__eyebrow">{vision ? 'CONNECT VISION PRO' : 'SCAN TO CONNECT'}</span>
             <h3>{error ? `${pairingInfo}准备失败` : `正在准备${pairingInfo}`}</h3>
@@ -227,6 +222,15 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
           key={`${ticket.id}:${ticket.pairingCode}:${ticket.pairingExpiresAt}:${address}`}
           device={device} ticket={ticket} address={address} disabled={!!busy} copied={copied}
           onCopy={() => perform('复制配对码…', async () => { await navigator.clipboard.writeText(ticket.pairingCode); setCopied(true); })} />}
+        {!vision && ticket && !preparationPending && !inputsChanged && <p className="ipad-pose-summary" role="status">
+          本次传输携带 {ticket.referencePoseCount || 0} 个相机 Pose：
+          <span style={{ color: '#59dbe8' }}>左臂 {ticket.referenceLeftArmPoseCount || 0} 个（青色）</span> ·
+          <span style={{ color: '#f4c95d' }}>右臂 {ticket.referenceRightArmPoseCount || 0} 个（金黄色）</span> ·
+          <span style={{ color: '#b39dff' }}>iPad {ticket.referenceIPadPoseCount || 0} 个（紫色）</span>。
+          {(ticket.referencePoseCount || 0) > (ticket.referenceIPadPoseCount || 0) + (ticket.referenceLeftArmPoseCount || 0) + (ticket.referenceRightArmPoseCount || 0)
+            && `另有 ${(ticket.referencePoseCount || 0) - (ticket.referenceIPadPoseCount || 0) - (ticket.referenceLeftArmPoseCount || 0) - (ticket.referenceRightArmPoseCount || 0)} 个 Mac Pose 未标注左右臂。`}
+          {!viewingHistory && '电脑 Pose 变更后，重新打开配对窗口或刷新二维码会自动更新。'}
+        </p>}
         <div className="ipad-connection"><Wifi size={17}/><div>{addresses.length ? <select id="ipad-lan-address" aria-label="电脑局域网地址" value={address} disabled={!!busy} onChange={(event) => setAddress(event.target.value)}>{addresses.map((item) => <option key={item}>{item}</option>)}</select> : <p>尚未发现局域网地址，请连接 Wi-Fi 或以太网后重新打开。</p>}</div></div>
         {!vision && <section className="ipad-usb" aria-label="通过数据线发送物体">
           <div className="ipad-usb__heading"><Cable size={20}/><h3>数据线连接</h3>
@@ -240,12 +244,12 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
           {usb.message && <p>{usb.message}</p>}
           {!usb.message && usb.devices.length === 0 && <p>请用数据线连接 iPad，解锁并信任此电脑。</p>}
           {usb.devices.find((item) => item.id === usbDevice)?.message && <p>{usb.devices.find((item) => item.id === usbDevice).message}</p>}
-          <button className="ipad-primary" onClick={sendUSB} disabled={!!busy || preparationPending || !ticket
+          <button className="ipad-primary" onClick={sendUSB} disabled={!!busy || preparationPending || inputsChanged || !ticket
             || !['ready', 'paired', 'completed', 'imported'].includes(ticket.status) || !usb.devices.some((item) => item.id === usbDevice && item.ready)}>
             <Cable size={15}/>通过数据线发送</button>
           {usbReceipt && <p className="ipad-usb__receipt" role="status">{usbReceipt}</p>}
         </section>}
-        {tickets.length > 0 && <label className="ipad-history">传输任务<select disabled={!!busy} value={ticket?.id || ''} onChange={(e) => { setTicket(tickets.find((item) => item.id === e.target.value)); setError(''); }}><option value="" disabled>选择任务</option>{tickets.map((item) => <option key={item.id} value={item.id}>{item.manifest.name} · {new Date(item.createdAt).toLocaleString()} · {statusText[item.status]}</option>)}</select></label>}
+        {tickets.length > 0 && <label className="ipad-history">传输任务<select disabled={!!busy} value={ticket?.id || ''} onChange={(e) => { setTicket(tickets.find((item) => item.id === e.target.value)); setViewingHistory(true); setPreparationPending(false); setError(''); }}><option value="" disabled>选择任务</option>{tickets.map((item) => <option key={item.id} value={item.id}>{item.manifest.name} · {new Date(item.createdAt).toLocaleString()} · {statusText[item.status]}</option>)}</select></label>}
         {ticket && (!['ready', 'preparing'].includes(ticket.status) || legacyCode) && <div className={`ipad-pairing is-${ticket.status}`} data-ipad-status={ticket.status}>
           <div><span>{statusText[ticket.status]}</span>{ticket.status === 'ready' && <p>此任务使用旧版配对码，请点击「{refreshPairingLabel}」生成 4 位码。</p>}
             {ticket.status === 'paired' && <p>{ticket.deviceName} 已配对；{vision ? '示教完成后在设备端同步，再点击「检查完成状态」。' : '示教完成后可扫描上方二维码同步结果。'}若要更换采集设备，请点击「新建传输」。</p>}
@@ -259,7 +263,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, onClose, 
       <footer><span role="status">{busy}</span><div>
         {lanVisible ? <>
         {ticket && <button disabled={!!busy} onClick={refresh}><RefreshCw size={14}/>检查完成状态</button>}
-        {canShowQR && <button disabled={!!busy} onClick={renew}><RefreshCw size={14}/>{refreshPairingLabel}</button>}
+        {pairable && <button disabled={!!busy} onClick={renew}><RefreshCw size={14}/>{refreshPairingLabel}</button>}
         {['completed', 'imported'].includes(ticket?.status) ? <button className="ipad-primary" disabled={!!busy} onClick={receive}><ArrowDownToLine size={15}/>{ticket.status === 'imported' ? '再次接收（去重）' : '接收示教结果'}</button> : null}
         {preparationPending && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare()}><RefreshCw size={15}/>{vision ? busy ? '正在准备配对信息…' : '重试准备配对信息' : busy ? '正在准备二维码…' : '重试生成二维码'}</button>}
         {ticket && <button className="ipad-primary" disabled={!!busy} onClick={() => prepare(true)}><DeviceIcon size={15}/>新建传输</button>}
