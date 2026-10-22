@@ -23,8 +23,8 @@ def run():
             wait_for_home(page)
             create_project(page, mode)
             toolbar = page.get_by_role('navigation', name='工作台工具栏', exact=True)
-            expect(toolbar.get_by_role('button')).to_have_count(4)
-            expect(toolbar.get_by_role('button')).to_have_text(['工程', '示教', '机器人', '设备'])
+            expect(toolbar.locator('[data-workbench-menu-trigger]')).to_have_count(4)
+            expect(toolbar.locator('[data-workbench-menu-trigger]')).to_have_text(['工程', '示教', '机器人', '设备'])
             expect(page.locator('.map-identity small')).to_contain_text('独立示教' if mode == 'independent' else '地图示教')
             page.evaluate('window.__toolbarController = document.querySelector(".spacemouse-control")')
 
@@ -96,6 +96,8 @@ def run():
                     expect(dialog).to_be_visible()
                     expect(dialog.get_by_role('alert')).to_contain_text('局域网暂不可用')
                     expect(dialog.get_by_role('button', name=retry, exact=True)).to_be_enabled()
+                    if device != 'Vision Pro':
+                        dialog.get_by_role('tab', name='文件导入').click()
                     expect(dialog.get_by_role('button', name='导入结果文件')).to_have_count(0 if device == 'Vision Pro' else 1)
                     dialog.get_by_role('button', name='关闭设备示教窗口').click()
                     expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()

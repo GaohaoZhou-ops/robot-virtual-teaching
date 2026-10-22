@@ -98,7 +98,7 @@ def run():
             expect(insert).to_be_visible()
             expect(up).to_be_disabled()
             expect(down).to_be_enabled()
-            assert insert.bounding_box()['x'] < page.get_by_role('button', name='继续示教', exact=True).bounding_box()['x']
+            assert insert.bounding_box()['x'] < page.get_by_role('button', name='查看姿态', exact=True).bounding_box()['x']
             assert insert.bounding_box()['x'] < up.bounding_box()['x'] < down.bounding_box()['x']
             assert insert.bounding_box()['y'] == up.bounding_box()['y'] == down.bounding_box()['y']
             assert toolbar.evaluate('node => node.scrollWidth <= node.clientWidth'), 'toolbar controls must fit'

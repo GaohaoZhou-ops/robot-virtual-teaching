@@ -137,9 +137,12 @@ with sync_playwright() as playwright:
     page.locator('[data-ipad-status="completed"]').wait_for()
     page.get_by_role('button', name='接收示教结果', exact=True).click()
     page.locator('[data-ipad-status="imported"]').wait_for()
+    dialog.get_by_role('button', name='继续同步').click()
     page.get_by_role('button', name='再次接收（去重）').click()
-    expect(page.get_by_role('button', name='再次接收（去重）')).to_be_enabled()
+    expect(dialog.get_by_role('button', name='查看示教')).to_be_enabled()
+    dialog.get_by_role('button', name='继续同步').click()
     # Reuse the ready QR from a new transfer for the same completed result.
+    dialog.locator('.ipad-sync-details > summary').click()
     page.get_by_role('button', name='新建传输').click()
     expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
     next_ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
@@ -168,6 +171,7 @@ with sync_playwright() as playwright:
     # The imported label comes from localStorage on the initial render. Wait
     # for opening preparation to reach the network response before checking
     # that controls are enabled; otherwise Escape can race that operation.
+    dialog.locator('.ipad-sync-details > summary').click()
     expect(dialog.get_by_label('电脑局域网地址')).to_be_visible()
     expect(page.get_by_role('button', name='关闭设备示教窗口')).to_be_enabled()
     dialog.press('Escape')
@@ -203,6 +207,7 @@ with sync_playwright() as playwright:
     assert len(retry_creations) == 1, 'retry must resume the preparing transfer'
 
     # Explicitly starting another transfer still prepares and displays its QR automatically.
+    retry_page.locator('.ipad-sync-details > summary').click()
     retry_page.get_by_role('button', name='新建传输').click()
     expect(retry_page.locator('.ipad-code')).not_to_have_text(resumed['pairingCode'])
     expect(retry_page.get_by_role('img', name='设备配对二维码')).to_be_visible()

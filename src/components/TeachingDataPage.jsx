@@ -44,12 +44,14 @@ export default function TeachingDataPage({
   onRenameTask,
   onDeleteTask,
   onSelectParkingPoint,
+  onViewParkingPoint,
   onRenameParkingPoint,
   onDeleteParkingPoint,
   onApplyParkingPoint,
   onRenamePoint,
   onDeletePoint,
   onApplyPoint,
+  onViewPose,
   onInsertPreset,
   onMovePoint,
   onPlayTask,
@@ -243,12 +245,14 @@ export default function TeachingDataPage({
                 onRenameTask={onRenameTask}
                 onDeleteTask={onDeleteTask}
                 onSelectParkingPoint={onSelectParkingPoint}
+                onViewParkingPoint={onViewParkingPoint}
                 onRenameParkingPoint={onRenameParkingPoint}
                 onDeleteParkingPoint={onDeleteParkingPoint}
                 onApplyParkingPoint={onApplyParkingPoint}
                 onRenamePoint={onRenamePoint}
                 onDeletePoint={onDeletePoint}
                 onApplyPoint={onApplyPoint}
+                onViewPose={onViewPose}
                 onInsertPreset={onInsertPreset}
                 onMovePoint={onMovePoint}
                 onPlayTask={onPlayTask}
@@ -259,7 +263,6 @@ export default function TeachingDataPage({
                 onImportTeachingData={onImportTeachingData}
                 teachingImportDisabled={teachingImportDisabled}
                 canExportTeachingData={canExportTeachingData}
-                onOpenCapturePage={onBack}
                 onSelectionChange={handleArchiveSelection}
               />
             </section>

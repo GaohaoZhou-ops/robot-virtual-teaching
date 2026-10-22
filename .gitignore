@@ -133,35 +133,36 @@ test-results/
 /iphone/screenshots/
 /vision/screenshots/
 # Packed test artifacts can contain the same local project data.
-/test-artifacts.zip
-/test-artifacts-*.zip
-/tests/test-artifacts.zip
-/tests/test-artifacts-*.zip
-/ipad/test-artifacts.zip
-/ipad/test-artifacts-*.zip
+# Match extension case variants consistently across desktop and native output.
+/test-artifacts.[zZ][iI][pP]
+/test-artifacts-*.[zZ][iI][pP]
+/tests/test-artifacts.[zZ][iI][pP]
+/tests/test-artifacts-*.[zZ][iI][pP]
+/ipad/test-artifacts.[zZ][iI][pP]
+/ipad/test-artifacts-*.[zZ][iI][pP]
 /iphone/test-artifacts.[zZ][iI][pP]
 /iphone/test-artifacts-*.[zZ][iI][pP]
-/vision/test-artifacts.zip
-/vision/test-artifacts-*.zip
+/vision/test-artifacts.[zZ][iI][pP]
+/vision/test-artifacts-*.[zZ][iI][pP]
 # ZIP copies of the test-output directories above stay local.
 # Use explicit output paths so fixture archives and design media stay visible.
-/playwright-report.zip
-/blob-report.zip
-/test-results.zip
-/screenshots.zip
-/test-downloads.zip
-/test-traces.zip
-/test-videos.zip
-/tests/playwright-report.zip
-/tests/blob-report.zip
-/tests/test-results.zip
-/tests/screenshots.zip
-/tests/test-downloads.zip
-/tests/test-traces.zip
-/tests/test-videos.zip
-/ipad/screenshots.zip
+/playwright-report.[zZ][iI][pP]
+/blob-report.[zZ][iI][pP]
+/test-results.[zZ][iI][pP]
+/screenshots.[zZ][iI][pP]
+/test-downloads.[zZ][iI][pP]
+/test-traces.[zZ][iI][pP]
+/test-videos.[zZ][iI][pP]
+/tests/playwright-report.[zZ][iI][pP]
+/tests/blob-report.[zZ][iI][pP]
+/tests/test-results.[zZ][iI][pP]
+/tests/screenshots.[zZ][iI][pP]
+/tests/test-downloads.[zZ][iI][pP]
+/tests/test-traces.[zZ][iI][pP]
+/tests/test-videos.[zZ][iI][pP]
+/ipad/screenshots.[zZ][iI][pP]
 /iphone/screenshots.[zZ][iI][pP]
-/vision/screenshots.zip
+/vision/screenshots.[zZ][iI][pP]
 .playwright/
 .local-browsers/
 ms-playwright/
@@ -206,6 +207,16 @@ playwright/.auth/
 /tests/atlas-record-button-*/
 /atlas-record-button-*.[zZ][iI][pP]
 /tests/atlas-record-button-*.[zZ][iI][pP]
+# Parking/pose shortcut review workspaces and generated project archives.
+# Restrict these to local output roots so test runners and fixtures stay visible.
+/atlas-view-parking-*/
+/tests/atlas-view-parking-*/
+/atlas-view-parking-*.[zZ][iI][pP]
+/tests/atlas-view-parking-*.[zZ][iI][pP]
+/atlas-view-pose-*/
+/tests/atlas-view-pose-*/
+/atlas-view-pose-*.[zZ][iI][pP]
+/tests/atlas-view-pose-*.[zZ][iI][pP]
 # Grouped SpaceMouse, viewer-toolbar and end-effector diagnostics, including
 # packed copies. Root/tests scopes keep source assets and fixtures trackable.
 /atlas-spacemouse-*/
@@ -453,6 +464,11 @@ playwright/.auth/
 /tests/atlas-vision-*-tests
 
 # Isolated smoke-test workspaces if TMPDIR points into the repository.
+# Sync-dialog checks use a separate LAN store containing pairing state/results.
+/atlas-sync-ui-*/
+/tests/atlas-sync-ui-*/
+/atlas-sync-ui-*.[zZ][iI][pP]
+/tests/atlas-sync-ui-*.[zZ][iI][pP]
 /atlas-native-ipad-*/
 /atlas-clean-build-*/
 /ipad/atlas-native-ipad-*/

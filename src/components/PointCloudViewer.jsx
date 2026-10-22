@@ -114,6 +114,7 @@ const WAYPOINT_RADIUS_SCALE = Math.cbrt(WAYPOINT_VOLUME_RATIO);
 // marker more compact, so dense waypoint layouts remain easy to select.
 const WAYPOINT_HIT_RADIUS_SCALE = Math.cbrt(0.2) * 2.2;
 const WAYPOINT_FOCUS_DISTANCE_RATIO = 0.17;
+const PARKING_POINT_FOCUS_DISTANCE_SCALE = 1.5;
 const WAYPOINT_DEFAULT_COLOR = '#ffd166';
 const WAYPOINT_SELECTED_BODY_COLOR = '#59dbe8';
 const WAYPOINT_SELECTED_HALO_COLOR = '#9b8cff';
@@ -1726,6 +1727,7 @@ export default function PointCloudViewer({
     EMPTY_TEACHING_SURFACE_TINT_STATS,
   );
   const [visionCoverageRenderingEnabled, setVisionCoverageRenderingEnabled] = useState(true);
+  const [showSurfaceCoverage, setShowSurfaceCoverage] = useState(false);
   const [teachingSurfaceTintOpacity, setTeachingSurfaceTintOpacity] = useState(
     TEACHING_SURFACE_TINT_OPACITY,
   );
@@ -6346,16 +6348,20 @@ export default function PointCloudViewer({
     if (viewDirection.lengthSq() < 1e-18) viewDirection.set(-0.5, -0.8, 0.45);
     viewDirection.normalize();
     const routeScale = Math.max(sphere.radius * 0.006, 0.12);
-    const desiredDistance = THREE.MathUtils.clamp(
-      focusRequest.type === 'edge'
-        ? Math.max(subjectSpan * 1.45, sphere.radius * 0.12, routeScale * 12)
-        : focusRequest.type === 'robot'
-          ? Math.max(subjectSpan * 1.72, 0.9)
-          : focusRequest.type === 'mobile-pose'
-            ? 2.2
+    const isParkingPointFocus = Boolean(pointById.get(focusRequest.id)?.teachingTaskId)
+      && (focusRequest.type === 'waypoint'
+        || (focusRequest.type === 'robot-ghost' && !robotParkingGhost?.poseId));
+    const baseDistance = focusRequest.type === 'edge'
+      ? Math.max(subjectSpan * 1.45, sphere.radius * 0.12, routeScale * 12)
+      : focusRequest.type === 'robot'
+        ? Math.max(subjectSpan * 1.72, 0.9)
+        : focusRequest.type === 'mobile-pose'
+          ? 2.2
           : focusRequest.type === 'robot-ghost'
             ? Math.max(subjectSpan * 1.48, 1.05)
-          : Math.max(sphere.radius * WAYPOINT_FOCUS_DISTANCE_RATIO, routeScale * 12),
+            : Math.max(sphere.radius * WAYPOINT_FOCUS_DISTANCE_RATIO, routeScale * 12);
+    const desiredDistance = THREE.MathUtils.clamp(
+      baseDistance * (isParkingPointFocus ? PARKING_POINT_FOCUS_DISTANCE_SCALE : 1),
       controls.minDistance * 2,
       controls.maxDistance * 0.82,
     );
@@ -7569,6 +7575,7 @@ export default function PointCloudViewer({
       : collisionStatusState === 'safe'
         ? `≥${ROBOT_COLLISION_SAFETY_DISTANCE * 1000} mm`
         : '— mm';
+  const canShowSurfaceCoverage = teachingSpaceMode === 'independent' && teachingDevice === 'desktop';
   const showVisionCoverageControls = teachingSpaceMode === 'independent' && (
     visionCoverageStats.frameCount > 0
     || (
@@ -7638,7 +7645,7 @@ export default function PointCloudViewer({
       )}
       {mapData?.geometry && (
         <>
-          {teachingSpaceMode === 'independent' && teachingDevice === 'desktop' && (
+          {canShowSurfaceCoverage && showSurfaceCoverage && (
             <TeachingSurfaceCoverage geometry={mapData.geometry} tasks={teachingTasks} />
           )}
           {teachingSpaceMode === 'independent' && mapOriginPose && (
@@ -8029,9 +8036,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={showVisionCoverageControls
-                ? '点云颜色、高程色卡、停车点名、路径名、投影渲染、表面透明度与显示质量'
-                : '点云颜色、高程色卡、停车点名、路径名、显示密度与网格质量'}
+              title={`点云颜色、高程色卡、停车点名、路径名${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -8105,6 +8110,20 @@ export default function PointCloudViewer({
                   <span>{showPathNames ? '显示' : '隐藏'}</span>
                 </button>
               </div>
+              {canShowSurfaceCoverage && <div className="viewer-display-settings__coverage">
+                <span><Gauge size={13} /> 表面覆盖率</span>
+                <button
+                  type="button"
+                  className="viewer-display-settings__toggle"
+                  aria-label={showSurfaceCoverage ? '隐藏表面覆盖率' : '显示表面覆盖率'}
+                  aria-pressed={showSurfaceCoverage}
+                  title={showSurfaceCoverage ? '隐藏3D窗口左上角的表面覆盖率浮窗' : '显示3D窗口左上角的表面覆盖率浮窗'}
+                  onClick={() => setShowSurfaceCoverage((current) => !current)}
+                >
+                  {showSurfaceCoverage ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showSurfaceCoverage ? '显示' : '隐藏'}</span>
+                </button>
+              </div>}
               {showVisionCoverageControls && <>
                 <div className="viewer-display-settings__coverage">
                   <span><Camera size={13} /> 投影渲染</span>

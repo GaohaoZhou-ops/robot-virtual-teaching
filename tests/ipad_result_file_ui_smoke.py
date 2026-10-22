@@ -40,6 +40,8 @@ with sync_playwright() as playwright:
         ready(page)
         open_ipad_dialog(page)
         dialog = page.get_by_role('dialog', name='iPad / iPhone 示教')
+        expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+        dialog.get_by_role('tab', name='文件导入').click()
         expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
         ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
         archive = json.loads(NATIVE_FILE.read_text())
@@ -58,15 +60,17 @@ with sync_playwright() as playwright:
         warning.get_by_role('button', name='知道了').click()
         expect(dialog.get_by_role('alert')).to_contain_text('模型内容不一致')
         upload(dialog, archive)
-        expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已接收 1 个 Pose')
+        expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text(f"已接收 {len(archive['result']['samples'])} 个 Pose")
         expect(dialog.get_by_role('alert')).not_to_be_visible()
+        expect(dialog.get_by_role('button', name='查看示教')).to_be_focused()
+        dialog.get_by_role('button', name='继续同步').click()
         upload(dialog, archive)
-        expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
+        expect(dialog.get_by_role('button', name='查看示教')).to_be_enabled()
         expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已保存到当前工程')
-        page.screenshot(path='/tmp/atlas-ipad-file-import.png', full_page=True)
+        page.screenshot(path='/tmp/atlas-ipad-file-import.png', full_page=True, animations='disabled')
         page.get_by_role('button', name='关闭设备示教窗口').click()
         topbar_action(page, name='打开示教数据管理页').click()
-        expect(page.get_by_role('region', name='iPad 示教结果')).to_contain_text('1 个 Pose')
+        expect(page.get_by_role('region', name='iPad 示教结果')).to_contain_text(f"{len(archive['result']['samples'])} 个 Pose")
         assert page.locator('.teaching-data-page').get_attribute('data-teaching-task-count') == '1'
         with page.expect_download() as download:
             page.get_by_role('button', name='导出 iPad 示教 JSON').click()
@@ -76,7 +80,7 @@ with sync_playwright() as playwright:
         assert exported == archive['result']
         page.reload(wait_until='networkidle')
         ready(page)
-        expect(page.get_by_role('region', name='iPad 示教结果')).to_contain_text('1 个 Pose')
+        expect(page.get_by_role('region', name='iPad 示教结果')).to_contain_text(f"{len(archive['result']['samples'])} 个 Pose")
 
         # No stored pairing credentials and no functioning LAN API: file import still works.
         page.get_by_role('button', name='继续工作 · 返回主工作台继续示教').click()
@@ -85,6 +89,7 @@ with sync_playwright() as playwright:
             status=503, content_type='application/json', body='{"error":"测试：局域网服务离线"}'))
         open_ipad_dialog(page)
         expect(dialog.get_by_role('alert')).to_contain_text('局域网服务离线')
+        dialog.get_by_role('tab', name='文件导入').click()
         expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
         second = json.loads(json.dumps(archive))
         second['result']['id'] = str(uuid.uuid4())
@@ -95,7 +100,7 @@ with sync_playwright() as playwright:
             return transfer;
         }''', second)
         dialog.get_by_role('region', name='AirDrop 或文件接收').dispatch_event('drop', {'dataTransfer': transfer})
-        expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text('已接收 1 个 Pose')
+        expect(dialog.locator('.ipad-result-file__receipt')).to_contain_text(f"已接收 {len(archive['result']['samples'])} 个 Pose")
         expect(dialog.get_by_role('alert')).not_to_be_visible()
         page.get_by_role('button', name='关闭设备示教窗口').click()
         topbar_action(page, name='打开示教数据管理页').click()

@@ -3575,6 +3575,20 @@ export default function App() {
     }
   }, [requestSynchronizedFocus, selectNavigationWaypoint, waypoints]);
 
+  const viewTeachingParkingPoint = useCallback((id) => {
+    setCollapsedPanel((current) => current === '3d' ? null : current);
+    focusWaypointFromInspector(id);
+    requestInspectorPage({ page: 'navigation' });
+    navigateAppPage(APP_PAGE_WORKBENCH);
+  }, [focusWaypointFromInspector, navigateAppPage, requestInspectorPage]);
+
+  const viewTeachingPose = useCallback((parkingPointId, poseId) => {
+    setCollapsedPanel((current) => current === '3d' ? null : current);
+    previewTeachingParkingPoint(parkingPointId, poseId);
+    requestInspectorPage({ page: 'teaching' });
+    navigateAppPage(APP_PAGE_WORKBENCH);
+  }, [navigateAppPage, previewTeachingParkingPoint, requestInspectorPage]);
+
   const renameTeachingParkingPoint = useCallback((taskId, parkingPointId, name) => {
     const nextName = String(name || '').trim();
     if (!nextName) return;
@@ -7117,12 +7131,14 @@ export default function App() {
           onRenameTask={renameTeachingTask}
           onDeleteTask={deleteTeachingTask}
           onSelectParkingPoint={selectTeachingParkingPoint}
+          onViewParkingPoint={viewTeachingParkingPoint}
           onRenameParkingPoint={renameTeachingParkingPoint}
           onDeleteParkingPoint={deleteTeachingParkingPoint}
           onApplyParkingPoint={applyTeachingParkingPoint}
           onRenamePoint={renameTeachingPoint}
           onDeletePoint={deleteTeachingPoint}
           onApplyPoint={applyTeachingPoint}
+          onViewPose={viewTeachingPose}
           onInsertPreset={insertTeachingPresetAction}
           onMovePoint={moveTeachingPoint}
           onPlayTask={startTeachingTaskPlayback}
