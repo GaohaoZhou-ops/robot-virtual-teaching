@@ -78,7 +78,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
         drag.maximumNumberOfTouches = 1; view.addGestureRecognizer(drag)
         view.addGestureRecognizer(UIRotationGestureRecognizer(target: self, action: #selector(rotateObject(_:))))
     }
-    func load(manifest: ModelManifest, samples: [TeachingSample]) {
+    func load(manifest: ModelManifest, samples: [TeachingSample], navigationReference: NavigationReference? = nil) {
         stop()
         objectRoot.childNodes.filter { $0 !== markers && $0 !== modelNode }.forEach { $0.removeFromParentNode() }
         markers.childNodes.forEach { $0.removeFromParentNode() }
@@ -92,6 +92,7 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
         objectRoot.isHidden = true
         // Keep manual waypoints visible without constructing thousands of SceneKit nodes.
         refreshMarkers(samples)
+        objectRoot.addChildNode(ParkingReferenceRenderer.makeNode(navigationReference))
         addAxes()
     }
     // Only replace draw geometry: placement, tracking, anchors and Pose markers stay intact.

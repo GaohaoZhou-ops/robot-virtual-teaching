@@ -68,8 +68,12 @@ try {
     capturedAt: new Date().toISOString(), kind: 'keyframe', tracking: 'normal',
     cameraPose: { frameName: 'ipad_camera_optical_frame', position: { x: 0, y: 0, z: 1 }, quaternion: { x: 1, y: 0, z: 0, w: 0 } } }] };
   poseSeed.samples.push({ ...poseSeed.samples[0], id: 'ipad-usb-returning', name: 'Returning iPad Pose', origin: 'ipad' });
+  const navigationReference = { version: 1, coordinateFrame: 'virtual_origin', distanceUnit: 'meter', verticalAxis: 'Z',
+    parkingPoints: [0, 1].map((index) => ({ id: `parking-${index}`, name: `停车点 ${index + 1}`,
+      position: { x: index, y: -0.5, z: 0.25 }, quaternion: { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 } })),
+    paths: [{ id: 'path-1', from: 'parking-0', to: 'parking-1', directed: false }] };
   const prepare = async () => {
-    const session = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest, poseSeed }, expected: 201 });
+    const session = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest, poseSeed, navigationReference }, expected: 201 });
     await request(`/sessions/${session.id}/model`, { method: 'PUT', token: session.ownerToken, body: packed.buffer });
     return session;
   };
@@ -88,6 +92,7 @@ try {
   const descriptor = JSON.parse(await readFile(path.join(transferred, 'ready.json'), 'utf8'));
   assert.equal(descriptor.manifest.modelHash, packed.manifest.modelHash);
   assert.deepEqual(descriptor.poseSeed, poseSeed, 'USB preserves exactly the same references as Wi-Fi');
+  assert.deepEqual(descriptor.navigationReference, navigationReference, 'USB includes the same read-only parking and graph as Wi-Fi');
   // Exercise the full send path for iPhone too, using the same app container and protocol.
   const originalFamily = device.hardwareProperties.deviceType;
   device.hardwareProperties.deviceType = 'iPhone';

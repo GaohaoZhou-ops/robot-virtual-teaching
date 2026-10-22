@@ -43,6 +43,7 @@ struct PosePreviewView: UIViewRepresentable {
     let sample: TeachingSample
     let mode: PosePreviewMode
     let resetRevision: Int
+    var navigationReference: NavigationReference? = nil
     @Binding var showsCameraPose: Bool
     @Binding var showsModelOrigin: Bool
     @Binding var overviewExpanded: Bool
@@ -53,7 +54,7 @@ struct PosePreviewView: UIViewRepresentable {
         view.onModelOriginVisibilityChange = { showsModelOrigin = $0 }
         view.onOverviewExpansionChange = { overviewExpanded = $0 }
         view.update(rendered: rendered, overview: overview, footprint: footprint, status: status,
-                    sample: sample, mode: mode, resetRevision: resetRevision)
+                    sample: sample, mode: mode, resetRevision: resetRevision, navigationReference: navigationReference)
         view.setCameraPoseVisible(showsCameraPose)
         view.setModelOriginVisible(showsModelOrigin)
         view.setOverviewExpanded(overviewExpanded && mode == .interactive)
@@ -198,6 +199,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     private let recordedCamera = SCNNode()
     private weak var sourceGeometry: SCNGeometry?
     private weak var sourceOverview: SCNGeometry?
+    private var navigationReference: NavigationReference?
     private var footprintFrames: MTLBuffer?
     private var overviewFootprint: TeachingCoverageSnapshot?
     private var controller = SCNCameraController()
@@ -351,7 +353,15 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
 
     func update(rendered: SCNGeometry?, overview: SCNGeometry? = nil,
                 footprint: TeachingCoverageSnapshot? = nil, status: String = "",
-                sample: TeachingSample, mode: PosePreviewMode, resetRevision: Int) {
+                sample: TeachingSample, mode: PosePreviewMode, resetRevision: Int,
+                navigationReference: NavigationReference? = nil) {
+        if self.navigationReference != navigationReference {
+            self.navigationReference = navigationReference
+            let root = overviewView.scene?.rootNode
+            root?.childNode(withName: ParkingReferenceRenderer.nodeName, recursively: false)?.removeFromParentNode()
+            root?.addChildNode(ParkingReferenceRenderer.makeNode(navigationReference))
+            pendingOverviewFit = true
+        }
         let q = sample.cameraPose.quaternion
         var transform = simd_float4x4(simd_quatf(ix: q.x, iy: q.y, iz: q.z, r: q.w)) * TeachingCoordinates.opticalToARCamera
         transform.columns.3 = SIMD4(sample.cameraPose.position.simd, 1)
@@ -582,9 +592,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             pendingOverviewFit = true; return
         }
         pendingOverviewFit = false
-        // Frame the model alone: origin axes, camera markers and projection rays
-        // must never change the point cloud's displayed size or orbit center.
-        let (minimum, maximum) = geometry.boundingBox
+        // Include parking references but exclude origin axes and camera rays.
+        let (minimum, maximum) = ParkingReferenceRenderer.bounds(navigationReference,
+            minimum: geometry.boundingBox.min, maximum: geometry.boundingBox.max)
         let lower = SIMD3<Float>(minimum.x, minimum.y, minimum.z)
         let upper = SIMD3<Float>(maximum.x, maximum.y, maximum.z)
         let center = (lower + upper) / 2

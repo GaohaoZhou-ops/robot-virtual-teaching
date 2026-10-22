@@ -16,7 +16,7 @@
 .ipad-result-file p { margin: 12px 0; font-size: 12px; line-height: 1.8; color: var(--muted); }
 .ipad-result-file p.ipad-result-file__receipt { margin-bottom: 0; color: var(--cyan); }
 .ipad-connection { display: flex; align-items: center; gap: 15px; margin-top: 18px; color: var(--cyan); }.ipad-connection > div { flex: 1; }
-.ipad-pose-summary { margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); color: var(--muted); font-size: 12px; line-height: 1.8; }
+.ipad-pose-summary, .ipad-navigation-summary { margin: 14px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-soft); color: var(--muted); font-size: 12px; line-height: 1.8; }
 .ipad-dialog select { display: block; width: 100%; padding: 10px; border: 1px solid var(--line-strong); border-radius: 4px; background: #050e13; color: var(--text); font: 12px Menlo, 'PingFang SC', sans-serif; }.ipad-dialog select:focus-visible { outline: 1px solid var(--cyan); }
 .ipad-history { display: grid; gap: 7px; color: var(--muted); font-size: 11px; margin-top: 18px; }
 .ipad-pairing { margin-top: 14px; display: flex; align-items: center; justify-content: space-between; padding: 17px; border: 1px solid #59dbe843; border-radius: 6px; background: #59dbe808; }.ipad-pairing span { display: block; font-size: 12px; color: var(--cyan); }.ipad-pairing small { display: block; color: var(--muted); font-size: 10px; margin-top: 7px; }.ipad-pairing p { font-size: 12px; }.ipad-code { display: block; font: 25px Menlo, monospace; letter-spacing: 1px; margin: 12px 0; }.ipad-error { color: var(--red); font-size: 12px; line-height: 1.7; }

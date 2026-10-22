@@ -13,6 +13,10 @@ import Foundation
         precondition(references?.first?.origin == .desktop,
                      "Mac source survives the USB wire format and native decoding")
         precondition(references?.last?.origin == .ipad, "iPad recordings retain their source when sent back over USB")
+        try transfer.navigationReference?.validate()
+        precondition(transfer.navigationReference?.parkingPoints.count == 2)
+        precondition(transfer.navigationReference?.parkingPoints.first?.position.z == 0.25)
+        precondition(transfer.navigationReference?.paths.first?.directed == false)
         let data = try await inbox.model(transfer)
         _ = try ModelGeometry(data: data, manifest: transfer.manifest)
         precondition(!data.isEmpty)
@@ -20,6 +24,7 @@ import Foundation
         let stale = try await inbox.snapshot(now: Date().addingTimeInterval(60))
         precondition(stale.connection == nil, "an old heartbeat must not claim a live USB connection")
         precondition(stale.transfers.count == 1, "a fully copied file remains available offline")
+        precondition(stale.transfers.first?.navigationReference == transfer.navigationReference)
         let connectionURL = directory.appendingPathComponent("connection.json")
         let heartbeat = try Data(contentsOf: connectionURL)
         var record = try JSONSerialization.jsonObject(with: heartbeat) as! [String: Any]

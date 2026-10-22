@@ -7,6 +7,42 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    func testReadOnlyParkingReferences() throws {
+        continueAfterFailure = false
+        guard let id = ProcessInfo.processInfo.environment["ATLAS_PARKING_REFERENCE_FIXTURE_ID"], UUID(uuidString: id) != nil else {
+            throw XCTSkip("Provide a dedicated completed parking reference fixture")
+        }
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(id)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 20)); project.tap()
+        let legend = app.staticTexts["parking-reference-legend"]
+        XCTAssertTrue(legend.waitForExistence(timeout: 40))
+        XCTAssertTrue(legend.label.contains("3 个 · 只读"))
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            let preview = app.otherElements["teaching-model-preview"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 10))
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(legend.frame))
+            XCTAssertFalse(legend.frame.intersects(app.buttons["review-poses"].frame), "reference legend stays clear of the phone action panel")
+            XCTAssertGreaterThanOrEqual(legend.frame.minY, app.staticTexts["teaching-tracking-status"].frame.maxY,
+                                        "reference legend is below the status toolbar")
+            preview.tap(); preview.swipeLeft()
+            XCTAssertTrue(legend.exists)
+            XCTAssertFalse(app.textFields["停车点名称"].exists)
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = "Read-only parking references - \(orientation.rawValue)"
+            attachment.lifetime = .keepAlways; add(attachment)
+        }
+        app.buttons["review-poses"].tap()
+        XCTAssertTrue(app.otherElements["pose-review-preview"].waitForExistence(timeout: 30))
+        let thumbnail = app.descendants(matching: .any)["pose-global-thumbnail"].firstMatch
+        XCTAssertTrue(thumbnail.waitForExistence(timeout: 20))
+        thumbnail.doubleTap()
+        XCTAssertTrue(app.buttons["collapse-pose-overview"].waitForExistence(timeout: 10))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        attachment.name = "Parking references in global Pose view"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+
     private func registerPhonePermissionHandler() {
         addUIInterruptionMonitor(withDescription: "Atlas first-launch permissions") { alert in
             self.allowPhonePermission(alert)

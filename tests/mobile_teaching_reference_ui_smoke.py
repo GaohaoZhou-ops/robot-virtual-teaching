@@ -47,7 +47,12 @@ def run():
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             dialog = page.get_by_role('dialog', name='计算机器人姿态', exact=True)
             selector = dialog.get_by_role('combobox', name='参考起始姿态', exact=True)
+            preference = dialog.get_by_role('combobox', name='参考姿态偏好', exact=True)
+            support = dialog.get_by_role('combobox', name='地面支撑', exact=True)
             expect(selector).to_have_value('current')
+            expect(preference).to_have_value('upper-body')
+            expect(support).to_have_value('level')
+            expect(support).to_be_enabled()
             expect(selector.locator('option')).to_have_count(1)
             expect(dialog).to_contain_text('暂无当前机器人的预设')
             dialog.get_by_role('button', name='关闭姿态计算').click()
@@ -66,6 +71,8 @@ def run():
             expect(selector).to_have_value('current')
             expect(selector.locator('option')).to_have_count(3)
             dialog.get_by_role('combobox', name='停车点策略').select_option('fixed')
+            expect(support).to_be_disabled()
+            expect(dialog).to_contain_text('固定停车点保持当前底盘的完整位姿')
             dialog.get_by_role('combobox', name='参与求解机械臂').select_option('left')
             dialog.get_by_role('checkbox', name='碰撞筛选').uncheck()
             dialog.get_by_role('checkbox', name='自动调节胸部高度').uncheck()
@@ -76,7 +83,10 @@ def run():
             config = await_saved(page, lambda c: c['project']['virtualTeaching']['tasks'][0].get('mobileSolve'))
             report = config['project']['virtualTeaching']['tasks'][0]['mobileSolve']
             assert report['options']['referencePose'] == {'type': 'current'}
+            assert report['options']['referencePreference'] == 'upper-body'
+            assert report['options']['baseSupport'] == 'level'
             assert report['feasibleCount'] == 1
+            assert report['rows'][0]['solutions']['left']['referenceDeviation']['meanAngleDegrees'] < 1e-5
             for name, value in live_values.items():
                 assert abs(report['initialJointValues'][name] - value) < 1e-5
             dock.get_by_role('button', name='查看结果', exact=True).click()
@@ -111,9 +121,13 @@ def run():
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             expect(selector).to_have_value(selected_id)
+            expect(preference).to_have_value('upper-body')
+            expect(support).to_have_value('level')
             expect(dialog).to_contain_text('本报告参考起始姿态 · 参考准备姿态')
+            expect(dialog).to_contain_text('上半身关节相对参考的平均角度偏差')
             expect(dialog.get_by_role('button', name='应用左臂解', exact=True)).to_be_enabled()
             selector.select_option('current')
+            preference.select_option('whole-body')
             expect(dialog.get_by_role('button', name='应用左臂解', exact=True)).to_be_disabled()
             dialog.get_by_role('button', name='重新计算', exact=True).click()
             expect(dock).to_have_attribute('data-compute-status', 'completed', timeout=120000)
@@ -121,6 +135,7 @@ def run():
                                  .get('mobileSolve', {}).get('options', {}).get('referencePose') == {'type': 'current'})
             assert abs(config['project']['virtualTeaching']['tasks'][0]['mobileSolve']['initialJointValues']['head_yaw_J']
                        - live_values['head_yaw_J']) < 1e-5
+            assert config['project']['virtualTeaching']['tasks'][0]['mobileSolve']['options']['referencePreference'] == 'whole-body'
             assert not errors, errors
             print('Reference posture UI: preset library, current pose, worker seeds, unchanged live/source data, report invalidation and reload persistence passed.')
         finally:

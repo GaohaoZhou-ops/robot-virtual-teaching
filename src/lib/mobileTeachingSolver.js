@@ -3,8 +3,10 @@ import { applyRobotJointValues, getRobotEndEffector, normalizeRobotPose, readRob
 import { mobileCaptureMatrix } from './ipadCaptureDisplay.js';
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
-import { mobileParkingCandidates, mobileParkingKey, mobileSolutionMapPose } from './mobileTeachingParking.js';
-import { applyMobileReferencePose, normalizeMobileReferencePose } from './mobileTeachingReference.js';
+import { mobileCooperativeParkingCandidates, mobileParkingCandidates, mobileParkingKey, mobileParkingSupportPose, mobileSolutionMapPose } from './mobileTeachingParking.js';
+import { applyMobileReferencePose, mobileReferenceMetrics, mobileUpperBodyJoints, normalizeMobileReferencePose } from './mobileTeachingReference.js';
+import { MOBILE_CHEST_TILT_LIMIT, mobileChestWithinTolerance, mobileRowFailureReason, mobileSolutionFailureReasons, mobileTargetWithinTolerance } from './mobileTeachingDiagnostics.js';
+import { MOBILE_TORSO_PITCH_JOINTS, mobileChestTiltLowerBound } from './mobileTeachingChest.js';
 
 const XYZ = ['x', 'y', 'z'];
 const RPY = ['roll', 'pitch', 'yaw'];
@@ -13,15 +15,17 @@ const deg = THREE.MathUtils.radToDeg;
 const plain = (v) => Object.fromEntries(XYZ.map((axis) => [axis, v[axis]]));
 const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 const abort = (signal) => { if (signal?.aborted) throw new DOMException('计算已取消', 'AbortError'); };
-const TORSO_PITCH_JOINTS = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J'];
-export const MOBILE_SOLVE_VERSION = 7;
+const TORSO_PITCH_JOINTS = MOBILE_TORSO_PITCH_JOINTS;
+export const MOBILE_SOLVE_VERSION = 10;
 
 export const DEFAULT_MOBILE_SOLVE_OPTIONS = Object.freeze({
   positionTolerance: Object.freeze({ x: 0.05, y: 0.05, z: 0.05 }),
   rotationTolerance: Object.freeze({ roll: 5, pitch: 5, yaw: 5 }),
   targetFrame: 'optical', armMode: 'both', allowSingleArm: true,
-  allowTorsoHeight: true, lockChestVertical: true, respectJointLocks: true, keyframesOnly: true,
+  allowTorsoHeight: true, lockChestVertical: true, chestTiltTolerance: MOBILE_CHEST_TILT_LIMIT,
+  respectJointLocks: true, keyframesOnly: true,
   parkingMode: 'auto', checkCollisions: true, armBodyClearance: 0.05,
+  referencePreference: 'upper-body', baseSupport: 'level',
   referencePose: Object.freeze({ type: 'current' }),
 });
 
@@ -37,11 +41,16 @@ export function validateMobileSolveOptions(value = {}) {
       return [axis, number];
     }));
   }
-  if (!['optical', 'tool'].includes(options.targetFrame) || !['both', 'left', 'right'].includes(options.armMode)) throw new Error('末端或机械臂配置无效');
+  if (!['optical', 'tool'].includes(options.targetFrame) || !['both', 'cooperative', 'left', 'right'].includes(options.armMode)) throw new Error('末端或机械臂配置无效');
   if (!['auto', 'per-pose', 'fixed'].includes(options.parkingMode)) throw new Error('停车点策略无效');
+  if (!['upper-body', 'whole-body'].includes(options.referencePreference)) throw new Error('参考姿态偏好无效');
+  if (!['level', 'current'].includes(options.baseSupport)) throw new Error('地面支撑设置无效');
   const clearance = options.armBodyClearance === '' || options.armBodyClearance == null ? NaN : Number(options.armBodyClearance);
   if (!Number.isFinite(clearance) || clearance < 0 || clearance > 0.3) throw new Error('机械臂与躯干的最小间距必须在 0–30 cm 之间');
   options.armBodyClearance = clearance;
+  const chestTolerance = options.chestTiltTolerance === '' || options.chestTiltTolerance == null ? NaN : Number(options.chestTiltTolerance);
+  if (!Number.isFinite(chestTolerance) || chestTolerance <= 0 || chestTolerance > 10) throw new Error('前胸垂直容差必须大于 0° 且不超过 10°');
+  options.chestTiltTolerance = chestTolerance;
   for (const key of ['allowSingleArm', 'allowTorsoHeight', 'lockChestVertical', 'respectJointLocks', 'keyframesOnly', 'checkCollisions']) {
     if (typeof options[key] !== 'boolean') throw new Error('计算开关配置无效');
   }
@@ -57,11 +66,13 @@ export function mobileReportSolveOptions(report) {
     // Reports predating height control must not inherit the new default.
     ...(report.version < 3 ? { allowTorsoHeight: false } : {}),
     ...(report.version < 6 ? { armBodyClearance: 0 } : {}),
+    ...(report.version < 8 ? { chestTiltTolerance: MOBILE_CHEST_TILT_LIMIT } : {}),
+    ...(report.version < 9 ? { referencePreference: 'whole-body', baseSupport: 'current' } : {}),
   });
 }
 
 export function normalizeMobileSolveReport(value) {
-  if (!value || ![1, 2, 3, 4, 5, 6, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
+  if (!value || ![1, 2, 3, 4, 5, 6, 7, 8, 9, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
   try {
     const options = mobileReportSolveOptions(value);
     const validPose = (pose) => XYZ.every((axis) => Number.isFinite(pose?.position?.[axis]))
@@ -77,8 +88,11 @@ export function normalizeMobileSolveReport(value) {
           || !RPY.every((axis) => Number.isFinite(solution.rotationError?.[axis]))) return null;
         if (value.version >= 2 && (!validPose(solution.mapPose)
           || (options.checkCollisions && solution.feasible && (!solution.collision?.checked || !solution.collision.clear)))) return null;
+        if (value.version >= 9 && solution.feasible && options.parkingMode !== 'fixed' && options.baseSupport === 'level'
+          && (Math.abs(solution.mapPose.rpy.roll) > 1e-7 || Math.abs(solution.mapPose.rpy.pitch) > 1e-7
+            || Math.abs(solution.mapPose.position.z - value.mapPose.position.z) > 1e-7)) return null;
         if (value.version >= 3 && solution.feasible && options.lockChestVertical
-          && (!Number.isFinite(solution.chestTilt) || solution.chestTilt < 0 || solution.chestTilt > 0.25 + 1e-7
+          && (!mobileChestWithinTolerance(solution.chestTilt, options)
             || !Number.isFinite(solution.chestHeight))) return null;
         if (value.version >= 6 && solution.feasible && options.checkCollisions && options.armBodyClearance > 0) {
           const clearance = solution.collision?.armBodyClearance;
@@ -139,8 +153,7 @@ export function measureMobileTarget(frame, target, options) {
   const rotationError = { roll: deg(angles.x), pitch: deg(angles.y), yaw: deg(angles.z) };
   return {
     positionError, rotationError,
-    withinTolerance: XYZ.every((axis) => Math.abs(positionError[axis]) <= options.positionTolerance[axis] + 1e-9)
-      && RPY.every((axis) => Math.abs(rotationError[axis]) <= options.rotationTolerance[axis] + 1e-7),
+    withinTolerance: mobileTargetWithinTolerance({ positionError, rotationError }, options),
     actualPose: { position: plain(position), quaternion: { ...plain(quaternion), w: quaternion.w } },
   };
 }
@@ -203,6 +216,8 @@ function seedUprightTorso(robot, chest, joints, start) {
 // update; chest verticality is a world-up constraint, independent of yaw.
 async function solveTargets({ goals, chest, options, locked, baseline, postureReference, seed, checkpoint, collisionChecker }) {
   const { robot } = goals[0].controller;
+  const preferUpperBody = options.referencePreference === 'upper-body';
+  const upperBodyJoints = mobileUpperBodyJoints(robot);
   const avoidBody = Boolean(collisionChecker && options.armBodyClearance > 0);
   const preferredClearance = options.armBodyClearance + 0.03;
   const clearanceWeight = 1.5;
@@ -215,6 +230,7 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
   const chestJoints = new Set();
   for (let node = chest; node && node !== robot; node = node.parent) chestJoints.add(node);
   const torsoJoints = TORSO_PITCH_JOINTS.map((name) => joints.find((joint) => joint.name === name)).filter(Boolean);
+  const chestTiltLowerBound = mobileChestTiltLowerBound(robot, chest);
   const weights = [...XYZ.map((axis) => 0.05 / options.positionTolerance[axis]),
     ...RPY.map((axis) => 0.24 * 5 / options.rotationTolerance[axis])];
   const postureCost = () => joints.reduce((sum, joint) => {
@@ -226,8 +242,10 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
     const range = jointLimit.upper - jointLimit.lower;
     const margin = Number.isFinite(range) && range > 0
       ? Math.min(value - jointLimit.lower, jointLimit.upper - value) / range : 1;
+    const marginCost = (Math.max(0, 0.1 - margin) / 0.1) ** 2;
+    if (preferUpperBody) return sum + 0.15 * (delta(value, reference) / unit) ** 2 + 0.03 * marginCost;
     return sum + (chestJoints.has(joint) ? 3 : 1) * ((delta(value, reference) / unit) ** 2
-      + 0.2 * (delta(value, origin) / unit) ** 2) + 0.15 * (Math.max(0, 0.1 - margin) / 0.1) ** 2;
+      + 0.2 * (delta(value, origin) / unit) ** 2) + 0.15 * marginCost;
   }, 0) / Math.max(1, joints.length);
   const measure = () => {
     robot.parent.updateMatrixWorld(true);
@@ -248,19 +266,21 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
     if (clearance) error.push(Math.max(0, 0.001 - clearance.selfSeparation) * 3);
     const chestTilt = up ? deg(up.angleTo(new THREE.Vector3(0, 0, 1))) : 0;
     const chestHeight = chest ? chest.getWorldPosition(new THREE.Vector3()).z - robot.parent.position.z : null;
-    const feasible = targets.every((metrics) => metrics.withinTolerance) && chestTilt <= 0.25;
+    const feasible = targets.every((metrics) => metrics.withinTolerance) && mobileChestWithinTolerance(chestTilt, options);
     const cost = error.reduce((sum, n) => sum + n * n, 0);
     const comfortCost = clearanceErrors.reduce((sum, value) => sum + (value / 0.03) ** 2, 0) / 2;
+    const referenceDeviation = mobileReferenceMetrics(upperBodyJoints, postureReference);
     return { targets, feasible, chestTilt, chestHeight, up, error, cost, clearance,
-      score: postureCost() + comfortCost * 2 + cost * 0.2 };
+      referenceDeviation, score: postureCost() + (preferUpperBody ? referenceDeviation.cost * 4 : 0) + comfortCost * 2 + cost * 0.2 };
   };
   let best = null;
-  // Try continuity first, then the chosen reference, before broader restarts.
+  // Upper-body mode starts from the reference; whole-body mode starts from
+  // the preceding motion. Both also try the other seed before broader restarts.
   for (let start = 0; start < 8; start += 1) {
     await checkpoint();
     applyRobotJointValues(robot, baseline);
-    if (start < 2) {
-      const initial = start === 0 ? seed : postureReference;
+    if (start < 2 || preferUpperBody) {
+      const initial = preferUpperBody ? (start === 1 ? seed : postureReference) : start === 0 ? seed : postureReference;
       joints.forEach((joint) => {
         if (Number.isFinite(initial[joint.name])) setRobotJointValue(joint,
           joint.userData.jointType === 'prismatic' ? initial[joint.name] : rad(initial[joint.name]));
@@ -354,17 +374,15 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
   const metrics = measure();
   const collision = metrics.feasible && collisionChecker ? collisionChecker.check() : null;
   const feasible = metrics.feasible && (!collision || collision.clear);
-  const collisionReason = collision && !collision.clear
-    ? [collision.selfPairs.length ? '机器人自身干涉' : '', collision.environmentLinks.length ? '机器人与工件干涉' : '', collision.groundLinks.length ? '机器人低于支撑平面' : '',
-      collision.armBodyClearance && !collision.armBodyClearance.clear
-        ? `机械臂与躯干间距不足 ${(options.armBodyClearance * 100).toFixed(1)} cm，可调整停车点或关节锁定` : ''].filter(Boolean).join('；') : '';
-  return metrics.targets.map((target, i) => ({ feasible, frameName: constraints[i].frame.name, positionError: target.positionError,
-    rotationError: target.rotationError, chestTilt: metrics.chestTilt, chestHeight: metrics.chestHeight, actualPose: target.actualPose,
-    jointValues: best.jointValues, score: metrics.score, errorCost: metrics.cost,
-    collision: collision || { checked: false, clear: false },
-    reason: feasible ? '' : collisionReason || (metrics.chestTilt > 0.25
-      ? options.allowTorsoHeight ? '前胸未满足垂直约束，请检查底盘倾斜或躯干行程' : '前胸未满足垂直约束，可开启自动调节胸部高度或检查关节锁定'
-      : '当前停车点、关节限位或锁定下未找到容差内解') }));
+  return metrics.targets.map((target, i) => {
+    const armJoints = upperBodyJoints.filter((joint) => constraints[i].chain.has(joint));
+    const solution = { feasible, frameName: constraints[i].frame.name, positionError: target.positionError,
+      rotationError: target.rotationError, chestTilt: metrics.chestTilt, chestTiltLowerBound, chestHeight: metrics.chestHeight, actualPose: target.actualPose,
+      referenceDeviation: metrics.referenceDeviation, armReferenceCost: mobileReferenceMetrics(armJoints, postureReference).cost,
+      jointValues: best.jointValues, score: metrics.score, errorCost: metrics.cost,
+      collision: collision || { checked: false, clear: false } };
+    return { ...solution, reason: mobileSolutionFailureReasons(solution, options).join('；') };
+  });
 }
 
 const solveArm = async ({ controller, target, ...rest }) => (await solveTargets({ ...rest, goals: [{ controller, target }] }))[0];
@@ -385,7 +403,8 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
   abort(signal);
   const robot = restoreMobileTeachingRobot(serializeMobileTeachingRobot(liveRobot, { includeCollision: options.checkCollisions })), layer = new THREE.Group();
   layer.add(robot);
-  const basePose = normalizeRobotPose(mapPose);
+  const initialMapPose = normalizeRobotPose(mapPose);
+  const basePose = mobileParkingSupportPose(initialMapPose, options);
   const place = (pose) => {
     layer.position.set(...XYZ.map((axis) => pose.position[axis]));
     // Match the workbench's existing base-pose convention exactly.
@@ -394,7 +413,8 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
   };
   place(basePose);
   try {
-    const sides = options.armMode === 'both' ? ['left', 'right'] : [options.armMode];
+    const cooperative = options.armMode === 'cooperative';
+    const sides = ['both', 'cooperative'].includes(options.armMode) ? ['left', 'right'] : [options.armMode];
     const controllers = Object.fromEntries(sides.map((side) => {
       const controller = getRobotEndEffector(robot, side);
       const frame = options.targetFrame === 'tool' ? controller?.frame : robot.getObjectByName(`zivid_${side}_optical_frame`);
@@ -411,6 +431,27 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     // Other body/arm locks and every URDF joint limit remain in effect.
     heightJointNames.forEach((name) => locked.delete(name));
     const postureReference = applyMobileReferencePose(robot, options.referencePose, locked);
+    const preferUpperBody = options.referencePreference === 'upper-body';
+    const referenceFrames = [];
+    if ((preferUpperBody || cooperative) && options.parkingMode !== 'fixed') {
+      const freeTorso = heightJoints.filter((joint) => joint && !locked.has(joint.name));
+      seedUprightTorso(robot, chest, freeTorso, 0);
+      layer.updateMatrixWorld(true);
+      const inverse = layer.getWorldQuaternion(new THREE.Quaternion()).invert();
+      for (const side of sides) if (controllers[side]) {
+        const frame = controllers[side].frame;
+        referenceFrames.push({ side, position: layer.worldToLocal(frame.getWorldPosition(new THREE.Vector3())),
+          quaternion: inverse.clone().multiply(frame.getWorldQuaternion(new THREE.Quaternion())) });
+      }
+      applyRobotJointValues(robot, postureReference);
+    }
+    const referenceFit = (side, pose, target) => {
+      const frame = referenceFrames.find((entry) => entry.side === side);
+      if (!frame) return Infinity;
+      const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...RPY.map((axis) => rad(pose.rpy[axis])), 'XYZ'));
+      const position = frame.position.clone().applyQuaternion(quaternion).add(new THREE.Vector3(...XYZ.map((axis) => pose.position[axis])));
+      return position.distanceTo(target.position) + 0.25 * quaternion.multiply(frame.quaternion).angleTo(target.quaternion);
+    };
     let state = { joints: postureReference, counts: { left: 0, right: 0 } };
     const collisionChecker = options.checkCollisions ? await createMobileCollisionChecker(robot, environment, checkpoint, options) : null;
     const refineClearance = Boolean(collisionChecker && options.armBodyClearance > 0);
@@ -451,12 +492,14 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     const solveAt = async (entry, pose, current, candidateProgress = {}) => {
       const { target } = entry, solutions = {};
       place(pose); applyRobotJointValues(robot, current.joints);
-      // Give the less-used camera at this stop first refusal. For equal loads,
-      // prefer the nearer camera. A failed attempt always falls back to the
-      // other arm, so balanced work is never a reachability requirement.
+      // Cooperation gives the less-used arm first refusal; otherwise reference
+      // fit comes first. Both modes fall back when that arm cannot reach.
       const distance = (side) => controllers[side]?.frame.getWorldPosition(new THREE.Vector3()).distanceTo(target.position) ?? Infinity;
       const distances = Object.fromEntries(sides.map((side) => [side, distance(side)]));
-      const ordered = [...sides].sort((a, b) => current.counts[a] - current.counts[b] || distances[a] - distances[b]);
+      const fits = Object.fromEntries(sides.map((side) => [side, referenceFit(side, pose, target)]));
+      const ordered = [...sides].sort((a, b) => (cooperative ? current.counts[a] - current.counts[b] : 0)
+        || (referenceFrames.length && Math.abs(fits[a] - fits[b]) > 1e-6 ? fits[a] - fits[b] : 0)
+        || current.counts[a] - current.counts[b] || distances[a] - distances[b]);
       for (const side of ordered) {
         await checkpoint(); progress(entry, { side, ...candidateProgress });
         const controller = controllers[side];
@@ -469,7 +512,9 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
         if (solution.feasible && comfortable(solution)) break;
       }
       const feasibleSides = ordered.filter((side) => solutions[side]?.feasible);
-      const selectedSide = feasibleSides.sort((a, b) => solutions[a].score - solutions[b].score)[0] || null;
+      const selectedSide = feasibleSides.sort((a, b) => (cooperative
+        ? Number(comfortable(solutions[b])) - Number(comfortable(solutions[a])) || current.counts[a] - current.counts[b] : 0)
+        || solutions[a].score - solutions[b].score)[0] || null;
       for (const side of sides) if (!solutions[side]) solutions[side] = {
         feasible: false, skipped: true, mapPose: pose,
         reason: `此姿态已分配给${selectedSide === 'left' ? '左臂' : '右臂'}，无需另一相机重复到达`,
@@ -477,7 +522,7 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
       const feasible = feasibleSides.length > 0;
       return { feasible, selectedSide, solutions, mapPose: pose,
         score: selectedSide ? solutions[selectedSide].score : Math.min(...Object.values(solutions).map((solution) => solution.errorCost ?? Infinity)),
-        reason: feasible ? '' : [...new Set(Object.values(solutions).map((solution) => solution.reason).filter(Boolean))].join('；') };
+        reason: mobileRowFailureReason({ feasible, solutions }, options) };
     };
     const emit = async (entry, result) => {
       await checkpoint();
@@ -542,7 +587,12 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
             place(first.result.mapPose);
             const solutions = await solveTargets({ goals, chest, options, locked, baseline: state.joints,
               postureReference, seed, checkpoint, collisionChecker });
-            if (solutions.every((solution) => solution.feasible) && comfortable(solutions[0])) {
+            const preservesReference = members.every((step, index) => {
+              const before = step.result.solutions[step.result.selectedSide]?.armReferenceCost;
+              return !Number.isFinite(before) || solutions[index].armReferenceCost <= before + 0.005;
+            });
+            if (solutions.every((solution) => solution.feasible) && comfortable(solutions[0])
+              && (!preferUpperBody || options.parkingMode === 'fixed' || preservesReference)) {
               paired = { partner, members, solutions }; break;
             }
           }
@@ -583,27 +633,42 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
       }
       const auto = options.parkingMode === 'auto';
       // Bound lookahead to eight nearby samples. Once a comfortable stop is
-      // found, compare up to four feasible candidates (three without the
-      // buffer); otherwise exhaust the finite candidate list. Every accepted
+      // found, compare up to eight feasible candidates for cooperation, or
+      // four otherwise (three without the buffer). Every accepted
       // sample must still pass IK and the complete collision checker.
       const pool = auto ? [anchor, ...[...pending.values()].filter((entry) => entry !== anchor)
         .sort((a, b) => a.target.position.distanceToSquared(anchor.target.position) - b.target.position.distanceToSquared(anchor.target.position))
         .slice(0, 7)] : [anchor];
-      let candidates = mobileParkingCandidates(anchor.target, basePose, previousPose, options.parkingMode, { refineClearance });
+      let candidates = mobileParkingCandidates(anchor.target, basePose, previousPose, options.parkingMode,
+        { refineClearance, baseSupport: options.baseSupport, referenceFrames });
       if (auto) {
         // Include bases between targets, not just bases centred on one camera
         // pose. This lets opposite arms cover opposite sides of a workpiece.
         for (const neighbour of pool.slice(1, 3)) {
+          if (cooperative) candidates.push(...mobileCooperativeParkingCandidates(anchor.target, neighbour.target, basePose,
+            { baseSupport: options.baseSupport, referenceFrames }));
           const centre = { position: anchor.target.position.clone().add(neighbour.target.position).multiplyScalar(0.5),
             quaternion: anchor.target.quaternion };
-          candidates.push(...mobileParkingCandidates(centre, basePose, null, 'per-pose').slice(0, 3));
+          candidates.push(...mobileParkingCandidates(centre, basePose, null, 'per-pose',
+            { baseSupport: options.baseSupport, referenceFrames }).slice(0, 3));
         }
         candidates = [...new Map(candidates.map((pose) => [mobileParkingKey(pose), pose])).values()];
         candidates = candidates.map((pose, index) => {
           place(pose); applyRobotJointValues(robot, state.joints);
-          return { pose, index, potential: pool.filter(canReach).length,
+          const reach = cooperative ? sides.map((side) => pool.filter((entry) => controllers[side]
+            && positionInRange(controllers[side], entry.target))) : [];
+          const potential = pool.filter(canReach).length;
+          return { pose, index, potential,
+            sharedPotential: cooperative ? Math.min(...reach.map((entries) => entries.length), Math.floor(potential / 2)) : 0,
+            sharedFit: cooperative ? Math.min(...pool.slice(1).flatMap((entry) => sides.map((side) => Math.max(
+              referenceFit(side, pose, anchor.target), referenceFit(side === 'left' ? 'right' : 'left', pose, entry.target))))) : Infinity,
+            fit: Math.min(...sides.map((side) => referenceFit(side, pose, anchor.target))),
             reused: previousPose && mobileParkingKey(previousPose) === mobileParkingKey(pose) ? 1 : 0 };
-        }).sort((a, b) => b.reused - a.reused || b.potential - a.potential || a.index - b.index).map(({ pose }) => pose);
+        }).sort((a, b) => (cooperative ? Number(b.sharedPotential > 0) - Number(a.sharedPotential > 0)
+          || b.potential - a.potential || b.sharedPotential - a.sharedPotential
+          || (Math.abs(a.sharedFit - b.sharedFit) > 1e-6 ? a.sharedFit - b.sharedFit : 0) : 0) || (preferUpperBody
+          ? (Math.abs(a.fit - b.fit) > 1e-6 ? a.fit - b.fit : 0) || b.potential - a.potential || b.reused - a.reused || a.index - b.index
+          : b.reused - a.reused || b.potential - a.potential || a.index - b.index)).map(({ pose }) => pose);
       }
       let bestPlan = null, failure = null, passingCandidates = 0;
       for (const [candidateIndex, pose] of candidates.entries()) {
@@ -624,25 +689,33 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
         }
         plan.shared = Math.min(plannedState.counts.left, plannedState.counts.right);
         plan.cost = plan.steps.reduce((sum, step) => sum + step.result.score, 0) / plan.steps.length + travel(pose) * 0.005;
+        plan.referenceCost = plan.steps.reduce((sum, step) => sum + step.result.solutions[step.result.selectedSide].referenceDeviation.cost, 0) / plan.steps.length;
+        if (preferUpperBody) plan.cost -= (plan.steps.length - 1) * 0.005 + plan.shared * 0.003;
         plan.comfortable = comfortableResult(result);
-        // Reject buffer violations first; prefer room around the torso over
-        // reusing a cramped stop. Within the comfortable band, maximize
-        // coverage, share work, then compare joint effort and base travel.
-        if (!bestPlan || (plan.comfortable && !bestPlan.comfortable)
-          || (plan.comfortable === bestPlan.comfortable && (plan.steps.length > bestPlan.steps.length
+        // Cooperation first seeks a stop used by both arms. Among shared
+        // stops, upper-body preference still takes priority over coverage.
+        const cooperationOrder = bestPlan && cooperative
+          ? Number(plan.shared > 0) - Number(bestPlan.shared > 0)
+            || (!preferUpperBody ? plan.steps.length - bestPlan.steps.length || plan.shared - bestPlan.shared : 0) : 0;
+        const betterPreference = bestPlan && (cooperationOrder ? cooperationOrder > 0 : preferUpperBody ? plan.cost < bestPlan.cost
+          : plan.steps.length > bestPlan.steps.length
             || (plan.steps.length === bestPlan.steps.length && (plan.shared > bestPlan.shared
-              || (plan.shared === bestPlan.shared && plan.cost < bestPlan.cost)))))) bestPlan = plan;
+              || (plan.shared === bestPlan.shared && plan.cost < bestPlan.cost))));
+        if (!bestPlan || (plan.comfortable && !bestPlan.comfortable)
+          || (plan.comfortable === bestPlan.comfortable && betterPreference)) bestPlan = plan;
         passingCandidates += 1;
-        if (sameStop && auto && plan.comfortable) { bestPlan = plan; break; }
-        if ((passingCandidates >= (refineClearance ? 4 : 3) && bestPlan.comfortable)
-          || (auto && plan.comfortable && plan.steps.length === pool.length && (sides.length === 1 || plan.shared >= Math.floor(pool.length / 2)))) break;
+        if (sameStop && auto && plan.comfortable && !preferUpperBody && (!cooperative || plan.shared > 0)) { bestPlan = plan; break; }
+        if ((passingCandidates >= (cooperative ? 8 : refineClearance ? 4 : 3) && bestPlan.comfortable)
+          || (auto && plan.comfortable && plan.steps.length === pool.length
+            && (!preferUpperBody ? !cooperative || passingCandidates >= 2 : passingCandidates >= 2 && plan.referenceCost < 0.0025)
+            && (sides.length === 1 || plan.shared >= Math.floor(pool.length / 2)))) break;
       }
       if (!bestPlan) {
         await emit(anchor, failure); pending.delete(anchor.sourceIndex); continue;
       }
       for (const { entry } of bestPlan.steps) pending.delete(entry.sourceIndex);
       await emitPlan(bestPlan.steps);
-      if (auto) {
+      if (auto && !preferUpperBody) {
         // Drain other comfortable targets before leaving the selected stop,
         // including non-adjacent captures. Never rewrite an emitted preview.
         let batch = [], plannedState = state;
@@ -664,7 +737,7 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     }
     await checkpoint();
     return { version: MOBILE_SOLVE_VERSION, taskId: task.id, captureId: task.mobileCapture.id, computedAt: new Date().toISOString(),
-      coordinateFrame: task.coordinateFrame, mapPose: basePose, options, lockedJointNames: [...locked], rows,
+      coordinateFrame: task.coordinateFrame, mapPose: initialMapPose, options, lockedJointNames: [...locked], rows,
       heightJointNames, initialJointValues: postureReference,
       sourceCount: task.mobileCapture.samples.length, feasibleCount, parkingCount, motionCount, dualMotionCount,
       collisionScreening: collisionChecker ? { enabled: true, method: 'conservative-obb', proxyCount: collisionChecker.proxyCount,
@@ -672,6 +745,19 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
   } finally {
     layer.clear();
   }
+}
+
+// Sharing a stop does not imply simultaneous motion: two individually valid
+// motions may use different torso heights at the same chassis pose.
+export function mobileParkingArmUsage(report) {
+  const parking = new Map();
+  for (const row of report.rows) {
+    if (!row.feasible || !row.parkingId || !['left', 'right'].includes(row.selectedSide)) continue;
+    if (!parking.has(row.parkingId)) parking.set(row.parkingId, { parkingId: row.parkingId, sides: [] });
+    const entry = parking.get(row.parkingId);
+    if (!entry.sides.includes(row.selectedSide)) entry.sides.push(row.selectedSide);
+  }
+  return [...parking.values()];
 }
 
 // Older reports remain one target per motion. v5 publishes adjacent rows with

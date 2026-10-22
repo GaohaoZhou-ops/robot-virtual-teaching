@@ -100,6 +100,7 @@ export function createIPadUSBBridge({ directory, serverId, serverName, platform 
           const ready = path.join(temporary, 'ready.json');
           await writeFile(ready, JSON.stringify({ protocol: USB_PROTOCOL, id, serverName,
             sourceSessionId: session.id, manifest: session.manifest,
+            ...(session.navigationReference ? { navigationReference: session.navigationReference } : {}),
             ...(session.poseSeed ? { poseSeed: session.poseSeed } : {}) }), { mode: 0o600 });
           // Commit metadata last. The iPad ignores incomplete or interrupted copies.
           await copy(deviceId, ready, `${inbox}/Inbox/${id}/ready.json`);

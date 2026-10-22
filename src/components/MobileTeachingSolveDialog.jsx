@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Check, Download, Play, Save, X } from 'lucide-react';
-import { DEFAULT_MOBILE_SOLVE_OPTIONS, MOBILE_SOLVE_VERSION, mobileReportSolveOptions, validateMobileSolveOptions } from '../lib/mobileTeachingSolver.js';
+import { DEFAULT_MOBILE_SOLVE_OPTIONS, MOBILE_SOLVE_VERSION, mobileParkingArmUsage, mobileReportSolveOptions, validateMobileSolveOptions } from '../lib/mobileTeachingSolver.js';
 import { mobileSolutionMapPose } from '../lib/mobileTeachingParking.js';
 import { mobileReferenceFromPreset } from '../lib/mobileTeachingReference.js';
+import { MOBILE_CHEST_TILT_LIMIT, MOBILE_TOLERANCE_GROUPS, formatMobileConstraintValue, mobileAxisWithinTolerance, mobileChestTiltTolerance, mobileChestWithinTolerance, mobileRowFailureReason, mobileSolutionFailureReasons, mobileTargetWithinTolerance } from '../lib/mobileTeachingDiagnostics.js';
 import { downloadJson } from '../lib/io.js';
 import RobotPicker from './RobotPicker.jsx';
 import './MobileTeachingSolveDialog.css';
 
 const sideName = (side) => side === 'left' ? '左臂' : '右臂';
-const groups = [['positionTolerance', ['x', 'y', 'z'], '位置容差', 'cm', 100], ['rotationTolerance', ['roll', 'pitch', 'yaw'], '角度容差', '°', 1]];
+const armModeNames = { both: '双臂分工', cooperative: '双臂协同', left: '仅左臂', right: '仅右臂' };
+const groups = MOBILE_TOLERANCE_GROUPS;
 const format = (value, scale = 1) => Number.isFinite(value) ? (value * scale).toFixed(2) : '—';
 
 export default function MobileTeachingSolveDialog({ task, robot, robotPose, robotPresets = [], robotLoadState, ready, readinessMessage, onSelectRobot, robotSelectionDisabled, initialSampleId, computation, onClose, onCalculate, onApply, onSave, onPlay }) {
@@ -21,6 +23,8 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
       ...(!initialOptions && task.mobileSolve?.version === 1 ? { parkingMode: 'auto', checkCollisions: true } : {}),
       ...(!initialOptions && task.mobileSolve?.version < 3 ? { allowTorsoHeight: true } : {}),
       ...(!initialOptions && task.mobileSolve?.version < 6 ? { armBodyClearance: DEFAULT_MOBILE_SOLVE_OPTIONS.armBodyClearance } : {}),
+      ...(!initialOptions && task.mobileSolve?.version < 8 ? { chestTiltTolerance: MOBILE_CHEST_TILT_LIMIT } : {}),
+      ...(!initialOptions && task.mobileSolve?.version < 9 ? { referencePreference: 'upper-body', baseSupport: 'level' } : {}),
       allowSingleArm: true };
     if (initial.allowTorsoHeight) initial.lockChestVertical = true;
     return structuredClone(initial);
@@ -80,6 +84,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
   };
   const row = report?.rows[selected];
   const storedOptions = report && mobileReportSolveOptions(report);
+  const parkingUsage = report ? mobileParkingArmUsage(report) : [];
   const optionsChanged = dirty || (report && (validation || JSON.stringify(validateMobileSolveOptions(options)) !== JSON.stringify(validateMobileSolveOptions(storedOptions))));
   const usable = report && !running && !optionsChanged && ready;
   const exportReport = () => downloadJson({
@@ -122,16 +127,34 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
                 {robotPresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
               </optgroup>}
             </select></label>
-            <p className="mobile-solve-help">以所选姿态初始化双臂、头部和躯干，并优先选择接近参考姿态的可达解。已锁定关节遵守下方设置，底盘位置由停车点策略决定。</p>
+            <p className="mobile-solve-help">以所选姿态初始化双臂、头部和躯干。参考姿态是求解偏好，已锁定关节仍遵守下方设置。</p>
             {!robotPresets.length && <p className="mobile-solve-help">暂无当前机器人的预设，可在“机器人”菜单中保存预设姿态。</p>}
+            <label className="mobile-solve-select">参考姿态偏好<select aria-label="参考姿态偏好" value={options.referencePreference}
+              onChange={(event) => update({ referencePreference: event.target.value })}>
+              <option value="upper-body">上半身优先 · 底盘配合</option><option value="whole-body">全身姿态与动作连续性</option>
+            </select></label>
+            <p className="mobile-solve-help">{options.referencePreference === 'upper-body'
+              ? '优先让双臂、胸部转向和头部接近参考，底盘通过移动和转向配合相机目标。踝、膝、腰俯仰用于升降和扶正；需要时可增加停车点。'
+              : '兼顾全身关节姿态、上一动作的连续性和停车点复用。'}</p>
             <label className="mobile-solve-select">停车点策略<select aria-label="停车点策略" value={options.parkingMode} onChange={(event) => update({ parkingMode: event.target.value })}>
               <option value="auto">自动搜索 · 避让躯干并复用停车点</option><option value="per-pose">每个 Pose 独立停车</option><option value="fixed">固定当前停车点</option>
             </select></label>
-            <p className="mobile-solve-help">自动搜索会为贴近躯干的姿态调整停车位置和朝向，在间距充足时优先共用停车点。同一停车点的左右目标可组成双臂同步动作。</p>
+            <p className="mobile-solve-help">自动搜索会调整停车位置和朝向。同一停车点的左右目标可组成双臂同步动作；上半身优先时，同时比较与参考姿态的偏差。</p>
+            <label className="mobile-solve-select">地面支撑<select aria-label="地面支撑" value={options.baseSupport} disabled={options.parkingMode === 'fixed'}
+              onChange={(event) => update({ baseSupport: event.target.value })}>
+              <option value="level">水平地面 · 底盘自动调平</option><option value="current">沿用当前高度与倾斜</option>
+            </select></label>
+            <p className="mobile-solve-help">{options.parkingMode === 'fixed' ? '固定停车点保持当前底盘的完整位姿。'
+              : options.baseSupport === 'level' ? '以当前底盘 Z 为水平支撑高度，Roll / Pitch 归零，自由搜索位置和朝向。适用于水平地面。'
+                : '保留当前支撑高度和底盘倾斜，搜索位置及绕世界竖直轴的转向。'}</p>
             <div className="mobile-solve-checks">
               <label><input type="checkbox" checked={options.allowTorsoHeight} onChange={(event) => update({ allowTorsoHeight: event.target.checked, ...(event.target.checked ? { lockChestVertical: true } : {}) })} /><span>自动调节胸部高度<small>踝、膝、腰俯仰协同升降并扶正胸甲，覆盖这三个关节的锁定</small></span></label>
-              <label><input type="checkbox" checked={options.lockChestVertical} disabled={options.allowTorsoHeight} onChange={(event) => update({ lockChestVertical: event.target.checked })} /><span>前胸垂直锁定<small>前胸向上轴保持竖直，允许偏航 · ≤ 0.25°</small></span></label>
+              <label><input type="checkbox" checked={options.lockChestVertical} disabled={options.allowTorsoHeight} onChange={(event) => update({ lockChestVertical: event.target.checked })} /><span>前胸垂直锁定<small>约束前胸向上轴与世界 Z 轴的夹角，允许偏航</small></span></label>
             </div>
+            <label className="mobile-solve-select">前胸垂直容差（°）<input aria-label="前胸垂直容差 (°)" type="number" min="0" max="10" step="any"
+              required={options.lockChestVertical} disabled={!options.lockChestVertical} value={options.chestTiltTolerance}
+              onChange={(event) => update({ chestTiltTolerance: event.target.value === '' ? '' : Number(event.target.value) })} /></label>
+            <p className="mobile-solve-help">独立于相机 XYZ / RPY 容差。底盘侧倾无法由踝、膝、腰俯仰完全补偿；如允许轻微倾斜，可在此调整上限。默认 0.25°。</p>
             {groups.map(([key, axes, label, unit, scale]) => <section className="mobile-solve-tolerances" key={key} aria-label={label}>
               <h3>{label}<small>逐轴 ±{unit}</small></h3>
               <div>{axes.map((axis) => <label key={axis}><span>{axis.toUpperCase()}</span><input aria-label={`${axis.toUpperCase()} ${label} (${unit})`}
@@ -144,10 +167,17 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
             </select></label>
             <p className="mobile-solve-help">相机模式对齐拍摄位置与方向；工具模式将同一位姿直接赋给工具坐标系。</p>
             <label className="mobile-solve-select">参与求解<select aria-label="参与求解机械臂" value={options.armMode} onChange={(event) => update({ armMode: event.target.value })}>
-              <option value="both">双臂分工 · 每个姿态只需一台相机</option><option value="left">仅左臂</option><option value="right">仅右臂</option>
+              <option value="both">双臂分工 · 每个姿态只需一台相机</option>
+              <option value="cooperative">双臂协同 · 优先共用停车点</option>
+              <option value="left">仅左臂</option><option value="right">仅右臂</option>
             </select></label>
-            <p className="mobile-solve-help">每个姿态只分配给一侧；优先让两臂各拍各的。某一侧无法到达时尝试另一侧，无需两台相机重复到达同一姿态。</p>
+            <p className="mobile-solve-help">{options.armMode === 'cooperative'
+              ? '优先选择左右臂都能参与拍摄的停车点，并优先尝试本站任务较少的一臂；在此基础上尽量贴近上半身参考。只有一臂满足约束时，保留单臂可达结果。'
+              : '优先让两臂各拍各的。某一侧无法到达时尝试另一侧。'}每个姿态只分配给一侧，无需两台相机重复到达同一姿态。</p>
             <p className="mobile-solve-help">同一组内双臂同时运动到各自目标，共同求解躯干并检查全身姿态。无法同时满足的目标保留为单臂动作。</p>
+            {options.armMode === 'cooperative' && <p className="mobile-solve-help">{options.parkingMode === 'per-pose'
+              ? '当前每个 Pose 独立停车，不跨目标协同；选择“自动搜索”可优先让双臂共用停车点。'
+              : '双臂可在同一底盘位同步或依次拍摄。协同是优先目标，不会放宽相机容差、关节限位或碰撞要求。'}</p>}
             <div className="mobile-solve-checks">
               <label><input type="checkbox" checked={options.checkCollisions} onChange={(event) => update({ checkCollisions: event.target.checked })} /><span>碰撞筛选<small>检查自身、工件干涉及躯干避让间距</small></span></label>
               <label className="mobile-solve-clearance"><span>躯干避让间距 <small>cm · 0 表示仅排除相交</small></span><input aria-label="躯干避让间距 (cm)" type="number" min="0" max="30" step="0.5"
@@ -164,8 +194,12 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
             <div className="mobile-solve-results-heading"><h3>{running ? '本轮计算结果' : report?.version < MOBILE_SOLVE_VERSION ? '旧版计算结果' : report && (optionsChanged || ['error', 'cancelled'].includes(computationStatus)) ? '上次计算结果' : '计算结果'}</h3>{report && <span>{report.feasibleCount} / {report.rows.length} 可达 · {report.parkingCount ?? (report.feasibleCount ? 1 : 0)} 个停车点</span>}</div>
             {report && <p className="mobile-solve-help">{running ? '本轮开始于' : '计算于'} {Number.isFinite(Date.parse(report.computedAt)) ? new Date(report.computedAt).toLocaleString('zh-CN', { hour12: false }) : '时间未记录'} · 本报告自动升降{storedOptions.allowTorsoHeight ? '已开启' : '未开启'}</p>}
             {report && <p className="mobile-solve-help">本报告参考起始姿态 · {storedOptions.referencePose.type === 'preset' ? storedOptions.referencePose.name : '计算开始时的当前姿态'}</p>}
+            {report && <p className="mobile-solve-help">本报告参与求解 · {armModeNames[storedOptions.armMode]}</p>}
+            {report && <p className="mobile-solve-help">本报告求解偏好 · {storedOptions.referencePreference === 'upper-body' ? '上半身优先' : '全身姿态与动作连续性'} · {storedOptions.parkingMode === 'fixed'
+              ? '固定底盘位姿' : storedOptions.baseSupport === 'level' ? '水平地面，底盘调平' : '沿用底盘高度与倾斜'}</p>}
             {report?.version >= 4 && <p className="mobile-solve-help">拍摄分工：左臂 {report.rows.filter((item) => item.feasible && item.selectedSide === 'left').length} 个 · 右臂 {report.rows.filter((item) => item.feasible && item.selectedSide === 'right').length} 个 · 每个姿态拍摄一次</p>}
             {report?.version >= 5 && <p className="mobile-solve-help">执行动作：{report.motionCount} 组 · 双臂同步 {report.dualMotionCount} 组 · 单臂 {report.motionCount - report.dualMotionCount} 组</p>}
+            {storedOptions?.armMode === 'cooperative' && <p className="mobile-solve-help">停车点协同：{parkingUsage.filter((entry) => entry.sides.length === 2).length} 处双臂参与 · {parkingUsage.filter((entry) => entry.sides.length === 1).length} 处单臂参与</p>}
             {running && <p className="mobile-solve-notice" role="status">
               {computationStatus === 'paused' ? '计算已暂停' : computationStatus === 'pausing' ? '正在暂停' : '正在计算'} · 已完成 {report.rows.length} / {computation.total} 个 Pose
               {computation.name && <> · {computation.name}{computation.side ? ` · ${computation.side === 'both' ? '双臂同步' : sideName(computation.side)}` : ''}</>}<br />
@@ -179,6 +213,8 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
             {report && report.version < 4 && <p className="mobile-solve-notice">已有报告尚未采用双臂分工与停车点覆盖优化，重新计算后生效。</p>}
             {report && report.version < 5 && <p className="mobile-solve-notice">已有报告按单臂依次执行。重新计算可在同一停车点生成双臂同步动作。</p>}
             {report && report.version < 6 && <p className="mobile-solve-notice">已有报告未检查躯干避让间距。重新计算后会调整手臂姿态及停车点，为躯干留出余量。</p>}
+            {report && report.version < 8 && <p className="mobile-solve-notice">已有报告的前胸垂直容差固定为 0.25°。修改此项后需重新计算，旧结果不会随配置变化。</p>}
+            {report && report.version < 9 && <p className="mobile-solve-notice">新计算默认使用“上半身优先”和“水平地面”。重新计算后生效，旧结果保持原来的底盘及关节姿态。</p>}
             {!report ? <div className="mobile-solve-empty"><Bot size={40} /><strong>将空间采样转换为机器人姿态</strong><p>开始后自动收起窗口，后台计算并逐点显示姿态虚影。可在 3D 窗口暂停、取消或重新计算。</p></div> : <>
               {running && !report.rows.length && <p className="mobile-solve-notice">{computationStatus === 'paused' ? '继续计算后将在此显示逐条结果。' : '正在计算首个结果…'}</p>}
               <div className="mobile-solve-table"><table><thead><tr><th>采样点</th><th>停车点</th><th>左臂</th><th>右臂</th>{report.version >= 5 && <th>动作组</th>}<th>结果</th></tr></thead><tbody>
@@ -187,30 +223,47 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
                   <td>{item.feasible ? item.parkingId?.replace('parking-', 'P') || 'P1' : '—'}</td>
                   {['left', 'right'].map((side) => <td key={side} className={item.solutions[side]?.feasible ? 'is-pass' : ''}>{!item.solutions[side] ? '—' : item.solutions[side].skipped ? '未分配' : item.solutions[side].feasible ? item.selectedSide === side ? '执行' : '可达' : '未找到解'}</td>)}
                   {report.version >= 5 && <td>{item.motionGroupId ? `${item.motionGroupId.replace('motion-', 'M')} · ${item.pairedSampleId ? '双臂' : '单臂'}` : '—'}</td>}
-                  <td><span className={`mobile-solve-badge ${item.feasible ? 'is-pass' : ''}`}>{item.feasible ? '通过' : '未通过'}</span></td>
+                  <td><span className={`mobile-solve-badge ${item.feasible ? 'is-pass' : ''}`} title={mobileRowFailureReason(item, storedOptions)}>{item.feasible ? '通过' : '未通过'}</span></td>
                 </tr>)}
               </tbody></table></div>
               {report.rows.length > 50 && <nav className="mobile-solve-pages" aria-label="计算结果分页"><button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>上一页</button><span>{page + 1} / {Math.ceil(report.rows.length / 50)}</span><button type="button" disabled={(page + 1) * 50 >= report.rows.length} onClick={() => setPage(page + 1)}>下一页</button></nav>}
               {row && <div className="mobile-solve-detail"><h4>{row.name}<span>实际误差 · 带符号</span></h4>
-                {!row.feasible && <p className="mobile-solve-notice">{row.reason}</p>}
+                {!row.feasible && <p className="mobile-solve-notice">未通过原因见下方。位置、角度及已启用的前胸垂直、碰撞约束需要同时满足。</p>}
                 {row.pairedSampleId && <p className="mobile-solve-help">与 {report.rows.find((item) => item.sampleId === row.pairedSampleId)?.name} 同组，双臂同时运动并分别到达各自目标。</p>}
                 {Object.entries(row.solutions).filter(([, solution]) => !solution.skipped).map(([side, solution]) => <article key={side}>
                   <header><strong>{sideName(side)}{row.feasible && row.selectedSide === side ? ' · 执行拍摄' : ''}</strong><span>{solution.frameName || '无对应末端'}</span>{solution.feasible && <Check size={14} />}</header>
+                  {!solution.feasible && <section className="mobile-solve-failure" aria-label={`${sideName(side)}未通过原因`}>
+                    <strong>{mobileTargetWithinTolerance(solution, storedOptions) ? 'XYZ / RPY 均在容差内，仍未通过' : '未通过原因'}</strong>
+                    <ul>{mobileSolutionFailureReasons(solution, storedOptions).map((reason) => <li key={reason}>{reason}</li>)}</ul>
+                  </section>}
                   <p className="mobile-solve-parking-pose">停车位置 XYZ {['x', 'y', 'z'].map((axis) => format(mobileSolutionMapPose(report, row, side).position[axis])).join(' / ')} m · 底盘 RPY {['roll', 'pitch', 'yaw'].map((axis) => format(mobileSolutionMapPose(report, row, side).rpy[axis])).join(' / ')}°</p>
+                  {Number.isFinite(solution.referenceDeviation?.meanAngleDegrees) && <p className="mobile-solve-parking-pose">
+                    上半身关节相对参考的平均角度偏差 {format(solution.referenceDeviation.meanAngleDegrees)}°
+                  </p>}
                   {Number.isFinite(solution.chestHeight) && <p className="mobile-solve-parking-pose">胸部坐标系距支撑平面 {format(solution.chestHeight)} m</p>}
-                  {solution.feasible && <p className={solution.collision?.checked ? 'mobile-solve-collision-pass' : ''}>{solution.collision?.checked ? '已通过静态碰撞筛选' : '未进行碰撞筛选'}</p>}
+                  {storedOptions.lockChestVertical && Number.isFinite(solution.chestTilt) && <p className={mobileChestWithinTolerance(solution.chestTilt, storedOptions) ? 'mobile-solve-collision-pass' : ''}>
+                    前胸倾角 {formatMobileConstraintValue(solution.chestTilt, mobileChestTiltTolerance(storedOptions))}° · 要求 ≤ {mobileChestTiltTolerance(storedOptions)}°
+                  </p>}
+                  <p className={solution.collision?.checked && solution.collision.clear ? 'mobile-solve-collision-pass' : 'mobile-solve-parking-pose'}>
+                    {!storedOptions.checkCollisions ? '未启用碰撞筛选' : solution.collision?.checked
+                      ? solution.collision.clear ? '已通过静态碰撞筛选' : '静态碰撞筛选未通过'
+                      : solution.positionError && (!mobileTargetWithinTolerance(solution, storedOptions)
+                        || (storedOptions.lockChestVertical && !mobileChestWithinTolerance(solution.chestTilt, storedOptions)))
+                        ? '尚未执行碰撞筛选：先满足位置、角度和前胸约束' : '报告未记录碰撞筛选结果'}
+                  </p>
                   {storedOptions.checkCollisions && storedOptions.armBodyClearance > 0 && solution.collision?.armBodyClearance?.checked && <p className={solution.collision.armBodyClearance.clear ? 'mobile-solve-collision-pass' : ''}>
-                    躯干间距保守下界 {format(solution.collision.armBodyClearance.minimum, 100)} cm · 要求 ≥ {format(storedOptions.armBodyClearance, 100)} cm<br />
-                    左臂 {format(solution.collision.armBodyClearance.bySide.left, 100)} cm · 右臂 {format(solution.collision.armBodyClearance.bySide.right, 100)} cm
+                    躯干间距保守下界 {formatMobileConstraintValue(solution.collision.armBodyClearance.minimum, storedOptions.armBodyClearance, 100)} cm · 要求 ≥ {format(storedOptions.armBodyClearance, 100)} cm<br />
+                    左臂 {formatMobileConstraintValue(solution.collision.armBodyClearance.bySide?.left, storedOptions.armBodyClearance, 100)} cm · 右臂 {formatMobileConstraintValue(solution.collision.armBodyClearance.bySide?.right, storedOptions.armBodyClearance, 100)} cm
                   </p>}
                   {solution.positionError && <div className="mobile-solve-error-grid">{groups.flatMap(([key, axes, , unit, scale]) => axes.map((axis) => {
-                    const value = solution[key === 'positionTolerance' ? 'positionError' : 'rotationError'][axis];
-                    return <div key={axis} className={Math.abs(value) > report.options[key][axis] + 1e-7 ? 'is-exceeded' : ''}><small>{axis.toUpperCase()}</small><b>{format(value, scale)}</b><span>{unit}</span></div>;
+                    const value = solution[key === 'positionTolerance' ? 'positionError' : 'rotationError']?.[axis];
+                    const limit = storedOptions[key][axis];
+                    return <div key={axis} className={mobileAxisWithinTolerance(value, limit, key) ? '' : 'is-exceeded'}
+                      title={`${axis.toUpperCase()} 原始误差 ${Number.isFinite(value) ? value * scale : '未记录'} ${unit}；本次计算容差 ±${limit * scale} ${unit}`}>
+                      <small>{axis.toUpperCase()}</small><b>{formatMobileConstraintValue(value, limit, scale)}</b><span>{unit}</span><span>±{formatMobileConstraintValue(limit, Math.abs(value), scale)}</span>
+                    </div>;
                   }))}</div>}
-                  {!solution.feasible && <p>{solution.reason}</p>}
-                  {solution.collision?.checked && !solution.collision.clear && <p>受限部件：{[...solution.collision.selfPairs.map((pair) => pair.join(' ↔ ')), ...solution.collision.environmentLinks, ...solution.collision.groundLinks,
-                    ...(solution.collision.armBodyClearance && !solution.collision.armBodyClearance.clear ? [solution.collision.armBodyClearance.limitingPair?.join(' ↔ ')] : [])].filter(Boolean).slice(0, 4).join('；')}</p>}
-                  <footer>{report.options.lockChestVertical && Number.isFinite(solution.chestTilt) && <small>前胸倾角 {format(solution.chestTilt)}°</small>}<button type="button" disabled={!usable || !row.feasible || !solution.feasible} onClick={() => act(() => onApply(task.id, report, row.sampleId, side))}><Play size={12} />应用{row.pairedSampleId && side === row.selectedSide ? '双臂' : sideName(side)}解</button></footer>
+                  <footer><button type="button" disabled={!usable || !row.feasible || !solution.feasible} onClick={() => act(() => onApply(task.id, report, row.sampleId, side))}><Play size={12} />应用{row.pairedSampleId && side === row.selectedSide ? '双臂' : sideName(side)}解</button></footer>
                 </article>)}
               </div>}
             </>}

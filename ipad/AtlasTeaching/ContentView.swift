@@ -1100,6 +1100,7 @@ struct TeachingView: View {
                             }.buttonStyle(.bordered).accessibilityIdentifier("expand-teaching-panel")
                         }
                     }.font(.caption).padding(16).background(.black.opacity(0.75))
+                    parkingReferenceLegend
                     if liveCamera && levelVisible {
                         HStack {
                             SpatialLevelView(reading: ar.levelReading)
@@ -1200,7 +1201,8 @@ struct TeachingView: View {
             // and its calibration instead of loading and resetting it again.
             guard loadedProjectID != projectID, let project = session.current else { return }
             loadedProjectID = projectID
-            ar.load(manifest: project.session.manifest, samples: project.result.samples)
+            ar.load(manifest: project.session.manifest, samples: project.result.samples,
+                    navigationReference: project.session.navigationReference)
             renderer.bind(geometry, settings: session.$current.compactMap { project in
                 guard let project, project.id == projectID else { return nil }
                 return project.displaySettings ?? ModelDisplaySettings().forOpening()
@@ -1275,6 +1277,7 @@ struct TeachingView: View {
 
             VStack(spacing: 8) {
                 phoneToolbar
+                parkingReferenceLegend
                 if liveCamera && levelVisible && (sidebarCollapsed || !portrait) && (portrait || !ar.adjustingPlacement) {
                     HStack {
                         SpatialLevelView(reading: ar.levelReading, compact: true)
@@ -1581,7 +1584,8 @@ struct TeachingView: View {
             if liveCamera { ARSceneView(controller: ar) }
             else {
                 ObjectPreviewView(geometry: geometry, rendered: renderer.geometry,
-                                  initialViewport: completed ? size : nil)
+                                  initialViewport: completed ? size : nil,
+                                  navigationReference: session.current?.session.navigationReference)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("三维物体预览，拖动旋转，双指缩放和平移")
                     .accessibilityIdentifier("teaching-model-preview")
@@ -1591,6 +1595,17 @@ struct TeachingView: View {
             }
         }.frame(width: size.width, height: size.height).clipped().contentShape(Rectangle())
             .accessibilityElement(children: .contain).accessibilityIdentifier("teaching-render-surface")
+    }
+    @ViewBuilder private var parkingReferenceLegend: some View {
+        if let count = session.current?.session.navigationReference?.parkingPoints.count, count > 0 {
+            HStack {
+                Label("停车点参考 · \(count) 个 · 只读", systemImage: "parkingsign.circle")
+                    .font(.caption).foregroundStyle(.white).padding(8)
+                    .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityIdentifier("parking-reference-legend")
+                Spacer(minLength: 0)
+            }.padding(.horizontal, 12).allowsHitTesting(false)
+        }
     }
     private var fieldOfViewControl: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1808,10 +1823,12 @@ struct ObjectPreviewView: UIViewRepresentable {
     let geometry: ModelGeometry
     let rendered: SCNGeometry?
     var initialViewport: CGSize? = nil
+    var navigationReference: NavigationReference? = nil
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView(); view.scene = SCNScene(); view.backgroundColor = UIColor(red: 0.025, green: 0.05, blue: 0.065, alpha: 1)
         let object = SCNNode(geometry: rendered); object.name = "preview-object"; view.scene?.rootNode.addChildNode(object)
-        let minimum = geometry.minimum, maximum = geometry.maximum
+        view.scene?.rootNode.addChildNode(ParkingReferenceRenderer.makeNode(navigationReference))
+        let (minimum, maximum) = ParkingReferenceRenderer.bounds(navigationReference, minimum: geometry.minimum, maximum: geometry.maximum)
         let center = SCNVector3((minimum.x + maximum.x) / 2, (minimum.y + maximum.y) / 2, (minimum.z + maximum.z) / 2)
         let size = max(maximum.x - minimum.x, maximum.y - minimum.y, maximum.z - minimum.z, 0.1)
         let camera = SCNNode(); camera.camera = SCNCamera(); camera.camera?.zNear = 0.001; camera.camera?.zFar = Double(max(size * 100, 1000))
@@ -2103,6 +2120,7 @@ struct PoseReviewView: View {
                                     footprint: ready ? previewPreparation.footprint : nil,
                                     status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
                                     sample: selected, mode: previewMode, resetRevision: previewReset,
+                                    navigationReference: session.current?.session.navigationReference,
                                     showsCameraPose: $showsPoseCamera, showsModelOrigin: $showsModelOrigin,
                                     overviewExpanded: $overviewExpanded)
                         .frame(width: width, height: height)

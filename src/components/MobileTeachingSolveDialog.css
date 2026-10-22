@@ -34,7 +34,7 @@
 .mobile-solve-tolerances h3 small { color: #7b95a1; font-weight: 400; }
 .mobile-solve-tolerances > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .mobile-solve-tolerances label { display: grid; gap: 5px; color: #89b8c8; font: 10px Menlo, monospace; }
-.mobile-solve-tolerances input, .mobile-solve-select select { box-sizing: border-box; width: 100%; min-width: 0; color: #e0edf2; background: #0c151c; border: 1px solid #30434f; border-radius: 5px; padding: 9px 8px; font-size: 13px; }
+.mobile-solve-tolerances input, .mobile-solve-select select, .mobile-solve-select input { box-sizing: border-box; width: 100%; min-width: 0; color: #e0edf2; background: #0c151c; border: 1px solid #30434f; border-radius: 5px; padding: 9px 8px; font-size: 13px; }
 .mobile-solve-select { display: grid; gap: 8px; margin-top: 19px; font-size: 12px; }
 .mobile-solve-help { color: #839ba8; font-size: 11px; line-height: 1.7; margin: 8px 0 0; }
 .mobile-solve-checks { display: grid; gap: 15px; margin: 22px 0; }
@@ -70,8 +70,12 @@
 .mobile-solve-detail article header { display: flex; align-items: center; gap: 10px; font-size: 12px; }
 .mobile-solve-detail article header span { color: #829eac; font: 10px Menlo, monospace; overflow-wrap: anywhere; }
 .mobile-solve-detail article header svg { margin-left: auto; color: #77dab3; }
+.mobile-solve-failure { margin-top: 12px; padding: 10px 12px; border-left: 3px solid #dfb676; border-radius: 4px; background: #dfb6760c; color: #f0c88d; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.mobile-solve-failure strong { font-weight: 600; }
+.mobile-solve-failure ul { margin: 6px 0 0; padding-left: 17px; }
+.mobile-solve-failure li + li { margin-top: 5px; }
 .mobile-solve-error-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin-top: 15px; gap: 6px; }
-.mobile-solve-error-grid > div { display: grid; gap: 5px; color: #a9c9d6; }
+.mobile-solve-error-grid > div { display: grid; min-width: 0; gap: 5px; color: #a9c9d6; overflow-wrap: anywhere; }
 .mobile-solve-error-grid small { font: 9px Menlo, monospace; color: #7c9aaa; }
 .mobile-solve-error-grid b { font: 13px Menlo, monospace; }
 .mobile-solve-error-grid span { font-size: 9px; color: #6c8997; }
@@ -89,4 +93,5 @@
 .mobile-solve-dialog button.is-primary { background: #59dbe8; border-color: #59dbe8; color: #10262d; font-weight: 600; }
 .mobile-solve-dialog button.is-primary:hover:not(:disabled) { color: #10262d; background: #8de8f0; }
 .mobile-solve-pages { display: flex; justify-content: center; align-items: center; gap: 12px; margin-top: 10px; font-size: 11px; }
-@media (max-width: 750px) { .mobile-solve-modal { padding: 8px; } .mobile-solve-dialog { max-height: calc(100dvh - 16px); } .mobile-solve-body { grid-template-columns: 1fr; } .mobile-solve-settings { border-right: 0; border-bottom: 1px solid #293840; } .mobile-solve-footer { flex-wrap: wrap; } .mobile-solve-empty { min-height: 160px; } }
+@media (max-width: 1000px) { .mobile-solve-error-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 750px) { .mobile-solve-modal { padding: 8px; } .mobile-solve-dialog { max-height: calc(100dvh - 16px); } .mobile-solve-body { grid-template-columns: 1fr; } .mobile-solve-settings { border-right: 0; border-bottom: 1px solid #293840; } .mobile-solve-footer { flex-wrap: wrap; } .mobile-solve-actions { width: 100%; flex-shrink: 1; } .mobile-solve-empty { min-height: 160px; } }

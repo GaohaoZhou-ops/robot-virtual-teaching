@@ -7,8 +7,9 @@ import './IPadTeaching.css';
 import { prepareIPadTransfer } from '../lib/ipadTransferPreparation.js';
 
 const statusText = { preparing: '准备模型', ready: '等待设备配对', paired: '已配对 · 在设备本机示教', completed: '示教完成 · 可以接收', imported: '已保存到当前工程', cancelled: '任务已结束' };
+const emptyNavigation = [];
 
-export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingTasks = [], onClose, onImport, initialAction = 'pairing', initialTicketId }) {
+export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingTasks = [], waypoints = emptyNavigation, edges = emptyNavigation, onClose, onImport, initialAction = 'pairing', initialTicketId }) {
   const vision = device === 'vision';
   const DeviceIcon = vision ? Glasses : Tablet;
   const pairingInfo = vision ? '配对信息' : '配对二维码';
@@ -34,7 +35,8 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
   const [viewingHistory, setViewingHistory] = useState(['history', 'receive', 'status'].includes(initialAction));
   const preparedInputs = useRef(null), attemptedInputs = useRef(null);
   const inputsChanged = !vision && !viewingHistory && preparedInputs.current
-    && (preparedInputs.current.mapData !== mapData || preparedInputs.current.teachingTasks !== teachingTasks);
+    && (preparedInputs.current.mapData !== mapData || preparedInputs.current.teachingTasks !== teachingTasks
+      || preparedInputs.current.waypoints !== waypoints || preparedInputs.current.edges !== edges);
   const pairable = ['ready', 'paired'].includes(ticket?.status);
   const canShowQR = pairable && !preparationPending && !inputsChanged;
   const legacyCode = pairable && !/^[A-Z0-9]{4}$/.test(ticket.pairingCode || '');
@@ -116,14 +118,14 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
   };
   const prepare = (newTransfer = false, action = '') => perform(`正在准备${pairingInfo}…`, async () => {
     setPreparationPending(true);
-    attemptedInputs.current = { mapData, teachingTasks };
+    attemptedInputs.current = { mapData, teachingTasks, waypoints, edges };
     if (newTransfer) setViewingHistory(false);
     const info = await ipadRequest('/info');
     setAddresses(info.addresses); setAddress(info.addresses.includes(address) ? address : info.addresses[0] || '');
-    const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, device, forceNew: newTransfer,
+    const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, waypoints, edges, device, forceNew: newTransfer,
       preserveSnapshot: !newTransfer && (viewingHistory || ['history', 'receive', 'status'].includes(action)),
       renew: action === 'renew', onUpdate: update, onProgress: setBusy });
-    preparedInputs.current = { mapData, teachingTasks };
+    preparedInputs.current = { mapData, teachingTasks, waypoints, edges };
     setPreparationPending(false);
     if (action === 'receive' && ['completed', 'imported'].includes(next.status)) await receiveTicket(next);
   });
@@ -137,9 +139,10 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
     // A background workspace sync can change poses while this modal is open.
     // Hide the old QR immediately, then attempt each new input snapshot once.
     if (!inputsChanged || !lanVisible || operation.current || modelMismatch
-      || (attemptedInputs.current?.mapData === mapData && attemptedInputs.current?.teachingTasks === teachingTasks)) return;
+      || (attemptedInputs.current?.mapData === mapData && attemptedInputs.current?.teachingTasks === teachingTasks
+        && attemptedInputs.current?.waypoints === waypoints && attemptedInputs.current?.edges === edges)) return;
     prepare();
-  }, [mapData, teachingTasks, busy, lanVisible, viewingHistory]);
+  }, [mapData, teachingTasks, waypoints, edges, busy, lanVisible, viewingHistory]);
   const refresh = () => perform('检查完成状态…', async () => {
     const next = await ipadRequest(`/sessions/${ticket.id}`, { token: ticket.ownerToken });
     update({ ...ticket, ...next });
@@ -157,11 +160,11 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
   const sendUSB = () => perform('正在通过数据线发送物体，请保持设备解锁并连接…', async () => {
     setUSBReceipt('');
     setPreparationPending(true);
-    const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, device,
+    const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, waypoints, edges, device,
       preserveSnapshot: viewingHistory, onUpdate: update, onProgress: setBusy });
-    preparedInputs.current = { mapData, teachingTasks };
+    preparedInputs.current = { mapData, teachingTasks, waypoints, edges };
     setPreparationPending(false);
-    setBusy('正在通过数据线发送物体与 Pose，请保持设备解锁并连接…');
+    setBusy('正在通过数据线发送物体、Pose 与停车点参考，请保持设备解锁并连接…');
     const receipt = await ipadRequest(`/sessions/${next.id}/usb`, {
       method: 'POST', token: next.ownerToken, body: { deviceId: usbDevice },
     });
@@ -230,7 +233,11 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
           <span>移动端 {ticket.referenceIPadPoseCount || 0} 个（<span style={{ color: '#b39dff' }}>iPad 紫色</span> / <span style={{ color: '#ff5a5f' }}>iPhone 红色</span>）</span>。
           {(ticket.referencePoseCount || 0) > (ticket.referenceIPadPoseCount || 0) + (ticket.referenceLeftArmPoseCount || 0) + (ticket.referenceRightArmPoseCount || 0)
             && `另有 ${(ticket.referencePoseCount || 0) - (ticket.referenceIPadPoseCount || 0) - (ticket.referenceLeftArmPoseCount || 0) - (ticket.referenceRightArmPoseCount || 0)} 个 Mac Pose 未标注左右臂。`}
-          {!viewingHistory && '电脑 Pose 变更后，重新打开配对窗口或刷新二维码会自动更新。'}
+          {!viewingHistory && '电脑 Pose 或停车点变更后，重新打开配对窗口或刷新二维码会自动更新。'}
+        </p>}
+        {!vision && ticket && !preparationPending && !inputsChanged && ticket.referenceParkingPointCount > 0 && <p className="ipad-navigation-summary" role="status">
+          同步参考：{ticket.referenceParkingPointCount} 个停车点、{ticket.referencePathCount || 0} 条路网连接。
+          移动端显示停车点名称、位置与朝向，仅供参考，不可编辑；路网连接暂不显示。
         </p>}
         <div className="ipad-connection"><Wifi size={17}/><div>{addresses.length ? <select id="ipad-lan-address" aria-label="电脑局域网地址" value={address} disabled={!!busy} onChange={(event) => setAddress(event.target.value)}>{addresses.map((item) => <option key={item}>{item}</option>)}</select> : <p>尚未发现局域网地址，请连接 Wi-Fi 或以太网后重新打开。</p>}</div></div>
         {!vision && <section className="ipad-usb" aria-label="通过数据线发送物体">
