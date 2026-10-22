@@ -242,23 +242,43 @@ struct TeachingPoseSeed: Codable {
 // calibration segments. Keep the entire captured sample while asking the user.
 struct NearbyPoseConfirmation: Identifiable {
     static let distanceThresholdMeters: Float = 0.10
+    static let angleThresholdDegrees: Double = 5
     let sample: TeachingSample
     let previousSampleID: String
     let distanceMeters: Float
+    let angleDegrees: Double
     var id: String { sample.id }
 
     init?(sample: TeachingSample, previousSample: TeachingSample?) {
         guard let previousSample else { return nil }
         let distance = simd_distance(sample.cameraPose.position.simd, previousSample.cameraPose.position.simd)
         guard distance.isFinite, distance < Self.distanceThresholdMeters else { return nil }
+        // Compare the full optical-frame rotation, including roll: the M70's
+        // rectangular view changes even when the camera center does not move.
+        // Normalize in Double and use the shortest rotation so q / -q and
+        // rotations crossing +/-180 degrees describe the same physical pose.
+        func normalized(_ rotation: Rotation4) -> simd_quatd? {
+            let vector = SIMD4(Double(rotation.x), Double(rotation.y), Double(rotation.z), Double(rotation.w))
+            let length = simd_length(vector)
+            guard length.isFinite, length > 0 else { return nil }
+            return simd_quatd(vector: vector / length)
+        }
+        guard let current = normalized(sample.cameraPose.quaternion),
+              let previous = normalized(previousSample.cameraPose.quaternion) else { return nil }
+        let relative = current * previous.inverse
+        let angle = 2 * atan2(simd_length(relative.imag), abs(relative.real)) * 180 / .pi
+        // Serialized Float quaternions can round an exact 5-degree turn down
+        // slightly. Treat that boundary as a direct capture, as with 10 cm.
+        guard angle.isFinite, angle + 0.0001 < Self.angleThresholdDegrees else { return nil }
         self.sample = sample
         previousSampleID = previousSample.id
         distanceMeters = distance
+        angleDegrees = angle
     }
 
     var message: String {
-        String(format: "与上一个 Pose 相距 %.1f cm，小于 %.0f cm。是否仍然记录？\n将保存点击「记录 Pose」时的位置和姿态。",
-            distanceMeters * 100, Self.distanceThresholdMeters * 100)
+        String(format: "与上一个 Pose 相距 %.1f cm，姿态角差 %.1f°。\n位移小于 %.0f cm 且角差小于 %.0f°，是否仍然记录？\n将保存点击「记录 Pose」时的位置和姿态。",
+            distanceMeters * 100, angleDegrees, Self.distanceThresholdMeters * 100, Self.angleThresholdDegrees)
     }
 }
 struct TeachingDevice: Codable {

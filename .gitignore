@@ -397,6 +397,32 @@ playwright/.auth/
 /ipad/atlas-pose-header-*.zip
 /tests/atlas-pose-header-*/
 /tests/atlas-pose-header-*.zip
+# Shared iPad/iPhone pose-angle checks also emit standalone binaries and device
+# diagnostics. Keep local copies out of Git without hiding source or fixtures.
+/atlas-pose-angle-*/
+/ipad/atlas-pose-angle-*/
+/iphone/atlas-pose-angle-*/
+/tests/atlas-pose-angle-*/
+/atlas-pose-angle-*.[zZ][iI][pP]
+/ipad/atlas-pose-angle-*.[zZ][iI][pP]
+/iphone/atlas-pose-angle-*.[zZ][iI][pP]
+/tests/atlas-pose-angle-*.[zZ][iI][pP]
+/atlas-pose-angle-*.json
+/ipad/atlas-pose-angle-*.json
+/iphone/atlas-pose-angle-*.json
+/tests/atlas-pose-angle-*.json
+/atlas-pose-angle-*.plist
+/ipad/atlas-pose-angle-*.plist
+/iphone/atlas-pose-angle-*.plist
+/tests/atlas-pose-angle-*.plist
+/atlas-pose-angle-test
+/atlas-pose-angle-tests
+/ipad/atlas-pose-angle-test
+/ipad/atlas-pose-angle-tests
+/iphone/atlas-pose-angle-test
+/iphone/atlas-pose-angle-tests
+/tests/atlas-pose-angle-test
+/tests/atlas-pose-angle-tests
 /atlas-ipad-fov-review-*/
 /atlas-ipad-fov-review-*.zip
 /ipad/atlas-ipad-fov-review-*/

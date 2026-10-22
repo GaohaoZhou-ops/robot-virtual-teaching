@@ -2221,7 +2221,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: place)], timeout: 30), .completed)
         app.otherElements["teaching-render-surface"].coordinate(withNormalizedOffset: CGVector(dx: 0.48, dy: 0.7)).tap()
         expectAutomaticPlacement(app)
-        let capture = app.buttons["capture-pose"], alert = app.alerts["当前 Pose 与上一个距离很近"]
+        let capture = app.buttons["capture-pose"], alert = app.alerts["当前 Pose 与上一个位置和姿态接近"]
         XCTAssertTrue(capture.isEnabled); capture.tap()
         XCTAssertFalse(alert.exists, "the first Pose must record directly")
         app.buttons["collapse-teaching-panel"].tap()
@@ -2229,8 +2229,9 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(count.label, "1 个 Pose")
         capture.tap(); XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "小于 10 cm")).firstMatch.exists)
+        XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "角差小于 5°")).firstMatch.exists)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "Nearby Pose distance confirmation"; screenshot.lifetime = .keepAlways; add(screenshot)
+        screenshot.name = "Nearby Pose position and orientation confirmation"; screenshot.lifetime = .keepAlways; add(screenshot)
         alert.buttons["取消"].tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: alert)], timeout: 5), .completed)
         XCTAssertEqual(count.label, "1 个 Pose", "cancel does not append a Pose")
@@ -2251,6 +2252,42 @@ final class AtlasTeachingUITests: XCTestCase {
         app.buttons["expand-teaching-panel"].tap()
         app.buttons["本地项目"].tap()
         XCTAssertTrue(project.waitForExistence(timeout: 10))
+    }
+
+    func testSamePositionRotatedPosesRecordWithoutConfirmation() throws {
+        // Exercise the production recording controller on both device families
+        // with deterministic optical poses instead of requiring physical motion.
+        let ar = ARController()
+        var calibration: Calibration?, saved: [TeachingSample] = []
+        ar.onCalibration = { calibration = $0 }
+        ar.onSample = { saved.append($0); return true }
+        ar.trackingNormal = true
+        ar.applyPlacement(at: SIMD3(0, -1, -2))
+        let segmentID = try XCTUnwrap(calibration).id
+        var rotation = simd_quatf(angle: 0.8, axis: simd_normalize(SIMD3<Float>(1, 2, 3)))
+        func sample() -> TeachingSample {
+            TeachingSample(segmentId: segmentID, kind: "keyframe",
+                cameraPose: CameraPose(position: Point3(.zero), quaternion: Rotation4(rotation)))
+        }
+        ar.recordKeyframe(sample())
+        XCTAssertEqual(saved.count, 1)
+        let axes: [SIMD3<Float>] = [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
+        for axis in axes {
+            rotation = rotation * simd_quatf(angle: 10 * .pi / 180, axis: axis)
+            let turned = sample()
+            XCTAssertNil(NearbyPoseConfirmation(sample: turned, previousSample: saved.last),
+                "a new view at the same camera center records directly, including optical roll")
+            ar.recordKeyframe(turned)
+        }
+        XCTAssertEqual(saved.count, 4)
+        XCTAssertTrue(saved.allSatisfy { $0.cameraPose.position.simd == .zero })
+        let markers = try XCTUnwrap(ar.view.scene.rootNode.childNode(withName: "recorded-pose-markers", recursively: true))
+        XCTAssertEqual(markers.childNodes.count, 4, "each distinct orientation keeps its own recorded Pose")
+        let duplicate = try XCTUnwrap(NearbyPoseConfirmation(sample: sample(), previousSample: saved.last))
+        XCTAssertEqual(duplicate.angleDegrees, 0, accuracy: 0.0001)
+        XCTAssertEqual(saved.count, 4, "an unchanged view still waits for confirmation")
+        ar.recordKeyframe(duplicate.sample)
+        XCTAssertEqual(saved.count, 5, "the user can still explicitly retain a near-duplicate")
     }
 
     func testFrozenPoseCommitRequiresCurrentCalibrationAndAcceptedSave() throws {
@@ -2472,7 +2509,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(adjust.waitForExistence(timeout: 5)); XCTAssertTrue(adjust.isHittable)
         func recordPose() {
             capture.tap()
-            let nearby = app.alerts["当前 Pose 与上一个距离很近"]
+            let nearby = app.alerts["当前 Pose 与上一个位置和姿态接近"]
             if nearby.waitForExistence(timeout: 1) { nearby.buttons["仍然记录"].tap() }
         }
         recordPose() // First Pose at the original confirmed placement.

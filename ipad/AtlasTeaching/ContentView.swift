@@ -1237,7 +1237,7 @@ struct TeachingView: View {
         .fullScreenCover(isPresented: $review, onDismiss: { ar.refreshMarkers(session.current?.result.samples ?? []) }) {
             PoseReviewView(geometry: geometry, renderer: renderer, coverage: coverage).environmentObject(session)
         }
-        .alert("当前 Pose 与上一个距离很近", isPresented: Binding(
+        .alert("当前 Pose 与上一个位置和姿态接近", isPresented: Binding(
             get: { nearbyPoseConfirmation != nil },
             set: { if !$0 { nearbyPoseConfirmation = nil } }
         ), presenting: nearbyPoseConfirmation) { confirmation in
