@@ -78,7 +78,7 @@ final class TeachingSession: ObservableObject {
                 await reload()
             } else {
                 try await acceptModel(data, paired: PairedSession(id: transfer.id, deviceToken: "", manifest: transfer.manifest,
-                                                                 poseSeed: transfer.poseSeed), serverURL: "")
+                                                                 poseSeed: transfer.poseSeed, navigationReference: transfer.navigationReference), serverURL: "")
             }
             try? await inbox.removeReceived(transfer)
             status = "物体已通过数据线接收并保存，可以拔下数据线开始示教"
@@ -148,6 +148,7 @@ final class TeachingSession: ObservableObject {
         }
     }
     private func acceptModel(_ data: Data, paired: PairedSession, serverURL: String) async throws {
+        try paired.navigationReference?.validate()
         transferProgress = .validating; status = "模型已接收，正在校验和加载…"
         let geometry = try await Task.detached { try ModelGeometry(data: data, manifest: paired.manifest) }.value
         let existing = try await ProjectStore.shared.projects().first { $0.id == paired.id }
@@ -193,6 +194,7 @@ final class TeachingSession: ObservableObject {
         guard !busy else { return }; busy = true; error = ""; openingProjectID = project.id
         defer { busy = false; openingProjectID = nil }
         do {
+            try project.session.navigationReference?.validate()
             let data = try await ProjectStore.shared.model(project.id)
             geometry = try await Task.detached(priority: .userInitiated) { try ModelGeometry(data: data, manifest: project.session.manifest) }.value
             var opened = project

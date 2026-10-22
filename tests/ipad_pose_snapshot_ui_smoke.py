@@ -34,6 +34,9 @@ project['map'].update(fileName=FIXTURE.name, sourceHash=source_hash)
 task = project['virtualTeaching']['tasks'][0]
 task['map'].update(fileName=FIXTURE.name, sourceHash=source_hash)
 parking = task['parkingPoints'][0]
+project['waypoints'] = [{'id': 'route-parking', 'name': 'N001',
+    'pose': {'x': 1, 'y': 2, 'z': 0.3, 'roll': 0, 'pitch': 0, 'yaw': 90}}]
+project['paths'] = [{'id': 'reference-path', 'from': 'route-parking', 'to': parking['id'], 'directed': False}]
 prototype = parking['poses'][0]
 parking['poses'] = []
 for index in range(3):
@@ -88,6 +91,11 @@ with sync_playwright() as p:
         current = created[-1]
         assert current['id'] != old['id'] and current['referencePoseCount'] == 6
         received = pair(current)
+        expect(dialog.locator('.ipad-navigation-summary')).to_contain_text('2 个停车点、1 条路网连接')
+        expect(dialog.locator('.ipad-navigation-summary')).to_contain_text('不可编辑')
+        assert received['navigationReference']['parkingPoints'][0]['name'] == 'N001'
+        assert received['navigationReference']['parkingPoints'][1]['position'] == parking['mapPose']['position']
+        assert received['navigationReference']['paths'][0]['directed'] is False
         assert len(received['poseSeed']['samples']) == 6
         assert [sample['arm'] for sample in received['poseSeed']['samples']] == ['left', 'right'] * 3
         assert all(sample['origin'] == 'desktop' for sample in received['poseSeed']['samples'])
@@ -116,7 +124,22 @@ with sync_playwright() as p:
         expect(dialog.locator('.ipad-pose-summary')).to_contain_text('携带 6 个相机 Pose')
         assert len(created) == 3, 'same-count edits must also produce a current QR'
         assert created[-1]['referencePoseHash'] != current['referencePoseHash']
+        before_parking_edit = created[-1]
+        dialog.get_by_role('button', name='关闭设备示教窗口').click()
+        parking['name'] = '停车点 P01 新位置'
+        parking['mapPose']['position']['z'] = 0.45
+        parking['mapPose']['rpy']['yaw'] = -48
+        import_poses()
+        dialog = open_ipad_dialog(page)
+        expect(dialog.get_by_role('img', name='设备配对二维码')).to_be_visible()
+        assert len(created) == 4, 'parking-only edits must refresh the transfer'
+        assert created[-1]['referencePoseHash'] == before_parking_edit['referencePoseHash']
+        assert created[-1]['navigationReferenceHash'] != before_parking_edit['navigationReferenceHash']
+        navigation = pair(created[-1])['navigationReference']
+        assert navigation['parkingPoints'][1]['name'] == parking['name']
+        assert navigation['parkingPoints'][1]['position']['z'] == 0.45
+        page.screenshot(path=str(ARTIFACTS / 'readonly-parking-reference.png'), full_page=True)
         assert not errors, errors
-        print('UI: old model-only QR → 3 left + 3 right camera poses; payload, reuse, history and same-count edits passed.')
+        print('UI: model-only QR → camera poses + read-only parking and graph; payload, reuse, history, pose-only and parking-only edits passed.')
     finally:
         browser.close()

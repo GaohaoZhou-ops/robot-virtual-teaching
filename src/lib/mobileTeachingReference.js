@@ -1,5 +1,33 @@
 import { applyRobotJointValues, readRobotJointValues } from './robotLoader.js';
 import { presetMatchesRobot } from './robotJointPresets.js';
+import { MOBILE_TORSO_PITCH_JOINTS } from './mobileTeachingChest.js';
+
+export function mobileUpperBodyJoints(robot) {
+  const joints = [];
+  robot.traverse((joint) => {
+    if (['revolute', 'continuous', 'prismatic'].includes(joint.userData.jointType)
+      && !/wheel/i.test(joint.name) && !MOBILE_TORSO_PITCH_JOINTS.includes(joint.name)) joints.push(joint);
+  });
+  return joints;
+}
+
+// Compare joints in the robot's own frame. Chassis heading/translation never
+// penalize a good upper-body reference; the three height joints stay free to
+// lift and level the chest. Keep angular and linear display units separate.
+export function mobileReferenceMetrics(joints, reference) {
+  let cost = 0, angularCount = 0, linearCount = 0, angle = 0, distance = 0;
+  for (const joint of joints) {
+    const linear = joint.userData.jointType === 'prismatic';
+    let delta = joint.userData.jointValue - (reference[joint.name] || 0) * (linear ? 1 : Math.PI / 180);
+    if (joint.userData.jointType === 'continuous') delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+    cost += (delta / (linear ? 0.5 : Math.PI)) ** 2;
+    if (linear) { distance += Math.abs(delta); linearCount += 1; }
+    else { angle += Math.abs(delta) * 180 / Math.PI; angularCount += 1; }
+  }
+  return { cost: cost / Math.max(1, joints.length), angularCount, linearCount,
+    meanAngleDegrees: angularCount ? angle / angularCount : null,
+    meanDistanceMeters: linearCount ? distance / linearCount : null };
+}
 
 export function normalizeMobileReferencePose(value = { type: 'current' }) {
   if (value?.type === 'current') return { type: 'current' };

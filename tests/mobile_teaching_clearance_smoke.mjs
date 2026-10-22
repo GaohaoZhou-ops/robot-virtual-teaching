@@ -87,15 +87,21 @@ const options = { allowTorsoHeight: false, positionTolerance: { x: 0.001, y: 0.0
 const solve = (extra = {}, overrides = {}) => solveMobileTeaching({ robot, task, mapPose: zero, environment: far, options: { ...options, ...extra }, ...overrides });
 const fixed = await solve({ parkingMode: 'fixed' });
 assert.equal(fixed.feasibleCount, 0, 'fixed parking may not silently relax the buffer');
+assert.equal((await solve({ parkingMode: 'fixed', armMode: 'cooperative' })).feasibleCount, 0,
+  'cooperation must not relax the hard clearance requirement');
 assert.ok(fixed.rows.every((row) => mobileParkingKey(row.mapPose) === mobileParkingKey(zero)));
 const contactOnly = await solve({ parkingMode: 'fixed', armBodyClearance: 0 });
 assert.equal(contactOnly.feasibleCount, 2);
 const adjusted = await solve();
+const cooperative = await solve({ armMode: 'cooperative' });
+assert.equal(cooperative.feasibleCount, 2);
+assert.equal(cooperative.parkingCount, 1);
+assert.equal(cooperative.dualMotionCount, 1);
 assert.equal(adjusted.feasibleCount, 2, JSON.stringify(adjusted.rows));
 assert.equal(adjusted.parkingCount, 1);
 assert.equal(adjusted.dualMotionCount, 1, 'clearance must also hold for jointly solved pairs');
 assert.notEqual(mobileParkingKey(adjusted.rows[0].mapPose), mobileParkingKey(zero), 'base moves to make the same world targets comfortable');
-for (const row of adjusted.rows) {
+for (const row of [...adjusted.rows, ...cooperative.rows]) {
   const solution = row.solutions[row.selectedSide];
   assert.ok(solution.collision.armBodyClearance.minimum >= 0.05);
   assert.ok(solution.collision.armBodyClearance.bySide.left >= 0.05 && solution.collision.armBodyClearance.bySide.right >= 0.05);

@@ -98,7 +98,7 @@ for (const candidate of mobileParkingCandidates(mobileSampleTarget(parkingTask.m
   assert.ok(Math.abs(up.angleTo(new THREE.Vector3(0, 0, 1)) - THREE.MathUtils.degToRad(5)) < 1e-10);
 }
 const turned = await solveMobileTeaching({ robot: restoreMobileTeachingRobot(fixture.robot), task: parkingTask,
-  mapPose: pitchedParking, lockedJointNames: [...bodyNames, 'waist_yaw_J'], options: { checkCollisions: false } });
+  mapPose: pitchedParking, lockedJointNames: [...bodyNames, 'waist_yaw_J'], options: { checkCollisions: false, baseSupport: 'current' } });
 assert.equal(turned.feasibleCount, 3, turned.rows.map((row) => row.reason).join('\n'));
 for (const row of turned.rows) {
   const solution = row.solutions[row.selectedSide];
@@ -116,6 +116,8 @@ const captureTask = { ...task, mobileCapture: { id: 'ipad-16', samples: fixture.
 const capture = await solveMobileTeaching({ robot, task: captureTask,
   mapPose: { position: { x: 0, y: 0, z: 0 }, rpy: { roll: 0, pitch: 0, yaw: 0 } },
   lockedJointNames: [...bodyNames, 'waist_yaw_J'], environment: far });
+assert.equal(capture.options.referencePreference, 'upper-body');
+assert.equal(capture.options.baseSupport, 'level');
 assert.equal(capture.feasibleCount, 16, capture.rows.filter((r) => !r.feasible).map((r) => r.reason).join('\n'));
 const checker = await createMobileCollisionChecker(fk, far, undefined, capture.options);
 for (const row of capture.rows) {

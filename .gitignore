@@ -605,6 +605,18 @@ playwright/.auth/
 /ipad/atlas-ipad-snapshot-*.[zZ][iI][pP]
 /tests/atlas-ipad-snapshot-*.[zZ][iI][pP]
 
+# Read-only parking/route-reference tests create LAN sessions, model payloads
+# and Swift test binaries under this TMPDIR prefix. Keep repository-local
+# workspaces and packed copies out of Git; nested fixture inputs stay visible.
+/atlas-navigation-reference-*/
+/tests/atlas-navigation-reference-*/
+/ipad/atlas-navigation-reference-*/
+/iphone/atlas-navigation-reference-*/
+/atlas-navigation-reference-*.[zZ][iI][pP]
+/tests/atlas-navigation-reference-*.[zZ][iI][pP]
+/ipad/atlas-navigation-reference-*.[zZ][iI][pP]
+/iphone/atlas-navigation-reference-*.[zZ][iI][pP]
+
 # iPad transfer-progress and desktop model-consistency checks create temporary
 # model/result stores. Keep them local when TMPDIR points into these directories.
 /atlas-transfer-progress-*/

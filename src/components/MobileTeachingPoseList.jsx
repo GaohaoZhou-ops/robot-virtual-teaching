@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Bot, Camera, ChevronLeft, ChevronRight } from 'lucide-react';
 import { mobileSamplePosition } from '../lib/ipadCaptureDisplay.js';
 import { mobileRobotPoseLinks, mobileSampleStatus } from '../lib/mobileTeachingReview.js';
+import { mobileReportSolveOptions } from '../lib/mobileTeachingSolver.js';
+import { mobileRowFailureReason } from '../lib/mobileTeachingDiagnostics.js';
 
 const PAGE_SIZE = 50;
 
@@ -13,6 +15,7 @@ export default function MobileTeachingPoseList({ task, robotTasks, selection, on
   const links = useMemo(() => mobileRobotPoseLinks(task, robotTasks), [task, robotTasks]);
   const selected = selection?.taskId === task.id ? samples.find((sample) => sample.id === selection.sampleId) : null;
   const selectedRow = selected && rows.get(selected.id);
+  const solveOptions = useMemo(() => task.mobileSolve && mobileReportSolveOptions(task.mobileSolve), [task.mobileSolve]);
   const selectedLink = selected && links.get(selected.id);
   const position = selected && mobileSamplePosition(selected, task);
 
@@ -25,7 +28,7 @@ export default function MobileTeachingPoseList({ task, robotTasks, selection, on
           className={`teaching-capture-tree__pose-item ${isSelected ? 'is-previewed' : ''}`}
           aria-label={`预览采样 Pose ${sample.name || `Pose ${currentPage * PAGE_SIZE + index + 1}`}`}
           aria-selected={isSelected} data-mobile-sample-id={sample.id}
-          title="在 3D 中高亮采样位置、光学坐标轴与朝向"
+          title={mobileRowFailureReason(row, solveOptions) || '在 3D 中高亮采样位置、光学坐标轴与朝向'}
           onClick={() => onSelect(task.id, sample.id)}>
           <i>{String(currentPage * PAGE_SIZE + index + 1).padStart(3, '0')}</i><Camera size={11} />
           <span>{sample.name || 'Pose'}</span><small>{mobileSampleStatus(row, link)}</small>
@@ -44,7 +47,7 @@ export default function MobileTeachingPoseList({ task, robotTasks, selection, on
         <p>{selectedLink.task.name} / {selectedLink.parkingPoint.name}</p>
         <button type="button" onClick={() => onOpenRobotPose(selectedLink.parkingPoint.id, selectedLink.pose.id)}><Bot size={12} />打开机器人姿态</button>
       </> : <>
-        <p>{selectedRow?.reason || (selectedRow?.feasible ? '此 Pose 已有可达解，保存后可调整机器人关节。' : selectedRow ? '当前约束下未通过，可调整机器人位置或求解配置后重算。' : '先计算机器人姿态，再保存可达解并精修关节。')}</p>
+        <p>{mobileRowFailureReason(selectedRow, solveOptions) || (selectedRow?.feasible ? '此 Pose 已有可达解，保存后可调整机器人关节。' : '先计算机器人姿态，再保存可达解并精修关节。')}</p>
         {selectedRow && <button type="button" onClick={() => onSolve(task.id, selected.id)}>查看此 Pose 的计算结果</button>}
       </>}
     </section>}

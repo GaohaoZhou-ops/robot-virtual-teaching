@@ -29,8 +29,10 @@ struct USBModelTransfer: Codable, Identifiable {
     let sourceSessionId: String
     let manifest: ModelManifest
     var poseSeed: TeachingPoseSeed? = nil
+    var navigationReference: NavigationReference? = nil
 
     func validate() throws {
+        try navigationReference?.validate()
         guard self.protocol == usbProtocol, UUID(uuidString: id) != nil, UUID(uuidString: sourceSessionId) != nil,
               manifest.protocol == teachingProtocol, manifest.coordinateFrame == "virtual_origin",
               manifest.distanceUnit == "meter", manifest.verticalAxis == "Z",

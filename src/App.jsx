@@ -7195,7 +7195,7 @@ export default function App() {
       onSelectRobot={(value) => { dismissMobileTeaching(); handleSelectRobot(value); setShowRobotModel(true); }}
       onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
       onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} onPlay={playMobileTeachingSolutions} />}
-    {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
+    {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog
       state={teachingTransferDialog}

@@ -16,7 +16,11 @@ const far = { positions: new Float32Array([100, 100, 100]), kind: 'points' };
 const task = { id: 'botx-capture', name: 'Distributed capture', coordinateFrame: 'virtual_origin', map: {},
   mobileCapture: { id: 'capture', samples: fixture.targets.map((cameraPose, i) => ({ id: `sample-${i}`, name: `Pose ${i + 1}`, kind: 'keyframe', cameraPose })) } };
 const before = structuredClone(task);
-const report = await solveMobileTeaching({ robot, task, mapPose: zero, environment: far, lockedJointNames: locked, options: { allowTorsoHeight: false } });
+// This regression exercises shared-stop planning. Upper-body preference may
+// trade shared stops for a closer reference; its FK and pairing guarantees are
+// covered separately by upper_body_smoke and the default height regression.
+const report = await solveMobileTeaching({ robot, task, mapPose: zero, environment: far, lockedJointNames: locked,
+  options: { allowTorsoHeight: false, referencePreference: 'whole-body' } });
 assert.equal(report.feasibleCount, 16, report.rows.filter((r) => !r.feasible).map((r) => `${r.name}: ${r.reason}`).join('\n'));
 assert.ok(report.parkingCount > 1 && report.parkingCount < fixture.targets.length,
   `Retain shared stops when comfortable, but allow more than the old 8 cramped stops: ${report.parkingCount}`);

@@ -35,6 +35,10 @@ def run():
                 position = [float(value) for value in canvas.get_attribute(f'data-zivid-{side}-optical-position').split(',')]
                 quaternion = [float(value) for value in canvas.get_attribute(f'data-zivid-{side}-optical-quaternion').split(',')]
                 position[0] += 0.075
+                # A common XY offset can now preserve both reference arms.
+                # Raising both cameras (with torso height locked below) forces
+                # actual arm movement, so synchronized playback stays tested.
+                position[2] += 0.075
                 sample = copy.deepcopy(archive['result']['samples'][0])
                 sample.update(id=f'assigned-{side}', name='左侧 Pose' if side == 'left' else '右侧 Pose')
                 sample['cameraPose'].update(position=dict(zip('xyz', position)), quaternion=dict(zip('xyzw', quaternion)))
@@ -47,6 +51,8 @@ def run():
             expect(dialog.get_by_role('combobox', name='停车点策略')).to_have_value('auto')
             expect(dialog.get_by_role('combobox', name='参与求解机械臂')).to_have_value('both')
             expect(dialog).to_contain_text('每个姿态只分配给一侧')
+            dialog.get_by_role('combobox', name='参与求解机械臂').select_option('cooperative')
+            expect(dialog).to_contain_text('只有一臂满足约束时，保留单臂可达结果')
             # Isolate assignment here. The real-URDF Node regression separately
             # verifies every generated full-body pose with collision screening.
             dialog.get_by_role('checkbox', name='碰撞筛选').uncheck()
@@ -57,7 +63,8 @@ def run():
             config = await_saved(page, lambda c: c['project']['virtualTeaching']['tasks'][0].get('mobileSolve'))
             source = config['project']['virtualTeaching']['tasks'][0]
             report = source['mobileSolve']
-            assert report['version'] == 7
+            assert report['version'] >= 10
+            assert report['options']['armMode'] == 'cooperative'
             assert report['feasibleCount'] == 2, report['rows']
             assert report['parkingCount'] == 1, report['rows']
             assert report['motionCount'] == 1 and report['dualMotionCount'] == 1
@@ -67,6 +74,17 @@ def run():
             dock.get_by_role('button', name='查看结果', exact=True).click()
             expect(dialog).to_contain_text('左臂 1 个 · 右臂 1 个')
             expect(dialog).to_contain_text('执行动作：1 组 · 双臂同步 1 组 · 单臂 0 组')
+            expect(dialog).to_contain_text('本报告参与求解 · 双臂协同')
+            expect(dialog).to_contain_text('停车点协同：1 处双臂参与 · 0 处单臂参与')
+            selector = dialog.get_by_role('combobox', name='参与求解机械臂')
+            selector.select_option('both')
+            expect(dialog.get_by_role('button', name='应用双臂解', exact=True)).to_be_disabled()
+            selector.select_option('cooperative')
+            # A configuration edit invalidates applying the existing report
+            # until this dialog is reopened with the persisted configuration.
+            dialog.get_by_role('button', name='关闭姿态计算', exact=True).click()
+            dock.get_by_role('button', name='查看结果', exact=True).click()
+            expect(selector).to_have_value('cooperative')
             expect(dialog.get_by_role('button', name='应用双臂解', exact=True)).to_be_enabled()
             expect(dialog.locator('.mobile-solve-table').get_by_role('cell', name='执行', exact=True)).to_have_count(2)
             expect(dialog.locator('.mobile-solve-table').get_by_role('cell', name='未分配', exact=True)).to_have_count(2)
@@ -126,7 +144,7 @@ def run():
             assert not errors, errors
         finally:
             browser.close()
-    print('Simultaneous UI passed: one shared stop/motion, two targets, both arms moving in the same intermediate frame, dynamic/saved playback equivalence and reload.')
+    print('Cooperative UI passed: mode selection/persistence, shared-stop summary, two targets in one motion, synchronized playback, saved poses and reload.')
 
 
 if __name__ == '__main__':

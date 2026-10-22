@@ -76,7 +76,9 @@ const moved = mobileSampleTarget(task.mobileCapture.samples[0], { ...task, mobil
 assert.ok(moved.position.distanceTo(new THREE.Vector3(1.8, 3.75, 1.4)) < 1e-9);
 assert.ok(moved.quaternion.angleTo(new THREE.Quaternion().setFromRotationMatrix(transform)) < 1e-8);
 const tilted = model(); tilted.getObjectByName('waist_yaw_L').rotation.x = 0.2;
-assert.equal((await run({ armMode: 'left' }, { robot: tilted })).feasibleCount, 0, 'locked chest tilt must reject otherwise reachable arm');
+const tiltedResult = await run({ armMode: 'left' }, { robot: tilted });
+assert.equal(tiltedResult.feasibleCount, 0, 'locked chest tilt must reject otherwise reachable arm');
+assert.match(tiltedResult.rows[0].reason, /前胸未满足垂直约束：倾角 .*° > 0.25°/, 'persist the actual failing constraint in the report');
 assert.equal((await run({ armMode: 'left', lockChestVertical: false }, { robot: tilted })).feasibleCount, 1);
 const controller = new AbortController();
 await assert.rejects(() => run({}, { signal: controller.signal, onProgress: () => controller.abort() }), { name: 'AbortError' });

@@ -80,7 +80,8 @@ actor ProjectStore {
         result.createdAt = timestamp(); result.completedAt = nil
         result.samples.removeAll { removingSampleIDs.contains($0.id) }
         let draft = LocalProject(serverURL: project.serverURL,
-            session: PairedSession(id: id, deviceToken: "", manifest: project.session.manifest), result: result,
+            session: PairedSession(id: id, deviceToken: "", manifest: project.session.manifest,
+                                   navigationReference: project.session.navigationReference), result: result,
             displaySettings: project.displaySettings ?? ModelDisplaySettings().forOpening())
         let destination = try file(id, ext: "atls")
         try FileManager.default.copyItem(at: source, to: destination)

@@ -8,7 +8,8 @@ import { IPAD_PROTOCOL, MAX_MODEL_BYTES, validateModelBytes, validateIPadResult,
 import { advertiseIPadService } from './ipadDiscovery.js';
 import { modelThumbnail } from './modelThumbnail.js';
 import { createIPadUSBBridge } from './ipadUSB.js';
-import { ipadPoseSeedJSON } from '../lib/ipadTransferSnapshot.js';
+import { ipadPoseSeedJSON, ipadNavigationReferenceJSON } from '../lib/ipadTransferSnapshot.js';
+import { validateIPadNavigationReference } from '../lib/ipadNavigationReference.js';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -58,6 +59,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
       const session = JSON.parse(await readFile(sessionFile(id), 'utf8'));
       // Also identify pre-feature transfers, including old model-only QRs.
       session.referencePoseHash ||= hash(ipadPoseSeedJSON(session.poseSeed));
+      session.navigationReferenceHash ||= hash(ipadNavigationReferenceJSON(session.navigationReference));
       return session;
     }
     catch (error) { if (error.code === 'ENOENT') fail(404, '配对任务不存在'); throw error; }
@@ -81,6 +83,9 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
   };
   const publicSession = (session) => ({ id: session.id, status: session.status, manifest: session.manifest,
     referencePoseHash: session.referencePoseHash,
+    navigationReferenceHash: session.navigationReferenceHash,
+    referenceParkingPointCount: session.navigationReference?.parkingPoints.length || 0,
+    referencePathCount: session.navigationReference?.paths.length || 0,
     referencePoseCount: session.poseSeed?.samples.length || 0,
     referenceIPadPoseCount: session.poseSeed?.samples.filter((sample) => sample.origin === 'ipad').length || 0,
     referenceLeftArmPoseCount: session.poseSeed?.samples.filter((sample) => ipadPoseArm(sample) === 'left').length || 0,
@@ -144,18 +149,22 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         return json(res, 200, { protocol: IPAD_PROTOCOL, serverId, offers: [...offers.values()].slice(0, 16) });
       }
       if (route === '/sessions' && req.method === 'POST') {
-        const { manifest, targetDevice = 'ipad', poseSeed } = await readBody(req, 32 * 1024 * 1024);
+        const { manifest, targetDevice = 'ipad', poseSeed, navigationReference } = await readBody(req, 32 * 1024 * 1024);
         if (!['ipad', 'vision'].includes(targetDevice)) fail(400, '采集设备类型无效');
         if (manifest?.protocol !== IPAD_PROTOCOL || manifest.coordinateFrame !== 'virtual_origin'
           || manifest.distanceUnit !== 'meter' || manifest.verticalAxis !== 'Z'
           || !/^[a-f0-9]{64}$/.test(manifest.modelHash) || typeof manifest.name !== 'string'
           || !Number.isInteger(manifest.byteLength) || manifest.byteLength < 48 || manifest.byteLength > MAX_MODEL_BYTES) fail(400, '独立示教物体清单无效');
-        let references;
-        try { references = targetDevice === 'ipad' ? validateIPadPoseSeed(poseSeed, manifest) : undefined; }
+        let references, navigation;
+        try {
+          references = targetDevice === 'ipad' ? validateIPadPoseSeed(poseSeed, manifest) : undefined;
+          navigation = targetDevice === 'ipad' ? validateIPadNavigationReference(navigationReference) : undefined;
+        }
         catch (error) { fail(400, error.message); }
         return await withNewPairingCode(async (pairingCode) => {
           const id = randomUUID(), ownerToken = secret();
           const session = { id, manifest, targetDevice, poseSeed: references, referencePoseHash: hash(ipadPoseSeedJSON(references)), status: 'preparing', createdAt: new Date().toISOString(),
+            navigationReference: navigation, navigationReferenceHash: hash(ipadNavigationReferenceJSON(navigation)),
             ownerTokenHash: hash(ownerToken), pairingCodeHash: hash(pairingCode),
             pairingExpiresAt: Date.now() + 15 * 60 * 1000 };
           await mkdir(path.join(directory, id), { mode: 0o700 });
@@ -203,6 +212,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
               deviceTokenHash: hash(deviceToken), pairedAt: new Date().toISOString() });
             await save(session);
             return json(res, 200, { ...publicSession(session), deviceToken,
+              ...(!forResult && session.navigationReference ? { navigationReference: session.navigationReference } : {}),
               ...(!forResult && session.poseSeed ? { poseSeed: session.poseSeed } : {}) });
           });
         }

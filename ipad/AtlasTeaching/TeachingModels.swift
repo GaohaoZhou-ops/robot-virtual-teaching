@@ -98,12 +98,12 @@ struct ModelDisplaySettings: Codable, Equatable {
     }
 }
 
-struct Point3: Codable {
+struct Point3: Codable, Equatable {
     var x: Float; var y: Float; var z: Float
     init(_ p: SIMD3<Float>) { x = p.x; y = p.y; z = p.z }
     var simd: SIMD3<Float> { SIMD3(x, y, z) }
 }
-struct Rotation4: Codable {
+struct Rotation4: Codable, Equatable {
     var x: Float; var y: Float; var z: Float; var w: Float
     init(_ q: simd_quatf) { let v = q.normalized.vector; x = v.x; y = v.y; z = v.z; w = v.w }
 }
@@ -329,6 +329,57 @@ struct TeachingResult: Codable, Identifiable {
     var samples: [TeachingSample] = []
 }
 struct ModelBounds: Codable { var min: Point3; var max: Point3 }
+// Immutable display references. They never become TeachingSamples or travel
+// back in TeachingResult, and therefore cannot be edited by the Pose tools.
+struct ParkingPointReference: Codable, Equatable, Identifiable {
+    let id: String
+    let name: String
+    let position: Point3
+    let quaternion: Rotation4
+    var transform: simd_float4x4 {
+        let q = quaternion
+        var matrix = simd_float4x4(simd_quatf(ix: q.x, iy: q.y, iz: q.z, r: q.w).normalized)
+        matrix.columns.3 = SIMD4(position.simd, 1)
+        return matrix
+    }
+}
+struct NavigationPathReference: Codable, Equatable {
+    let id: String
+    let from: String
+    let to: String
+    let directed: Bool
+}
+struct NavigationReference: Codable, Equatable {
+    let version: Int
+    let coordinateFrame: String
+    let distanceUnit: String
+    let verticalAxis: String
+    let parkingPoints: [ParkingPointReference]
+    let paths: [NavigationPathReference]
+
+    func validate() throws {
+        guard version == 1, coordinateFrame == "virtual_origin", distanceUnit == "meter", verticalAxis == "Z",
+              parkingPoints.count <= 10_000, paths.count <= 50_000 else {
+            throw TeachingError("停车点参考坐标系或数量无效，请在电脑重新同步")
+        }
+        func validText(_ text: String) -> Bool { !text.isEmpty && text.utf16.count <= 512 }
+        var ids = Set<String>(), pathIDs = Set<String>()
+        for point in parkingPoints {
+            let p = point.position, q = point.quaternion
+            guard validText(point.id), validText(point.name), ids.insert(point.id).inserted,
+                  [p.x, p.y, p.z, q.x, q.y, q.z, q.w].allSatisfy(\.isFinite),
+                  abs(simd_length(SIMD4(q.x, q.y, q.z, q.w)) - 1) < 0.002 else {
+                throw TeachingError("停车点参考位姿或标识无效，请在电脑重新同步")
+            }
+        }
+        for path in paths {
+            guard validText(path.id), pathIDs.insert(path.id).inserted,
+                  ids.contains(path.from), ids.contains(path.to), path.from != path.to else {
+                throw TeachingError("路网参考连接无效，请在电脑重新同步")
+            }
+        }
+    }
+}
 struct ModelManifest: Codable {
     var `protocol`: String
     var modelHash: String
@@ -348,6 +399,7 @@ struct ModelManifest: Codable {
 struct PairedSession: Codable {
     var id: String; var deviceToken: String; var manifest: ModelManifest
     var poseSeed: TeachingPoseSeed? = nil
+    var navigationReference: NavigationReference? = nil
 }
 struct ResultSyncDestination: Codable {
     var serverURL: String
