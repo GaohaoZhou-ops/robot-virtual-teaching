@@ -77,7 +77,7 @@ const mobileCapture = (capture) => ({
     ...(calibration.referencePoint ? { referencePoint: vector(calibration.referencePoint) } : {}),
   })),
   samples: (capture.samples || []).map((sample) => ({
-    ...fields(sample, ['id', 'name', 'kind', 'segmentId', 'capturedAt', 'tracking']),
+    ...fields(sample, ['id', 'name', 'kind', 'segmentId', 'capturedAt', 'tracking', 'origin', 'arm']),
     cameraPose: opticalPose(sample.cameraPose),
     ...(sample.surfacePoint ? { surfacePoint: vector(sample.surfacePoint) } : {}),
   })),

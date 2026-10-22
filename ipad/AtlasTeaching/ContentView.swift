@@ -3,6 +3,34 @@ import SceneKit
 
 private let accent = Color(red: 0.35, green: 0.86, blue: 0.91)
 
+private extension TeachingPoseCategory {
+    var color: Color { Color(red: Double(rgb.x), green: Double(rgb.y), blue: Double(rgb.z)) }
+}
+
+private struct PoseOriginLegend: View {
+    let samples: [TeachingSample]
+    let coveragePercentages: [TeachingPoseCategory: String]
+    let coverageTitle: String
+    var rowSpacing: CGFloat = 10
+    var body: some View {
+        let counts = TeachingPoseCounts(samples)
+        VStack(alignment: .leading, spacing: rowSpacing) {
+            ForEach(TeachingPoseCategory.allCases.filter { $0 != .desktop || counts[$0] > 0 }, id: \.rawValue) { category in
+                let percentage = counts[category] == 0 ? "0%" : coveragePercentages[category] ?? "—"
+                HStack {
+                    Label(category.label, systemImage: category.symbol).foregroundStyle(category.color)
+                    Spacer(minLength: 8)
+                    Text("\(counts[category]) 个 Pose").monospacedDigit().foregroundStyle(category.color)
+                    Text(percentage).monospacedDigit().foregroundStyle(category.color)
+                        .frame(width: 54, alignment: .trailing)
+                        .accessibilityLabel("\(coverageTitle) \(percentage)")
+                }.accessibilityElement(children: .combine)
+                    .accessibilityIdentifier("pose-count-\(category.rawValue)")
+            }
+        }.font(.caption).accessibilityElement(children: .contain)
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var session: TeachingSession
     @Environment(\.scenePhase) private var scenePhase
@@ -15,14 +43,13 @@ struct ContentView: View {
     @State private var projectToDelete: LocalProject?
     @State private var revealedProjectID: String?
     @State private var deleteActionFrames: [String: CGRect] = [:]
-    @State private var libraryHeaderHeight: CGFloat = 0
     @State private var refreshingUSB = false
     @State private var usbRefreshTask: Task<Void, Never>?
     var body: some View {
         GeometryReader { viewport in
         Group {
             if let project = session.current, let geometry = session.geometry {
-                TeachingView(projectID: project.id, geometry: geometry)
+                TeachingView(projectID: project.id, geometry: geometry, bottomSafeArea: viewport.safeAreaInsets.bottom)
             } else { library(bottomSafeArea: viewport.safeAreaInsets.bottom) }
         }.frame(width: viewport.size.width, height: viewport.size.height)
         }.tint(accent).task { await session.reload() }
@@ -33,34 +60,32 @@ struct ContentView: View {
             let padding: CGFloat = viewport.size.width >= 700 ? 28 : 20
             // Include the home-indicator safe area in the page's bottom margin.
             let bottomPadding = max(0, padding - bottomSafeArea)
-            let panelHeight = wide ? max(0, viewport.size.height - padding - bottomPadding - libraryHeaderHeight - 24) : 0
-            ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 24) {
-                        libraryHeader
-                        if !ARController.supported {
-                            Label("空间定位需要配备 LiDAR 的 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
-                                .font(.callout).foregroundStyle(.orange).padding().frame(maxWidth: .infinity, alignment: .leading)
-                                .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-                        }
-                    }
-                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { libraryHeaderHeight = $0 }
-                    if wide {
-                        HStack(alignment: .top, spacing: 24) {
-                            pairingPanel(minHeight: panelHeight).frame(width: min(420, viewport.size.width * 0.35))
-                            localProjectsPanel(minHeight: panelHeight).frame(maxWidth: .infinity)
-                        }
-                    } else {
-                        pairingPanel(minHeight: 0).fixedSize(horizontal: false, vertical: true)
-                        localProjectsPanel(minHeight: 0)
+                    libraryHeader
+                    if !ARController.supported {
+                        Label("空间定位需要配备 LiDAR 的 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
+                            .font(.callout).foregroundStyle(.orange).padding().frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
-                .frame(minHeight: viewport.size.height, alignment: .topLeading)
-                .accessibilityElement(children: .contain).accessibilityIdentifier("library-content")
+                .fixedSize(horizontal: false, vertical: true)
+                if wide {
+                    HStack(alignment: .top, spacing: 24) {
+                        pairingPanel.frame(width: min(420, viewport.size.width * 0.35))
+                        localProjectsPanel
+                    }
+                } else {
+                    VStack(spacing: 24) {
+                        pairingPanel
+                        localProjectsPanel
+                    }
+                }
             }
-            .frame(width: viewport.size.width, height: viewport.size.height)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
+            .frame(width: viewport.size.width, height: viewport.size.height, alignment: .topLeading)
+            .accessibilityElement(children: .contain).accessibilityIdentifier("library-content")
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .coordinateSpace(name: LocalProjectSwipeLayout.coordinateSpace)
@@ -170,10 +195,24 @@ struct ContentView: View {
                 .accessibilityHidden(true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
-    private func pairingPanel(minHeight: CGFloat) -> some View {
+    private var pairingPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("与电脑配对", systemImage: "desktopcomputer").font(.title2.weight(.medium))
             Divider().padding(.vertical, 8)
+            ScrollView {
+                pairingContents
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .accessibilityIdentifier("library-pairing-scroll")
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
+    }
+    private var pairingContents: some View {
+        VStack(alignment: .leading, spacing: 12) {
             if let progress = session.transferProgress { modelTransferProgress(progress) }
             pairingMethodHeader("方式一", title: "扫码配对", symbol: "qrcode")
             Button(action: beginScanning) {
@@ -197,10 +236,7 @@ struct ContentView: View {
                 Text(session.status).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
-        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
-        .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
     private var usbReceivingPanel: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -355,7 +391,7 @@ struct ContentView: View {
             }
         }
     }
-    private func localProjectsPanel(minHeight: CGFloat) -> some View {
+    private var localProjectsPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
                 Label("保存在此 iPad", systemImage: "square.stack.3d.up").font(.title2.weight(.medium))
@@ -363,6 +399,21 @@ struct ContentView: View {
                 Text("\(session.projects.count) 个物体").font(.caption).foregroundStyle(.secondary)
             }
             Divider()
+            ScrollView {
+                localProjectContents
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .accessibilityIdentifier("library-projects-scroll")
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.06)))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("library-projects-panel")
+    }
+    private var localProjectContents: some View {
+        VStack(alignment: .leading, spacing: 20) {
             if session.projects.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "cube.transparent").font(.system(size: 64, weight: .ultraLight)).foregroundStyle(accent.opacity(0.7))
@@ -381,6 +432,7 @@ struct ContentView: View {
                                         Text(project.session.manifest.name).font(.headline).multilineTextAlignment(.leading).lineLimit(3)
                                         Text("\(project.result.samples.count) 个 Pose · \(project.syncedAt != nil ? "已同步" : project.result.completedAt != nil ? "已完成，待同步" : "本地草稿")")
                                             .font(.caption).foregroundStyle(.secondary)
+                                        Text(TeachingPoseCounts(project.result.samples).summary).font(.caption2).foregroundStyle(.secondary)
                                         if session.openingProjectID == project.id {
                                             ProgressView("轻量加载…").font(.caption).controlSize(.small)
                                                 .accessibilityIdentifier("opening-model-progress")
@@ -405,13 +457,8 @@ struct ContentView: View {
                 }
                 .accessibilityIdentifier("local-project-list")
             }
-            Spacer(minLength: 12)
         }
-        .padding(24)
-        .frame(maxWidth: .infinity, minHeight: minHeight, alignment: .topLeading)
-        .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.06)))
-        .accessibilityElement(children: .contain).accessibilityIdentifier("library-projects-panel")
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
 }
@@ -800,6 +847,8 @@ private struct TeachingResultSyncView: View {
                         Text(session.current?.session.manifest.name ?? "示教结果").font(.title3)
                         Text("已完成 · \(session.current?.result.samples.count ?? 0) 个 Pose")
                             .font(.callout).foregroundStyle(.secondary)
+                        Text(TeachingPoseCounts(session.current?.result.samples ?? []).summary)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     ResultSyncMethodPicker(selection: $method)
                         .frame(height: 44).disabled(session.busy)
@@ -913,13 +962,16 @@ struct TeachingView: View {
     @State private var sidebarCollapsed = false
     @State private var nearbyPoseConfirmation: NearbyPoseConfirmation?
     @State private var loadedProjectID: String?
+    @State private var sidebarContentHeight: CGFloat = 0
     @ScaledMetric(relativeTo: .body) private var teachingActionLabelHeight: CGFloat = 34
     let projectID: String
     let geometry: ModelGeometry
+    let bottomSafeArea: CGFloat
+    private let sidebarPadding: CGFloat = 22
     private var completed: Bool { session.current?.result.completedAt != nil }
     private var count: Int { session.current?.result.samples.count ?? 0 }
     private var liveCamera: Bool { ARController.supported && !completed }
-    private var fieldOfView: ZividFieldOfView? { liveCamera ? ar.cameraFieldOfView : .modelPreview }
+    private var fieldOfView: ZividFieldOfView? { liveCamera ? ar.cameraFieldOfView : nil }
     private var canRecordPose: Bool {
         scenePhase == .active && !review && !finishing && session.current?.id == projectID
             && !completed && ar.calibrated && ar.trackingNormal && renderer.geometry != nil
@@ -942,13 +994,13 @@ struct TeachingView: View {
         GeometryReader { viewport in
         let sidebarWidth: CGFloat = sidebarCollapsed ? 0 : 340
         let controlsWidth = max(0, viewport.size.width - sidebarWidth)
-        ZStack {
-            // Always render with the collapsed panel's full viewport. The panel
-            // covers its right edge; it must not resize/recenter the camera,
-            // the M70 mask, or the center used by placement raycasts.
+        let renderSize = CGSize(width: liveCamera ? viewport.size.width : controlsWidth, height: viewport.size.height)
+        ZStack(alignment: .leading) {
+            // Keep the live AR camera and placement raycasts stable while folding
+            // the panel. Free model previews use only the visible left viewport.
             ZStack {
                 Color.black
-                modelViewport(in: viewport.size)
+                modelViewport(in: renderSize)
                 if liveCamera {
                     Image(systemName: ar.placed && !ar.repositioning ? "plus" : "viewfinder")
                         .font(ar.placed && !ar.repositioning ? .title2.weight(.ultraLight) : .system(size: 48, weight: .ultraLight))
@@ -956,7 +1008,7 @@ struct TeachingView: View {
                         .shadow(color: .black, radius: 2).allowsHitTesting(false)
                         .accessibilityLabel("模型放置准星").accessibilityIdentifier("teaching-placement-target")
                 }
-            }.frame(width: viewport.size.width, height: viewport.size.height).clipped()
+            }.frame(width: renderSize.width, height: renderSize.height).clipped()
                 .accessibilityElement(children: .contain).accessibilityIdentifier("teaching-viewport")
             HStack(spacing: 0) {
                 VStack {
@@ -981,6 +1033,11 @@ struct TeachingView: View {
                         }
                             .buttonStyle(.bordered).accessibilityIdentifier("display-settings")
                         if sidebarCollapsed {
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text("\(coverage.coverageTitle) \(coverage.coveragePercentage)").monospacedDigit()
+                                    .accessibilityIdentifier("floating-coverage-percentage")
+                                if coverage.preparing { Text("更新中…").foregroundStyle(.secondary) }
+                            }
                             Button { setSidebarCollapsed(false) } label: {
                                 Label("展开面板", systemImage: "sidebar.right").frame(minWidth: 88, minHeight: 32)
                             }.buttonStyle(.bordered).accessibilityIdentifier("expand-teaching-panel")
@@ -1014,8 +1071,7 @@ struct TeachingView: View {
                         }
                     }.padding(20)
                 }.frame(width: controlsWidth, height: viewport.size.height).clipped()
-            // Keep sidebar controls alive while folding; only the overlay's
-            // usable area changes, never the underlying scene/session.
+            // Keep sidebar controls and the underlying scene/session alive while folding.
             VStack(spacing: 0) {
                 HStack {
                     Button { ar.stop(); Task { await session.close() } } label: { Label("本地项目", systemImage: "chevron.left") }.disabled(session.busy)
@@ -1024,18 +1080,23 @@ struct TeachingView: View {
                         Label("收起", systemImage: "chevron.right").font(.caption).frame(minHeight: 32)
                     }.buttonStyle(.bordered).accessibilityLabel("收起右侧面板")
                         .accessibilityIdentifier("collapse-teaching-panel")
-                }.padding(.horizontal, 22).padding(.vertical, 12)
+                }.padding(.horizontal, sidebarPadding).padding(.vertical, 12)
                 if liveCamera && !sidebarCollapsed && (ar.calibrated || ar.adjustingPlacement) {
-                    placementAdjustmentControls.padding(.horizontal, 22).padding(.bottom, 12)
+                    placementAdjustmentControls.padding(.horizontal, sidebarPadding).padding(.bottom, 12)
                 }
+            GeometryReader { contentViewport in
+                let extraHeight = completed && sidebarContentHeight > 0
+                    ? max(0, contentViewport.size.height - sidebarContentHeight) : 0
+                let counts = TeachingPoseCounts(session.current?.result.samples ?? [])
+                let groupCount = TeachingPoseCategory.allCases.filter { $0 != .desktop || counts[$0] > 0 }.count
             ScrollView {
                 VStack(alignment: .leading, spacing: 19) {
                     Text(session.current?.session.manifest.name ?? "独立示教物体").font(.title3).lineLimit(2)
                     Text("\(count)").font(.system(size: 54, weight: .light, design: .monospaced)) + Text("  POSES").font(.caption).foregroundColor(.secondary)
-                    Text(renderer.appliedSettings.map { geometry.summary($0) } ?? "正在轻量加载模型…")
-                        .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("teaching-render-summary")
+                    Text(TeachingPoseCounts(session.current?.result.samples ?? []).summary)
+                        .font(.caption).foregroundStyle(.secondary).accessibilityIdentifier("teaching-pose-counts")
                     if session.current?.session.manifest.sampled == true { Text("大物体以抽样点云显示，尺寸与坐标不变").font(.caption).foregroundStyle(.secondary) }
-                    Divider()
+                    if !completed { Divider() }
                     if completed {
                         Button { Task { await session.continueTeaching() } } label: {
                             teachingActionLabel("继续示教", systemImage: "camera.fill")
@@ -1044,28 +1105,14 @@ struct TeachingView: View {
                         Divider()
                     }
                     if liveCamera && !ar.calibrated { groundAssistanceControl }
-                    fieldOfViewControl
-                    coverageControl
-                    Divider()
+                    if liveCamera { fieldOfViewControl }
+                    coverageControl(additionalRowSpacing: extraHeight / CGFloat(groupCount))
                     if !completed {
+                        Divider()
                         calibrationPanel
                         if !sidebarCollapsed && !ar.adjustingPlacement { recordPoseButton }
-                    }
-                    Button { review = true } label: {
-                        teachingActionLabel("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle")
-                    }
-                        .buttonStyle(.bordered).disabled(count == 0)
-                        .accessibilityIdentifier("review-poses")
-                    if !completed {
+                        reviewPosesButton
                         finishTeachingButton
-                    } else {
-                        Button {
-                            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                            resultSyncOpen = true
-                        } label: {
-                            teachingActionLabel("同步数据", systemImage: "arrow.triangle.2.circlepath")
-                        }.buttonStyle(.borderedProminent).disabled(session.busy)
-                            .accessibilityIdentifier("sync-teaching-result")
                     }
                     if session.busy { ProgressView() }
                     if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.secondary) }
@@ -1074,8 +1121,16 @@ struct TeachingView: View {
                         Text(session.error).font(.caption).foregroundStyle(.orange)
                         Button("重试保存") { Task { do { try await session.saveNow(); session.error = "" } catch { session.error = error.localizedDescription } } }
                     }
-                }.padding(22)
+                }.padding(.horizontal, sidebarPadding).padding(.top, sidebarPadding)
+                    .padding(.bottom, completed ? 12 : sidebarPadding)
+                    // Measure the natural content height so distributing spare space
+                    // across the coverage rows does not feed back into the measurement.
+                    .onGeometryChange(for: CGFloat.self) { max(0, $0.size.height - extraHeight) } action: { height in
+                        if abs(height - sidebarContentHeight) > 0.5 { sidebarContentHeight = height }
+                    }
             }
+            }
+                if completed { completedActions }
             }.frame(width: 340, height: viewport.size.height).background(Color(red: 0.025, green: 0.05, blue: 0.065))
                 .frame(width: sidebarWidth, alignment: .leading).clipped()
                 .opacity(sidebarCollapsed ? 0 : 1).allowsHitTesting(!sidebarCollapsed)
@@ -1094,7 +1149,13 @@ struct TeachingView: View {
             }.eraseToAnyPublisher())
             coverage.update(model: geometry, samples: project.result.samples)
             ar.onCalibration = { session.addCalibration($0) }
-            ar.onSample = { session.addSample($0) }
+            ar.onSample = { sample in
+                guard session.addSample(sample) else { return false }
+                // Start surface feedback in the recording action itself; the
+                // publisher also handles deletion, review and project restore.
+                if let project = session.current { coverage.update(model: geometry, samples: project.result.samples) }
+                return true
+            }
             if !completed { await ar.start() }
         }.onDisappear {
             guard !review || session.current?.id != projectID else { return }
@@ -1137,6 +1198,29 @@ struct TeachingView: View {
         Label(title, systemImage: systemImage).font(.body)
             .frame(maxWidth: .infinity).frame(height: teachingActionLabelHeight)
             .padding(.horizontal, 7)
+    }
+    private var reviewPosesButton: some View {
+        Button { review = true } label: {
+            teachingActionLabel("查看 / 编辑 Pose", systemImage: "list.bullet.rectangle")
+        }.buttonStyle(.bordered).disabled(count == 0)
+            .accessibilityIdentifier("review-poses")
+    }
+    private var completedActions: some View {
+        VStack(spacing: 19) {
+            Divider()
+            reviewPosesButton
+            Button {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                resultSyncOpen = true
+            } label: {
+                teachingActionLabel("同步数据", systemImage: "arrow.triangle.2.circlepath")
+            }.buttonStyle(.borderedProminent).disabled(session.busy)
+                .accessibilityIdentifier("sync-teaching-result")
+        }
+        .padding(.horizontal, sidebarPadding)
+        // Count the home-indicator safe area as part of the outer bottom margin.
+        .padding(.bottom, max(0, sidebarPadding - bottomSafeArea))
+        .fixedSize(horizontal: false, vertical: true)
     }
     private var finishTeachingButton: some View {
         Button {
@@ -1210,11 +1294,17 @@ struct TeachingView: View {
         let size = zividFieldOfViewEnabled ? fieldOfView?.fittedSize(in: available) ?? available : available
         return ZStack {
             if liveCamera { ARSceneView(controller: ar) }
-            else { ObjectPreviewView(geometry: geometry, rendered: renderer.geometry) }
+            else {
+                ObjectPreviewView(geometry: geometry, rendered: renderer.geometry,
+                                  initialViewport: completed ? size : nil)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("三维物体预览，拖动旋转，双指缩放和平移")
+                    .accessibilityIdentifier("teaching-model-preview")
+            }
             if zividFieldOfViewEnabled, let fieldOfView {
                 ZividFieldOfViewOverlay(fieldOfView: fieldOfView, labelAtTop: sidebarCollapsed)
             }
-        }.frame(width: size.width, height: size.height).clipped()
+        }.frame(width: size.width, height: size.height).clipped().contentShape(Rectangle())
             .accessibilityElement(children: .contain).accessibilityIdentifier("teaching-render-surface")
     }
     private var fieldOfViewControl: some View {
@@ -1238,8 +1328,8 @@ struct TeachingView: View {
             }
         }
     }
-    private var coverageControl: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func coverageControl(additionalRowSpacing: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Button { coverage.enabled.toggle() } label: {
                     Label("已示教区域", systemImage: "square.3.layers.3d")
@@ -1249,24 +1339,43 @@ struct TeachingView: View {
                 Toggle("已示教区域", isOn: $coverage.enabled).labelsHidden().fixedSize()
                     .tint(accent).accessibilityIdentifier("teaching-coverage-toggle")
             }
+            PoseOriginLegend(samples: session.current?.result.samples ?? [],
+                             coveragePercentages: coverage.categoryPercentages, coverageTitle: coverage.coverageTitle,
+                             rowSpacing: 10 + additionalRowSpacing)
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    Text("\(coverage.coverageTitle)（估算）").font(.caption)
+                    Spacer()
+                    if coverage.preparing {
+                        ProgressView().controlSize(.mini).accessibilityLabel("正在更新覆盖率")
+                            .accessibilityIdentifier("teaching-coverage-progress")
+                    }
+                    Text(coverage.coveragePercentage).font(.subheadline.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(accent).accessibilityIdentifier("teaching-coverage-percentage")
+                }
+                ProgressView(value: coverage.coveredFraction ?? 0, total: 1).tint(.mint)
+                    .accessibilityLabel(coverage.coverageTitle).accessibilityIdentifier("teaching-coverage-bar")
+                if coverage.preparing || coverage.coveredFraction == nil {
+                    Text(coverage.preparing ? "正在更新覆盖率…" : "模型没有可估算的有效表面")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }.padding(.top, additionalRowSpacing).padding(.bottom, 4)
             if coverage.enabled {
                 HStack {
                     Text("着色强度").font(.caption)
-                    Slider(value: $coverage.opacity, in: 0.05...0.6, step: 0.05)
+                    Slider(value: $coverage.opacity, in: 0.05...1, step: 0.05)
                         .tint(.mint).accessibilityLabel("已示教区域着色强度")
                         .accessibilityIdentifier("teaching-coverage-opacity")
                     Text("\(Int((coverage.opacity * 100).rounded()))%")
-                        .font(.caption.monospacedDigit()).frame(width: 32, alignment: .trailing)
+                        .font(.caption.monospacedDigit()).frame(width: 42, alignment: .trailing)
+                        .accessibilityIdentifier("teaching-coverage-opacity-value")
                 }
             }
-            if coverage.preparing || !coverage.error.isEmpty {
+            if !coverage.error.isEmpty || (coverage.enabled &&
+                (coverage.preparing || coverage.poseCount == 0 || coverage.hasCoverageWarning)) {
                 HStack(spacing: 6) {
-                    if coverage.preparing {
-                        ProgressView().controlSize(.mini)
-                            .accessibilityIdentifier("teaching-coverage-progress")
-                    }
                     Text(coverage.status).font(.caption)
-                        .foregroundStyle(coverage.error.isEmpty ? Color.secondary : .orange)
+                        .foregroundStyle(coverage.error.isEmpty && !coverage.hasCoverageWarning ? Color.secondary : .orange)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("teaching-coverage-status")
                 }
@@ -1413,6 +1522,7 @@ struct ModelDisplaySettingsView: View {
 struct ObjectPreviewView: UIViewRepresentable {
     let geometry: ModelGeometry
     let rendered: SCNGeometry?
+    var initialViewport: CGSize? = nil
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView(); view.scene = SCNScene(); view.backgroundColor = UIColor(red: 0.025, green: 0.05, blue: 0.065, alpha: 1)
         let object = SCNNode(geometry: rendered); object.name = "preview-object"; view.scene?.rootNode.addChildNode(object)
@@ -1422,7 +1532,30 @@ struct ObjectPreviewView: UIViewRepresentable {
         let camera = SCNNode(); camera.camera = SCNCamera(); camera.camera?.zNear = 0.001; camera.camera?.zFar = Double(max(size * 100, 1000))
         camera.camera?.projectionDirection = .vertical
         camera.camera?.fieldOfView = ZividFieldOfView.previewVerticalDegrees
-        camera.position = SCNVector3(center.x + size * 1.2, center.y - size * 1.8, center.z + size)
+        let direction = simd_normalize(SIMD3<Float>(1.2, -1.8, 1))
+        var distance = size * simd_length(SIMD3<Float>(1.2, -1.8, 1))
+        if let viewport = initialViewport, viewport.width > 0, viewport.height > 0 {
+            // Fit the completed model to 78% of the visible left canvas. Using
+            // both viewport axes avoids a tiny landscape preview or clipped
+            // sides when the same model is first opened in portrait.
+            let right = simd_normalize(simd_cross(SIMD3<Float>(0, 0, 1), direction))
+            let up = simd_cross(direction, right)
+            let tangentY = tan(Float(ZividFieldOfView.previewVerticalDegrees) * .pi / 360) * 0.78
+            let tangentX = tangentY * Float(viewport.width / viewport.height)
+            distance = size * 0.05
+            for x in [minimum.x, maximum.x] {
+                for y in [minimum.y, maximum.y] {
+                    for z in [minimum.z, maximum.z] {
+                        let offset = SIMD3<Float>(x - center.x, y - center.y, z - center.z)
+                        let depth = simd_dot(offset, direction)
+                        distance = max(distance, depth + max(abs(simd_dot(offset, right)) / tangentX,
+                                                             abs(simd_dot(offset, up)) / tangentY))
+                    }
+                }
+            }
+        }
+        camera.position = SCNVector3(center.x + direction.x * distance,
+                                    center.y + direction.y * distance, center.z + direction.z * distance)
         camera.look(at: center, up: SCNVector3(0, 0, 1), localFront: SCNVector3(0, 0, -1))
         view.scene?.rootNode.addChildNode(camera); view.pointOfView = camera
         view.allowsCameraControl = true; view.defaultCameraController.worldUp = SCNVector3(0, 0, 1)
@@ -1529,6 +1662,8 @@ struct PoseReviewView: View {
                     .accessibilityIdentifier(selectingForDeletion ? "cancel-pose-selection" : "select-poses")
             }.padding(.horizontal, 16).padding(.vertical, 12)
                 .frame(minHeight: headerHeight)
+            PoseOriginLegend(samples: samples, coveragePercentages: coverage.categoryPercentages,
+                             coverageTitle: coverage.coverageTitle).padding(.horizontal, 16).padding(.bottom, 12)
             Divider()
             if selectingForDeletion {
                 HStack {
@@ -1558,6 +1693,7 @@ struct PoseReviewView: View {
 
     private func poseRow(_ sample: TeachingSample) -> some View {
         let highlighted = selectingForDeletion ? deletionIDs.contains(sample.id) : sample.id == selected?.id
+        let origin = sample.category
         return Button {
             poseNameFocused = false; selectedID = sample.id; poseName = sample.name
             if selectingForDeletion {
@@ -1572,12 +1708,14 @@ struct PoseReviewView: View {
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Text(sample.name.isEmpty ? "Pose" : sample.name)
-                        .foregroundStyle(highlighted ? accent : .primary)
+                        .foregroundStyle(origin.color)
+                    Label(origin.label, systemImage: origin.symbol)
+                        .font(.caption).foregroundStyle(origin.color)
                     Text(sample.capturedAt).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }.padding(.vertical, 5).contentShape(Rectangle())
-        }.listRowBackground(highlighted ? accent.opacity(0.12) : Color.clear)
+        }.listRowBackground(highlighted ? origin.color.opacity(0.12) : Color.clear)
             .disabled(session.busy)
             .accessibilityIdentifier("review-pose-\(sample.id)")
             .accessibilityValue(selectingForDeletion ? (deletionIDs.contains(sample.id) ? "已勾选" : "未勾选") : "")
@@ -1736,7 +1874,7 @@ struct PoseReviewView: View {
 
     private func poseEditorPanel(maximumHeight: CGFloat) -> some View {
         ScrollView {
-            poseEditor.padding(16)
+            poseEditor.padding(.horizontal, 16).padding(.vertical, 14)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { poseEditorHeight = $0 }
         }
@@ -1777,13 +1915,24 @@ struct PoseReviewView: View {
                 if !session.error.isEmpty { Text(session.error).font(.caption).foregroundStyle(.orange) }
             }.frame(maxWidth: .infinity, alignment: .leading)
         } else if let selected {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("Pose 详情").font(.caption.weight(.medium)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: true, vertical: false)
                     Spacer(minLength: 0)
                     Text(selected.name.isEmpty ? "Pose" : selected.name).font(.headline)
                         .multilineTextAlignment(.trailing)
+                }
+                Label(selected.category.label, systemImage: selected.category.symbol)
+                    .font(.caption.weight(.medium)).foregroundStyle(selected.category.color)
+                    .accessibilityIdentifier("pose-selected-origin")
+                HStack {
+                    Text("\(coverage.coverageTitle)（估算）").font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    let fraction = previewPreparation.sampleID == selected.id ? previewPreparation.footprint?.coveredFraction : nil
+                    Text(TeachingCoverageRenderer.percentage(fraction))
+                        .font(.subheadline.monospacedDigit().weight(.semibold)).foregroundStyle(selected.category.color)
+                        .accessibilityIdentifier("pose-selected-coverage-percentage")
                 }
                 let p = selected.cameraPose.position
                 if previewMode == .image {
@@ -1799,10 +1948,6 @@ struct PoseReviewView: View {
                         .accessibilityIdentifier("review-pose-name")
                     Button("保存名称") { session.renameSample(selected.id, name: poseName); poseNameFocused = false }
                         .buttonStyle(.bordered).accessibilityIdentifier("save-pose-name")
-                }
-                if completed {
-                    Text("本次示教已完成。可通过上方「多选」在副本中批量删除。")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
                 if !session.error.isEmpty { Text(session.error).font(.caption).foregroundStyle(.orange) }
             }.frame(maxWidth: .infinity, alignment: .leading)

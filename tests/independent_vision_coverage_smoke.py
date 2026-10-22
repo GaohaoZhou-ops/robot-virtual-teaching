@@ -4,7 +4,7 @@ import os
 from io import BytesIO
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 from viewer_tools_helpers import viewer_tool
 from PIL import Image, ImageChops, ImageStat
@@ -13,6 +13,16 @@ from PIL import Image, ImageChops, ImageStat
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990").rstrip("/")
 ROOT = Path(__file__).resolve().parents[1]
 CHROME = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+
+
+def surface_coverage(page, frames):
+    card = page.locator('.teaching-surface-coverage')
+    expect(card).to_have_attribute('data-frame-count', str(frames))
+    expect(card).to_have_attribute('data-status', 'ready')
+    expect(card).to_have_attribute('data-kind', 'surface')
+    expect(card).to_have_attribute('data-sample-count', '131072')
+    assert abs(float(card.get_attribute('data-total-area')) - 0.234) < 1e-6
+    return float(card.get_attribute('data-fraction'))
 
 
 def image_pixel_difference(left_png, right_png):
@@ -123,6 +133,7 @@ def run():
 
         canvas = page.locator(".three-canvas")
         assert canvas.get_attribute("data-vision-coverage-state") == "empty"
+        assert surface_coverage(page, 0) == 0
         topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role(
             "option", name="加载机器人 botx_abx_zivid_m70"
@@ -201,6 +212,8 @@ def run():
             canvas.get_attribute("data-teaching-surface-tint-covered-point-count") or 0
         )
         assert first_surface_tint_count > 0
+        first_area_coverage = surface_coverage(page, 2)
+        assert 0 < first_area_coverage < 1
         assert canvas.get_attribute("data-teaching-surface-tint-overlap-mode") == "binary-union"
         assert canvas.get_attribute("data-teaching-surface-tint-maximum-weight") == "1"
         assert canvas.get_attribute("data-teaching-surface-tint-opacity") == "0.05"
@@ -248,6 +261,7 @@ def run():
             timeout=30_000,
         )
         overlap_metrics = coverage_metrics(canvas)
+        assert surface_coverage(page, 4) == first_area_coverage
         assert overlap_metrics["poses"] == 2
         assert overlap_metrics["frames"] == 4
         assert overlap_metrics["optical_points"] == 4
@@ -308,6 +322,7 @@ def run():
             "document.querySelector('.three-canvas')?.dataset.teachingSurfaceTintOpacity === '0.35'"
         )
         assert opacity_slider.input_value() == "35"
+        assert surface_coverage(page, 4) == first_area_coverage
         assert display_settings.locator("output").inner_text() == "35%"
         assert canvas.get_attribute("data-teaching-surface-tint-opacity") == "0.35"
         page.screenshot(path="/tmp/atlas-surface-opacity-display-settings.png")
@@ -353,6 +368,7 @@ def run():
         )
         page.wait_for_timeout(250)
         disabled_metrics = coverage_metrics(canvas)
+        assert surface_coverage(page, 4) == first_area_coverage
         assert disabled_metrics["state"] == "disabled"
         assert disabled_metrics["render_enabled"] == "false"
         assert disabled_metrics["render_state"] == "disabled"
@@ -435,6 +451,14 @@ def run():
         assert moved_metrics["coordinate_frames"] == 4
         assert moved_metrics["coordinate_axes"] == 12
 
+        page.get_by_role('button', name='显示设置', exact=True).click()
+        display_settings.get_by_role('combobox', name='网格渲染质量').select_option('performance')
+        display_settings.get_by_role('combobox', name='点云显示密度').select_option('0')
+        assert surface_coverage(page, 4) == first_area_coverage
+        display_settings.get_by_role('combobox', name='网格渲染质量').select_option('auto')
+        display_settings.get_by_role('combobox', name='点云显示密度').select_option('auto')
+        display_settings.get_by_role('button', name='关闭显示设置').click()
+
         # Playback immediately restores the first recording and its projection,
         # then reveals later captures as their poses are reached.
         topbar_action(page, name="打开示教数据管理页").click()
@@ -466,6 +490,7 @@ def run():
             timeout=60_000,
         )
         first_arrival_metrics = coverage_metrics(canvas)
+        assert surface_coverage(page, 4) == first_area_coverage, 'overall progress is independent of playback'
         assert first_arrival_metrics["generation_mode"] == "pose-arrival-progressive"
         assert first_arrival_metrics["playback_status"] == "playing"
         assert first_arrival_metrics["available_frames"] == 4
@@ -553,6 +578,7 @@ def run():
             """
         )
         restored = coverage_metrics(page.locator(".three-canvas"))
+        assert surface_coverage(page, 4) == first_area_coverage
         assert restored["state"] == "visible"
         assert restored["poses"] == 2
         assert restored["frames"] == 4
@@ -569,6 +595,19 @@ def run():
             or 0
         ) == first_surface_tint_count
 
+        page.screenshot(path='/tmp/atlas-mac-surface-coverage.png', full_page=True)
+        page.get_by_role('tab', name='示教', exact=True).click()
+        pose_items = page.locator('.teaching-capture-tree__pose-item')
+        if not pose_items.count():
+            page.get_by_role('button', name='选择当前停车点', exact=False).first.click()
+        pose_items.last.click()
+        page.get_by_role('button', name='删除姿态', exact=True).click()
+        assert surface_coverage(page, 2) == first_area_coverage, 'one duplicate still covers the same area'
+        pose_items.last.click()
+        page.get_by_role('button', name='删除姿态', exact=True).click()
+        assert surface_coverage(page, 0) == 0, 'deleting the final Pose clears coverage'
+
+        print('surface_area_coverage=', first_area_coverage)
         print("coverage_metrics=", metrics)
         print("overlap_coverage_metrics=", overlap_metrics)
         print("disabled_coverage_metrics=", disabled_metrics)

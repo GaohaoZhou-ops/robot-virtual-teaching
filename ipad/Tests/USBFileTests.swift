@@ -9,6 +9,10 @@ import Foundation
         precondition(snapshot.connection != nil && snapshot.transfers.count == 1)
         let transfer = snapshot.transfers[0]
         precondition(transfer.id == id)
+        let references = try transfer.poseSeed?.validatedSamples()
+        precondition(references?.first?.origin == .desktop,
+                     "Mac source survives the USB wire format and native decoding")
+        precondition(references?.last?.origin == .ipad, "iPad recordings retain their source when sent back over USB")
         let data = try await inbox.model(transfer)
         _ = try ModelGeometry(data: data, manifest: transfer.manifest)
         precondition(!data.isEmpty)

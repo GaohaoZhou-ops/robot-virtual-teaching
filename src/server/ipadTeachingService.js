@@ -4,10 +4,11 @@ import { createReadStream } from 'node:fs';
 import { networkInterfaces, hostname } from 'node:os';
 import path from 'node:path';
 import QRCode from 'qrcode';
-import { IPAD_PROTOCOL, MAX_MODEL_BYTES, validateModelBytes, validateIPadResult } from '../lib/ipadProtocol.js';
+import { IPAD_PROTOCOL, MAX_MODEL_BYTES, validateModelBytes, validateIPadResult, validateIPadPoseSeed, ipadPoseArm } from '../lib/ipadProtocol.js';
 import { advertiseIPadService } from './ipadDiscovery.js';
 import { modelThumbnail } from './modelThumbnail.js';
 import { createIPadUSBBridge } from './ipadUSB.js';
+import { ipadPoseSeedJSON } from '../lib/ipadTransferSnapshot.js';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -53,7 +54,12 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
   const save = (session) => atomicWrite(sessionFile(session.id), JSON.stringify(session));
   async function load(id) {
     if (!/^[a-f0-9-]{36}$/.test(id)) fail(404, '配对任务不存在');
-    try { return JSON.parse(await readFile(sessionFile(id), 'utf8')); }
+    try {
+      const session = JSON.parse(await readFile(sessionFile(id), 'utf8'));
+      // Also identify pre-feature transfers, including old model-only QRs.
+      session.referencePoseHash ||= hash(ipadPoseSeedJSON(session.poseSeed));
+      return session;
+    }
     catch (error) { if (error.code === 'ENOENT') fail(404, '配对任务不存在'); throw error; }
   }
   // Creation and renewal share one reservation lock, including the durable write.
@@ -74,6 +80,11 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
     if (session.status === 'cancelled') fail(410, '配对任务已结束');
   };
   const publicSession = (session) => ({ id: session.id, status: session.status, manifest: session.manifest,
+    referencePoseHash: session.referencePoseHash,
+    referencePoseCount: session.poseSeed?.samples.length || 0,
+    referenceIPadPoseCount: session.poseSeed?.samples.filter((sample) => sample.origin === 'ipad').length || 0,
+    referenceLeftArmPoseCount: session.poseSeed?.samples.filter((sample) => ipadPoseArm(sample) === 'left').length || 0,
+    referenceRightArmPoseCount: session.poseSeed?.samples.filter((sample) => ipadPoseArm(sample) === 'right').length || 0,
     createdAt: session.createdAt, pairedAt: session.pairedAt, completedAt: session.completedAt,
     importedAt: session.importedAt, sampleCount: session.sampleCount || 0, deviceName: session.deviceName || '' });
   async function verifyModel(session, identity) {
@@ -133,15 +144,18 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         return json(res, 200, { protocol: IPAD_PROTOCOL, serverId, offers: [...offers.values()].slice(0, 16) });
       }
       if (route === '/sessions' && req.method === 'POST') {
-        const { manifest, targetDevice = 'ipad' } = await readBody(req, 16384);
+        const { manifest, targetDevice = 'ipad', poseSeed } = await readBody(req, 32 * 1024 * 1024);
         if (!['ipad', 'vision'].includes(targetDevice)) fail(400, '采集设备类型无效');
         if (manifest?.protocol !== IPAD_PROTOCOL || manifest.coordinateFrame !== 'virtual_origin'
           || manifest.distanceUnit !== 'meter' || manifest.verticalAxis !== 'Z'
           || !/^[a-f0-9]{64}$/.test(manifest.modelHash) || typeof manifest.name !== 'string'
           || !Number.isInteger(manifest.byteLength) || manifest.byteLength < 48 || manifest.byteLength > MAX_MODEL_BYTES) fail(400, '独立示教物体清单无效');
+        let references;
+        try { references = targetDevice === 'ipad' ? validateIPadPoseSeed(poseSeed, manifest) : undefined; }
+        catch (error) { fail(400, error.message); }
         return await withNewPairingCode(async (pairingCode) => {
           const id = randomUUID(), ownerToken = secret();
-          const session = { id, manifest, targetDevice, status: 'preparing', createdAt: new Date().toISOString(),
+          const session = { id, manifest, targetDevice, poseSeed: references, referencePoseHash: hash(ipadPoseSeedJSON(references)), status: 'preparing', createdAt: new Date().toISOString(),
             ownerTokenHash: hash(ownerToken), pairingCodeHash: hash(pairingCode),
             pairingExpiresAt: Date.now() + 15 * 60 * 1000 };
           await mkdir(path.join(directory, id), { mode: 0o700 });
@@ -188,7 +202,8 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
             Object.assign(session, { status: session.resultHash ? session.status : 'paired', deviceId: body.deviceId, deviceName: String(body.deviceName || 'iPad Pro').slice(0, 80),
               deviceTokenHash: hash(deviceToken), pairedAt: new Date().toISOString() });
             await save(session);
-            return json(res, 200, { ...publicSession(session), deviceToken });
+            return json(res, 200, { ...publicSession(session), deviceToken,
+              ...(!forResult && session.poseSeed ? { poseSeed: session.poseSeed } : {}) });
           });
         }
         fail(404, '找不到配对码，请确认电脑地址与配对码');

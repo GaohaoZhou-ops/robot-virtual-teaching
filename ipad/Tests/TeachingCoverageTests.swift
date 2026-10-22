@@ -33,6 +33,30 @@ import AppKit
     @MainActor static func main() async throws {
         guard let device = MTLCreateSystemDefaultDevice() else { fatalError("Coverage tests require Metal") }
         let pose = TeachingCoveragePose(camera())!
+        let legacy = TeachingSample(segmentId: "legacy", kind: "keyframe", cameraPose: camera())
+        let legacyBytes = try JSONEncoder().encode(legacy)
+        let decodedLegacy = try JSONDecoder().decode(TeachingSample.self, from: legacyBytes)
+        precondition(decodedLegacy.origin == nil && decodedLegacy.resolvedOrigin == .ipad)
+        precondition(!String(data: legacyBytes, encoding: .utf8)!.contains("origin"), "legacy archives stay compatible")
+        var imported = legacy; imported.origin = .desktop
+        var oldLeft = imported; oldLeft.name = "Pose 001 · 左相机"
+        var oldRight = imported; oldRight.name = "Pose 001 · 右相机"
+        precondition(oldLeft.resolvedArm == .left && oldRight.resolvedArm == .right)
+        oldRight.arm = oldRight.resolvedArm; oldRight.name = "Renamed"
+        let armRoundTrip = try JSONDecoder().decode(TeachingSample.self, from: JSONEncoder().encode(oldRight))
+        precondition(armRoundTrip.category == .rightArm, "explicit arm identity survives rename and storage")
+        var namedIPad = legacy; namedIPad.name = "Pose 001 · 左相机"
+        precondition(namedIPad.category == .ipad, "an iPad pose cannot be classified by name")
+        let armCounts = TeachingPoseCounts([oldLeft, oldRight, legacy, oldLeft, oldRight, oldLeft, oldRight])
+        precondition(armCounts[.leftArm] == 3 && armCounts[.rightArm] == 3 && armCounts[.ipad] == 1)
+        var returningIPad = legacy; returningIPad.id = "returning-ipad"; returningIPad.origin = .ipad
+        let seed = TeachingPoseSeed(samples: [imported, returningIPad])
+        var seededResult = TeachingResult(sessionId: "seed-test", modelHash: "model-test")
+        try seed.apply(to: &seededResult)
+        let restored = try JSONDecoder().decode(TeachingResult.self, from: JSONEncoder().encode(seededResult))
+        precondition(restored.samples[0].resolvedOrigin == .desktop
+                     && restored.samples[0].segmentId == restored.calibrations[0].id)
+        precondition(restored.samples[1].origin == .ipad, "an iPad Pose keeps its source after transmission through Mac")
         let flat = try model(plane(z: 1), quad)
         let engine = try TeachingCoverageEngine(model: flat)
         let depths = try await engine.rasterize(pose)
@@ -61,6 +85,15 @@ import AppKit
         precondition(empty.allSatisfy { $0 == 0 }, "empty cells never extend to the far plane")
         let missing = try await emptyEngine.build([pose])
         precondition(missing.frameCount == 0 && missing.frames == nil)
+        guard case .tooFar(let farDepth) = missing.poseStatuses[pose] else { fatalError("a distant visible surface must explain a missed footprint") }
+        precondition(abs(farDepth - 2) < 0.001)
+        let tooNearSnapshot = try await nearEngine.build([pose])
+        guard case .tooNear(let nearDepth) = tooNearSnapshot.poseStatuses[pose] else { fatalError("near occluders must report that the camera is too close") }
+        precondition(abs(nearDepth - 0.1) < 0.001 && tooNearSnapshot.frameCount == 0)
+        let sideways = TeachingCoveragePose(camera(position: SIMD3(10, 0, 0)))!
+        let outsideSnapshot = try await engine.build([sideways])
+        precondition(outsideSnapshot.poseStatuses[sideways] == .outsideView && outsideSnapshot.frameCount == 0,
+                     "a model outside the camera frustum must not be reported as a distance miss")
         var previewSample = TeachingSample(segmentId: "preview", kind: "keyframe", cameraPose: camera())
         let distantPreview = try await emptyEngine.preview(previewSample)
         precondition(distantPreview.frameCount == 0,
@@ -131,13 +164,147 @@ import AppKit
         }
         let plain = capture()
         let snapshot = try await engine.build([pose])
+        let firstFraction = snapshot.coveredFraction!
+        let apertureArea = 4 * Double(TeachingCoverageProfile.tangentX * TeachingCoverageProfile.tangentY)
+        precondition(abs(firstFraction - apertureArea / 16) < 0.002,
+                     "coverage measures partial triangle AREA, even with every vertex outside the view")
+        precondition(snapshot.categoryFractions[.ipad] == firstFraction
+                     && snapshot.categoryFractions[.leftArm] == 0 && snapshot.categoryFractions[.rightArm] == 0,
+                     "each group uses the whole model area as its denominator")
+        let shiftedPose = TeachingCoveragePose(camera(position: SIMD3(0.2, 0, 0)))!
+        let union = try await engine.build([pose, shiftedPose])
+        let unionArea = (2 * Double(TeachingCoverageProfile.tangentX) + 0.2) * 2 * Double(TeachingCoverageProfile.tangentY)
+        precondition(abs(union.coveredFraction! - unionArea / 16) < 0.002
+                     && union.coveredFraction! > firstFraction && union.coveredFraction! < 2 * firstFraction,
+                     "overlapping footprints count only their union, not the sum of their areas")
+        let selectedCoverage = try await engine.preview(previewSample)
+        precondition(selectedCoverage.coveredFraction == firstFraction
+                     && selectedCoverage.coveredFraction! < union.coveredFraction!,
+                     "Pose details report only the selected camera's area over the full model")
+        precondition(offAxis.coveredFraction == firstFraction && distantPreview.coveredFraction == 0,
+                     "legacy screen lens fields do not change the M70 percentage, and misses report zero")
+        let untouchedUnion = try await engine.build([pose, shiftedPose])
+        precondition(untouchedUnion.coveredFraction == union.coveredFraction
+                     && untouchedUnion.categoryFractions == union.categoryFractions,
+                     "inspecting one Pose cannot replace the accumulated union or group statistics")
+        var editedPreview = previewSample
+        editedPreview.cameraPose = camera(position: SIMD3(0, 0, -1))
+        let editedCoverage = try await engine.preview(editedPreview)
+        let restoredCoverage = try await engine.preview(previewSample)
+        precondition(editedCoverage.coveredFraction == 0 && restoredCoverage.coveredFraction == firstFraction,
+                     "selection measurement is keyed by the camera, not an unchanged sample ID")
+        let freshEngine = try TeachingCoverageEngine(model: flat)
+        let reordered = try await freshEngine.build([shiftedPose, pose, shiftedPose])
+        precondition(reordered.coveredFraction == union.coveredFraction && reordered.categoryFractions == union.categoryFractions,
+                     "duplicate/reordered Poses and reopening keep exactly the same estimate")
+        let deleted = try await engine.build([shiftedPose])
+        let onePose = try await freshEngine.build([shiftedPose])
+        precondition(deleted.coveredFraction == onePose.coveredFraction && deleted.coveredFraction! < union.coveredFraction!,
+                     "deletion recomputes the retained union without leaving removed coverage behind")
+        let batched = try await freshEngine.build(Array(repeating: pose, count: 65) + [shiftedPose])
+        precondition(batched.coveredFraction == union.coveredFraction && batched.categoryFractions == union.categoryFractions,
+                     "GPU batch boundaries must preserve the same union without counting overlap again")
+        let zero = try await engine.build([])
+        precondition(zero.coveredFraction == 0 && zero.categoryFractions.values.allSatisfy { $0 == 0 })
+        let unequalArea = try TeachingCoverageEngine(model: model(plane(z: 1, radius: 0.1) + plane(z: 2, radius: 1),
+                                                                 quad + quad.map { $0 + 4 }))
+        let weighted = try await unequalArea.build([pose])
+        precondition(abs(weighted.coveredFraction! - 0.04 / 4.04) < 0.001,
+                     "equal numbers of faces with unequal areas must not each contribute 50 percent")
+        let pointCoverage = try await pointEngine.build([pose])
+        let selectedPoints = try await pointEngine.preview(previewSample)
+        let selectedWeighted = try await unequalArea.preview(previewSample)
+        let selectedTooNear = try await nearEngine.preview(previewSample)
+        precondition(selectedPoints.coveredFraction == 1 && selectedWeighted.coveredFraction == weighted.coveredFraction
+                     && selectedTooNear.coveredFraction == 0,
+                     "single-Pose percentages preserve point-cloud fallback, area weights and near occluders")
+        precondition(pointCoverage.coveredFraction == 1 && missing.coveredFraction == 0 && tooNearSnapshot.coveredFraction == 0,
+                     "point-only coverage and out-of-range surfaces follow the same visibility rules")
+        precondition(pointCoverage.categoryFractions[.ipad] == 1 && missing.categoryFractions[.ipad] == 0
+                     && tooNearSnapshot.categoryFractions[.ipad] == 0)
         TeachingCoverageRenderer.apply(snapshot, opacity: 0.5, to: geometry.firstMaterial!)
         let tinted = capture("coverage-surface.png")
         let center = (128 * 256 + 128) * 4
-        precondition(Int(tinted[center + 1]) > Int(tinted[center]) + 30, "the real shader must tint the triangle interior green")
+        precondition(Int(tinted[center + 2]) > Int(tinted[center]) + 15, "legacy and new iPad Poses tint the triangle interior purple")
         precondition(tinted[center + 3] == plain[center + 3], "source alpha is preserved")
         let outside = (128 * 256 + 240) * 4
         precondition(Array(tinted[outside..<(outside + 4)]) == Array(plain[outside..<(outside + 4)]), "outside-FOV surface color remains unchanged")
+        let macPose = TeachingCoveragePose(camera(), origin: .desktop)!
+        let green = try await engine.build([macPose])
+        precondition(green.coveredFraction == snapshot.coveredFraction && green.ipadFrameCount == 0)
+        TeachingCoverageRenderer.apply(green, opacity: 1, to: geometry.firstMaterial!)
+        let greenPixels = capture("mac-coverage-surface.png")
+        precondition(Int(greenPixels[center + 1]) > Int(greenPixels[center]) + 30,
+                     "Mac coverage must retain the original green in the Metal shader")
+        let both = try await engine.build([macPose, pose])
+        precondition(both.coveredFraction == snapshot.coveredFraction && both.ipadFrameCount == 1,
+                     "the same footprint from two sources is never double-counted")
+        TeachingCoverageRenderer.apply(both, opacity: 1, to: geometry.firstMaterial!)
+        let overlapPixels = capture("overlapping-origins.png")
+        precondition(Int(overlapPixels[center + 2]) > Int(overlapPixels[center]) + 20,
+                     "iPad coverage wins overlap even when Mac appears first")
+        let mixed = try await engine.build([TeachingCoveragePose(camera(position: SIMD3(0.7, 0, 0)), origin: .desktop)!, pose])
+        TeachingCoverageRenderer.apply(mixed, opacity: 1, to: geometry.firstMaterial!)
+        let mixedPixels = capture("mixed-origins.png"), right = (128 * 256 + 224) * 4
+        precondition(Int(mixedPixels[right + 1]) > Int(mixedPixels[right]) + 40
+                     && Int(mixedPixels[center + 2]) > Int(mixedPixels[center]) + 20,
+                     "legacy Mac and purple iPad surfaces coexist")
+        for (arm, expected) in [(TeachingPoseArm.left, [89, 219, 232]), (.right, [244, 201, 93])] {
+            let armPose = TeachingCoveragePose(camera(), origin: .desktop, arm: arm)!
+            let armSnapshot = try await engine.build([armPose])
+            precondition(armSnapshot.leftArmFrameCount == (arm == .left ? 1 : 0)
+                         && armSnapshot.rightArmFrameCount == (arm == .right ? 1 : 0))
+            TeachingCoverageRenderer.apply(armSnapshot, opacity: 1, to: geometry.firstMaterial!)
+            let pixels = capture("\(arm.rawValue)-arm-coverage.png")
+            for channel in 0..<3 {
+                precondition(abs(Int(pixels[center + channel]) - expected[channel]) <= 4,
+                             "\(arm.rawValue) arm shader matches Mac sRGB: \(Array(pixels[center..<(center + 3)]))")
+            }
+        }
+        let armOverlap = try await engine.build([TeachingCoveragePose(camera(), origin: .desktop, arm: .left)!,
+                                                TeachingCoveragePose(camera(), origin: .desktop, arm: .right)!])
+        precondition(armOverlap.coveredFraction == snapshot.coveredFraction, "left/right overlap is counted only once")
+        precondition(armOverlap.categoryFractions[.leftArm] == firstFraction
+                     && armOverlap.categoryFractions[.rightArm] == firstFraction,
+                     "left and right each include their full coverage despite overlapping color priority")
+        let leftPose = TeachingCoveragePose(camera(), origin: .desktop, arm: .left)!
+        let rightPose = TeachingCoveragePose(camera(), origin: .desktop, arm: .right)!
+        let shiftedLeft = TeachingCoveragePose(camera(position: SIMD3(0.2, 0, 0)), origin: .desktop, arm: .left)!
+        let groupedEngine = try TeachingCoverageEngine(model: flat)
+        _ = try await groupedEngine.build([leftPose])
+        let grouped = try await groupedEngine.build([leftPose, shiftedLeft, shiftedLeft, rightPose, pose, macPose])
+        precondition(grouped.coveredFraction == union.coveredFraction
+                     && grouped.categoryFractions[.leftArm] == union.coveredFraction,
+                     "partial overlap and duplicates within a group use its union, not intersection or summed area")
+        for category in [TeachingPoseCategory.rightArm, .ipad, .desktop] {
+            precondition(grouped.categoryFractions[category] == firstFraction,
+                         "new categories mark samples even when an earlier category already covered them")
+        }
+        precondition(grouped.categoryFractions.values.reduce(0, +) > grouped.coveredFraction!)
+        let reorderedGroups = try await groupedEngine.build([macPose, pose, shiftedLeft, rightPose, leftPose])
+        precondition(reorderedGroups.categoryFractions == grouped.categoryFractions)
+        let deletedGroupPose = try await groupedEngine.build([leftPose, rightPose, pose, macPose])
+        precondition(deletedGroupPose.categoryFractions.values.allSatisfy { $0 == firstFraction },
+                     "removing a Pose shrinks only its group's union while retaining cross-group overlap")
+        _ = try await groupedEngine.build([leftPose])
+        let reassigned = try await groupedEngine.build([rightPose])
+        precondition(reassigned.coveredFraction == firstFraction && reassigned.categoryFractions[.leftArm] == 0
+                     && reassigned.categoryFractions[.rightArm] == firstFraction,
+                     "recategorizing an unchanged camera clears the old group")
+        let groupedBatches = try await groupedEngine.build(Array(repeating: leftPose, count: 65) + [shiftedLeft, rightPose, pose, macPose])
+        precondition(groupedBatches.coveredFraction == grouped.coveredFraction
+                     && groupedBatches.categoryFractions == grouped.categoryFractions,
+                     "all category bits survive multiple GPU batches")
+        let fullGroups = try await pointEngine.build([leftPose, rightPose, pose, macPose])
+        precondition(fullGroups.coveredFraction == 1 && fullGroups.categoryFractions.values.allSatisfy { $0 == 1 },
+                     "groups may sum to more than 100 percent while total coverage never does")
+        let armPreview = try await engine.preview(oldRight)
+        precondition(armPreview.rightArmFrameCount == 1 && armPreview.coveredFraction == firstFraction,
+                     "selected Pose surface retains right-arm color without changing its area")
+        let sourceUnion = try await engine.build([TeachingCoveragePose(camera(position: SIMD3(0.2, 0, 0)), origin: .desktop)!, pose])
+        precondition(sourceUnion.coveredFraction == union.coveredFraction, "coverage union is independent of Pose source")
+        let macPreview = try await engine.preview(imported)
+        precondition(macPreview.ipadFrameCount == 0 && macPreview.frameCount == 1, "Pose inspection retains origin color")
         TeachingCoverageRenderer.apply(snapshot, opacity: 0, to: geometry.firstMaterial!, clipOutside: true)
         let clipped = capture("pose-local-surface.png")
         precondition(Array(clipped[center..<(center + 4)]) == Array(plain[center..<(center + 4)]),
@@ -149,11 +316,15 @@ import AppKit
                      && abs(Float(localBounds.1.y) - TeachingCoverageProfile.tangentY) < 0.0001,
                      "the orbit bounds follow the selected surface, not the original model bounds")
         let repeated = try await engine.build([pose, pose])
+        precondition(repeated.coveredFraction == firstFraction, "repeated coverage is never counted twice")
         TeachingCoverageRenderer.apply(repeated, opacity: 0.5, to: geometry.firstMaterial!)
         let overlapped = capture()
         precondition(Array(overlapped[center..<(center + 4)]) == Array(tinted[center..<(center + 4)]), "overlapping poses are a binary union, never darker or brighter")
         node.geometry = try stacked.makeGeometry(settings: ModelDisplaySettings(meshQuality: .full))
         let stackedSnapshot = try await stackedEngine.build([pose])
+        let selectedStacked = try await stackedEngine.preview(previewSample)
+        precondition(selectedStacked.coveredFraction == stackedSnapshot.coveredFraction,
+                     "selected and aggregate percentages share the same surface occlusion tolerance")
         let backPlain = capture()
         TeachingCoverageRenderer.apply(stackedSnapshot, opacity: 0.5, to: node.geometry!.firstMaterial!)
         let backTinted = capture("coverage-occlusion.png")
@@ -174,8 +345,21 @@ import AppKit
         display.attach(to: geometry); display.update(model: flat, samples: [sample, sample])
         for _ in 0..<500 { if !display.preparing { break }; try await Task.sleep(nanoseconds: 10_000_000) }
         precondition(display.error.isEmpty && !display.preparing && display.poseCount == 2 && display.hitCount == 1)
+        precondition(display.latestPoseStatus == .covered)
+        let initialProgress = display.coveredFraction
+        precondition(initialProgress == firstFraction && display.categoryFractions[.ipad] == firstFraction
+                     && display.categoryPercentages[.ipad] == display.coveragePercentage
+                     && display.categoryPercentages[.leftArm] == "0%")
+        display.opacity = 1
+        precondition(display.coveredFraction == initialProgress, "opacity changes appearance, not coverage")
+        let failedSample = TeachingSample(segmentId: "test", kind: "keyframe", cameraPose: camera(position: SIMD3(0, 0, -1)))
+        display.update(model: flat, samples: [sample, failedSample])
+        for _ in 0..<500 { if !display.preparing { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        guard case .tooFar(let latestDepth) = display.latestPoseStatus else { fatalError("a new failed Pose must report its own result even when an earlier Pose was covered") }
+        precondition(abs(latestDepth - 2) < 0.001 && display.hitCount == 1 && display.hasCoverageWarning)
+        precondition(geometry.firstMaterial!.shaderModifiers != nil, "a failed new Pose preserves all previous surface coloring")
         let another = TeachingSample(segmentId: "another-segment", kind: "keyframe", cameraPose: camera(position: SIMD3(0.1, 0, 0)))
-        display.update(model: flat, samples: [sample, sample, another])
+        display.update(model: flat, samples: [sample, failedSample, another])
         precondition(display.hitCount == 1 && geometry.firstMaterial!.shaderModifiers != nil,
                      "adding a pose retains the previous union while the new footprint is being prepared")
         display.cancel(); display.resume()
@@ -188,17 +372,36 @@ import AppKit
                      "quality or render-mode changes reuse the same full-model coverage")
         display.attach(to: geometry)
         display.enabled = false
+        let hiddenPose = TeachingSample(segmentId: "hidden", kind: "keyframe", cameraPose: camera(position: SIMD3(0.2, 0, 0)))
+        display.update(model: flat, samples: [sample, hiddenPose])
+        for _ in 0..<500 { if !display.preparing { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        precondition(display.coveredFraction == union.coveredFraction && display.coveredFraction! > initialProgress!,
+                     "recording still updates progress when the color overlay is hidden")
         let inspection = try await display.previewSnapshot(for: sample)
-        precondition(inspection.frameCount == 1 && inspection.modelBounds != nil,
+        precondition(inspection.frameCount == 1 && inspection.modelBounds != nil && inspection.coveredFraction == firstFraction
+                     && display.coveredFraction == union.coveredFraction,
                      "single-Pose selection works while aggregate coverage is disabled")
         precondition(geometry.firstMaterial!.shaderModifiers == nil,
                      "preparing a preview never enables or replaces the live model coverage")
         precondition(geometry.firstMaterial!.shaderModifiers == nil, "hiding coverage restores original rendering")
+        var leftSample = sample; leftSample.origin = .desktop; leftSample.arm = .left
+        display.update(model: flat, samples: [sample, hiddenPose, leftSample])
+        display.cancel(); display.resume()
+        for _ in 0..<500 { if !display.preparing { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        precondition(display.error.isEmpty && !display.preparing && display.categoryFractions[.leftArm] == firstFraction
+                     && display.categoryFractions[.ipad] == union.coveredFraction,
+                     "published group statistics update across source additions, cancellation and hidden overlays")
+        display.update(model: flat, samples: [leftSample])
+        precondition(display.categoryPercentages[.ipad] == "—", "removal cannot display stale category totals")
+        for _ in 0..<500 { if !display.preparing { break }; try await Task.sleep(nanoseconds: 10_000_000) }
+        precondition(display.categoryFractions[.ipad] == 0 && display.categoryFractions[.leftArm] == firstFraction)
         display.enabled = true
         display.update(model: flat, samples: [])
         try await Task.sleep(nanoseconds: 100_000_000)
         precondition(display.poseCount == 0 && display.hitCount == 0 && geometry.firstMaterial!.shaderModifiers == nil,
                      "deleting the last pose cancels stale work and clears the surface")
-        print("M70 surface coverage: full-model GPU occlusion, near occluders, FOV/range, arbitrary tilt, sparse triangles, point clouds, invalid input, shader pixels, binary union and delete/cancel passed.")
+        precondition(display.coveredFraction == 0 && display.coveragePercentage == "0%"
+                     && display.categoryPercentages.values.allSatisfy { $0 == "0%" })
+        print("M70 surface coverage: GPU occlusion, FOV/range, shader pixels, area-weighted coverage, per-category unions and overlap, partial triangles, overlap/duplicate/order/batch invariance, hidden-overlay updates, point clouds and delete/cancel passed.")
     }
 }

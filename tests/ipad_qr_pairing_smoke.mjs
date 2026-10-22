@@ -40,8 +40,8 @@ async function api(route, { body, token, method = 'POST', status = 200 } = {}) {
 }
 const qr = (task, options = {}) => api(`/sessions/${task.id}/pairing-qr`, {
   body: { address, code: task.pairingCode }, token: task.ownerToken, ...options });
-async function ready() {
-  const task = await api('/sessions', { body: { manifest }, status: 201 });
+async function ready(poseSeed) {
+  const task = await api('/sessions', { body: { manifest, poseSeed }, status: 201 });
   await qr(task, { status: 409 });
   await api(`/sessions/${task.id}/model`, { method: 'PUT', token: task.ownerToken, body: model });
   return task;
@@ -51,7 +51,10 @@ const run = (cmd, args) => new Promise((resolve, reject) => {
   child.on('error', reject); child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`Exit ${code}`)));
 });
 try {
-  const task = await ready(), other = await ready();
+  const poseSeed = { samples: [1, 2, 3].map((i) => ({ id: `mac-${i}`, name: `Mac Pose ${i}`, origin: 'desktop', arm: i % 2 ? 'left' : 'right',
+    segmentId: 'mac-reference', kind: 'keyframe', tracking: 'normal', capturedAt: '2026-10-22T00:00:00.000Z',
+    cameraPose: { frameName: 'ipad_camera_optical_frame', position: { x: i, y: 0, z: 1 }, quaternion: { x: 1, y: 0, z: 0, w: 0 } } })) };
+  const task = await ready(poseSeed), other = await ready();
   await qr(task, { token: undefined, status: 401 });
   await qr(task, { token: other.ownerToken, status: 401 });
   await qr(task, { body: { address: 'http://8.8.8.8:21990', code: task.pairingCode }, status: 400 });

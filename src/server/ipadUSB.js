@@ -99,7 +99,8 @@ export function createIPadUSBBridge({ directory, serverId, serverName, platform 
           if (!(await list()).some((item) => item.identifier === deviceId)) fail(409, '数据线传输中断，请重新连接后重试。');
           const ready = path.join(temporary, 'ready.json');
           await writeFile(ready, JSON.stringify({ protocol: USB_PROTOCOL, id, serverName,
-            sourceSessionId: session.id, manifest: session.manifest }), { mode: 0o600 });
+            sourceSessionId: session.id, manifest: session.manifest,
+            ...(session.poseSeed ? { poseSeed: session.poseSeed } : {}) }), { mode: 0o600 });
           // Commit metadata last. The iPad ignores incomplete or interrupted copies.
           await copy(deviceId, ready, `${inbox}/Inbox/${id}/ready.json`);
           await ping(device);

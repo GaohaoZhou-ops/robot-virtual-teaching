@@ -72,6 +72,7 @@ private final class PoseOverviewContainer: UIView {
 /// Uses the same M70 optical frame and lens as the selected surface mask.
 /// The cone ends at the furthest visible surface within the working range.
 struct PoseCameraProjection {
+    let category: TeachingPoseCategory
     let modelFromCamera: simd_float4x4
     let frustum: TeachingCoverageFrustum
     let surfaceDepth: Float?
@@ -80,7 +81,7 @@ struct PoseCameraProjection {
         guard let recorded = try? TeachingCoverageFrustum.recordedView(sample) else { return nil }
         let transform = recorded.cameraFromModel.inverse
         guard transform.elements.allSatisfy(\.isFinite) else { return nil }
-        modelFromCamera = transform; frustum = recorded.frustum
+        modelFromCamera = transform; frustum = recorded.frustum; category = sample.category
         var furthest: Float?
         if let footprint, footprint.frameCount == 1, let frames = footprint.frames, let depths = footprint.depths,
            frames.length >= MemoryLayout<simd_float4x4>.stride,
@@ -112,7 +113,8 @@ struct PoseCameraProjection {
     func makeNode(modelRadius: Float) -> SCNNode {
         let node = SCNNode(); node.simdTransform = modelFromCamera
         let size = max(modelRadius, (surfaceDepth ?? 0) * 0.5, 0.3) * 0.045
-        let amber = UIColor(red: 1, green: 0.72, blue: 0.25, alpha: 1)
+        let rgb = category.rgb
+        let tint = UIColor(red: CGFloat(rgb.x), green: CGFloat(rgb.y), blue: CGFloat(rgb.z), alpha: 1)
         func material(_ color: UIColor, opacity: CGFloat = 1) -> SCNMaterial {
             let material = SCNMaterial(); material.lightingModel = .constant
             material.diffuse.contents = color; material.isDoubleSided = true
@@ -135,14 +137,14 @@ struct PoseCameraProjection {
             node.addChildNode(edge)
         }
         let body = SCNBox(width: CGFloat(size * 1.4), height: CGFloat(size), length: CGFloat(size * 0.7), chamferRadius: CGFloat(size * 0.12))
-        add(body, at: SIMD3(0, 0, -size * 0.55), color: amber).name = "camera-body"
+        add(body, at: SIMD3(0, 0, -size * 0.55), color: tint).name = "camera-body"
         let lens = SCNCylinder(radius: CGFloat(size * 0.32), height: CGFloat(size * 0.4))
         lens.radialSegmentCount = 16
         add(lens, at: SIMD3(0, 0, -size * 0.08), color: .white)
             .simdOrientation = simd_quatf(angle: .pi / 2, axis: SIMD3(1, 0, 0))
         // An asymmetric top and RGB optical axes make camera roll visible too.
         let top = SCNBox(width: CGFloat(size * 0.6), height: CGFloat(size * 0.25), length: CGFloat(size * 0.4), chamferRadius: 0)
-        _ = add(top, at: SIMD3(0, -size * 0.6, -size * 0.55), color: amber)
+        _ = add(top, at: SIMD3(0, -size * 0.6, -size * 0.55), color: tint)
         for (direction, color) in [(SIMD3<Float>(1, 0, 0), UIColor.systemRed),
                                     (SIMD3<Float>(0, 1, 0), UIColor.systemGreen),
                                     (SIMD3<Float>(0, 0, 1), UIColor.systemBlue)] {
@@ -155,14 +157,14 @@ struct PoseCameraProjection {
         let corners = corners
         if corners.count == 4 {
             for index in 0..<4 {
-                line(.zero, corners[index], radius: size * 0.022, color: amber, opacity: 0.8)
-                line(corners[index], corners[(index + 1) % 4], radius: size * 0.022, color: amber, opacity: 0.8)
+                line(.zero, corners[index], radius: size * 0.022, color: tint, opacity: 0.8)
+                line(corners[index], corners[(index + 1) % 4], radius: size * 0.022, color: tint, opacity: 0.8)
             }
             let vertices = ([SIMD3<Float>.zero] + corners).map { SCNVector3($0.x, $0.y, $0.z) }
             let faces = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices)], elements: [
                 SCNGeometryElement(indices: [Int32(0), 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1], primitiveType: .triangles)
             ])
-            faces.materials = [material(amber, opacity: 0.045)]
+            faces.materials = [material(tint, opacity: 0.045)]
             let cone = SCNNode(geometry: faces); cone.name = "camera-projection"
             cone.renderingOrder = 1; node.addChildNode(cone)
         }
@@ -209,6 +211,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     var onModelOriginVisibilityChange: ((Bool) -> Void)?
     var onOverviewExpansionChange: ((Bool) -> Void)?
     private var sampleID: String?
+    private var sampleCategory: TeachingPoseCategory?
     private var recordedTransform: [Float] = []
     private var recordedProjection: [Float]?
     private var resetRevision = 0
@@ -266,7 +269,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewContainer.layer.borderColor = UIColor.white.withAlphaComponent(0.22).cgColor
         overviewView.isUserInteractionEnabled = false
         overviewView.accessibilityIdentifier = "pose-global-overview"
-        overviewView.accessibilityLabel = "全局点云，绿色为当前 Pose"
+        overviewView.accessibilityLabel = "全局点云，着色为当前 Pose"
         overviewView.accessibilityHint = "单指旋转，双指平移，捏合缩放"
         overviewCollapseButton.setImage(UIImage(systemName: "arrow.down.right.and.arrow.up.left",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
@@ -304,7 +307,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewContainer.isAccessibilityElement = true
         overviewContainer.accessibilityTraits = .button
         overviewContainer.accessibilityIdentifier = "pose-global-thumbnail"
-        overviewContainer.accessibilityLabel = "全局缩略图，绿色为当前 Pose"
+        overviewContainer.accessibilityLabel = "全局缩略图，着色为当前 Pose"
         overviewContainer.accessibilityHint = "双击放大全局视图"
         overviewContainer.onActivate = { [weak self] in self?.expandOverview() }
         updateOverviewAccessibility()
@@ -353,11 +356,14 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         var transform = simd_float4x4(simd_quatf(ix: q.x, iy: q.y, iz: q.z, r: q.w)) * TeachingCoordinates.opticalToARCamera
         transform.columns.3 = SIMD4(sample.cameraPose.position.simd, 1)
         let projection = ZividFieldOfView.projectionMatrix.elements
-        let poseChanged = sampleID != sample.id || recordedTransform != transform.elements || recordedProjection != projection
+        let poseChanged = sampleID != sample.id || sampleCategory != sample.category || recordedTransform != transform.elements || recordedProjection != projection
         let geometryChanged = sourceGeometry !== rendered
         let overviewChanged = sourceOverview !== overview
         let footprintChanged = footprintFrames !== footprint?.frames
         overviewFootprint = footprint
+        let sourceLabel = sample.category.label
+        overviewView.accessibilityLabel = "全局点云，当前 Pose 来源：\(sourceLabel)"
+        overviewContainer.accessibilityLabel = "全局缩略图，当前 Pose 来源：\(sourceLabel)"
         if geometryChanged {
             sourceGeometry = rendered
             // The recorded camera image shows original surface colors. Live
@@ -367,8 +373,8 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         }
         if geometryChanged || footprintChanged {
             footprintFrames = footprint?.frames
-            // Separate materials keep inspection clipping and the selected-Pose
-            // highlight out of the live AR model and its aggregate coverage.
+            // Keep the selected surface in its original colors while clipping
+            // outside the Pose. Global coverage uses its own tinted materials.
             object.geometry = footprint.flatMap { selection in
                 guard selection.frameCount > 0, let rendered else { return nil }
                 let local = Self.copyForInspection(rendered)
@@ -384,7 +390,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             updateOverviewGeometry()
         }
         if poseChanged {
-            sampleID = sample.id; recordedTransform = transform.elements; recordedProjection = projection
+            sampleID = sample.id; sampleCategory = sample.category; recordedTransform = transform.elements; recordedProjection = projection
             recordedCamera.simdTransform = transform
             let lens = SCNCamera(); lens.zNear = Double(ZividFieldOfView.near); lens.zFar = Double(ZividFieldOfView.far)
             lens.projectionDirection = .vertical; lens.fieldOfView = ZividFieldOfView.verticalDegrees
@@ -587,7 +593,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         overviewCamera.simdOrientation = camera.simdWorldOrientation
         overviewCamera.simdPosition = center - overviewCamera.simdWorldFront * (radius * 3)
         let aspect = Float(overviewView.bounds.width / max(overviewView.bounds.height, 1))
-        overviewCamera.camera?.orthographicScale = Double(radius * 1.15 / max(min(aspect, 1), 0.1))
+        // Use the same tighter framing in the thumbnail and expanded view,
+        // keeping the complete bounding sphere visible through rotation.
+        overviewCamera.camera?.orthographicScale = Double(radius / max(min(aspect, 1), 0.1))
         overviewCamera.camera?.zNear = Double(max(radius * 0.01, 0.001))
         overviewCamera.camera?.zFar = Double(radius * 6)
         if overviewExpanded {

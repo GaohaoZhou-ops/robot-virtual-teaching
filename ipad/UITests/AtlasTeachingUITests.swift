@@ -23,7 +23,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         let refresh = app.buttons["refresh-usb-connection"]
         XCTAssertTrue(refresh.waitForExistence(timeout: 15))
-        for _ in 0..<8 where !app.windows.firstMatch.frame.contains(refresh.frame) { app.swipeUp() }
+        for _ in 0..<8 where !refresh.isHittable { app.scrollViews["library-pairing-scroll"].swipeUp() }
         XCTAssertTrue(refresh.isHittable)
         for attempt in 0..<3 {
             refresh.tap()
@@ -96,7 +96,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(receive.waitForExistence(timeout: 15))
         XCTAssertTrue(receive.label.contains("数据线接收验证（临时）"), "only import the dedicated test fixture")
         XCTAssertTrue(app.staticTexts["方式三"].exists)
-        for _ in 0..<8 where !receive.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !receive.isHittable { app.scrollViews["library-pairing-scroll"].swipeUp() }
         XCTAssertTrue(receive.isHittable)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "USB connected and complete model ready to receive"; shot.lifetime = .keepAlways; add(shot)
@@ -109,9 +109,9 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertFalse(receive.exists, "successful reception removes its temporary inbox copy")
         app.terminate(); app.launch()
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the USB model survives relaunch")
-        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
         row.tap(); XCTAssertTrue(back.waitForExistence(timeout: 15)); back.tap()
-        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+        for _ in 0..<8 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
         XCTAssertTrue(row.label.contains("数据线接收验证（临时）"))
         row.swipeLeft()
         app.buttons["swipe-delete-local-project-\(id)"].firstMatch.tap()
@@ -131,7 +131,7 @@ final class AtlasTeachingUITests: XCTestCase {
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
             for index in 0..<6 {
-                for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+                for _ in 0..<8 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
                 let frame = row.frame
                 let origin = app.coordinate(withNormalizedOffset: .zero)
                 let start = origin.withOffset(CGVector(dx: frame.maxX - 120, dy: frame.midY))
@@ -164,7 +164,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let protectedIDs = (ProcessInfo.processInfo.environment["ATLAS_DELETE_PROTECTED_IDS"] ?? "").split(separator: ",").map(String.init)
         let app = XCUIApplication(); app.launch()
         func reveal(_ row: XCUIElement) {
-            for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+            for _ in 0..<8 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
             XCTAssertTrue(row.isHittable, app.debugDescription)
             row.swipeLeft()
         }
@@ -840,7 +840,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(app.otherElements["library-content"].waitForExistence(timeout: 15))
         for id in ids {
             let row = app.buttons["local-project-\(id)"]
-            for _ in 0..<5 where !row.isHittable { app.swipeUp() }
+            for _ in 0..<5 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
             XCTAssertTrue(row.exists)
             XCTAssertTrue(row.label.contains("UI-Batch-"), "cleanup is limited to marked test fixtures")
             row.swipeLeft(); app.buttons["swipe-delete-local-project-\(id)"].tap()
@@ -1029,6 +1029,86 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(try encoder.encode(sample), original, "inspection cannot change the saved Pose or camera parameters")
     }
 
+    func testRecordedPoseColorsPlacedModelImmediately() async throws {
+        let points: [SIMD3<Float>] = [SIMD3(-1, -1, 0), SIMD3(1, -1, 0), SIMD3(1, 1, 0), SIMD3(-1, 1, 0)]
+        let indices: [UInt32] = [0, 1, 2, 0, 2, 3]
+        var data = Data(count: 32 + points.count * 16 + indices.count * 4)
+        data.withUnsafeMutableBytes { raw in
+            let words = raw.bindMemory(to: UInt32.self)
+            words[0] = 0x534c5441; words[1] = 1; words[2] = UInt32(points.count); words[3] = UInt32(indices.count)
+            for (index, point) in points.enumerated() {
+                for axis in 0..<3 { words[8 + index * 3 + axis] = point[axis].bitPattern }
+                words[8 + points.count * 3 + index] = 0xff808080
+            }
+            for (index, value) in indices.enumerated() { words[8 + points.count * 4 + index] = value }
+        }
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let manifest = ModelManifest(protocol: teachingProtocol, modelHash: hash, name: "Coverage regression",
+            sourceHash: hash, sourceMapId: "coverage-regression", coordinateFrame: "virtual_origin",
+            distanceUnit: "meter", verticalAxis: "Z", vertices: points.count, indices: indices.count,
+            sampled: false, originalVertices: points.count, byteLength: data.count,
+            bounds: ModelBounds(min: Point3(SIMD3(-1, -1, 0)), max: Point3(SIMD3(1, 1, 0))))
+        let model = try ModelGeometry(data: data, manifest: manifest)
+        let geometry = try model.makeGeometry(settings: ModelDisplaySettings(meshQuality: .full))
+        let ar = ARController(); ar.load(manifest: manifest, samples: [])
+        ar.display(geometry); ar.trackingNormal = true; ar.yaw = 37; ar.pitch = 16; ar.roll = -21
+        ar.applyPlacement(at: SIMD3(2, 0.4, -3))
+        let object = try XCTUnwrap(ar.view.scene.rootNode.childNode(withName: "independent-teaching-object", recursively: true))
+        let camera = SCNNode(); camera.camera = SCNCamera(); camera.camera?.zNear = 0.01; camera.camera?.zFar = 10
+        var modelFromCamera = matrix_identity_float4x4; modelFromCamera.columns.3.z = 1
+        camera.simdTransform = object.simdWorldTransform * modelFromCamera
+        ar.view.scene.rootNode.addChildNode(camera)
+        let renderer = SCNRenderer(device: try XCTUnwrap(MTLCreateSystemDefaultDevice()), options: nil)
+        renderer.scene = ar.view.scene; renderer.pointOfView = camera
+        func coveragePixels(_ name: String, origin: TeachingPoseOrigin = .ipad) throws -> Int {
+            let image = renderer.snapshot(atTime: 0, with: CGSize(width: 320, height: 240), antialiasingMode: .none)
+            let cg = try XCTUnwrap(image.cgImage)
+            let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height,
+                bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+            let count = (0..<(cg.width * cg.height)).filter { index in
+                let offset = index * 4
+                if origin == .ipad {
+                    return Int(pixels[offset]) > Int(pixels[offset + 1]) + 20 && Int(pixels[offset + 1]) > Int(pixels[offset + 2]) + 30
+                }
+                return Int(pixels[offset + 1]) > Int(pixels[offset]) + 40 && Int(pixels[offset + 1]) > Int(pixels[offset + 2]) + 15
+            }.count
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            return count
+        }
+        let coverage = TeachingCoverageRenderer(); coverage.attach(to: geometry); coverage.opacity = 1
+        coverage.update(model: model, samples: [])
+        let baseline = try coveragePixels("Placed model before recording")
+        let sample = TeachingSample(segmentId: "coverage-regression", kind: "keyframe",
+            cameraPose: TeachingCoordinates.opticalPose(camera: camera.simdWorldTransform, worldFromModel: object.simdWorldTransform))
+        var mac = sample; mac.id = "mac-coverage-regression"; mac.origin = .desktop
+        coverage.update(model: model, samples: [mac])
+        for _ in 0..<500 where coverage.preparing { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertGreaterThan(try coveragePixels("Placed Mac coverage", origin: .desktop), 5000)
+        let macFraction = coverage.coveredFraction
+        ar.refreshMarkers([mac, sample])
+        let markers = try XCTUnwrap(ar.view.scene.rootNode.childNode(withName: "recorded-pose-markers", recursively: true))
+        XCTAssertEqual(markers.childNodes.count, 2)
+        for (marker, origin) in zip(markers.childNodes, [TeachingPoseOrigin.desktop, .ipad]) {
+            let color = try XCTUnwrap(marker.geometry?.firstMaterial?.diffuse.contents as? UIColor)
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            color.getRed(&r, green: &g, blue: &b, alpha: &a)
+            XCTAssertEqual(r, CGFloat(origin.rgb.x), accuracy: 0.001)
+            XCTAssertEqual(g, CGFloat(origin.rgb.y), accuracy: 0.001)
+        }
+        coverage.update(model: model, samples: [mac, sample])
+        for _ in 0..<500 where coverage.preparing { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(coverage.error.isEmpty, coverage.error)
+        XCTAssertEqual(coverage.hitCount, 2)
+        XCTAssertEqual(coverage.coveredFraction, macFraction, "recording the same area must not double-count Mac references")
+        XCTAssertGreaterThan(try coveragePixels("Placed model after recording") - baseline, 5000,
+                             "recording must color the already displayed and arbitrarily placed model")
+        coverage.enabled = false
+        XCTAssertLessThan(abs(try coveragePixels("Placed model coverage hidden") - baseline), 100)
+    }
+
     func testPoseImageExcludesCoverageWhileGlobalModelKeepsIt() throws {
         let device = try XCTUnwrap(MTLCreateSystemDefaultDevice())
         func makeGeometry() -> SCNGeometry {
@@ -1089,8 +1169,8 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(view.imageView.image?.pngData(), originalPNG, "2D must preserve original colors when live coverage is enabled")
         let livePixel = try centerPixel(render(geometry))
         let globalPixel = try centerPixel(render(XCTUnwrap(view.overviewObject.geometry)))
-        XCTAssertGreaterThan(Int(livePixel[1]), Int(livePixel[0]) + 30, "opening 2D must preserve live model coverage")
-        XCTAssertGreaterThan(Int(globalPixel[1]), Int(globalPixel[0]) + 30, "the global 3D overview keeps the selected Pose highlight")
+        XCTAssertGreaterThan(Int(livePixel[2]), Int(livePixel[0]) + 15, "opening 2D must preserve purple iPad coverage")
+        XCTAssertGreaterThan(Int(globalPixel[2]), Int(globalPixel[0]) + 15, "the global 3D overview keeps the selected iPad Pose purple")
         XCTAssertTrue(geometry.firstMaterial?.value(forKey: "atlasCoverageFrames") as? MTLBuffer === frames)
 
         // Force new snapshots after material changes and Pose selection; cached images can hide a shared-material leak.
@@ -1534,7 +1614,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication(); app.launch()
         let project = app.buttons["local-project-\(projectID)"]
         XCTAssertTrue(app.otherElements["library-content"].waitForExistence(timeout: 15))
-        for _ in 0..<6 where !project.isHittable { app.swipeUp() }
+        for _ in 0..<6 where !project.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
         XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
         let review = app.buttons["review-poses"]
         XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
@@ -2267,6 +2347,221 @@ final class AtlasTeachingUITests: XCTestCase {
         app.buttons["本地项目"].tap()
     }
 
+    func testMixedPoseOriginsInDraftAndCompletedReview() throws {
+        let ids = (ProcessInfo.processInfo.environment["ATLAS_POSE_ORIGIN_FIXTURE_IDS"] ?? "").split(separator: ",").map(String.init)
+        guard ids.count == 2, ids.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+            throw XCTSkip("Provide two disposable UI-Pose-Origins projects, draft then completed")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        func shot(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        for (index, id) in ids.enumerated() {
+            let row = app.buttons["local-project-\(id)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 15)); XCTAssertTrue(row.label.contains("UI-Pose-Origins"))
+            row.tap()
+            let review = app.buttons["review-poses"]
+            XCTAssertTrue(review.waitForExistence(timeout: 30))
+            for category in ["leftArm", "rightArm", "ipad"] {
+                let count = app.descendants(matching: .any).matching(identifier: "pose-count-\(category)").firstMatch
+                XCTAssertTrue(count.exists && count.label.contains("1 个 Pose"), count.label)
+            }
+            if index == 1 {
+                for _ in 0..<3 {
+                    app.sliders["teaching-coverage-opacity"].adjust(toNormalizedSliderPosition: 1)
+                    if app.staticTexts["teaching-coverage-opacity-value"].label == "100%" { break }
+                }
+                let progress = app.staticTexts["teaching-coverage-percentage"]
+                let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    progress.exists && progress.label.contains("%") && progress.label != "0%"
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+            }
+            shot(index == 0 ? "Draft arm counts and palette" : "Completed cyan gold and purple coverage")
+            review.tap()
+            let mac = app.buttons["review-pose-mac-fixture"], right = app.buttons["review-pose-mac-right-fixture"], ipad = app.buttons["review-pose-ipad-fixture"]
+            XCTAssertTrue(mac.waitForExistence(timeout: 10))
+            XCTAssertTrue(mac.label.contains("Mac 左臂")); XCTAssertTrue(right.label.contains("Mac 右臂")); XCTAssertTrue(ipad.label.contains("iPad 示教"))
+            for (button, label) in [(mac, "Mac 左臂"), (right, "Mac 右臂"), (ipad, "iPad 示教")] {
+                button.tap()
+                let badge = app.descendants(matching: .any).matching(identifier: "pose-selected-origin").firstMatch
+                XCTAssertTrue(badge.waitForExistence(timeout: 5)); XCTAssertTrue(badge.label.contains(label))
+                RunLoop.current.run(until: Date().addingTimeInterval(1))
+                shot("\(index == 0 ? "Draft" : "Completed") review \(label)")
+            }
+            app.buttons["close-pose-review"].tap(); app.buttons["本地项目"].tap()
+        }
+        // Delete only the explicit temporary fixtures after inspecting both workflows.
+        for id in ids {
+            let row = app.buttons["local-project-\(id)"]
+            XCTAssertTrue(row.label.contains("UI-Pose-Origins"))
+            row.swipeLeft(); app.buttons["swipe-delete-local-project-\(id)"].tap()
+            app.buttons["confirm-delete-local-project"].firstMatch.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+        }
+    }
+
+    func testStoredMacArmPoseCounts() throws {
+        guard let id = ProcessInfo.processInfo.environment["ATLAS_ARM_PROJECT_ID"], UUID(uuidString: id) != nil else {
+            throw XCTSkip("Provide a downloaded project with three Mac Poses per arm for read-only verification")
+        }
+        let total = Int(ProcessInfo.processInfo.environment["ATLAS_ARM_PROJECT_POSE_COUNT"] ?? "6") ?? 6
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(id)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); XCTAssertTrue(project.label.contains("\(total) 个 Pose"))
+        XCTAssertTrue(project.label.contains("左臂 3 · 右臂 3")); project.tap()
+        let review = app.buttons["review-poses"]
+        XCTAssertTrue(review.waitForExistence(timeout: 30))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            app.staticTexts["teaching-coverage-percentage"].label.contains("%")
+                && !app.descendants(matching: .any).matching(identifier: "teaching-coverage-progress").firstMatch.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed)
+        func groupLabels() -> [String: String] {
+            var labels: [String: String] = [:]
+            for (category, expected) in [("leftArm", 3), ("rightArm", 3), ("ipad", total - 6)] {
+                let row = app.descendants(matching: .any).matching(identifier: "pose-count-\(category)").firstMatch
+                XCTAssertTrue(row.exists && row.label.contains("\(expected) 个 Pose"), row.label)
+                XCTAssertTrue(row.label.contains("表面覆盖率") && row.label.contains("%"), row.label)
+                XCTAssertLessThanOrEqual(row.frame.maxX, app.windows.firstMatch.frame.maxX)
+                labels[category] = row.label
+            }
+            return labels
+        }
+        let initialLabels = groupLabels()
+        let initialShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        initialShot.name = "Stored project — per-group coverage"; initialShot.lifetime = .keepAlways; add(initialShot)
+        review.tap()
+        XCTAssertEqual(app.staticTexts["pose-review-count"].label, "\(total) 个 Pose")
+        XCTAssertEqual(groupLabels(), initialLabels, "review and teaching show the same category coverage")
+        for (sample, label) in [("mac-1", "Mac 左臂"), ("mac-2", "Mac 右臂")] {
+            let row = app.buttons["review-pose-\(sample)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 10)); XCTAssertTrue(row.label.contains(label)); row.tap()
+            let badge = app.descendants(matching: .any).matching(identifier: "pose-selected-origin").firstMatch
+            XCTAssertTrue(badge.label.contains(label))
+            let percentage = app.staticTexts["pose-selected-coverage-percentage"]
+            XCTAssertTrue(percentage.waitForExistence(timeout: 10))
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "label CONTAINS %@", "%"), object: percentage)], timeout: 20), .completed)
+            let details = app.descendants(matching: .any).matching(identifier: "pose-review-details").firstMatch
+            XCTAssertTrue(details.frame.contains(percentage.frame) && percentage.isHittable,
+                          "selected Pose coverage fits in the details panel")
+            XCTAssertFalse(app.staticTexts["本次示教已完成。可通过上方「多选」在副本中批量删除。"].exists)
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Stored project — \(label)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        app.buttons["close-pose-review"].tap(); app.buttons["本地项目"].tap()
+    }
+
+    func testStoredProjectSurfaceCoverageAndFullOpacity() throws {
+        guard let id = ProcessInfo.processInfo.environment["ATLAS_COVERAGE_PROJECT_ID"] else {
+            throw XCTSkip("Provide a completed project whose latest Pose covers the visible model")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(id)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        let toggle = app.switches["teaching-coverage-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 15))
+        let preview = app.descendants(matching: .any).matching(identifier: "teaching-model-preview").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 10), app.debugDescription)
+        func assertPreviewBounds(panelExpanded: Bool) {
+            let window = app.windows.firstMatch.frame
+            XCTAssertEqual(preview.frame.minX, window.minX, accuracy: 1)
+            XCTAssertEqual(preview.frame.width, window.width - (panelExpanded ? 340 : 0), accuracy: 1,
+                           "the free preview must use the visible canvas, never the area behind the sidebar")
+            if panelExpanded {
+                XCTAssertEqual(preview.frame.maxX, app.scrollViews.firstMatch.frame.minX, accuracy: 1)
+            }
+            XCTAssertFalse(app.switches["zivid-fov-toggle"].exists)
+            XCTAssertFalse(app.otherElements["zivid-fov-aperture"].exists,
+                           "a free camera preview must not apply the recording viewfinder")
+        }
+        assertPreviewBounds(panelExpanded: true)
+        let status = app.staticTexts["teaching-coverage-status"]
+        let percentage = app.staticTexts["teaching-coverage-percentage"]
+        func waitForColoring() {
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                percentage.exists && percentage.label.contains("%") && percentage.label != "0%"
+                    && !app.descendants(matching: .any)["teaching-coverage-progress"].firstMatch.exists
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed)
+            XCTAssertFalse(status.exists, "successful coverage does not add a Pose status caption")
+        }
+        waitForColoring()
+        XCTAssertTrue(percentage.exists)
+        let initialPercentage = percentage.label
+        XCTAssertTrue(initialPercentage.contains("%") && initialPercentage != "0%", "the saved Poses cover part of this model")
+        // XCTest occasionally releases one slider step short of the endpoint.
+        for _ in 0..<3 {
+            app.sliders["teaching-coverage-opacity"].adjust(toNormalizedSliderPosition: 1)
+            if app.staticTexts["teaching-coverage-opacity-value"].label == "100%" { break }
+        }
+        XCTAssertEqual(app.staticTexts["teaching-coverage-opacity-value"].label, "100%")
+        XCTAssertEqual(percentage.label, initialPercentage, "color strength must not change coverage progress")
+        func coloredPixels(_ name: String) throws -> Int {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            let shot = XCUIScreen.main.screenshot()
+            let attachment = XCTAttachment(screenshot: shot); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+            let image = try XCTUnwrap(shot.image.cgImage)
+            // Exclude the sidebar and toolbars so labels and switches cannot
+            // satisfy the surface-color check.
+            let crop = try XCTUnwrap(image.cropping(to: CGRect(x: 0, y: CGFloat(image.height) * 0.18,
+                width: CGFloat(image.width) * 0.68, height: CGFloat(image.height) * 0.65)))
+            let context = try XCTUnwrap(CGContext(data: nil, width: crop.width, height: crop.height,
+                bitsPerComponent: 8, bytesPerRow: crop.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+            context.draw(crop, in: CGRect(x: 0, y: 0, width: crop.width, height: crop.height))
+            let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+            return (0..<(crop.width * crop.height)).filter { index in
+                let offset = index * 4
+                return Int(pixels[offset]) > Int(pixels[offset + 1]) + 20 && Int(pixels[offset + 1]) > Int(pixels[offset + 2]) + 30
+            }.count
+        }
+        let colored = try coloredPixels("Stored model with 100 percent surface coverage")
+        toggle.tap(); XCTAssertFalse(status.exists)
+        XCTAssertEqual(percentage.label, initialPercentage, "progress remains visible when surface colors are hidden")
+        let original = try coloredPixels("Stored model original colors")
+        XCTAssertGreaterThan(colored - original, 100, "the app must color the model itself, not just its controls")
+        toggle.tap(); waitForColoring()
+        defer { XCUIDevice.shared.orientation = .landscapeLeft }
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            let rotated = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                let window = app.windows.firstMatch.frame
+                return orientation.isLandscape ? window.width > window.height : window.height > window.width
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [rotated], timeout: 10), .completed)
+            assertPreviewBounds(panelExpanded: true)
+            let before = preview.screenshot().pngRepresentation
+            preview.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5)).press(forDuration: 0.1,
+                thenDragTo: preview.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.5)))
+            XCTAssertNotEqual(preview.screenshot().pngRepresentation, before, "the bounded preview remains interactive")
+            assertPreviewBounds(panelExpanded: true)
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Bounded completed model preview \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+            app.buttons["collapse-teaching-panel"].tap()
+            XCTAssertTrue(app.buttons["expand-teaching-panel"].waitForExistence(timeout: 5))
+            assertPreviewBounds(panelExpanded: false)
+            XCTAssertTrue(app.staticTexts["floating-coverage-percentage"].label.contains(initialPercentage))
+            app.buttons["expand-teaching-panel"].tap()
+            XCTAssertTrue(app.buttons["collapse-teaching-panel"].waitForExistence(timeout: 5))
+            assertPreviewBounds(panelExpanded: true)
+        }
+        app.buttons["本地项目"].tap()
+        XCTAssertTrue(project.waitForExistence(timeout: 10)); project.tap()
+        waitForColoring()
+        XCTAssertEqual(percentage.label, initialPercentage, "reopening a local result restores the same coverage progress")
+        app.buttons["本地项目"].tap()
+    }
+
     func testTeachingSurfaceCoverageControlsAndPreview() throws {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
@@ -2283,7 +2578,10 @@ final class AtlasTeachingUITests: XCTestCase {
             let progress = app.descendants(matching: .any)["teaching-coverage-progress"].firstMatch
             let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: progress)
             XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 60), .completed)
-            XCTAssertFalse(status.exists, "finished coverage leaves the controls without a status caption")
+            XCTAssertTrue(app.staticTexts["teaching-coverage-percentage"].exists)
+            if status.exists {
+                XCTAssertFalse(status.label.contains("已在模型表面着色"), "only guidance or missed-coverage reasons remain")
+            }
         }
         waitForCoverage()
         XCTAssertFalse(app.buttons["capture-pose"].isEnabled, "displaying old footprints cannot calibrate or capture")
@@ -2649,7 +2947,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let fixture = app.buttons["local-project-\(fixtureID)"]
         func removeFixture() {
             XCTAssertTrue(fixture.label.contains("进度验证（临时）"), "only remove the dedicated transfer fixture")
-            for _ in 0..<8 where !fixture.isHittable { app.swipeUp() }
+            for _ in 0..<8 where !fixture.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
             fixture.swipeLeft()
             app.buttons["swipe-delete-local-project-\(fixtureID)"].firstMatch.tap()
             app.buttons["confirm-delete-local-project"].firstMatch.tap()
@@ -2860,6 +3158,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 30))
         let summary = app.staticTexts["model-render-summary"]
         let quality = app.sliders["pose-preview-quality"]
+        var retainedSummary = ""
         for (mode, picker, preset, full, prefix, unit) in [
             ("points", "point-density", "25%", "100%", "点云", "点"),
             ("mesh", "mesh-quality", "流畅", "全量", "Mesh", "面")
@@ -2881,7 +3180,6 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertGreaterThan(total, count, "fixture must expose more than one quality level")
             let percentage = (Double(count) / Double(total)).formatted(.percent.precision(.fractionLength(0...1)))
             app.buttons["close-display-settings"].tap()
-            XCTAssertEqual(app.staticTexts["teaching-render-summary"].label, selectedSummary)
             review.tap()
             XCTAssertTrue(quality.waitForExistence(timeout: 15))
             XCTAssertEqual(quality.value as? String, percentage, "Pose review inherits the actual teaching quality")
@@ -2894,15 +3192,13 @@ final class AtlasTeachingUITests: XCTestCase {
             poseShot.name = "Shared \(mode) quality in Pose review"; poseShot.lifetime = .keepAlways; add(poseShot)
             app.buttons["close-pose-review"].tap()
             let fullSummary = "\(prefix) · \(total.formatted()) / \(total.formatted()) \(unit)"
-            XCTAssertEqual(app.staticTexts["teaching-render-summary"].label, fullSummary,
-                           "returning to teaching uses the geometry selected in Pose review")
             settings.tap(); waitForRenderSummary(app, label: fullSummary)
+            retainedSummary = summary.label
             XCTAssertTrue(app.buttons[picker].label.contains(full), "the settings picker reflects the Pose slider")
             let settingsShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             settingsShot.name = "Shared \(mode) quality in display settings"; settingsShot.lifetime = .keepAlways; add(settingsShot)
             app.buttons["close-display-settings"].tap()
         }
-        let retainedSummary = app.staticTexts["teaching-render-summary"].label
         app.buttons["本地项目"].tap()
         app.terminate(); app.launch()
         XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()

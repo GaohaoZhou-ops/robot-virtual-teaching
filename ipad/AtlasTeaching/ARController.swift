@@ -311,7 +311,10 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
         point.pointSize = 0.016
         point.minimumPointScreenSpaceRadius = 3; point.maximumPointScreenSpaceRadius = 5
         let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: [SCNVector3Zero])], elements: [point])
-        let material = SCNMaterial(); material.diffuse.contents = UIColor.systemYellow; material.lightingModel = .constant
+        let rgb = sample.category.rgb
+        let material = SCNMaterial()
+        material.diffuse.contents = UIColor(red: CGFloat(rgb.x), green: CGFloat(rgb.y), blue: CGFloat(rgb.z), alpha: 1)
+        material.lightingModel = .constant
         material.readsFromDepthBuffer = true; material.writesToDepthBuffer = true
         geometry.materials = [material]
         let node = SCNNode(geometry: geometry); node.simdPosition = sample.cameraPose.position.simd; markers.addChildNode(node)
