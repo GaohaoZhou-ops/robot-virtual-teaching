@@ -7,6 +7,119 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    private func renderedButtonPixels(_ button: XCUIElement) throws -> [UInt8] {
+        let image = try XCTUnwrap(button.screenshot().image.cgImage)
+        let context = try XCTUnwrap(CGContext(data: nil, width: image.width, height: image.height,
+            bitsPerComponent: 8, bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        let data = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        return Array(UnsafeBufferPointer(start: data, count: image.width * image.height * 4))
+    }
+
+    func testUSBRefreshAnimationStops() throws {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let refresh = app.buttons["refresh-usb-connection"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 15))
+        for _ in 0..<8 where !app.windows.firstMatch.frame.contains(refresh.frame) { app.swipeUp() }
+        XCTAssertTrue(refresh.isHittable)
+        for attempt in 0..<3 {
+            refresh.tap()
+            let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                refresh.isEnabled && (refresh.value as? String) != "正在刷新"
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 5), .completed)
+            RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+            let reference = try renderedButtonPixels(refresh)
+            for interval in [0.19, 0.37, 0.23] {
+                RunLoop.current.run(until: Date().addingTimeInterval(interval))
+                let pixels = try renderedButtonPixels(refresh)
+                XCTAssertEqual(reference.count, pixels.count)
+                let changed = zip(reference, pixels).filter { abs(Int($0) - Int($1)) > 8 }.count
+                XCTAssertLessThan(changed, 32, "The rendered refresh icon must stop after completion, attempt \(attempt)")
+            }
+        }
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "USB refresh returns to a stationary icon after repeated taps"; shot.lifetime = .keepAlways; add(shot)
+    }
+
+    func testServerGlobeAnimationStops() throws {
+        guard let address = ProcessInfo.processInfo.environment["ATLAS_PROBE_ANIMATION_ADDRESS"] else {
+            throw XCTSkip("Provide a directed-probe fixture with a short delayed response")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launchArguments = ["-serverAddress", address]; app.launch()
+        let search = app.buttons["discover-services"]
+        XCTAssertTrue(search.waitForExistence(timeout: 15))
+        let initiallyIdle = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (search.value as? String) != "正在搜索"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [initiallyIdle], timeout: 4), .completed)
+        search.tap()
+        XCTAssertTrue(search.isEnabled, "searching keeps the button's normal appearance")
+        XCTAssertEqual(search.value as? String, "正在搜索")
+        let moving = try renderedButtonPixels(search)
+        for index in 0..<2 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+            let shot = XCTAttachment(screenshot: search.screenshot())
+            shot.name = "Globe self rotation frame \(index)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        let next = try renderedButtonPixels(search)
+        XCTAssertEqual(moving.count, next.count)
+        XCTAssertGreaterThan(zip(moving, next).filter { abs(Int($0) - Int($1)) > 8 }.count, 32,
+                             "the globe must actually animate during discovery")
+        let completed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            (search.value as? String) != "正在搜索"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [completed], timeout: 4), .completed)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.3))
+        let stopped = try renderedButtonPixels(search)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.23))
+        let still = try renderedButtonPixels(search)
+        XCTAssertEqual(stopped.count, still.count)
+        XCTAssertLessThan(zip(stopped, still).filter { abs(Int($0) - Int($1)) > 8 }.count, 32,
+                          "the globe must become stationary when discovery ends")
+        XCTAssertTrue(search.isEnabled)
+    }
+
+    func testUSBWelcomeAndModelReceiving() throws {
+        guard let id = ProcessInfo.processInfo.environment["ATLAS_USB_TRANSFER_ID"], UUID(uuidString: id) != nil else {
+            throw XCTSkip("Provide a disposable USB transfer for the device receiving check")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let receive = app.buttons["receive-usb-model-\(id)"]
+        XCTAssertTrue(receive.waitForExistence(timeout: 15))
+        XCTAssertTrue(receive.label.contains("数据线接收验证（临时）"), "only import the dedicated test fixture")
+        XCTAssertTrue(app.staticTexts["方式三"].exists)
+        for _ in 0..<8 where !receive.isHittable { app.swipeUp() }
+        XCTAssertTrue(receive.isHittable)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "USB connected and complete model ready to receive"; shot.lifetime = .keepAlways; add(shot)
+        receive.tap()
+        let back = app.buttons["本地项目"]
+        XCTAssertTrue(back.waitForExistence(timeout: 20), "USB reception opens the existing teaching workflow")
+        back.tap()
+        let row = app.buttons["local-project-\(id)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        XCTAssertFalse(receive.exists, "successful reception removes its temporary inbox copy")
+        app.terminate(); app.launch()
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "the USB model survives relaunch")
+        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+        row.tap(); XCTAssertTrue(back.waitForExistence(timeout: 15)); back.tap()
+        for _ in 0..<8 where !row.isHittable { app.swipeUp() }
+        XCTAssertTrue(row.label.contains("数据线接收验证（临时）"))
+        row.swipeLeft()
+        app.buttons["swipe-delete-local-project-\(id)"].firstMatch.tap()
+        app.buttons["confirm-delete-local-project"].firstMatch.tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+    }
+
     func testLocalProjectDeleteImmediatelyAfterSwipe() throws {
         guard let id = ProcessInfo.processInfo.environment["ATLAS_SWIPE_TAP_FIXTURE_ID"], UUID(uuidString: id) != nil else {
             throw XCTSkip("Provide a disposable local project for rapid swipe/tap checks")
@@ -2281,14 +2394,23 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(updates.last, "255.255.255.255")
     }
 
+    private func openPairingCodePrompt(in app: XCUIApplication) -> XCUIElement {
+        let port = app.textFields["server-port"]
+        XCTAssertTrue(port.waitForExistence(timeout: 15))
+        port.tap(); port.typeText("\n")
+        let code = app.textFields["pairing-code"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5), app.debugDescription)
+        return code
+    }
+
     func testPairingScannerCanCancelWithoutChangingManualInput() {
         continueAfterFailure = false
         let app = XCUIApplication()
         XCUIDevice.shared.orientation = .landscapeLeft
         app.launchArguments = ["-serverAddress", "http://192.168.100.7:21990"]
         app.launch()
-        let code = app.textFields["pairing-code"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.textFields["pairing-code"].exists)
         app.buttons["scan-pairing-code"].tap()
         let cancel = app.buttons["cancel-pairing-scan"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 10))
@@ -2302,7 +2424,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Native QR pairing scanner"; shot.lifetime = .keepAlways; add(shot)
         cancel.tap()
-        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 5))
         // VisionKit can restore the physical device orientation after dismissal.
         // Wait for the rotation before editing so the next tap uses stable coordinates.
         XCUIDevice.shared.orientation = .portrait
@@ -2311,74 +2433,116 @@ final class AtlasTeachingUITests: XCTestCase {
             return frame.height > frame.width
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [portrait], timeout: 10), .completed)
+        let code = openPairingCodePrompt(in: app)
         code.tap(); code.typeText("Q7Z")
+        app.buttons["cancel-wifi-pairing"].tap()
         app.buttons["scan-pairing-code"].tap()
         XCTAssertTrue(cancel.waitForExistence(timeout: 10))
         cancel.tap()
-        XCTAssertTrue(code.waitForExistence(timeout: 5))
-        XCTAssertEqual(code.value as? String, "Q7Z")
+        XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 5))
+        XCTAssertFalse(code.exists, "cancelled Wi-Fi input stays dismissed after scanning")
         XCTAssertEqual(ipv4Address(in: app), "192.168.100.7")
         XCTAssertEqual(app.textFields["server-port"].value as? String, "21990")
-        XCTAssertTrue(code.isEnabled)
         XCTAssertFalse(app.buttons["capture-pose"].exists)
         XCUIDevice.shared.orientation = .landscapeLeft
     }
 
-    func testDiscoverTeachingServerKeepsPairingCode() throws {
-        guard let serverID = ProcessInfo.processInfo.environment["ATLAS_DISCOVERY_SERVER_ID"] else {
-            throw XCTSkip("Provide the running LAN service ID for a physical discovery test")
+    func testDiscoveredServerOpensPairingPrompt() throws {
+        guard let serverID = ProcessInfo.processInfo.environment["ATLAS_DISCOVERY_SERVER_ID"],
+              let address = ProcessInfo.processInfo.environment["ATLAS_DISCOVERY_ADDRESS"] else {
+            throw XCTSkip("Provide the running LAN service ID and address for a directed-probe test")
         }
         continueAfterFailure = false
         let app = XCUIApplication()
         XCUIDevice.shared.orientation = .landscapeLeft
-        app.launchArguments = ["-serverAddress", "http://192.168.100.7:21990"]
+        app.launchArguments = ["-serverAddress", address]
         app.launch()
         let code = app.textFields["pairing-code"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
-        code.tap(); code.typeText("Q7Z")
+        XCTAssertTrue(app.staticTexts["Wifi连接"].waitForExistence(timeout: 15))
+        XCTAssertFalse(code.exists, "the welcome page has no pairing-code input")
         let service = app.buttons["discovered-service-\(serverID)"]
-        XCTAssertTrue(service.waitForExistence(timeout: 20), app.debugDescription)
-        XCTAssertEqual(ipv4Address(in: app), "192.168.100.7", "search never overwrites a manually entered address")
+        XCTAssertTrue(service.waitForExistence(timeout: 5), app.debugDescription)
+        XCTAssertEqual(ipv4Address(in: app), URLComponents(string: address)?.host ?? "", "search only probes the entered address")
+        XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "discovered-service-")).count, 1)
+        XCTAssertNotEqual(app.buttons["discover-services"].value as? String, "正在搜索", "results appear after search feedback completes")
         service.tap()
-        XCTAssertNotEqual(ipv4Address(in: app), "192.168.100.7")
-        XCTAssertEqual(code.value as? String, "Q7Z", "selection keeps the partially entered pairing code")
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertEqual(code.value as? String, "")
+        code.tap(); code.typeText("q7z")
+        XCTAssertEqual(code.value as? String, "Q7Z")
+        XCTAssertFalse(app.buttons["confirm-wifi-pairing"].isEnabled)
         XCTAssertTrue(code.isEnabled)
         XCTAssertFalse(app.buttons["capture-pose"].exists, "discovery never pairs or opens a teaching session")
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        screenshot.name = "Discovered LAN teaching server, pairing still required"; screenshot.lifetime = .keepAlways; add(screenshot)
+        screenshot.name = "Selected LAN server opens pairing-code dialog"; screenshot.lifetime = .keepAlways; add(screenshot)
+        app.buttons["cancel-wifi-pairing"].tap()
+        XCTAssertFalse(code.exists)
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "cancelling must not connect")
+        XCTAssertEqual(ipv4Address(in: app), URLComponents(string: address)?.host ?? "")
+        XCTAssertTrue(service.waitForExistence(timeout: 5)); service.tap()
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        XCTAssertEqual(code.value as? String, "", "reopening starts with a fresh code")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(code.isHittable)
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "Pairing-code dialog in portrait"; portrait.lifetime = .keepAlways; add(portrait)
+        app.buttons["cancel-wifi-pairing"].tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+    }
+
+    func testServerProbeClearsCardWhenPortChanges() throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let serverID = environment["ATLAS_DISCOVERY_SERVER_ID"],
+              let address = environment["ATLAS_DISCOVERY_ADDRESS"] else {
+            throw XCTSkip("Provide a running service to verify address editing and retry")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launchArguments = ["-serverAddress", address]; app.launch()
+        let service = app.buttons["discovered-service-\(serverID)"]
+        XCTAssertTrue(service.waitForExistence(timeout: 15))
+        let port = app.textFields["server-port"], search = app.buttons["discover-services"]
+        let originalPort = String(URLComponents(string: address)?.port ?? 21990)
+        port.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: originalPort.count) + "65536")
+        XCTAssertFalse(service.exists, "the old card disappears as soon as its port changes")
+        search.tap()
+        XCTAssertEqual(search.value as? String, "正在搜索", "invalid input also keeps feedback visible")
+        XCTAssertTrue(app.staticTexts["请先填写有效的电脑地址和端口。"].waitForExistence(timeout: 4))
+        XCTAssertNotEqual(search.value as? String, "正在搜索")
+        port.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        port.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5) + originalPort)
+        search.tap()
+        XCTAssertEqual(search.value as? String, "正在搜索", "a fast success still shows search feedback")
+        XCTAssertTrue(service.waitForExistence(timeout: 5), "retry probes the corrected endpoint")
+        XCTAssertNotEqual(search.value as? String, "正在搜索")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Directed search finishes after minimum feedback with one matching server"; shot.lifetime = .keepAlways; add(shot)
     }
 
     func testFourCharacterPairingInput() {
         continueAfterFailure = false
         let app = XCUIApplication()
         XCUIDevice.shared.orientation = .landscapeLeft
-        app.launchArguments = ["-serverAddress", ""]
+        app.launchArguments = ["-serverAddress", "http://192.168.100.7:21990"]
         app.launch()
-        let code = app.textFields["pairing-code"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        let code = openPairingCodePrompt(in: app)
         XCTAssertFalse(app.buttons["receive-model"].exists)
         code.tap(); code.typeText("q7z")
         XCTAssertEqual(code.value as? String, "Q7Z")
         XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "three characters are incomplete")
-        code.typeText("2")
-        XCTAssertEqual(code.value as? String, "Q7Z2")
-        XCTAssertTrue(app.staticTexts["请先选择服务器或填写有效地址与端口"].exists)
-        let filled = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        filled.name = "Four filled pairing code cells"; filled.lifetime = .keepAlways; add(filled)
-        code.typeText("9")
+        code.typeText("29")
         XCTAssertEqual(code.value as? String, "Q7Z29", "do not truncate a longer code into a different valid code")
         XCTAssertTrue(app.staticTexts["请输入 4 位字母或数字"].exists)
         code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 5))
-        code.typeText("1234"); XCTAssertEqual(code.value as? String, "1234")
-        code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
-        code.typeText("wxyz"); XCTAssertEqual(code.value as? String, "WXYZ")
-        code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
         code.typeText("12-4"); XCTAssertTrue(app.staticTexts["请输入 4 位字母或数字"].exists, "punctuation is rejected")
         code.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 4))
-        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "a code alone cannot connect without a server address")
+        XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "incomplete and invalid codes cannot connect")
         XCTAssertFalse(app.buttons["capture-pose"].exists)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Four-character alphanumeric pairing input"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["cancel-wifi-pairing"].tap()
+        XCTAssertFalse(code.exists)
     }
 
     func testSeparateIPv4AndPortInputs() {
@@ -2459,9 +2623,10 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(scan.frame.height, 44)
             XCTAssertTrue(app.staticTexts["方式一"].exists)
             XCTAssertTrue(app.staticTexts["方式二"].exists)
+            XCTAssertTrue(app.staticTexts["方式三"].exists)
             XCTAssertEqual(app.buttons["discover-services"].label, "搜索服务器")
-            XCTAssertGreaterThan(app.staticTexts["手动连接"].frame.minY, scan.frame.maxY)
-            XCTAssertTrue(window.contains(app.textFields["pairing-code"].frame))
+            XCTAssertGreaterThan(app.staticTexts["Wifi连接"].frame.minY, scan.frame.maxY)
+            XCTAssertFalse(app.textFields["pairing-code"].exists)
             print("Library window: \(window), pairing panel: \(left), project panel: \(right)")
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = orientation.isLandscape ? "Full-width library landscape" : "Full-width library portrait"
@@ -2480,8 +2645,7 @@ final class AtlasTeachingUITests: XCTestCase {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication(); app.launchArguments = ["-serverAddress", address]; app.launch()
-        let code = app.textFields["pairing-code"]
-        XCTAssertTrue(code.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.textFields["server-port"].waitForExistence(timeout: 15))
         let fixture = app.buttons["local-project-\(fixtureID)"]
         func removeFixture() {
             XCTAssertTrue(fixture.label.contains("进度验证（临时）"), "only remove the dedicated transfer fixture")
@@ -2493,6 +2657,7 @@ final class AtlasTeachingUITests: XCTestCase {
                 predicate: NSPredicate(format: "exists == false"), object: fixture)], timeout: 10), .completed)
         }
         if fixture.exists { removeFixture() }
+        let code = openPairingCodePrompt(in: app)
         code.tap(); code.typeText("ABCDE")
         XCTAssertEqual(code.value as? String, "ABCDE")
         XCTAssertFalse(app.staticTexts["model-transfer-stage"].exists, "a longer code must not submit its first four characters")
@@ -3031,7 +3196,7 @@ final class AtlasTeachingUITests: XCTestCase {
             let project = app.buttons["local-project-\(id)"]
             XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
         } else {
-            let code = app.textFields["pairing-code"]
+            let code = openPairingCodePrompt(in: app)
             code.tap(); code.typeText(pairingCode)
         }
         let capture = app.buttons["capture-pose"]

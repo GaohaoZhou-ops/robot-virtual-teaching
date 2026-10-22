@@ -7,14 +7,17 @@ struct ContentView: View {
     @EnvironmentObject private var session: TeachingSession
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var discovery = LANServiceDiscovery()
+    @StateObject private var usbReceiver = USBFileReceiver()
     @State private var scanning = false
     @State private var scannedCode: PairingQRCode?
-    @State private var codeFocused = false
-    @State private var pendingManualPairing: Task<Void, Never>?
+    @State private var pairingServer: DiscoveredTeachingServer?
+    @State private var requestedWiFiPairing: (server: DiscoveredTeachingServer, code: String)?
     @State private var projectToDelete: LocalProject?
     @State private var revealedProjectID: String?
     @State private var deleteActionFrames: [String: CGRect] = [:]
     @State private var libraryHeaderHeight: CGFloat = 0
+    @State private var refreshingUSB = false
+    @State private var usbRefreshTask: Task<Void, Never>?
     var body: some View {
         GeometryReader { viewport in
         Group {
@@ -70,6 +73,12 @@ struct ContentView: View {
         .sheet(isPresented: $scanning, onDismiss: finishScanning) {
             PairingScannerView { qr in scannedCode = qr; scanning = false }
         }
+        .sheet(item: $pairingServer, onDismiss: finishWiFiPairing) { server in
+            WiFiPairingSheet(server: server) { code in
+                requestedWiFiPairing = (server, code)
+                pairingServer = nil
+            }
+        }
         .alert("从此 iPad 删除模型？", isPresented: Binding(
             get: { projectToDelete != nil }, set: { if !$0 { projectToDelete = nil } }
         ), presenting: projectToDelete) { project in
@@ -80,12 +89,15 @@ struct ContentView: View {
         } message: { project in
             Text("将删除「\(project.session.manifest.name)」在此 iPad 上的模型、全部 \(project.result.samples.count) 个 Pose 和应用生成的导出副本。电脑上的工程和已同步结果不受影响。")
         }
-        .onAppear { if !scanning { discovery.start() } }
-        .onDisappear { discovery.stop(); pendingManualPairing?.cancel(); pendingManualPairing = nil }
+        .onAppear { usbReceiver.start(); if !scanning && pairingServer == nil { searchConfiguredServer() } }
+        .onDisappear { stopUSBRefresh(); usbReceiver.stop(); discovery.stop() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active && session.current == nil && !scanning { discovery.start() }
+            if phase != .active { stopUSBRefresh() }
+            if phase == .active && session.current == nil { usbReceiver.start() } else { usbReceiver.stop() }
+            if phase == .active && session.current == nil && !scanning && pairingServer == nil { searchConfiguredServer() }
             else { discovery.stop() }
         }
+        .onChange(of: session.serverAddress) { _, _ in discovery.resetProbe() }
     }
     private func handleLibraryTap(at location: CGPoint) {
         guard !session.busy else { return }
@@ -102,38 +114,56 @@ struct ContentView: View {
         if let qr = scannedCode {
             scannedCode = nil
             Task { await session.pair(qr: qr) }
-        } else { discovery.start() }
+        } else { searchConfiguredServer() }
     }
     private func beginScanning() {
-        pendingManualPairing?.cancel(); pendingManualPairing = nil
-        codeFocused = false; discovery.stop()
+        discovery.stop()
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         // Finish the native field's resignation before SwiftUI presents the camera.
         DispatchQueue.main.async { scanning = true }
     }
     private var canPairManually: Bool {
-        !session.busy && !scanning && session.current == nil && session.serverConnection.canConnect && PairingCode.isValid(session.code)
+        !session.busy && !scanning && pairingServer == nil && session.current == nil
+            && session.serverConnection.canConnect && PairingCode.isValid(session.code)
     }
-    private func pairManually(after delay: Duration = .zero) {
-        pendingManualPairing?.cancel(); pendingManualPairing = nil
+    private func pairManually() {
         guard canPairManually else { return }
-        let address = session.serverAddress, code = session.code
-        pendingManualPairing = Task {
-            // Let a complete paste/edit settle so a longer or invalid code never
-            // submits just because its first four characters were valid.
-            do { try await Task.sleep(for: delay) } catch { return }
-            guard !Task.isCancelled, canPairManually, session.serverAddress == address, session.code == code else { return }
-            pendingManualPairing = nil
-            codeFocused = false
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-            await session.pair()
+        Task { await session.pair() }
+    }
+    private func presentWiFiPairing(_ server: DiscoveredTeachingServer) {
+        guard !session.busy, !scanning, pairingServer == nil, session.current == nil else { return }
+        discovery.stop()
+        session.serverAddress = server.address
+        session.code = ""; session.error = ""
+        requestedWiFiPairing = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        pairingServer = server
+    }
+    private func presentAddressPairing() {
+        guard session.serverConnection.canConnect else { return }
+        let address = session.serverAddress
+        presentWiFiPairing(discovery.servers.first(where: { $0.address == address })
+            ?? DiscoveredTeachingServer(id: address, name: "指定的电脑", address: address))
+    }
+    private func finishWiFiPairing() {
+        if let request = requestedWiFiPairing {
+            requestedWiFiPairing = nil
+            session.serverAddress = request.server.address
+            session.code = request.code
+            pairManually()
+        } else if !session.busy && !scanning && session.current == nil {
+            searchConfiguredServer()
         }
+    }
+    private func searchConfiguredServer() {
+        guard !session.busy, !scanning, pairingServer == nil, session.current == nil else { return }
+        discovery.probe(address: session.serverAddress)
     }
     private var libraryHeader: some View {
         HStack(alignment: .center, spacing: 24) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("ATLAS / IPAD PRO").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
                 Text("虚拟示教").font(.largeTitle.weight(.medium))
+                Text("ATLAS / IPAD PRO").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
             }
             Spacer(minLength: 0)
             Image(systemName: "ipad.landscape").font(.system(size: 60, weight: .ultraLight)).foregroundStyle(accent)
@@ -142,21 +172,20 @@ struct ContentView: View {
     }
     private func pairingPanel(minHeight: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("从电脑接收物体", systemImage: "wifi").font(.title2.weight(.medium))
+            Label("与电脑配对", systemImage: "desktopcomputer").font(.title2.weight(.medium))
+            Divider().padding(.vertical, 8)
             if let progress = session.transferProgress { modelTransferProgress(progress) }
             pairingMethodHeader("方式一", title: "扫码配对", symbol: "qrcode")
             Button(action: beginScanning) {
                 pairingActionLabel("扫码配对", systemImage: "qrcode.viewfinder")
-            }.buttonStyle(.borderedProminent)
+            }.buttonStyle(.bordered)
                 .disabled(session.busy).accessibilityIdentifier("scan-pairing-code")
             Divider().padding(.vertical, 4)
-            pairingMethodHeader("方式二", title: "手动连接", symbol: "globe")
-            LANAddressFields(address: $session.serverConnection, onSubmit: { pairManually() }).disabled(session.busy)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("4 位配对码 · 大写字母或数字").font(.caption).foregroundStyle(.secondary)
-                pairingCodeInput
-            }
+            pairingMethodHeader("方式二", title: "Wifi连接", symbol: "globe")
+            LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(session.busy)
             discoveryPanel
+            Divider().padding(.vertical, 4)
+            usbReceivingPanel
             if session.busy && session.transferProgress == nil { ProgressView() }
             if !session.error.isEmpty { Text(session.error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
             if session.error.hasPrefix("接收失败：") {
@@ -173,9 +202,82 @@ struct ContentView: View {
         .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
     }
-    private func pairingActionLabel(_ title: String, systemImage: String) -> some View {
-        Label(title, systemImage: systemImage).font(.body)
+    private var usbReceivingPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            pairingMethodHeader("方式三", title: "数据线连接", symbol: "cable.connector")
+            VStack(alignment: .leading, spacing: 8) {
+                Button(action: refreshUSBConnection) {
+                    pairingActionLabel("刷新数据线状态", systemImage: "arrow.clockwise", refreshing: refreshingUSB, activity: .refresh)
+                }.buttonStyle(.bordered).disabled(session.busy || refreshingUSB)
+                    .accessibilityValue(refreshingUSB ? "正在刷新" : "")
+                    .accessibilityIdentifier("refresh-usb-connection")
+                if let connection = usbReceiver.connection {
+                    serverConnectionCard(name: connection.serverName, detail: "数据线已连接 · 可接收文件", connected: true)
+                        .accessibilityElement(children: .combine).accessibilityIdentifier("usb-connected")
+                } else {
+                    Label("等待数据线连接", systemImage: "cable.connector")
+                        .font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("usb-disconnected")
+                }
+            }
+            if usbReceiver.transfers.isEmpty {
+                Text("在 Mac 打开示教服务，用数据线连接并信任此电脑。在电脑「iPad 示教」窗口点击「通过数据线发送」，物体会显示在这里。")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                if usbReceiver.connection == nil {
+                    Text("以下文件已传到本机，可离线接收。").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(usbReceiver.transfers) { transfer in
+                    Button {
+                        discovery.stop()
+                        Task { await session.receiveUSB(transfer, from: usbReceiver.inbox); await usbReceiver.refresh() }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label("接收 · \(transfer.manifest.name)", systemImage: "arrow.down.doc")
+                                .lineLimit(2).multilineTextAlignment(.leading)
+                            Text(ByteCountFormatter.string(fromByteCount: Int64(transfer.manifest.byteLength), countStyle: .file))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
+                    }.buttonStyle(.borderedProminent).disabled(session.busy)
+                        .accessibilityIdentifier("receive-usb-model-\(transfer.id)")
+                }
+            }
+            if !usbReceiver.message.isEmpty { Text(usbReceiver.message).font(.caption).foregroundStyle(.orange) }
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("usb-receiving-panel")
+    }
+    private func refreshUSBConnection() {
+        guard !refreshingUSB, !session.busy else { return }
+        refreshingUSB = true
+        usbRefreshTask = Task {
+            // Keep one full turn visible even when the local status read is fast.
+            async let feedback: Void = Task.sleep(for: .milliseconds(800))
+            await usbReceiver.refresh()
+            _ = try? await feedback
+            guard !Task.isCancelled else { return }
+            refreshingUSB = false; usbRefreshTask = nil
+        }
+    }
+    private func stopUSBRefresh() {
+        usbRefreshTask?.cancel(); usbRefreshTask = nil; refreshingUSB = false
+    }
+    private func pairingActionLabel(_ title: String, systemImage: String, refreshing: Bool = false,
+                                    activity: PairingActivityIcon.Kind? = nil) -> some View {
+        Label { Text(title) } icon: {
+            if let activity { PairingActivityIcon(kind: activity, active: refreshing) }
+            else { Image(systemName: systemImage) }
+        }.font(.body)
             .frame(maxWidth: .infinity).padding(.vertical, 10)
+    }
+    private func serverConnectionCard(name: String, detail: String, connected: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "desktopcomputer").foregroundStyle(accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name).font(.callout.weight(.medium)).lineLimit(1)
+                Text(detail).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Image(systemName: connected ? "checkmark.circle.fill" : "plus.circle").foregroundStyle(accent)
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
+            .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
     private func pairingMethodHeader(_ method: String, title: String, symbol: String) -> some View {
         HStack(spacing: 14) {
@@ -224,51 +326,23 @@ struct ContentView: View {
         .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .contain).accessibilityIdentifier("model-transfer-progress")
     }
-    private var pairingCodeInput: some View {
-        let characters = Array(session.code)
-        let invalid = characters.count > 4 || characters.contains { !$0.isASCII || !("A"..."Z").contains(String($0)) && !("0"..."9").contains(String($0)) }
-        return VStack(alignment: .leading, spacing: 8) {
-            PairingCodeField(code: Binding(get: { session.code }, set: { value in
-                session.code = value
-                pairManually(after: .milliseconds(600))
-            }), isFocused: $codeFocused, onSubmit: { pairManually() })
-                .frame(maxWidth: .infinity).frame(height: 58).disabled(session.busy)
-            if invalid { Text("请输入 4 位字母或数字").font(.caption).foregroundStyle(.orange) }
-            else if PairingCode.isValid(session.code) && !session.serverConnection.canConnect {
-                Text("请先选择服务器或填写有效地址与端口").font(.caption).foregroundStyle(.orange)
-            }
-        }
-    }
     private var discoveryPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button { discovery.start() } label: {
-                pairingActionLabel("搜索服务器", systemImage: "network")
-                    .overlay(alignment: .trailing) {
-                        if discovery.isSearching {
-                            ProgressView().controlSize(.small).padding(.trailing, 8).accessibilityHidden(true)
-                        }
-                    }
+            Button(action: searchConfiguredServer) {
+                pairingActionLabel("搜索服务器", systemImage: "network", refreshing: discovery.isSearching, activity: .globe)
             }.buttonStyle(.bordered)
-                .disabled(discovery.isSearching || session.busy).accessibilityIdentifier("discover-services")
+                .disabled(session.busy).allowsHitTesting(!discovery.isSearching)
+                .accessibilityValue(discovery.isSearching ? "正在搜索" : "")
+                .accessibilityIdentifier("discover-services")
             if !discovery.servers.isEmpty {
                 ScrollView {
                     VStack(spacing: 6) {
                         ForEach(discovery.servers) { server in
                             Button {
-                                session.serverAddress = server.address
-                                session.error = ""
-                                pairManually(after: .milliseconds(600))
+                                presentWiFiPairing(server)
                             } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "desktopcomputer").foregroundStyle(accent)
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(server.name).font(.callout.weight(.medium)).lineLimit(1)
-                                        Text(LANAddressInput(address: server.address).displayAddress).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
-                                    }
-                                    Spacer(minLength: 0)
-                                    Image(systemName: session.serverAddress == server.address ? "checkmark.circle.fill" : "plus.circle").foregroundStyle(accent)
-                                }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                                serverConnectionCard(name: server.name, detail: LANAddressInput(address: server.address).displayAddress,
+                                                     connected: session.serverAddress == server.address)
                             }.buttonStyle(.plain).disabled(session.busy)
                                 .accessibilityIdentifier("discovered-service-\(server.id)")
                         }
@@ -440,6 +514,192 @@ private struct LocalProjectSwipeSnap: ScrollTargetBehavior {
         let revealWidth = max(0, context.contentSize.width - context.containerSize.width)
         let reveal = abs(context.velocity.dx) > 100 ? context.velocity.dx > 0 : target.rect.minX > revealWidth / 2
         target.rect.origin.x = reveal ? revealWidth : 0
+    }
+}
+
+private struct PairingActivityIcon: View {
+    enum Kind { case refresh, globe }
+    let kind: Kind
+    let active: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Group {
+            // Removing the timeline ends rendering immediately. Setting a
+            // repeatForever animation to nil can leave its old animation alive.
+            if active { AnimatedPairingActivityIcon(kind: kind, reduceMotion: reduceMotion) }
+            else { PairingActivityFrame(kind: kind, phase: 0) }
+        }
+        .frame(width: 20, height: 20)
+        .transaction { $0.animation = nil }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AnimatedPairingActivityIcon: View {
+    let kind: PairingActivityIcon.Kind
+    let reduceMotion: Bool
+    @State private var startedAt = Date()
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+            let duration = kind == .refresh ? 0.8 : 2.4
+            let phase = max(0, timeline.date.timeIntervalSince(startedAt))
+                .truncatingRemainder(dividingBy: duration) / duration
+            PairingActivityFrame(kind: kind, phase: reduceMotion ? 0 : phase)
+                .opacity(reduceMotion ? 0.8 + 0.2 * cos(phase * 2 * .pi) : 1)
+        }
+    }
+}
+
+private struct PairingActivityFrame: View {
+    let kind: PairingActivityIcon.Kind
+    let phase: Double
+
+    var body: some View {
+        Canvas { context, size in
+            if kind == .refresh {
+                context.stroke(refreshPath(size), with: .foreground,
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
+            } else {
+                context.stroke(globePath(size), with: .foreground,
+                    style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round))
+            }
+        }
+        .rotationEffect(.degrees(kind == .refresh ? phase * 360 : 0))
+    }
+    private func refreshPath(_ size: CGSize) -> Path {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let scale = min(size.width, size.height) / 20, radius = scale * 6.7
+        var path = Path()
+        // The circle and rotation share this exact center, independently of the
+        // arrowhead's asymmetric bounds or a font symbol's baseline metrics.
+        for step in 0...60 {
+            let angle = (15 + Double(step) * 5) * .pi / 180
+            let point = CGPoint(x: center.x + radius * CGFloat(cos(angle)), y: center.y + radius * CGFloat(sin(angle)))
+            if step == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        let end = 315.0 * .pi / 180
+        let normal = CGVector(dx: cos(end), dy: sin(end))
+        let tangent = CGVector(dx: -sin(end), dy: cos(end))
+        let tip = CGPoint(x: center.x + radius * normal.dx, y: center.y + radius * normal.dy)
+        path.move(to: CGPoint(x: tip.x - scale * 3.3 * tangent.dx + scale * 2.8 * normal.dx,
+                              y: tip.y - scale * 3.3 * tangent.dy + scale * 2.8 * normal.dy))
+        path.addLine(to: tip)
+        path.addLine(to: CGPoint(x: tip.x - scale * 3.3 * tangent.dx - scale * 2.8 * normal.dx,
+                                 y: tip.y - scale * 3.3 * tangent.dy - scale * 2.8 * normal.dy))
+        return path
+    }
+    private func globePath(_ size: CGSize) -> Path {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let radius = min(size.width, size.height) / 2 - 1
+        var path = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2))
+        let tilt = 0.16
+        func appendCurve(_ coordinates: [(latitude: Double, longitude: Double)]) {
+            var drawing = false
+            for coordinate in coordinates {
+                let x = cos(coordinate.latitude) * sin(coordinate.longitude)
+                let y = sin(coordinate.latitude)
+                let z = cos(coordinate.latitude) * cos(coordinate.longitude)
+                let visible = y * sin(tilt) + z * cos(tilt) >= 0
+                guard visible else { drawing = false; continue }
+                let point = CGPoint(x: center.x + radius * CGFloat(x),
+                                    y: center.y - radius * CGFloat(y * cos(tilt) - z * sin(tilt)))
+                if drawing { path.addLine(to: point) } else { path.move(to: point); drawing = true }
+            }
+        }
+        // A fixed sphere silhouette with meridians turning around its vertical
+        // axis. It never rolls around the screen or flips a flat globe image.
+        for meridian in 0..<6 {
+            let longitude = phase * 2 * Double.pi + Double(meridian) * Double.pi / 3
+            let points: [(latitude: Double, longitude: Double)] = (0...48).map { step in
+                let latitude = -Double.pi / 2 + Double(step) * (Double.pi / 48)
+                return (latitude, longitude)
+            }
+            appendCurve(points)
+        }
+        for latitude in [-Double.pi / 4, 0, Double.pi / 4] {
+            let points: [(latitude: Double, longitude: Double)] = (0...64).map { step in
+                (latitude, Double(step) * (2 * Double.pi / 64))
+            }
+            appendCurve(points)
+        }
+        return path
+    }
+}
+
+private struct WiFiPairingSheet: View {
+    let server: DiscoveredTeachingServer
+    let onPair: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var code = ""
+    @State private var codeFocused = false
+    @State private var pendingSubmission: Task<Void, Never>?
+    @State private var submitted = false
+
+    private var valid: Bool { PairingCode.isValid(code) }
+    private var invalid: Bool {
+        code.count > 4 || code.utf8.contains { !(65...90).contains($0) && !(48...57).contains($0) }
+    }
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "desktopcomputer").font(.title2).foregroundStyle(accent)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(server.name).font(.headline)
+                            Text(LANAddressInput(address: server.address).displayAddress)
+                                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("输入此电脑窗口中的 4 位配对码，字母或数字均可。输入完成后自动连接。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    PairingCodeField(code: Binding(get: { code }, set: { value in
+                        code = value; submit(after: .milliseconds(600))
+                    }), isFocused: $codeFocused, onSubmit: { submit() })
+                        .frame(maxWidth: .infinity).frame(height: 58).disabled(submitted)
+                    if invalid { Text("请输入 4 位字母或数字").font(.caption).foregroundStyle(.orange) }
+                }.padding(24)
+            }
+            .background(Color(red: 0.025, green: 0.05, blue: 0.065))
+            .navigationTitle("输入配对码").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") {
+                        pendingSubmission?.cancel(); pendingSubmission = nil
+                        codeFocused = false; dismiss()
+                    }.accessibilityIdentifier("cancel-wifi-pairing")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("连接") { submit() }.disabled(!valid || submitted)
+                        .accessibilityIdentifier("confirm-wifi-pairing")
+                }
+            }
+        }
+        .presentationDetents([.height(320)]).presentationDragIndicator(.visible)
+        .task {
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            codeFocused = true
+        }
+        .onDisappear { pendingSubmission?.cancel(); pendingSubmission = nil }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { pendingSubmission?.cancel(); pendingSubmission = nil }
+        }
+    }
+    private func submit(after delay: Duration = .zero) {
+        pendingSubmission?.cancel(); pendingSubmission = nil
+        guard valid, !submitted else { return }
+        let value = code
+        pendingSubmission = Task {
+            // Wait for the entire edit/paste, never submit a valid four-character
+            // prefix of a longer or invalid code. Dismissal cancels this work.
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard !Task.isCancelled, !submitted, valid, code == value else { return }
+            submitted = true; codeFocused = false
+            onPair(value)
+        }
     }
 }
 

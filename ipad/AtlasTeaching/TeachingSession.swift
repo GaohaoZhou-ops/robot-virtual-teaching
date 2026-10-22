@@ -61,6 +61,29 @@ final class TeachingSession: ObservableObject {
         do { projects = try await ProjectStore.shared.projects() } catch { self.error = "读取本地草稿失败：\(error.localizedDescription)" }
     }
     #if os(iOS)
+    func receiveUSB(_ transfer: USBModelTransfer, from inbox: USBModelInbox) async {
+        guard !busy, current == nil else { return }
+        busy = true; error = ""; transferProgress = .validating
+        defer { busy = false; transferProgress = nil }
+        do {
+            status = "正在校验数据线接收的模型…"
+            let data = try await inbox.model(transfer)
+            if let existing = try await ProjectStore.shared.projects().first(where: { $0.id == transfer.id }) {
+                guard existing.session.manifest.modelHash == transfer.manifest.modelHash else {
+                    throw TeachingError("本地项目与接收物体不一致，已停止接收；已有 Pose 保留")
+                }
+                let loaded = try await Task.detached { try ModelGeometry(data: data, manifest: existing.session.manifest) }.value
+                try await ProjectStore.shared.saveModel(data, id: existing.id)
+                geometry = loaded; current = existing; pendingModel = nil
+                await reload()
+            } else {
+                try await acceptModel(data, paired: PairedSession(id: transfer.id, deviceToken: "", manifest: transfer.manifest), serverURL: "")
+            }
+            try? await inbox.removeReceived(transfer)
+            status = "物体已通过数据线接收并保存，可以拔下数据线开始示教"
+        } catch { self.error = "数据线接收失败：\(error.localizedDescription)" }
+    }
+
     func deleteLocalProject(_ project: LocalProject) async {
         guard !busy, current == nil, projects.contains(where: { $0.id == project.id }) else { return }
         busy = true; deletingProjectID = project.id; error = ""
@@ -124,7 +147,7 @@ final class TeachingSession: ObservableObject {
         }
     }
     private func acceptModel(_ data: Data, paired: PairedSession, serverURL: String) async throws {
-        transferProgress = .validating; status = "下载完成，正在校验和加载模型…"
+        transferProgress = .validating; status = "模型已接收，正在校验和加载…"
         let geometry = try await Task.detached { try ModelGeometry(data: data, manifest: paired.manifest) }.value
         let existing = try await ProjectStore.shared.projects().first { $0.id == paired.id }
         var project = existing ?? LocalProject(serverURL: serverURL, session: paired,
@@ -135,7 +158,7 @@ final class TeachingSession: ObservableObject {
         transferProgress = .saving; status = "正在将模型保存到 \(TeachingDevice.storageName)…"
         try await ProjectStore.shared.saveModel(data, id: paired.id)
         try await ProjectStore.shared.save(project)
-        UserDefaults.standard.set(serverURL, forKey: "serverAddress")
+        if !serverURL.isEmpty { UserDefaults.standard.set(serverURL, forKey: "serverAddress") }
         self.geometry = geometry; current = project; pendingModel = nil
         status = "物体已保存到 \(TeachingDevice.storageName)，可以断开网络"
         await reload()

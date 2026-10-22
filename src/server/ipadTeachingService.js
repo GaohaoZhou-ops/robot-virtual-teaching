@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { IPAD_PROTOCOL, MAX_MODEL_BYTES, validateModelBytes, validateIPadResult } from '../lib/ipadProtocol.js';
 import { advertiseIPadService } from './ipadDiscovery.js';
 import { modelThumbnail } from './modelThumbnail.js';
+import { createIPadUSBBridge } from './ipadUSB.js';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
@@ -34,7 +35,7 @@ async function readBody(req, limit, asJSON = true) {
   try { return JSON.parse(body.toString('utf8')); } catch { fail(400, 'JSON 数据无效'); }
 }
 
-export function createIPadTeachingService({ directory, serverId = randomUUID(), serverName = hostname().replace(/\.local$/i, '').slice(0, 120), generatePairingCode = randomPairingCode, getAddresses = lanAddresses }) {
+export function createIPadTeachingService({ directory, serverId = randomUUID(), serverName = hostname().replace(/\.local$/i, '').slice(0, 120), generatePairingCode = randomPairingCode, getAddresses = lanAddresses, usbBridge }) {
   const locks = new Map(), attempts = new Map();
   // Only an open, owner-authorized Vision Pro pairing window publishes a code.
   // Keep these short leases in memory; session files continue storing hashes only.
@@ -108,6 +109,11 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
       if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) fail(403, '不允许跨站访问配对服务');
       await mkdir(directory, { recursive: true, mode: 0o700 });
       const route = pathname.slice('/__atlas/ipad'.length);
+      const localUSB = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress);
+      if (route === '/usb' && req.method === 'GET') {
+        if (!localUSB) return json(res, 200, { supported: false, devices: [], message: '请在连接 iPad 的 Mac 上使用 http://127.0.0.1:' + req.socket.localPort + ' 打开工作台。' });
+        return json(res, 200, usbBridge?.status() || { supported: false, devices: [], message: '请在连接 iPad 的 Mac 上运行示教服务。' });
+      }
       if (route === '/info' && req.method === 'GET') {
         const port = req.socket.localPort;
         const addresses = getAddresses(port);
@@ -187,7 +193,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         }
         fail(404, '找不到配对码，请确认电脑地址与配对码');
       }
-      const match = /^\/sessions\/([a-f0-9-]{36})(?:\/(model|thumbnail|verify-model|result|imported|renew|pairing-qr|vision-pairing))?$/.exec(route);
+      const match = /^\/sessions\/([a-f0-9-]{36})(?:\/(model|thumbnail|verify-model|result|imported|renew|pairing-qr|vision-pairing|usb))?$/.exec(route);
       if (!match) fail(404, '接口不存在');
       const [, id, action] = match;
       await serialized(id, async () => {
@@ -195,6 +201,17 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
         const role = (['model', 'thumbnail'].includes(action) && req.method === 'GET')
           || (['verify-model', 'result'].includes(action) && req.method === 'POST') ? 'device' : 'owner';
         authorize(req, session, role);
+        if (action === 'usb' && req.method === 'POST') {
+          if (!localUSB) fail(403, '请在连接 iPad 的 Mac 本机工作台发送数据线文件。');
+          if (!usbBridge) fail(503, '当前服务未启用 Mac 数据线传输。');
+          if (session.targetDevice === 'vision' || !['ready', 'paired', 'completed', 'imported'].includes(session.status)) {
+            fail(409, '请先为 iPad 准备好当前物体。');
+          }
+          const { deviceId } = await readBody(req, 4096);
+          if (typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/i.test(deviceId)) fail(400, '请选择已连接的 iPad。');
+          await verifyModel(session, session.manifest);
+          return json(res, 200, await usbBridge.send({ deviceId, session, modelPath: path.join(directory, id, 'model.atls') }));
+        }
         if (action === 'vision-pairing' && ['POST', 'DELETE'].includes(req.method)) {
           const { publisherId, code } = await readBody(req, 4096);
           if (!/^[a-f0-9-]{36}$/.test(publisherId || '')) fail(400, '配对窗口标识无效');
@@ -311,7 +328,14 @@ export function ipadTeachingPlugin() {
   const cleanups = new Set();
   const install = (server) => {
     const identity = { serverId: randomUUID(), serverName: hostname().replace(/\.local$/i, '').slice(0, 120) };
-    server.middlewares.use(createIPadTeachingService({ directory: path.join(root, '.atlas-cache', 'ipad-teaching'), ...identity }));
+    const usbBridge = createIPadUSBBridge({ directory: path.join(root, '.atlas-cache', 'ipad-usb'), ...identity });
+    server.middlewares.use(createIPadTeachingService({ directory: path.join(root, '.atlas-cache', 'ipad-teaching'), ...identity, usbBridge }));
+    if (server.httpServer) {
+      const start = () => usbBridge.start();
+      if (server.httpServer.listening) start(); else server.httpServer.once('listening', start);
+      const stop = () => { server.httpServer.removeListener('listening', start); usbBridge.close(); };
+      server.httpServer.once('close', stop); cleanups.add(stop);
+    }
     if (server.httpServer) cleanups.add(advertiseIPadService(server.httpServer, { ...identity,
       onError: (error) => logger?.warn(`iPad 局域网发现暂不可用，仍可手动填写地址：${error.message}`) }));
   };
