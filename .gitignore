@@ -186,6 +186,12 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Grouped inspector layout / button-size captures and packed review copies.
+# Scope these to local output roots; source artwork and fixtures stay visible.
+/atlas-inspector-*/
+/tests/atlas-inspector-*/
+/atlas-inspector-*.[zZ][iI][pP]
+/tests/atlas-inspector-*.[zZ][iI][pP]
 # Pose-solver dialog captures copied from /tmp for local UI review.
 # Keep same-named source artwork and nested regression fixtures trackable.
 /mobile-solve-*.png

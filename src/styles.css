@@ -5197,7 +5197,7 @@ input[type="number"]::-webkit-inner-spin-button {
   top: 4px;
   right: 5px;
   color: rgba(var(--tab-accent), 0.42);
-  font: normal 5px "SFMono-Regular", Menlo, monospace;
+  font: normal 6px "SFMono-Regular", Menlo, monospace;
   letter-spacing: 0.08em;
 }
 
@@ -5208,7 +5208,7 @@ input[type="number"]::-webkit-inner-spin-button {
   min-width: 0;
   padding-right: 10px;
   overflow: hidden;
-  font-size: 7px;
+  font-size: 10px;
   font-weight: 570;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5219,7 +5219,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .inspector-pagination button > small {
   overflow: hidden;
   color: rgba(137, 177, 179, 0.46);
-  font: 5px "SFMono-Regular", Menlo, monospace;
+  font: 7px "SFMono-Regular", Menlo, monospace;
   letter-spacing: 0.05em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -9410,6 +9410,10 @@ input[type="number"]::-webkit-inner-spin-button {
 .inspector-navigation-actions > button {
   height: 32px;
   font-size: 11px;
+}
+
+.inspector-navigation-actions > button {
+  height: 42px;
 }
 
 .inspector-navigation-actions > button:only-child {
