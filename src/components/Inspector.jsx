@@ -137,7 +137,6 @@ export default function Inspector({
   onSelectMobilePose,
   onOpenMobileRobotPose,
   onOpenMobileSource,
-  onEditTeachingPose,
   activeTeachingTaskId,
   activeTeachingParkingPointId,
   robotParkingGhostId,
@@ -175,6 +174,8 @@ export default function Inspector({
   onDeleteTeachingTask,
   onDeleteTeachingParkingPoint,
   onDeleteTeachingPoint,
+  onApplyTeachingPoint,
+  onApplyTeachingUpperBodyPose,
   onSolveMobileTask,
   onSaveMobileTask,
   mobileSaveDisabledReason,
@@ -864,7 +865,6 @@ export default function Inspector({
               onSelectMobilePose={onSelectMobilePose}
               onOpenMobileRobotPose={onOpenMobileRobotPose}
               onOpenMobileSource={onOpenMobileSource}
-              onEditPose={onEditTeachingPose}
               editingPoseId={editingTeachingPoseId}
               teachingSpaceMode={teachingSpaceMode}
               tasks={teachingTasks}
@@ -887,6 +887,10 @@ export default function Inspector({
               onDeleteTask={onDeleteTeachingTask}
               onDeleteParkingPoint={onDeleteTeachingParkingPoint}
               onDeletePoint={onDeleteTeachingPoint}
+              onApplyPoint={onApplyTeachingPoint}
+              onApplyUpperBodyPose={onApplyTeachingUpperBodyPose}
+              onMoveToParkingPoint={onMoveToWaypoint}
+              parkingMoveDisabled={waypointMoveDisabled || !pointById.has(activeTeachingParkingPointId)}
               onSolveMobileTask={onSolveMobileTask}
               onSaveMobileTask={onSaveMobileTask}
               mobileSaveDisabledReason={mobileSaveDisabledReason}
