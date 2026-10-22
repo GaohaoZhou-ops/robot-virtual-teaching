@@ -3,7 +3,7 @@
 .collision-joint-settings__toggle small { margin-left: auto; color: var(--muted); font-size: 9px; }
 .collision-joint-settings__toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .collision-joint-settings__body > p { margin: 3px 0 10px; color: var(--muted); font-size: 10px; line-height: 1.6; }
-.collision-joint-settings__groups { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-bottom: 9px; }
+.collision-joint-settings__groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 12px; margin-bottom: 9px; }
 .collision-joint-settings__groups label { display: inline-flex; align-items: center; gap: 5px; padding: 4px 0; color: var(--text); font-size: 10px; cursor: pointer; }
 .collision-joint-settings__groups input { margin: 0; accent-color: var(--cyan); }
 .collision-joint-settings__groups label:has(input:disabled) { opacity: 0.4; cursor: default; }

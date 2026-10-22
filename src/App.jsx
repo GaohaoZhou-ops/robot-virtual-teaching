@@ -598,6 +598,7 @@ export default function App() {
   const [meshRenderQuality, setMeshRenderQuality] = useState('auto');
   const [showWaypoints3D, setShowWaypoints3D] = useState(true);
   const [showWaypointNames3D, setShowWaypointNames3D] = useState(true);
+  const [showPathNames3D, setShowPathNames3D] = useState(false);
   const [showHeightLegend3D, setShowHeightLegend3D] = useState(true);
   const [showRobotModel, setShowRobotModel] = useState(true);
   const [collapsedPanel, setCollapsedPanel] = useState(null);
@@ -811,6 +812,7 @@ export default function App() {
     meshRenderQuality,
     showWaypoints3D,
     showWaypointNames3D,
+    showPathNames3D,
     showHeightLegend3D,
     collapsedPanel,
     inspectorCollapsed,
@@ -1079,6 +1081,7 @@ export default function App() {
           placedObjectColorMode: current.placedObjectColorMode,
           showWaypoints3D: current.showWaypoints3D,
           showWaypointNames3D: current.showWaypointNames3D,
+          showPathNames3D: current.showPathNames3D,
           showHeightLegend3D: current.showHeightLegend3D,
           activeTeachingTaskId: current.activeTeachingTaskId,
           activeTeachingParkingPointId: current.activeTeachingParkingPointId,
@@ -1105,6 +1108,7 @@ export default function App() {
         meshRenderQuality: current.meshRenderQuality,
         showWaypoints3D: current.showWaypoints3D,
         showWaypointNames3D: current.showWaypointNames3D,
+        showPathNames3D: current.showPathNames3D,
         showHeightLegend3D: current.showHeightLegend3D,
         showSlice3D: current.showSlice3D,
         collapsedPanel: current.collapsedPanel,
@@ -1594,6 +1598,9 @@ export default function App() {
           setShowWaypointNames3D(
             (snapshot?.ui?.showWaypointNames3D ?? project?.workspace?.showWaypointNames3D) !== false,
           );
+          setShowPathNames3D(
+            (snapshot?.ui?.showPathNames3D ?? project?.workspace?.showPathNames3D) === true,
+          );
           setShowHeightLegend3D(
             (snapshot?.ui?.showHeightLegend3D ?? project?.workspace?.showHeightLegend3D) !== false,
           );
@@ -1849,6 +1856,7 @@ export default function App() {
           setMeshRenderQuality('auto');
           setShowWaypoints3D(true);
           setShowWaypointNames3D(true);
+          setShowPathNames3D(false);
           setShowHeightLegend3D(true);
           setCollapsedPanel(null);
           setInspectorCollapsed(false);
@@ -2029,6 +2037,7 @@ export default function App() {
     sessionState.status,
     showWaypoints3D,
     showWaypointNames3D,
+    showPathNames3D,
     showHeightLegend3D,
     validation,
     waypoints,
@@ -2400,6 +2409,7 @@ export default function App() {
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
         placedObjectColorMode: current.placedObjectColorMode,
         showWaypoints3D: syncRoute || current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
+        showPathNames3D: current.showPathNames3D,
         showHeightLegend3D: current.showHeightLegend3D,
         collapsedPanel: current.collapsedPanel, inspectorCollapsed: current.inspectorCollapsed,
         directoryAutosaveSuspended: true, transfer,
@@ -2630,6 +2640,7 @@ export default function App() {
         : 'height';
       const importedShowWaypoints3D = project.workspace?.showWaypoints3D !== false;
       const importedShowWaypointNames3D = project.workspace?.showWaypointNames3D !== false;
+      const importedShowPathNames3D = project.workspace?.showPathNames3D === true;
       const importedShowHeightLegend3D = project.workspace?.showHeightLegend3D !== false;
       const importedObjectColor = project.workspace?.placedObjectColorMode || importedPointColorMode;
       const importedCollapsedPanel = ['2d', '3d'].includes(project.workspace?.collapsedPanel)
@@ -2668,6 +2679,7 @@ export default function App() {
       setPlacedObjectColorMode(importedObjectColor);
       setShowWaypoints3D(importedShowWaypoints3D);
       setShowWaypointNames3D(importedShowWaypointNames3D);
+      setShowPathNames3D(importedShowPathNames3D);
       setShowHeightLegend3D(importedShowHeightLegend3D);
       setCollapsedPanel(importedCollapsedPanel);
       setInspectorCollapsed(importedInspectorCollapsed);
@@ -2742,6 +2754,7 @@ export default function App() {
             placedObjectColorMode: importedObjectColor,
             showWaypoints3D: importedShowWaypoints3D,
             showWaypointNames3D: importedShowWaypointNames3D,
+            showPathNames3D: importedShowPathNames3D,
             showHeightLegend3D: importedShowHeightLegend3D,
             activeTeachingTaskId: importedTaskId,
             activeTeachingParkingPointId: importedParkingPointId,
@@ -2762,6 +2775,7 @@ export default function App() {
             meshRenderQuality: importedMeshQuality,
             showWaypoints3D: importedShowWaypoints3D,
             showWaypointNames3D: importedShowWaypointNames3D,
+            showPathNames3D: importedShowPathNames3D,
             showHeightLegend3D: importedShowHeightLegend3D,
             collapsedPanel: importedCollapsedPanel,
             inspectorCollapsed: importedInspectorCollapsed,
@@ -4252,6 +4266,7 @@ export default function App() {
     placedObjectColorMode,
     showWaypoints3D,
     showWaypointNames3D,
+    showPathNames3D,
     showHeightLegend3D,
     activeTeachingTaskId,
     activeTeachingParkingPointId,
@@ -6664,6 +6679,8 @@ export default function App() {
                 onShowWaypointsChange={setShowWaypoints3D}
                 showWaypointNames={showWaypointNames3D}
                 onShowWaypointNamesChange={setShowWaypointNames3D}
+                showPathNames={showPathNames3D}
+                onShowPathNamesChange={setShowPathNames3D}
                 showHeightLegend={showHeightLegend3D}
                 onShowHeightLegendChange={setShowHeightLegend3D}
                 onSelectWaypoint={selectNavigationWaypoint}

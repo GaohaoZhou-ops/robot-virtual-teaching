@@ -9,6 +9,7 @@ import {
 } from '../src/lib/robotCollision.js';
 import { resolveRobotCollisionBackend } from '../src/lib/robotCollisionBackend.js';
 import { setRobotVisualBounds } from '../src/lib/robotLoader.js';
+import { groupPresetJoints, presetJointDefinitions } from '../src/lib/robotJointPresets.js';
 
 const material = () => new THREE.MeshBasicMaterial({ color: '#78909c' });
 
@@ -116,6 +117,49 @@ disposeRobotCollisionProxies(allIgnored);
 const restored = collectRobotCollisionProxies(articulated);
 assert.equal(restored.proxies.length, 3);
 disposeRobotCollisionProxies(restored);
+
+// Torso selection matches the four editable preset joints; head joints and
+// fixed cameras stay separate from both the torso and chassis sensors.
+const groupedRobot = new THREE.Group();
+const groupedBase = createLink('base_link').link;
+const torso = createLink('ankle_pitch_L').link;
+const knee = createLink('knee_pitch_L').link;
+const waistPitch = createLink('waist_pitch_L').link;
+const waistYaw = createLink('waist_yaw_L').link;
+const headYaw = createLink('head_yaw_L').link;
+const head = createLink('head_pitch_L').link;
+const bracket = createLink('sensor_bracket').link;
+groupedRobot.add(groupedBase);
+groupedBase.add(joint('ankle_pitch_J', torso, 'revolute'),
+  joint('mid360_left_J', createLink('mid360_left_L').link),
+  joint('bracket_mount', bracket), joint('wheel_J', createLink('wheel_LF_L').link));
+bracket.add(joint('mid360_right_J', createLink('mid360_right_L').link));
+torso.add(joint('knee_pitch_J', knee, 'revolute'));
+knee.add(joint('waist_pitch_J', waistPitch, 'revolute'));
+waistPitch.add(joint('waist_yaw_J', waistYaw, 'revolute'));
+waistYaw.add(joint('head_yaw_J', headYaw, 'revolute'),
+  joint('camera_waist_J', createLink('camera_waist_L').link),
+  joint('arm_left_mount', createLink('arm_left_baselink').link));
+headYaw.add(joint('head_pitch_J', head, 'revolute'));
+head.add(joint('camera_head_J', createLink('camera_head_L').link));
+const groupedOptions = getRobotCollisionJointOptions(groupedRobot);
+const namesIn = (group) => groupedOptions.filter((option) => option.group === group).map((option) => option.name).sort();
+assert.deepEqual(namesIn('chassis'), ['bracket_mount', 'mid360_left_J', 'mid360_right_J']);
+assert.deepEqual(namesIn('torso'), ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J', 'waist_yaw_J']);
+assert.deepEqual(namesIn('torso'), groupPresetJoints(presetJointDefinitions(groupedOptions))
+  .find((group) => group.id === 'body').joints.map((joint) => joint.name).sort());
+assert.deepEqual(namesIn('head'), ['head_pitch_J', 'head_yaw_J']);
+assert.deepEqual(namesIn('other'), ['camera_head_J', 'camera_waist_J']);
+assert.deepEqual(namesIn('left'), ['arm_left_mount']);
+assert(!groupedOptions.some((option) => option.name === 'wheel_J'));
+for (const group of ['torso', 'chassis', 'head', 'other']) {
+  const filtered = collectRobotCollisionProxies(groupedRobot, namesIn(group));
+  assert.deepEqual(filtered.ignoredLinks,
+    groupedOptions.filter((option) => option.group === group).flatMap((option) => option.links).sort());
+  assert(groupedOptions.filter((option) => option.group !== group)
+    .flatMap((option) => option.links).every((link) => filtered.monitoredLinks.includes(link)));
+  disposeRobotCollisionProxies(filtered);
+}
 
 const originalFetch = globalThis.fetch;
 try {

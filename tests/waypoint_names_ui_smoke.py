@@ -38,6 +38,8 @@ def seed(page):
         // Exercise old projects that do not yet have the display preference.
         delete project.workspace.showWaypointNames3D;
         delete fixture.config.config.ui.showWaypointNames3D;
+        delete project.workspace.showPathNames3D;
+        delete fixture.config.config.ui.showPathNames3D;
         await store.saveWorkspaceMap(sessionId, fixture.map.mapId, fixture.map.name, fixture.map, mode);
         await store.saveWorkspaceConfig(sessionId, fixture.map.mapId, fixture.config.config, mode);
       }
@@ -122,6 +124,21 @@ def run():
             original = {mode: snapshot(page, mode)["project"] for mode in POINTS}
             labels = check_projection(page, "map")
             canvas = page.locator(".three-canvas")
+            path_names = page.locator('.path-name-label')
+            expect(path_names).to_have_count(0)
+            settings = display_settings(page)
+            expect(settings.get_by_role('button', name='显示路径名', exact=True)).to_have_attribute('aria-pressed', 'false')
+            settings.get_by_role('button', name='显示路径名', exact=True).click()
+            expect(path_names).to_have_count(1)
+            expect(path_names).to_have_text('停车点一 → 检修区 B')
+            expect(path_names).to_have_css('visibility', 'visible')
+            expect(path_names).to_have_css('pointer-events', 'none')
+            page.screenshot(path='/tmp/atlas-path-names-settings.png', full_page=True)
+            page.keyboard.press('Escape')
+            path_transform = path_names.evaluate('el => el.style.transform')
+            page.get_by_role('tab', name='路径与导航', exact=True).click()
+            page.locator('.route-index__item').click()
+            expect(path_names).to_have_class('path-name-label is-selected')
 
             # Names cannot intercept selection, and the selected name highlights.
             target = next(label for label in labels if label["visible"])
@@ -152,10 +169,18 @@ def run():
             check_projection(page, "map")
 
             settings = display_settings(page)
+            assert path_names.evaluate('el => el.style.transform') != path_transform
+            expect(settings.get_by_role('button', name='隐藏路径名', exact=True)).to_have_attribute('aria-pressed', 'true')
+            settings.get_by_role('button', name='隐藏路径名', exact=True).click()
+            expect(path_names).to_have_count(0)
+            expect(page.locator('.waypoint-name-label')).to_have_count(4)
+            settings.get_by_role('button', name='显示路径名', exact=True).click()
+            expect(path_names).to_have_count(1)
             expect(settings.get_by_role("button", name="隐藏停车点名")).to_have_attribute("aria-pressed", "true")
             page.screenshot(path="/tmp/atlas-waypoint-names.png", full_page=True)
             settings.get_by_role("button", name="隐藏停车点名", exact=True).click()
             expect(page.locator(".waypoint-name-label")).to_have_count(0)
+            expect(path_names).to_have_count(1)
             expect(settings.get_by_role("button", name="显示停车点名")).to_have_attribute("aria-pressed", "false")
             expect(canvas).to_have_attribute("data-waypoints-visible", "true")
             expect(canvas).to_have_attribute("data-route-edge-count", "1")
@@ -164,14 +189,35 @@ def run():
             # Each workspace remembers its choice, including reload and ZIP import.
             switch_mode(page, "independent")
             check_projection(page, "independent")
+            expect(path_names).to_have_count(0)
+            settings = display_settings(page)
+            settings.get_by_role('button', name='显示路径名', exact=True).click()
+            expect(path_names).to_have_text('停车点一 → 检修区 B')
+            page.keyboard.press('Escape')
+            # This fixture's default close-up puts the route below the viewport.
+            # Zoom out before checking its projected name is visible.
+            box = canvas.bounding_box()
+            page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
+            for _ in range(4):
+                page.mouse.wheel(0, 160)
+                page.wait_for_timeout(150)
+            expect(path_names).to_have_css('visibility', 'visible')
+            page.screenshot(path='/tmp/atlas-path-names-independent.png', full_page=True)
+            settings = display_settings(page)
+            settings.get_by_role('button', name='隐藏路径名', exact=True).click()
+            expect(path_names).to_have_count(0)
+            page.keyboard.press('Escape')
             switch_mode(page, "map")
+            expect(path_names).to_have_count(1)
             expect(page.locator(".waypoint-name-label")).to_have_count(0)
             page.reload(wait_until="networkidle")
             ready(page, "map")
             expect(page.locator(".waypoint-name-label")).to_have_count(0)
+            expect(path_names).to_have_count(1)
             for mode in POINTS:
                 saved = snapshot(page, mode)["project"]
                 assert saved["workspace"]["showWaypointNames3D"] is (mode == "independent")
+                assert saved["workspace"]["showPathNames3D"] is (mode == "map")
                 assert saved["waypoints"] == original[mode]["waypoints"], (
                     mode, original[mode]["waypoints"], saved["waypoints"])
                 assert saved["paths"] == original[mode]["paths"], (
@@ -179,16 +225,18 @@ def run():
             with page.expect_download() as downloaded:
                 start_project_download(page, "waypoint-names")
             assert read_exported_project(downloaded.value)["workspace"]["showWaypointNames3D"] is False
+            assert read_exported_project(downloaded.value)["workspace"]["showPathNames3D"] is True
             archive = Path(temporary) / "waypoint-names.zip"
             downloaded.value.save_as(archive)
             imported = browser.new_page(viewport={"width": 1440, "height": 1000})
             imported.on("pageerror", lambda error: errors.append(str(error)))
             load_project(imported, "map", archive)
             expect(imported.locator(".waypoint-name-label")).to_have_count(0)
+            expect(imported.locator('.path-name-label')).to_have_text('停车点一 → 检修区 B')
             display_settings(imported).get_by_role("button", name="显示停车点名", exact=True).click()
             check_projection(imported, "map")
             assert not errors, errors
-            print("Waypoint names: camera projection, picking, toggles, both workspaces, reload and ZIP round-trip passed")
+            print("Waypoint/path names: default visibility, independent toggles, camera projection, picking, both workspaces, reload and ZIP round-trip passed")
         finally:
             browser.close()
 

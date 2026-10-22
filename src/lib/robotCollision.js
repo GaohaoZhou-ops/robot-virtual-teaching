@@ -1,11 +1,13 @@
 import * as THREE from 'three';
-import { normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
+import { collisionSideForLink, normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
+import { isRobotBodyJoint } from './robotJointLocks.js';
 
 export const ROBOT_COLLISION_SAFETY_DISTANCE = 0.1;
 export const ROBOT_COLLISION_CONTACT_MARGIN = 0.008;
 export const ROBOT_COLLISION_CHECK_INTERVAL_MS = 160;
 
 const CHASSIS_LINK_PATTERN = /(?:^base(?:[_-]|$)|(?:^|[_-])(?:chassis|wheel|caster|mecanum)(?:[_-]|$)|(?:mobile|robot)[_-]base)/i;
+const BODY_BRANCH_PATTERN = /(?:^|[_-])(?:torso|trunk|body|waist|hip|pelvis|chest|head|neck|ankle|knee|spine)(?:[_-]|$)/i;
 
 const RED_WARNING_COLOR = '#ff4545';
 const YELLOW_WARNING_COLOR = '#ffc84a';
@@ -39,6 +41,27 @@ export const createRobotCollisionStatus = (overrides = {}) => ({
 export const isExcludedRobotCollisionLink = (name) => (
   CHASSIS_LINK_PATTERN.test(String(name || '').trim())
 );
+
+const collisionJointGroup = (link, robot) => {
+  const joint = link?.parent;
+  if (['revolute', 'continuous', 'prismatic'].includes(joint?.userData?.jointType)) {
+    // Match the editable torso joints in preset creation and joint adjustment.
+    if (isRobotBodyJoint(joint.name)) return 'torso';
+    if (/(head|neck)/i.test(joint.name)) return 'head';
+  }
+  // Fixed arm/base attachments retain their mounting group. Torso/head
+  // attachments stay configurable separately from those movable joints.
+  for (let current = link; current && current !== robot; current = current.parent) {
+    if (current.userData?.urdfType === 'link') {
+      const side = collisionSideForLink(current.name);
+      if (side !== 'body') return side;
+      if (BODY_BRANCH_PATTERN.test(current.name)) return 'other';
+      if (isExcludedRobotCollisionLink(current.name)) return 'chassis';
+    }
+    if (current.userData?.urdfType === 'joint' && current.userData.jointType !== 'fixed') return 'other';
+  }
+  return 'other';
+};
 
 const findOwningLink = (object, robot) => {
   let current = object;
@@ -102,7 +125,8 @@ const collectRobotCollisionMeshes = (robot, includeChassis = false) => {
     }
     // Each joint owns its direct child link, not the entire downstream chain.
     if (link?.parent?.userData?.urdfType === 'joint') {
-      jointByLink.set(linkName, { name: link.parent.name, type: link.parent.userData.jointType });
+      jointByLink.set(linkName, { name: link.parent.name, type: link.parent.userData.jointType,
+        group: collisionJointGroup(link, robot) });
     }
 
     const isCollisionGeometry = Boolean(object.userData?.robotCollisionGeometry)
