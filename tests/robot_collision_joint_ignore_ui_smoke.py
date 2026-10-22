@@ -36,18 +36,39 @@ def check_group_selection(page, mode, archive):
     expect(canvas).to_have_attribute('data-collision-state', 'collision')
     menu = open_settings(page)
     expect(menu.get_by_text('勾选后，该关节直接连接的部件不参与碰撞与距离检测。', exact=True)).to_have_count(0)
-    groups = [menu.get_by_role('checkbox', name=f'{label}全选', exact=True) for label in ('左臂', '右臂', '本体')]
-    left_group, right_group, body_group = groups
+    groups = [menu.get_by_role('checkbox', name=f'{label}全选', exact=True) for label in ('左臂', '右臂', '躯干', '底盘')]
+    left_group, right_group, torso_group, chassis_group = groups
+    expect(menu.get_by_role('checkbox', name='本体全选', exact=True)).to_have_count(0)
     for group in groups:
         expect(group).to_be_visible()
         expect(group).not_to_be_checked()
+    # Chassis sensors and torso joints can be selected independently, including
+    # partial selection and selecting a group while the search hides its rows.
+    chassis_left = menu.get_by_role('checkbox', name='忽略 mid360_left_L_mount', exact=True)
+    chassis_right = menu.get_by_role('checkbox', name='忽略 mid360_right_L_mount', exact=True)
+    chassis_left.check()
+    expect(chassis_group).to_be_checked(indeterminate=True)
+    expect(torso_group).not_to_be_checked()
+    torso_group.check()
+    assert_filtered(canvas, ['mid360_left_L_mount', 'waist_yaw_J'], 'right_L1', 'left_L1')
+    expect(chassis_right).not_to_be_checked()
+    menu.get_by_role('searchbox', name='搜索碰撞检测关节').fill('torso')
+    chassis_group.check()
+    assert_filtered(canvas, ['mid360_left_L_mount', 'mid360_right_L_mount', 'waist_yaw_J'], 'right_L1', 'left_L1')
+    torso_group.uncheck()
+    assert_filtered(canvas, ['mid360_left_L_mount', 'mid360_right_L_mount'], 'right_L1,torso_link', 'left_L1')
+    expect(chassis_group).to_be_checked()
+    chassis_group.uncheck()
+    menu.get_by_role('searchbox', name='搜索碰撞检测关节').fill('')
+    assert_filtered(canvas, [], 'right_L1,torso_link', 'left_L1')
     left = menu.get_by_role('checkbox', name='忽略 left_L1_mount', exact=True)
     right_group.check()
     expect(menu.get_by_role('checkbox', name='忽略 right_L1_mount', exact=True)).to_be_checked()
     left.check()
     expect(left_group).to_be_checked(indeterminate=True)
     expect(right_group).to_be_checked()
-    expect(body_group).not_to_be_checked()
+    expect(torso_group).not_to_be_checked()
+    expect(chassis_group).not_to_be_checked()
 
     # Selecting a whole arm includes joints hidden by the search and preserves other groups.
     search = menu.get_by_role('searchbox', name='搜索碰撞检测关节')
@@ -71,7 +92,9 @@ def check_group_selection(page, mode, archive):
     menu.screenshot(path=f'/tmp/atlas-ignored-joint-groups-{mode}.png')
     left_group.click()
     expect(left).to_be_checked()
-    body_group.check()
+    torso_group.check()
+    expect(canvas).to_have_attribute('data-collision-monitored-link-count', '2')
+    chassis_group.check()
     expect(canvas).to_have_attribute('data-collision-state', 'excluded')
     expect(canvas).to_have_attribute('data-collision-monitored-link-count', '0')
     for group in groups:
@@ -90,7 +113,8 @@ def run():
             (directory / mode).mkdir()
             make_fixtures(directory / mode, mode)
             (directory / mode / 'grouped').mkdir()
-            make_fixtures(directory / mode / 'grouped', mode, extra_links=[['left_L2', 1.2]])
+            make_fixtures(directory / mode / 'grouped', mode,
+                          extra_links=[['left_L2', 1.2], ['mid360_left_L', 2], ['mid360_right_L', 2.6]])
         executable = os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE') or (str(CHROME) if CHROME.exists() else None)
         browser = p.chromium.launch(headless=True, executable_path=executable)
         errors = []
@@ -117,10 +141,11 @@ def run():
                 expect(canvas).to_have_attribute('data-collision-state', 'collision')
                 expect(warning.get_by_role('button')).to_have_count(0)
                 menu = open_settings(page)
-                expect(menu.get_by_role('checkbox')).to_have_count(6)
+                expect(menu.get_by_role('checkbox')).to_have_count(9)
+                expect(menu.get_by_role('checkbox', name='底盘全选', exact=True)).to_be_disabled()
                 left = menu.get_by_role('checkbox', name='忽略 left_L1_mount', exact=True)
                 right = menu.get_by_role('checkbox', name='忽略 right_L1_mount', exact=True)
-                body = menu.get_by_role('checkbox', name='忽略 torso_link_mount', exact=True)
+                body = menu.get_by_role('checkbox', name='忽略 waist_yaw_J', exact=True)
                 left.focus()
                 page.keyboard.press('Space')
                 expect(left).to_be_checked()
@@ -134,7 +159,7 @@ def run():
 
                 search = menu.get_by_role('searchbox', name='搜索碰撞检测关节')
                 search.fill('right_L1')
-                expect(menu.get_by_role('checkbox')).to_have_count(4)
+                expect(menu.get_by_role('checkbox')).to_have_count(7)
                 right.check()
                 search.fill('')
                 body.check()
@@ -146,7 +171,7 @@ def run():
                 expect(page.get_by_label('碰撞保护距离', exact=True)).to_have_text('已全部忽略')
                 left.uncheck()
                 expect(canvas).to_have_attribute('data-collision-state', 'collision')
-                assert_filtered(canvas, ['right_L1_mount', 'torso_link_mount'], '', 'left_L1')
+                assert_filtered(canvas, ['right_L1_mount', 'waist_yaw_J'], '', 'left_L1')
                 menu.get_by_role('button', name='恢复全部关节检测').click()
                 assert_filtered(canvas, [], 'right_L1,torso_link', 'left_L1')
                 assert page.evaluate('window.__collisionIndexBuilds') == 1, 'Changing joints must reuse the environment index'
@@ -167,7 +192,7 @@ def run():
                 expect(canvas).to_have_attribute('data-collision-state', 'disabled')
                 expect(page.get_by_role('button', name='碰撞保护距离')).to_have_text('检测关闭')
                 menu = open_settings(page)
-                expect(menu.get_by_role('checkbox')).to_have_count(6)
+                expect(menu.get_by_role('checkbox')).to_have_count(9)
                 left.uncheck()
                 menu.get_by_role('button', name='关闭距离警告').click()
                 viewer_tool(page, name='开启碰撞保护').click()

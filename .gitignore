@@ -449,12 +449,16 @@ playwright/.auth/
 /tests/atlas-preset-manager-*/
 /atlas-preset-manager-*.[zZ][iI][pP]
 /tests/atlas-preset-manager-*.[zZ][iI][pP]
-# Navigation-name display tests export complete projects for ZIP round trips.
+# Waypoint/path-name display checks export complete projects for ZIP round trips.
 # Keep local TMPDIR workspaces and packed copies out of source/fixture paths.
 /atlas-waypoint-names-*/
 /tests/atlas-waypoint-names-*/
 /atlas-waypoint-names-*.[zZ][iI][pP]
 /tests/atlas-waypoint-names-*.[zZ][iI][pP]
+/atlas-path-names-*/
+/tests/atlas-path-names-*/
+/atlas-path-names-*.[zZ][iI][pP]
+/tests/atlas-path-names-*.[zZ][iI][pP]
 # Export separation and Save As tests when TMPDIR is inside the repository.
 /atlas-export-separation-*/
 /atlas-save-picker-*/
@@ -469,11 +473,15 @@ playwright/.auth/
 # Packed copies may contain exported models from native save-dialog checks.
 /model-editor-save-*.zip
 /tests/model-editor-save-*.zip
-# Distance-warning and joint-exclusion fixtures when TMPDIR is in the repository.
+# Distance-warning/joint-exclusion workspaces and packed copies under TMPDIR.
 /atlas-distance-warning-*/
 /atlas-ignore-joints-*/
 /tests/atlas-distance-warning-*/
 /tests/atlas-ignore-joints-*/
+/atlas-distance-warning-*.[zZ][iI][pP]
+/atlas-ignore-joints-*.[zZ][iI][pP]
+/tests/atlas-distance-warning-*.[zZ][iI][pP]
+/tests/atlas-ignore-joints-*.[zZ][iI][pP]
 # tests/ipad_result_file_smoke.mjs creates these import/result stores under TMPDIR.
 /atlas-result-file-*/
 /tests/atlas-result-file-*/

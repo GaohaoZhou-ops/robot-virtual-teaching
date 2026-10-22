@@ -22,7 +22,7 @@ def make_fixtures(directory, mode='map', extra_links=()):
           '<robot name="distance_fixture"><link name="base_link"/>' +
           [['left_L1', 0.6], ['right_L1', -0.6], ['torso_link', 0]].concat(JSON.parse(process.argv[3])).map(([name, y]) =>
             `<link name="${name}"><visual>${geometry}</visual><collision>${geometry}</collision></link>` +
-            `<joint name="${name}_mount" type="fixed"><parent link="base_link"/><child link="${name}"/>` +
+            `<joint name="${name === 'torso_link' ? 'waist_yaw_J' : `${name}_mount`}" type="${name === 'torso_link' ? 'revolute' : 'fixed'}"><parent link="base_link"/><child link="${name}"/>` +
             `<origin xyz="0 ${y} 1"/></joint>`).join('') + '</robot>');
         const x = state === 'safe' ? 0.5 : 0.15;
         const positions = new Float32Array([

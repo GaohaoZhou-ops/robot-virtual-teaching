@@ -22,6 +22,7 @@ import {
   Palette,
   Rotate3D,
   RotateCcw,
+  Route,
   Ruler,
   Save,
   ShieldAlert,
@@ -92,6 +93,7 @@ import {
 } from '../lib/robotCollision.js';
 import { createRobotCollisionBackend } from '../lib/robotCollisionBackend.js';
 import { buildWaypointLabels } from '../lib/waypointLabels.js';
+import { buildPathLabels } from '../lib/pathLabels.js';
 import { placedObjectLayers, placedObjectMask } from '../lib/placedObjectRendering.js';
 
 const RESOLUTION_LEVELS = [
@@ -1545,6 +1547,8 @@ export default function PointCloudViewer({
   onShowWaypointsChange,
   showWaypointNames = true,
   onShowWaypointNamesChange,
+  showPathNames = false,
+  onShowPathNamesChange,
   showHeightLegend = true,
   onShowHeightLegendChange,
   onSelectWaypoint,
@@ -1607,6 +1611,9 @@ export default function PointCloudViewer({
   const waypointGroupRef = useRef(null);
   const waypointNameElementsRef = useRef(new Map());
   const waypointLabels = useMemo(() => buildWaypointLabels(waypoints), [waypoints]);
+  const pathNameElementsRef = useRef(new Map());
+  const pathLabels = useMemo(() => showPathNames ? buildPathLabels(waypoints, edges) : [],
+    [showPathNames, waypoints, edges]);
   const mapOriginGroupRef = useRef(null);
   const mapOriginLabelRef = useRef(null);
   const visionCoverageGroupRef = useRef(null);
@@ -5370,6 +5377,21 @@ export default function PointCloudViewer({
           element.style.transform = `translate(${x}px, ${y}px) translate(-50%, -100%)`;
         }
       });
+      pathNameElementsRef.current.forEach(({ element, pose }) => {
+        waypointNamePosition.set(pose.x, pose.y, pose.z);
+        waypointCameraPosition.copy(waypointNamePosition).applyMatrix4(camera.matrixWorldInverse);
+        waypointNamePosition.project(camera);
+        const visible = waypointCameraPosition.z < 0
+          && Math.abs(waypointNamePosition.x) <= 1
+          && Math.abs(waypointNamePosition.y) <= 1
+          && Math.abs(waypointNamePosition.z) <= 1;
+        element.style.visibility = visible ? 'visible' : 'hidden';
+        if (visible) {
+          const x = (waypointNamePosition.x + 1) * labelWidth / 2;
+          const y = (1 - waypointNamePosition.y) * labelHeight / 2 + 8;
+          element.style.transform = `translate(${x}px, ${y}px) translateX(-50%)`;
+        }
+      });
 
       const selectedHalo = selectedWaypointPulseRef.current;
       if (selectedHalo) {
@@ -7619,6 +7641,23 @@ export default function PointCloudViewer({
               <span ref={mapOriginLabelRef} className="map-origin-label">地图原点 · (0, 0, 0)</span>
             </div>
           )}
+          {showPathNames && (
+            <div className="path-name-layer" role="group" aria-label="3D路径名称">
+              {pathLabels.map(({ id, name, pose }) => (
+                <span
+                  key={id}
+                  ref={(element) => {
+                    if (element) pathNameElementsRef.current.set(id, { element, pose });
+                    else pathNameElementsRef.current.delete(id);
+                  }}
+                  className={`path-name-label${id === selectedEdgeId ? ' is-selected' : ''}`}
+                  data-edge-id={id}
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
           {showWaypointNames && (
             <div className="waypoint-name-layer" role="group" aria-label="3D停车点名称">
               {waypointLabels.map(({ point, waypointIds }) => (
@@ -7986,8 +8025,8 @@ export default function PointCloudViewer({
               key={`display-${resolutionMapKey}`}
               label="显示设置"
               title={showVisionCoverageControls
-                ? '点云颜色、高程色卡、停车点名、投影渲染、表面透明度与显示质量'
-                : '点云颜色、高程色卡、停车点名、显示密度与网格质量'}
+                ? '点云颜色、高程色卡、停车点名、路径名、投影渲染、表面透明度与显示质量'
+                : '点云颜色、高程色卡、停车点名、路径名、显示密度与网格质量'}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -8045,6 +8084,20 @@ export default function PointCloudViewer({
                 >
                   {showWaypointNames ? <Eye size={12} /> : <EyeOff size={12} />}
                   <span>{showWaypointNames ? '显示' : '隐藏'}</span>
+                </button>
+              </div>
+              <div className="viewer-display-settings__path-names">
+                <span><Route size={13} /> 路径名</span>
+                <button
+                  type="button"
+                  className="viewer-display-settings__toggle"
+                  aria-label={showPathNames ? '隐藏路径名' : '显示路径名'}
+                  aria-pressed={showPathNames}
+                  title={showPathNames ? '隐藏3D路径名称' : '显示3D路径的起点与终点名称'}
+                  onClick={() => onShowPathNamesChange?.(!showPathNames)}
+                >
+                  {showPathNames ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showPathNames ? '显示' : '隐藏'}</span>
                 </button>
               </div>
               {showVisionCoverageControls && <>

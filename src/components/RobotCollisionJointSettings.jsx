@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react';
 import { ChevronDown, RotateCcw, Search } from 'lucide-react';
-import { collisionSideForLink, normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
+import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
 import './RobotCollisionJointSettings.css';
 
-const GROUPS = [{ id: 'left', label: '左臂' }, { id: 'right', label: '右臂' }, { id: 'body', label: '本体' }];
+const GROUPS = [{ id: 'left', label: '左臂' }, { id: 'right', label: '右臂' },
+  { id: 'torso', label: '躯干' }, { id: 'chassis', label: '底盘' },
+  { id: 'head', label: '头部' }, { id: 'other', label: '其他部件' }];
 
 export default function RobotCollisionJointSettings({ options, ignoredJointNames, onChange,
   expanded, onExpandedChange, ready }) {
@@ -12,7 +14,7 @@ export default function RobotCollisionJointSettings({ options, ignoredJointNames
   const ignored = new Set(ignoredJointNames);
   const count = options.filter((option) => ignored.has(option.name)).length;
   const groups = GROUPS.map((group) => ({
-    ...group, joints: options.filter((joint) => collisionSideForLink(joint.links[0]) === group.id),
+    ...group, joints: options.filter((joint) => joint.group === group.id),
   }));
   const query = search.trim().toLowerCase();
   const filtered = options.filter((option) => [option.name, ...option.links].some((name) => name.toLowerCase().includes(query)));
@@ -47,7 +49,7 @@ export default function RobotCollisionJointSettings({ options, ignoredJointNames
         </label>
         <div className="collision-joint-settings__list">
           {GROUPS.map((group) => {
-            const joints = filtered.filter((joint) => collisionSideForLink(joint.links[0]) === group.id);
+            const joints = filtered.filter((joint) => joint.group === group.id);
             return joints.length > 0 && <fieldset key={group.id}><legend>{group.label}</legend>
               {joints.map((joint) => <label key={joint.name} title={`${joint.name} → ${joint.links.join(', ')}`}>
                 <input type="checkbox" aria-label={`忽略 ${joint.name}`} checked={ignored.has(joint.name)}
