@@ -1,5 +1,9 @@
 import Foundation
 import simd
+#if os(iOS)
+import UIKit
+import ARKit
+#endif
 
 let teachingProtocol = "atlas-ipad-teaching/1"
 let maximumSamples = 50_000
@@ -119,7 +123,7 @@ struct Calibration: Codable, Identifiable {
 }
 enum TeachingPoseOrigin: String, Codable {
     case ipad, desktop
-    var label: String { self == .desktop ? "Mac 同步" : "iPad 示教" }
+    var label: String { self == .desktop ? "Mac 同步" : "移动端示教" }
     var symbol: String { self == .desktop ? "desktopcomputer" : "ipad" }
     var rgb: SIMD3<Float> { (self == .ipad ? TeachingPoseCategory.ipad : .desktop).rgb }
 }
@@ -130,18 +134,19 @@ enum TeachingPoseCategory: String, CaseIterable {
         switch self {
         case .leftArm: return "Mac 左臂"
         case .rightArm: return "Mac 右臂"
-        case .ipad: return "iPad 示教"
+        case .ipad: return "移动端示教"
         case .desktop: return "Mac 同步"
         }
     }
     var symbol: String { self == .ipad ? "ipad" : "desktopcomputer" }
     // Keep the arm palette identical to CAMERA_SIDE_COLORS in visionCoverage.js.
-    // iPad purple is distinct from both the cyan left arm and golden right arm.
+    // The shared mobile source key stays .ipad for archive/protocol compatibility.
+    // iPhone red and iPad purple both differ from the cyan and golden Mac arms.
     var rgb: SIMD3<Float> {
         switch self {
         case .leftArm: return SIMD3(89, 219, 232) / 255
         case .rightArm: return SIMD3(244, 201, 93) / 255
-        case .ipad: return SIMD3(179, 157, 255) / 255
+        case .ipad: return TeachingDevice.isPhone ? SIMD3(255, 90, 95) / 255 : SIMD3(179, 157, 255) / 255
         case .desktop: return SIMD3(45, 240, 152) / 255
         }
     }
@@ -191,7 +196,7 @@ struct TeachingPoseCounts {
     init(_ samples: [TeachingSample]) { for sample in samples { counts[sample.category, default: 0] += 1 } }
     subscript(_ category: TeachingPoseCategory) -> Int { counts[category, default: 0] }
     var summary: String {
-        "左臂 \(self[.leftArm]) · 右臂 \(self[.rightArm]) · iPad \(self[.ipad])"
+        "左臂 \(self[.leftArm]) · 右臂 \(self[.rightArm]) · 移动端 \(self[.ipad])"
         + (self[.desktop] > 0 ? " · Mac 未标注 \(self[.desktop])" : "")
     }
 }
@@ -268,15 +273,26 @@ struct TeachingDevice: Codable {
     static var current: TeachingDevice {
         #if os(visionOS)
         return .visionPro
+        #elseif os(iOS)
+        return TeachingDevice(model: UIDevice.current.model,
+            lidar: ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth),
+            platform: isPhone ? "iOS" : "iPadOS", poseSource: "camera")
         #else
         return TeachingDevice()
+        #endif
+    }
+    static var isPhone: Bool {
+        #if os(iOS)
+        return UIDevice.current.userInterfaceIdiom == .phone
+        #else
+        return false
         #endif
     }
     static var storageName: String {
         #if os(visionOS)
         return "Vision Pro"
         #else
-        return "iPad"
+        return isPhone ? "iPhone" : "iPad"
         #endif
     }
 }

@@ -154,18 +154,18 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
   };
   const receive = () => perform('正在校验地图并接收示教结果…', () => receiveTicket(ticket));
   const renew = () => prepare(false, 'renew');
-  const sendUSB = () => perform('正在通过数据线发送物体，请保持 iPad 解锁并连接…', async () => {
+  const sendUSB = () => perform('正在通过数据线发送物体，请保持设备解锁并连接…', async () => {
     setUSBReceipt('');
     setPreparationPending(true);
     const next = await prepareIPadTransfer({ ticket, mapData, teachingTasks, device,
       preserveSnapshot: viewingHistory, onUpdate: update, onProgress: setBusy });
     preparedInputs.current = { mapData, teachingTasks };
     setPreparationPending(false);
-    setBusy('正在通过数据线发送物体与 Pose，请保持 iPad 解锁并连接…');
+    setBusy('正在通过数据线发送物体与 Pose，请保持设备解锁并连接…');
     const receipt = await ipadRequest(`/sessions/${next.id}/usb`, {
       method: 'POST', token: next.ownerToken, body: { deviceId: usbDevice },
     });
-    setUSBReceipt(`已传至 ${receipt.deviceName}。请在 iPad 欢迎页「方式三 · 数据线连接」点击接收物体。`);
+    setUSBReceipt(`已传至 ${receipt.deviceName}。请在设备欢迎页「方式三 · 数据线连接」点击接收物体。`);
   });
   const importFile = (file) => {
     if (!file) return;
@@ -193,7 +193,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
   };
   return <div className="ipad-modal" onKeyDown={keyDown}>
     <section className="ipad-dialog" role="dialog" aria-modal={modelMismatch ? undefined : true} aria-labelledby="ipad-title" ref={dialog} tabIndex={-1} inert={modelMismatch ? '' : undefined} data-sync-entry={initialAction}>
-      <header><span className="ipad-mark"><DeviceIcon size={25} /></span><div><small>{vision ? 'ATLAS / SPATIAL TEACHING' : 'ATLAS / ON DEVICE'}</small><h2 id="ipad-title">{vision ? 'Vision Pro 空间示教' : 'iPad 示教'}</h2></div><button aria-label="关闭设备示教窗口" disabled={!!busy} onClick={onClose}><X size={18} /></button></header>
+      <header><span className="ipad-mark"><DeviceIcon size={25} /></span><div><small>{vision ? 'ATLAS / SPATIAL TEACHING' : 'ATLAS / ON DEVICE'}</small><h2 id="ipad-title">{vision ? 'Vision Pro 空间示教' : 'iPad / iPhone 示教'}</h2></div><button aria-label="关闭设备示教窗口" disabled={!!busy} onClick={onClose}><X size={18} /></button></header>
       <div className="ipad-dialog__body ipad-dialog__body--transfer">
         <div className="ipad-model"><span>独立示教物体</span><strong>{mapData.name}</strong></div>
         {!vision && <section className="ipad-result-file" aria-label="AirDrop 或文件接收"
@@ -205,7 +205,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
             importFile(event.dataTransfer.files[0]);
           }}>
           <div className="ipad-result-file__heading"><FileUp size={20} aria-hidden="true"/><h3>接收已完成的示教</h3></div>
-          <p>在 iPad 点击「同步数据」，选择「AirDrop 导出」并分享至这台 Mac。将收到的结果文件拖到这里，或点击导入；也可选择从 Finder 拷贝的文件。</p>
+          <p>在 iPhone / iPad 点击「同步数据」，选择「AirDrop 导出」并分享至这台 Mac。将收到的结果文件拖到这里，或点击导入；也可选择从 Finder 拷贝的文件。</p>
           <input ref={resultInput} type="file" hidden disabled={!!busy} accept=".json,application/json" data-ipad-result-input="true"
             onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; importFile(file); }}/>
           <button className="ipad-primary" disabled={!!busy} onClick={() => resultInput.current?.click()}><FileUp size={15}/>导入结果文件</button>
@@ -227,7 +227,7 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
           本次传输携带 {ticket.referencePoseCount || 0} 个相机 Pose：
           <span style={{ color: '#59dbe8' }}>左臂 {ticket.referenceLeftArmPoseCount || 0} 个（青色）</span> ·
           <span style={{ color: '#f4c95d' }}>右臂 {ticket.referenceRightArmPoseCount || 0} 个（金黄色）</span> ·
-          <span style={{ color: '#b39dff' }}>iPad {ticket.referenceIPadPoseCount || 0} 个（紫色）</span>。
+          <span>移动端 {ticket.referenceIPadPoseCount || 0} 个（<span style={{ color: '#b39dff' }}>iPad 紫色</span> / <span style={{ color: '#ff5a5f' }}>iPhone 红色</span>）</span>。
           {(ticket.referencePoseCount || 0) > (ticket.referenceIPadPoseCount || 0) + (ticket.referenceLeftArmPoseCount || 0) + (ticket.referenceRightArmPoseCount || 0)
             && `另有 ${(ticket.referencePoseCount || 0) - (ticket.referenceIPadPoseCount || 0) - (ticket.referenceLeftArmPoseCount || 0) - (ticket.referenceRightArmPoseCount || 0)} 个 Mac Pose 未标注左右臂。`}
           {!viewingHistory && '电脑 Pose 变更后，重新打开配对窗口或刷新二维码会自动更新。'}
@@ -235,15 +235,15 @@ export default function IPadTeachingDialog({ device = 'ipad', mapData, teachingT
         <div className="ipad-connection"><Wifi size={17}/><div>{addresses.length ? <select id="ipad-lan-address" aria-label="电脑局域网地址" value={address} disabled={!!busy} onChange={(event) => setAddress(event.target.value)}>{addresses.map((item) => <option key={item}>{item}</option>)}</select> : <p>尚未发现局域网地址，请连接 Wi-Fi 或以太网后重新打开。</p>}</div></div>
         {!vision && <section className="ipad-usb" aria-label="通过数据线发送物体">
           <div className="ipad-usb__heading"><Cable size={20}/><h3>数据线连接</h3>
-            <span>{usb.devices.some((item) => item.ready) ? '已检测到 iPad' : '等待连接'}</span></div>
-          <p>通过 USB 将当前物体发送到 iPad，无需连接同一 Wi-Fi。发送后在 iPad 欢迎页的「方式三」接收。</p>
-          {usb.devices.length > 0 && <select aria-label="数据线连接的 iPad" value={usbDevice} disabled={!!busy}
+            <span>{usb.devices.some((item) => item.ready) ? '已检测到设备' : '等待连接'}</span></div>
+          <p>通过 USB 将当前物体发送到 iPhone / iPad，无需连接同一 Wi-Fi。发送后在设备欢迎页的「方式三」接收。</p>
+          {usb.devices.length > 0 && <select aria-label="数据线连接的 iPhone / iPad" value={usbDevice} disabled={!!busy}
             onChange={(event) => setUSBDevice(event.target.value)}>
-            <option value="" disabled>选择接收物体的 iPad</option>
+            <option value="" disabled>选择接收物体的设备</option>
             {usb.devices.map((item) => <option key={item.id} value={item.id}>{item.name}{item.ready ? '' : ' · 请解锁并信任电脑'}</option>)}
           </select>}
           {usb.message && <p>{usb.message}</p>}
-          {!usb.message && usb.devices.length === 0 && <p>请用数据线连接 iPad，解锁并信任此电脑。</p>}
+          {!usb.message && usb.devices.length === 0 && <p>请用数据线连接 iPhone / iPad，解锁并信任此电脑。</p>}
           {usb.devices.find((item) => item.id === usbDevice)?.message && <p>{usb.devices.find((item) => item.id === usbDevice).message}</p>}
           <button className="ipad-primary" onClick={sendUSB} disabled={!!busy || preparationPending || inputsChanged || !ticket
             || !['ready', 'paired', 'completed', 'imported'].includes(ticket.status) || !usb.devices.some((item) => item.id === usbDevice && item.ready)}>

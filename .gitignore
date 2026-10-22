@@ -21,7 +21,7 @@ node_modules/
 
 # Build output and frontend tool caches
 # build_local.sh writes dist/ and build/local/; the native entry points use
-# ipad/build/{device,simulator}/ and vision/build/{device,simulator}/.
+# ipad/build/{device,simulator}/, iphone/build/{device,simulator}/ and vision/build/{device,simulator}/.
 # The build/ rule also covers deploy_ipad.sh's ipad/build/deploy-device/ logs,
 # device/signing reports, products, and native UI verification attachments.
 dist/
@@ -68,16 +68,20 @@ xcuserdata/
 /build-*.[zZ][iI][pP]
 /ipad/build.[zZ][iI][pP]
 /ipad/build-*.[zZ][iI][pP]
+/iphone/build.[zZ][iI][pP]
+/iphone/build-*.[zZ][iI][pP]
 /vision/build.[zZ][iI][pP]
 /vision/build-*.[zZ][iI][pP]
 /DerivedData.[zZ][iI][pP]
 /DerivedData-*.[zZ][iI][pP]
 /ipad/DerivedData.[zZ][iI][pP]
 /ipad/DerivedData-*.[zZ][iI][pP]
+/iphone/DerivedData.[zZ][iI][pP]
+/iphone/DerivedData-*.[zZ][iI][pP]
 /vision/DerivedData.[zZ][iI][pP]
 /vision/DerivedData-*.[zZ][iI][pP]
 
-# Exported iPad / Vision Pro app containers and Xcode diagnostics
+# Exported iPhone / iPad / Vision Pro app containers and Xcode diagnostics
 # Containers can include local models, poses, and pairing credentials.
 *.xcappdata/
 *.xcappdata.zip
@@ -114,16 +118,19 @@ test-results/
 /tests/test-downloads/
 /tests/test-videos/
 /tests/test-traces/
-# Both singleton launchers write build.log and DerivedData under simulator-dev/.
+# Native simulator launchers write build.log and DerivedData under simulator-dev/.
 /ipad/test-artifacts/
+/iphone/test-artifacts/
 /vision/test-artifacts/
 # Dated or per-run output roots used when overriding ATLAS_TEST_ARTIFACTS /
-# IPAD_ARTIFACTS / VISION_ARTIFACTS. Match the ZIP directory variants below.
+# IPAD_ARTIFACTS / IPHONE_ARTIFACTS / VISION_ARTIFACTS. Match the ZIP variants below.
 /test-artifacts-*/
 /tests/test-artifacts-*/
 /ipad/test-artifacts-*/
+/iphone/test-artifacts-*/
 /vision/test-artifacts-*/
 /ipad/screenshots/
+/iphone/screenshots/
 /vision/screenshots/
 # Packed test artifacts can contain the same local project data.
 /test-artifacts.zip
@@ -132,6 +139,8 @@ test-results/
 /tests/test-artifacts-*.zip
 /ipad/test-artifacts.zip
 /ipad/test-artifacts-*.zip
+/iphone/test-artifacts.[zZ][iI][pP]
+/iphone/test-artifacts-*.[zZ][iI][pP]
 /vision/test-artifacts.zip
 /vision/test-artifacts-*.zip
 # ZIP copies of the test-output directories above stay local.
@@ -151,6 +160,7 @@ test-results/
 /tests/test-traces.zip
 /tests/test-videos.zip
 /ipad/screenshots.zip
+/iphone/screenshots.[zZ][iI][pP]
 /vision/screenshots.zip
 .playwright/
 .local-browsers/
@@ -276,6 +286,38 @@ playwright/.auth/
 /tests/atlas-ipad-*.heic
 /tests/atlas-vision-*.mov
 /tests/atlas-vision-*.heic
+
+# iPhone native review workspaces (fixtures copied to devices, xcresulttool
+# attachments, launcher regressions and packed copies) stay local. Scope these
+# to output roots; source artwork and nested regression fixtures remain visible.
+# The shared native app and its checked-in tests continue to live under ipad/.
+/atlas-iphone-*/
+/iphone/atlas-iphone-*/
+/tests/atlas-iphone-*/
+/atlas-iphone-*.[zZ][iI][pP]
+/iphone/atlas-iphone-*.[zZ][iI][pP]
+/tests/atlas-iphone-*.[zZ][iI][pP]
+/atlas-iphone-*.json
+/atlas-iphone-*.plist
+/atlas-iphone-*.mov
+/atlas-iphone-*.heic
+/iphone/atlas-iphone-*.json
+/iphone/atlas-iphone-*.plist
+/iphone/atlas-iphone-*.png
+/iphone/atlas-iphone-*.mp4
+/iphone/atlas-iphone-*.webm
+/iphone/atlas-iphone-*.mov
+/iphone/atlas-iphone-*.heic
+/tests/atlas-iphone-*.json
+/tests/atlas-iphone-*.plist
+/tests/atlas-iphone-*.mov
+/tests/atlas-iphone-*.heic
+/atlas-iphone-*-test
+/atlas-iphone-*-tests
+/iphone/atlas-iphone-*-test
+/iphone/atlas-iphone-*-tests
+/tests/atlas-iphone-*-test
+/tests/atlas-iphone-*-tests
 
 # xcresulttool exports UUID-named images, recordings, snapshots and a manifest.
 # Include numbered retry folders such as atlas-ipad-level-shots-2.
@@ -786,7 +828,7 @@ Desktop.ini
 *.[pP][lL][yY].[gG][zZ]
 !maps/xian_map.ply
 
-# Local iPad / Vision Pro model-transfer payloads
+# Local iPhone / iPad / Vision Pro model-transfer payloads
 *.atls
 *.atls.zip
 

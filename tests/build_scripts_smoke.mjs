@@ -22,7 +22,7 @@ async function readCalls() {
   return (await readFile(calls, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
 }
 try {
-  for (const name of ['build_local.sh', 'build_vision.sh', 'build_ipad.sh', 'lib/build_apple.sh']) {
+  for (const name of ['build_local.sh', 'build_vision.sh', 'build_ipad.sh', 'build_iphone.sh', 'lib/build_apple.sh']) {
     const target = path.join(repo, 'scripts', name);
     await mkdir(path.dirname(target), { recursive: true }); await copyFile(path.join(source, name), target);
   }
@@ -55,12 +55,12 @@ console.log(command+' fixture succeeded');
   for (const command of ['npm', 'xcodebuild', 'xcrun']) {
     await put(path.join(bin, command), fakeTool); await chmod(path.join(bin, command), 0o755);
   }
-  for (const script of ['build_local.sh', 'build_vision.sh', 'build_ipad.sh']) {
+  for (const script of ['build_local.sh', 'build_vision.sh', 'build_ipad.sh', 'build_iphone.sh']) {
     assert.equal(run(script, ['--help']).status, 0);
     assert.equal(run(script, ['--unknown']).status, 2);
   }
   assert.equal(await exists(calls), false, 'help/invalid arguments must not invoke build tools');
-  for (const target of ['vision', 'ipad']) {
+  for (const target of ['vision', 'ipad', 'iphone']) {
     const script = `build_${target}.sh`;
     assert.equal(run(script, ['--configuration']).status, 2);
     assert.equal(run(script, ['--configuration', 'Fast']).status, 2);
@@ -68,7 +68,7 @@ console.log(command+' fixture succeeded');
     let build = (await readCalls()).filter(c => c.command === 'xcodebuild' && c.args[0] !== '-version').at(-1);
     const scheme = target === 'vision' ? 'AtlasVisionTeaching' : 'AtlasTeaching';
     const sdk = target === 'vision' ? 'xros' : 'iphoneos';
-    assert.ok(build.args.includes(path.join(repo, target, `${scheme}.xcodeproj`)));
+    assert.ok(build.args.includes(path.join(repo, target === 'iphone' ? 'ipad' : target, `${scheme}.xcodeproj`)));
     assert.ok(build.args.includes('generic/platform=' + (target === 'vision' ? 'visionOS' : 'iOS')));
     assert.ok(build.args.includes('CODE_SIGNING_ALLOWED=NO'));
     assert.ok(await exists(path.join(repo, target, `build/device/Build/Products/Release-${sdk}/${scheme}.app/Info.plist`)));

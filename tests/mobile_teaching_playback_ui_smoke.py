@@ -140,7 +140,7 @@ def run():
             page.reload(wait_until='networkidle')
             ready(page)
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
-            page.get_by_role('group', name='示教来源', exact=True).get_by_role('button', name='iPad 示教', exact=True).click()
+            page.get_by_role('group', name='示教来源', exact=True).get_by_role('button', name='iPad / iPhone 示教', exact=True).click()
             page.get_by_role('button', name='计算机器人姿态', exact=True).click()
             expect(preview).to_be_enabled()
             preview.click()

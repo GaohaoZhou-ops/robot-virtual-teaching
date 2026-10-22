@@ -16,7 +16,7 @@ export default function IPadCaptureDetails({ task, tasks, onSolve, onSave, saveD
   return <section className="ipad-capture" aria-label={`${device} 示教结果`}>
     <span className="eyebrow">{vision ? 'VISION PRO / HEAD REFERENCE' : 'IPAD PRO / LOCAL CAPTURE'}</span><h3>{task.name}</h3>
     <p>{samples.length.toLocaleString()} 个 Pose · {capture.calibrations.length} 段校准</p>
-    <p>{vision ? '黄色为头显参考 Pose，青色连线表示记录顺序。保存的是头显相对物体的位置与朝向，采用虚拟光学轴；未包含眼球视线或实际相机外参标定。' : '黄色为逐个记录的 Pose，青色连线表示记录顺序，绿色为 LiDAR 表面参考点。保存的是 iPad 相机相对物体的位置与朝向。'}坐标以米表示，使用 {task.coordinateFrame}。</p>
+    <p>{vision ? '黄色为头显参考 Pose，青色连线表示记录顺序。保存的是头显相对物体的位置与朝向，采用虚拟光学轴；未包含眼球视线或实际相机外参标定。' : '黄色为逐个记录的 Pose，青色连线表示记录顺序，绿色为 LiDAR 表面参考点。保存的是 iPhone / iPad 相机相对物体的位置与朝向。'}坐标以米表示，使用 {task.coordinateFrame}。</p>
     <button onClick={download}>导出 {device} 示教 JSON</button>
     {onSolve && <button onClick={() => onSolve(task.id)}>计算机器人姿态</button>}
     {task.mobileSolve && <p>上次计算：{task.mobileSolve.feasibleCount} / {task.mobileSolve.rows.length} 个姿态可达</p>}

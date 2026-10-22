@@ -92,14 +92,14 @@ final class TeachingSession: ObservableObject {
         // Drain earlier saves before removing files so an autosave cannot
         // recreate the deleted project. Deletion is only available in the library.
         await saveTask?.value; saveTask = nil
-        status = "正在从此 iPad 删除模型与 Pose…"
+        status = "正在从此 \(TeachingDevice.storageName) 删除模型与 Pose…"
         do {
             try await ProjectStore.shared.deleteLocalProject(project.id)
             projects.removeAll { $0.id == project.id }
             if !projects.contains(where: { $0.session.manifest.modelHash == project.session.manifest.modelHash }) {
                 await ProjectThumbnailStore.shared.removeThumbnail(modelHash: project.session.manifest.modelHash)
             }
-            status = "已从此 iPad 删除「\(project.session.manifest.name)」及全部 Pose；电脑工程和已同步结果保留"
+            status = "已从此 \(TeachingDevice.storageName) 删除「\(project.session.manifest.name)」及全部 Pose；电脑工程和已同步结果保留"
         } catch {
             self.error = "本地删除未完成，请重试：\(error.localizedDescription)"
             status = "电脑工程和已同步结果不受影响"

@@ -31,6 +31,7 @@ try {
   const disposable = [
     'dist/assets/app.js', 'dist/xian_map.ply', 'build/compiler.o', 'ipad/build/Build/Products/App.app/Info.plist',
     'vision/build/device/Build/Products/App.app/Info.plist', 'vision/DerivedData/ModuleCache.noindex/cache.pcm',
+    'iphone/build/simulator/Build/Products/App.app/Info.plist', 'iphone/test-artifacts/run/build.log',
     'vision/.build/cache.bin', 'vision/screenshots/preview.png', 'tests/test-videos/capture.mp4',
     'tests/test-artifacts/result.log', 'vision/test-artifacts/preview/screenshot.png',
     'vision/atlas-vision-ui-attachments-2/clip.mov', 'atlas-vision-ui-shots/manifest.json',

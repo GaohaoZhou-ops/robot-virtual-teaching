@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sign, update and launch Atlas on a USB-connected iPad without uninstalling it."""
+"""Sign, update and launch Atlas on a USB-connected iPhone or iPad without uninstalling it."""
 
 import argparse
 import base64
@@ -22,7 +22,8 @@ REPO = Path(__file__).resolve().parents[2]
 BUNDLE_ID = 'com.atlasroute.teaching'
 SCHEME = 'AtlasTeaching'
 SIGNING_HINT = '请在 Xcode → Settings → Accounts 登录开发者账号，检查团队资格和证书后重试。'
-DEVICE_HINT = '请用数据线连接 iPad、解锁并信任此电脑，保持连接；首次使用需开启“设置 → 隐私与安全性 → 开发者模式”。'
+DEVICE_HINT = ('请用数据线连接 iPhone / iPad、解锁并信任此电脑，保持连接；首次使用需开启“设置 → 隐私与安全性 → 开发者模式”。'
+               '若提示开发者未受信任，请先在主屏幕打开 App，再到“设置 → 通用 → VPN 与设备管理”的“开发者 App”中信任签名账号。')
 
 
 def run(args, log=None, hint='', timeout=60):
@@ -56,12 +57,12 @@ def device_command(logs, name, *args, timeout=60):
     return payload['result']
 
 
-def select_device(devices, requested):
+def select_device(devices, requested, device_family='iPad'):
     candidates = []
     for device in devices:
         hardware = device.get('hardwareProperties', {})
         connection = device.get('connectionProperties', {})
-        if (hardware.get('deviceType') == 'iPad' and hardware.get('reality') == 'physical'
+        if (hardware.get('deviceType') == device_family and hardware.get('reality') == 'physical'
                 and connection.get('transportType') == 'wired'
                 and connection.get('pairingState') == 'paired'
                 and connection.get('tunnelState') != 'unavailable'):
@@ -70,10 +71,10 @@ def select_device(devices, requested):
         candidates = [d for d in candidates if requested in (
             d['identifier'], d['hardwareProperties'].get('udid'), d['deviceProperties'].get('name'))]
     if not candidates:
-        raise RuntimeError('未找到符合条件的有线 iPad。' + DEVICE_HINT)
+        raise RuntimeError(f'未找到符合条件的有线 {device_family}。' + DEVICE_HINT)
     if len(candidates) != 1:
         choices = '\n'.join(f"  {d['deviceProperties']['name']}: {d['hardwareProperties']['udid']}" for d in candidates)
-        raise RuntimeError('检测到多台 iPad，请用 --device <UDID> 指定一台：\n' + choices)
+        raise RuntimeError(f'检测到多台 {device_family}，请用 --device <UDID> 指定一台：\n' + choices)
     return candidates[0]
 
 
@@ -139,16 +140,16 @@ def validate_app(app, team, udid, logs):
 def deploy(options, output, logs):
     run(['xcodebuild', '-version'], hint='请先安装并选择完整 Xcode。')
     run(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], hint='请在 Xcode Settings → Components 安装 iOS SDK。')
-    print('检测通过数据线连接的 iPad…', flush=True)
+    print(f'检测通过数据线连接的 {options.device_family}…', flush=True)
     devices = device_command(logs, 'devices', 'list', 'devices')['devices']
-    device = select_device(devices, options.device)
+    device = select_device(devices, options.device, options.device_family)
     identifier = device['identifier']
     udid = device['hardwareProperties']['udid']
     if device['deviceProperties'].get('developerModeStatus') != 'enabled':
-        raise RuntimeError('iPad 尚未开启开发者模式。' + DEVICE_HINT)
+        raise RuntimeError('设备尚未开启开发者模式。' + DEVICE_HINT)
     state = device_command(logs, 'lock-state', 'device', 'info', 'lockState', '--device', identifier)
     if state.get('passcodeRequired') or not state.get('unlockedSinceBoot'):
-        raise RuntimeError('请先解锁 iPad，再执行部署。')
+        raise RuntimeError('请先解锁设备，再执行部署。')
     team = signing_team(options.team)
     print(f"设备：{device['deviceProperties']['name']}（{udid}）\n签名团队：{team}", flush=True)
 
@@ -175,18 +176,21 @@ def deploy(options, output, logs):
     time.sleep(5)
     processes = device_command(logs, 'processes', 'device', 'info', 'processes', '--device', identifier)
     if not any(p.get('processIdentifier') == pid for p in processes['runningProcesses']):
-        raise RuntimeError('App 已安装，但启动后退出，请查看 iPad 提示或在 Xcode 检查设备崩溃日志。')
+        raise RuntimeError('App 已安装，但启动后退出，请查看设备提示或在 Xcode 检查设备崩溃日志。')
     print(f'部署成功，Atlas 示教已启动（PID {pid}）。\nApp：{app}\n日志：{logs}', flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        prog='./scripts/deploy_ipad.sh', description='自动签名、覆盖安装并启动通过数据线连接的 iPad 上的 Atlas 示教。',
-        epilog='首次需在 Xcode 登录 Apple 账号，iPad 解锁、信任电脑并开启开发者模式。免费签名仍受 7 天限制。')
-    parser.add_argument('--device', default=os.environ.get('IPAD_DEVICE_ID'), help='指定 iPad 的 UDID、CoreDevice ID 或名称；默认识别唯一有线 iPad。')
-    parser.add_argument('--team', default=os.environ.get('IPAD_DEVELOPMENT_TEAM'), help='Apple Team ID；默认从本 App 的描述文件或有效开发证书识别。')
+        prog='./scripts/deploy_ipad.sh', description='自动签名、覆盖安装并启动通过数据线连接的 iPhone / iPad 上的 Atlas 示教。',
+        epilog='首次需在 Xcode 登录 Apple 账号，设备解锁、信任电脑并开启开发者模式。免费签名仍受 7 天限制。')
+    parser.add_argument('--device-family', choices=('iPad', 'iPhone'), default='iPad', help='设备类型，iPhone 启动脚本自动选择 iPhone。')
+    parser.add_argument('--device', help='指定设备的 UDID、CoreDevice ID 或名称；默认识别该类型唯一有线设备。')
+    parser.add_argument('--team', help='Apple Team ID；默认从本 App 的描述文件或有效开发证书识别。')
     parser.add_argument('--configuration', choices=('Debug', 'Release'), default='Release', help='构建配置，默认 Release。')
     options = parser.parse_args()
+    options.device = options.device or os.environ.get(f'{options.device_family.upper()}_DEVICE_ID')
+    options.team = options.team or os.environ.get(f'{options.device_family.upper()}_DEVELOPMENT_TEAM')
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     logs = None
     try:

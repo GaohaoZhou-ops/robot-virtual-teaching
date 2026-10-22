@@ -59,10 +59,10 @@ try {
   const testRoots = new Set([
     'test-results', 'test-artifacts', 'screenshots', 'test-downloads', 'test-videos', 'test-traces',
     'tests/test-artifacts', 'tests/screenshots', 'tests/test-downloads', 'tests/test-videos', 'tests/test-traces',
-    'ipad/test-artifacts', 'ipad/screenshots', 'vision/test-artifacts', 'vision/screenshots',
+    'ipad/test-artifacts', 'ipad/screenshots', 'iphone/test-artifacts', 'iphone/screenshots', 'vision/test-artifacts', 'vision/screenshots',
   ]);
   const candidates = new Set([
-    'dist', 'build', 'ipad/build', 'vision/build',
+    'dist', 'build', 'ipad/build', 'iphone/build', 'vision/build',
     'DerivedData', 'ipad/DerivedData', 'vision/DerivedData', '.build', 'ipad/.build', 'vision/.build',
     '.vite', '.vite-temp', 'node_modules/.vite', 'node_modules/.vite-temp', 'node_modules/.cache',
     '.npm-cache', '.npm/_cacache', '.npm/_logs', '.cache', '.parcel-cache', '.turbo',

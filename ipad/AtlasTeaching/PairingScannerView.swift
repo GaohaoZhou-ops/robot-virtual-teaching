@@ -19,8 +19,8 @@ struct PairingScannerView: View {
         NavigationStack {
             VStack(spacing: 18) {
                 Text(purpose == .syncResult
-                    ? "在电脑打开相同物体的「iPad / Vision Pro」窗口，扫描其中的二维码。模型核对通过后，自动上传当前已完成的示教结果。"
-                    : "扫描电脑「iPad / Vision Pro」窗口中的二维码，识别后自动连接并接收物体。")
+                    ? "在电脑打开相同物体的「iPad / iPhone / Vision Pro」窗口，扫描其中的二维码。模型核对通过后，自动上传当前已完成的示教结果。"
+                    : "扫描电脑「iPad / iPhone / Vision Pro」窗口中的二维码，识别后自动连接并接收物体。")
                     .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 Group {
                     if DataScannerViewController.isSupported && permission == .authorized && cameraError == nil {
@@ -43,7 +43,7 @@ struct PairingScannerView: View {
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).clipShape(RoundedRectangle(cornerRadius: 18))
                 Text(scanMessage).font(.callout).multilineTextAlignment(.center).accessibilityIdentifier("scanner-status")
-                Label("电脑与 iPad 需连接同一局域网", systemImage: "wifi").font(.caption).foregroundStyle(.secondary)
+                Label("电脑与设备 需连接同一局域网", systemImage: "wifi").font(.caption).foregroundStyle(.secondary)
             }.padding(24)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065))
                 .navigationTitle(purpose == .syncResult ? "扫码同步到电脑" : "扫码配对").navigationBarTitleDisplayMode(.inline)

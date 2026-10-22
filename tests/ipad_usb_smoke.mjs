@@ -51,7 +51,9 @@ const run = (command, args) => new Promise((resolve, reject) => {
   child.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`)));
 });
 try {
-  assert.equal(wiredIPads([device, wireless, { ...device, hardwareProperties: { deviceType: 'iPhone', reality: 'physical' } }]).length, 1);
+  const phone = { ...device, identifier: randomUUID(), hardwareProperties: { deviceType: 'iPhone', reality: 'physical' } };
+  assert.deepEqual(wiredIPads([device, wireless, phone]), [device, phone], 'both wired iOS device families can receive models');
+  assert.equal(wiredIPads([{ ...phone, hardwareProperties: { deviceType: 'iPhone', reality: 'simulated' } }]).length, 0);
   assert.equal(wiredIPads([{ ...device, connectionProperties: { ...device.connectionProperties, tunnelState: 'unavailable' } }]).length, 0);
   assert.equal((await bridge.refresh()).devices[0].ready, true);
   assert.equal((await request('/usb')).devices.length, 1);
@@ -86,6 +88,12 @@ try {
   const descriptor = JSON.parse(await readFile(path.join(transferred, 'ready.json'), 'utf8'));
   assert.equal(descriptor.manifest.modelHash, packed.manifest.modelHash);
   assert.deepEqual(descriptor.poseSeed, poseSeed, 'USB preserves exactly the same references as Wi-Fi');
+  // Exercise the full send path for iPhone too, using the same app container and protocol.
+  const originalFamily = device.hardwareProperties.deviceType;
+  device.hardwareProperties.deviceType = 'iPhone';
+  assert.equal((await bridge.refresh()).devices[0].ready, true);
+  assert.equal((await send()).id, receipt.id);
+  device.hardwareProperties.deviceType = originalFamily;
   assert.notEqual(descriptor.id, session.id, 'USB imports must not replace a LAN project and its credentials');
   assert.ok(!JSON.stringify(descriptor).includes(session.ownerToken));
   assert.equal((await request(`/sessions/${session.id}`, { token: session.ownerToken })).status, 'ready');

@@ -39,7 +39,7 @@ with sync_playwright() as playwright:
             str(Path(__file__).parent / 'fixtures/rotation-map.ply'))
         ready(page)
         open_ipad_dialog(page)
-        dialog = page.get_by_role('dialog', name='iPad 示教')
+        dialog = page.get_by_role('dialog', name='iPad / iPhone 示教')
         expect(dialog.get_by_role('button', name='导入结果文件')).to_be_enabled()
         ticket = page.evaluate("JSON.parse(localStorage.getItem('atlas-ipad-handoffs-v1'))[0]")
         archive = json.loads(NATIVE_FILE.read_text())

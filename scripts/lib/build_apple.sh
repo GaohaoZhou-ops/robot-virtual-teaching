@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
-# Shared implementation for the two public native build entry points.
+# Shared implementation for the public native build entry points.
 build_apple() {
   local target="$1"; shift
-  local repo configuration=Release flavor=device scheme platform sdk output log app status=0
+  local repo configuration=Release flavor=device scheme platform sdk output log app status=0 project_target="$target"
   repo="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -32,7 +32,7 @@ HELP
   done
   case "$target" in
     vision) scheme=AtlasVisionTeaching; platform=visionOS; sdk=xros ;;
-    ipad) scheme=AtlasTeaching; platform=iOS; sdk=iphoneos ;;
+    ipad|iphone) scheme=AtlasTeaching; platform=iOS; sdk=iphoneos; project_target=ipad ;;
     *) echo "未知构建目标：$target" >&2; return 2 ;;
   esac
   if [[ "$flavor" == simulator ]]; then
@@ -52,7 +52,7 @@ HELP
   app="$output/Build/Products/$configuration-$sdk/$scheme.app"
   mkdir -p "$output"
   printf '编译 %s（%s / %s）…\n日志：%s\n' "$scheme" "$platform" "$configuration" "$log"
-  xcodebuild -project "$repo/$target/$scheme.xcodeproj" -scheme "$scheme" \
+  xcodebuild -project "$repo/$project_target/$scheme.xcodeproj" -scheme "$scheme" \
     -sdk "$sdk" -destination "generic/platform=$platform" -configuration "$configuration" \
     -derivedDataPath "$output" CODE_SIGNING_ALLOWED=NO build > "$log" 2>&1 || status=$?
   if [[ "$status" != 0 ]]; then

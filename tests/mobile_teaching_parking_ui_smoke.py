@@ -173,7 +173,7 @@ def run():
                 }''', version)
                 page.goto(BASE + '/workbench', wait_until='networkidle')
                 ready(page)
-                page.get_by_role('group', name='示教来源', exact=True).get_by_role('button', name='iPad 示教', exact=True).click()
+                page.get_by_role('group', name='示教来源', exact=True).get_by_role('button', name='iPad / iPhone 示教', exact=True).click()
                 page.get_by_role('button', name='计算机器人姿态', exact=True).click()
                 if version < 4:
                     expect(dialog).to_contain_text('已有报告尚未采用双臂分工与停车点覆盖优化')
@@ -206,7 +206,7 @@ def run():
             dialog.get_by_role('button', name='重新计算', exact=True).click()
             expect(dock).to_have_attribute('data-compute-status', 'error')
             expect(dock).to_contain_text('后台求解器版本已过期')
-            dock.get_by_role('button', name='计算配置', exact=True).click()
+            dock.get_by_role('button', name='计算详情', exact=True).click()
             expect(dialog.get_by_role('alert')).to_contain_text('下方保留上次报告，不是本次结果')
             expect(dialog.get_by_role('heading', name='旧版计算结果', exact=True)).to_be_visible()
             unchanged = await_saved(page, lambda c: c['project']['virtualTeaching']['tasks'][0]['mobileSolve']['version'] == 1)

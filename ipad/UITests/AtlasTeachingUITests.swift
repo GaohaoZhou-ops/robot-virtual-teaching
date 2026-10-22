@@ -7,6 +7,232 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    private func registerPhonePermissionHandler() {
+        addUIInterruptionMonitor(withDescription: "Atlas first-launch permissions") { alert in
+            self.allowPhonePermission(alert)
+        }
+    }
+
+    private func allowPhonePermission(_ alert: XCUIElement) -> Bool {
+        let text = alert.label + alert.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " ")
+        guard text.contains("Atlas") else { return false }
+        for title in ["WLAN Only", "仅无线局域网", "仅 WLAN", "允许", "Allow", "好", "OK"] where alert.buttons[title].exists {
+            alert.buttons[title].tap()
+            return true
+        }
+        return false
+    }
+
+    private func dismissSystemBanners() {
+        let banner = XCUIApplication(bundleIdentifier: "com.apple.springboard").otherElements["NotificationShortLookView"].firstMatch
+        if banner.exists && banner.isHittable { banner.swipeUp() }
+    }
+
+    private func allowPhoneCameraIfNeeded() {
+        let alert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if alert.waitForExistence(timeout: 2) {
+            _ = allowPhonePermission(alert)
+        }
+    }
+
+    func testPhoneLibraryConnectionsAndRotation() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { throw XCTSkip("iPhone layout") }
+        registerPhonePermissionHandler()
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            app.activate()
+            dismissSystemBanners()
+            XCUIDevice.shared.orientation = orientation
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            let methods = app.segmentedControls["phone-pairing-method"]
+            XCTAssertTrue(methods.waitForExistence(timeout: 15))
+            let scroll = app.scrollViews["library-phone-scroll"]
+            for _ in 0..<5 where !methods.isHittable { scroll.swipeDown() }
+            methods.buttons["Wi-Fi"].tap()
+            let host = app.textFields["server-address-octet-0"]
+            for _ in 0..<4 where !host.isHittable { scroll.swipeUp() }
+            XCTAssertTrue(host.isHittable)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(host.frame))
+            for _ in 0..<5 where !methods.isHittable { scroll.swipeDown() }
+            methods.buttons["数据线"].tap()
+            let refresh = app.buttons["refresh-usb-connection"]
+            for _ in 0..<4 where !refresh.isHittable { scroll.swipeUp() }
+            XCTAssertTrue(refresh.isHittable)
+            XCTAssertGreaterThanOrEqual(refresh.frame.height, 44)
+            for _ in 0..<5 where !methods.isHittable { scroll.swipeDown() }
+            methods.buttons["扫码"].tap()
+            let scan = app.buttons["scan-pairing-code"]
+            for _ in 0..<4 where !scan.isHittable { scroll.swipeUp() }
+            XCTAssertTrue(scan.isHittable)
+            scan.tap()
+            allowPhoneCameraIfNeeded()
+            XCTAssertTrue(app.buttons["cancel-pairing-scan"].waitForExistence(timeout: 8))
+            dismissSystemBanners()
+            app.buttons["cancel-pairing-scan"].tap()
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = orientation.isLandscape ? "iPhone library landscape" : "iPhone library portrait"
+            shot.lifetime = .keepAlways; add(shot)
+        }
+    }
+
+    func testPhoneLiveLiDARPlacementAndCapture() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Live LiDAR requires an iPhone Pro")
+        #else
+        guard UIDevice.current.userInterfaceIdiom == .phone else { throw XCTSkip("iPhone hardware") }
+        registerPhonePermissionHandler()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 15))
+        let project = app.buttons.matching(NSPredicate(format:
+            "identifier BEGINSWITH 'local-project-' AND label CONTAINS 'UI-iPhone-LiveAR'")).firstMatch
+        guard project.exists else { throw XCTSkip("Provide a dedicated UI-iPhone-LiveAR fixture") }
+        for _ in 0..<8 where !project.isHittable { app.scrollViews["library-phone-scroll"].swipeUp() }
+        project.tap(); allowPhoneCameraIfNeeded()
+        let depth = app.staticTexts["teaching-depth-status"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == 'LiDAR 已就绪'"), object: depth)], timeout: 30), .completed)
+        let tracking = app.staticTexts["teaching-tracking-status"]
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label CONTAINS '空间定位正常'"), object: tracking)], timeout: 30), .completed)
+        app.buttons["expand-teaching-panel"].tap()
+        let panel = app.scrollViews["phone-teaching-panel-scroll"]
+        let ground = app.switches["ground-assistance"]
+        for _ in 0..<5 where !ground.isHittable { panel.swipeUp() }
+        XCTAssertTrue(ground.isHittable)
+        if ground.value as? String == "1" { ground.tap() }
+        app.buttons["collapse-teaching-panel"].tap()
+        let capture = app.buttons["capture-pose"]
+        for point in [CGVector(dx: 0.5, dy: 0.5), CGVector(dx: 0.5, dy: 0.65), CGVector(dx: 0.65, dy: 0.5)] where !capture.isEnabled {
+            app.otherElements["teaching-render-surface"].coordinate(withNormalizedOffset: point).tap()
+        }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "enabled == true"), object: capture)], timeout: 15), .completed)
+        let before = app.staticTexts["floating-pose-count"].label
+        capture.tap()
+        let nearby = app.buttons["confirm-nearby-pose"]
+        if nearby.waitForExistence(timeout: 2) { nearby.tap() }
+        XCTAssertNotEqual(app.staticTexts["floating-pose-count"].label, before)
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            XCTAssertTrue(capture.isEnabled, "Rotation must retain the model calibration")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "iPhone live LiDAR and recorded Pose \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        app.buttons["back-to-library"].tap()
+        #endif
+    }
+
+    func testPhoneTeachingReviewAndCompletion() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { throw XCTSkip("iPhone layout") }
+        registerPhonePermissionHandler()
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 15))
+        let project = ProcessInfo.processInfo.environment["ATLAS_PHONE_LAYOUT_FIXTURE_ID"].map {
+            app.buttons["local-project-\($0)"]
+        } ?? app.buttons.matching(NSPredicate(format:
+            "identifier BEGINSWITH 'local-project-' AND label CONTAINS 'UI-iPhone-Adaptation'")).firstMatch
+        guard project.exists else { throw XCTSkip("Generate and copy tests/iphone_layout_fixture.mjs projects into this test device") }
+        XCTAssertTrue(project.label.contains("UI-iPhone-Adaptation"), "Only edit the dedicated layout fixture")
+        let projectID = project.identifier
+        let scroll = app.scrollViews["library-phone-scroll"]
+        for _ in 0..<6 where !project.isHittable { scroll.swipeUp() }
+        project.tap()
+        allowPhoneCameraIfNeeded()
+        XCTAssertTrue(app.buttons["expand-teaching-panel"].waitForExistence(timeout: 15))
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .landscapeRight, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            let capture = app.buttons["capture-pose"]
+            XCTAssertTrue(capture.waitForExistence(timeout: 5))
+            XCTAssertTrue(capture.isHittable || !capture.isEnabled)
+            XCTAssertGreaterThanOrEqual(capture.frame.height, 44)
+            XCTAssertTrue(app.windows.firstMatch.frame.insetBy(dx: -1, dy: -1).contains(capture.frame))
+            if orientation.isLandscape {
+                let window = app.windows.firstMatch.frame
+                let controls = app.otherElements["phone-landscape-controls"]
+                XCTAssertTrue(controls.exists)
+                XCTAssertLessThan(controls.frame.width, window.width * 0.2, "Keep the central camera view unobstructed")
+                XCTAssertGreaterThan(capture.frame.midX, window.minX + window.width * 0.8)
+                XCTAssertGreaterThanOrEqual(capture.frame.width, 80, "Use a thumb-sized capture target")
+                XCTAssertGreaterThanOrEqual(capture.frame.height, 80)
+                XCTAssertLessThan(abs(capture.frame.midY - window.midY), window.height * 0.2)
+                XCTAssertFalse(app.otherElements["floating-pose-controls"].exists, "No full-width bottom recording bar in landscape")
+                for id in ["review-poses", "finish-teaching"] {
+                    let action = app.buttons[id]
+                    XCTAssertTrue(action.isHittable)
+                    XCTAssertGreaterThanOrEqual(action.frame.height, 44)
+                    XCTAssertFalse(action.frame.intersects(capture.frame))
+                }
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "iPhone landscape capture controls \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+            } else {
+                XCTAssertFalse(app.otherElements["phone-landscape-controls"].exists)
+            }
+            app.buttons["expand-teaching-panel"].tap()
+            XCTAssertTrue(app.buttons["collapse-teaching-panel"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(app.buttons["capture-pose"].frame), "Recording stays pinned outside the panel scroll")
+            let panel = app.otherElements["phone-teaching-panel"]
+            XCTAssertTrue(app.windows.firstMatch.frame.insetBy(dx: -1, dy: -1).contains(panel.frame))
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "iPhone teaching panel \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+            app.buttons["collapse-teaching-panel"].tap()
+        }
+        app.buttons["review-poses"].tap()
+        XCTAssertTrue(app.buttons["close-pose-review"].waitForExistence(timeout: 8))
+        XCTAssertEqual(app.staticTexts["pose-review-count"].label, "8 个 Pose")
+        for orientation in [UIDeviceOrientation.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            XCTAssertTrue(app.buttons["close-pose-review"].isHittable)
+            let list = app.collectionViews["pose-review-list"].exists ? app.collectionViews["pose-review-list"] : app.tables["pose-review-list"]
+            XCTAssertGreaterThan(list.frame.height, 90)
+            app.buttons["pose-preview-mode-2d"].tap()
+            app.buttons["pose-preview-mode-3d"].tap()
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "iPhone Pose review \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        XCUIDevice.shared.orientation = .portrait
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        app.buttons["phone-pose-details"].tap()
+        let name = app.textFields["review-pose-name"]
+        for _ in 0..<4 where !name.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(name.isHittable)
+        name.tap()
+        name.typeText(" 手机")
+        let save = app.buttons["save-pose-name"]
+        for _ in 0..<4 where !save.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        save.tap()
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '手机'")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["close-phone-pose-details"].tap()
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: app.buttons["close-phone-pose-details"])], timeout: 5), .completed)
+        app.buttons["close-pose-review"].tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        app.buttons["finish-teaching"].tap()
+        app.buttons["仅完成并保存在 iPhone"].tap()
+        XCTAssertTrue(app.buttons["sync-teaching-result"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.otherElements["phone-landscape-controls"].frame.contains(app.buttons["sync-teaching-result"].frame))
+        app.buttons["sync-teaching-result"].tap()
+        XCTAssertTrue(app.segmentedControls["result-sync-method"].waitForExistence(timeout: 5))
+        app.segmentedControls["result-sync-method"].buttons["Wi-Fi"].tap()
+        XCTAssertTrue(app.textFields["server-address-octet-0"].exists)
+        app.segmentedControls["result-sync-method"].buttons["AirDrop 导出"].tap()
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "iPhone result export"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["close-result-sync"].tap()
+        app.buttons["back-to-library"].tap()
+        XCTAssertTrue(app.buttons[projectID].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons[projectID].label.contains("已完成"))
+    }
+
     private func renderedButtonPixels(_ button: XCUIElement) throws -> [UInt8] {
         let image = try XCTUnwrap(button.screenshot().image.cgImage)
         let context = try XCTUnwrap(CGContext(data: nil, width: image.width, height: image.height,
@@ -90,18 +316,40 @@ final class AtlasTeachingUITests: XCTestCase {
             throw XCTSkip("Provide a disposable USB transfer for the device receiving check")
         }
         continueAfterFailure = false
+        let phone = UIDevice.current.userInterfaceIdiom == .phone
+        if phone { registerPhonePermissionHandler() }
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication(); app.launch()
+        func visible(_ element: XCUIElement) -> Bool {
+            element.isHittable && (!phone || app.windows.firstMatch.frame.insetBy(dx: 0, dy: 24).contains(element.frame))
+        }
+        func reveal(_ element: XCUIElement, scroll: XCUIElement) {
+            for _ in 0..<10 where !visible(element) {
+                if phone {
+                    let window = app.windows.firstMatch
+                    let upward = element.frame.midY > window.frame.midY
+                    let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.7 : 0.3))
+                    let end = window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.4 : 0.6))
+                    start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+                } else { scroll.swipeUp() }
+            }
+        }
+        if phone {
+            let methods = app.segmentedControls["phone-pairing-method"]
+            XCTAssertTrue(methods.waitForExistence(timeout: 15))
+            methods.buttons["数据线"].tap()
+        }
         let receive = app.buttons["receive-usb-model-\(id)"]
         XCTAssertTrue(receive.waitForExistence(timeout: 15))
         XCTAssertTrue(receive.label.contains("数据线接收验证（临时）"), "only import the dedicated test fixture")
         XCTAssertTrue(app.staticTexts["方式三"].exists)
-        for _ in 0..<8 where !receive.isHittable { app.scrollViews["library-pairing-scroll"].swipeUp() }
-        XCTAssertTrue(receive.isHittable)
+        reveal(receive, scroll: app.scrollViews[phone ? "library-phone-scroll" : "library-pairing-scroll"])
+        XCTAssertTrue(visible(receive))
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "USB connected and complete model ready to receive"; shot.lifetime = .keepAlways; add(shot)
         receive.tap()
-        let back = app.buttons["本地项目"]
+        if phone { allowPhoneCameraIfNeeded() }
+        let back = app.buttons["back-to-library"]
         XCTAssertTrue(back.waitForExistence(timeout: 20), "USB reception opens the existing teaching workflow")
         back.tap()
         let row = app.buttons["local-project-\(id)"]
@@ -109,15 +357,41 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertFalse(receive.exists, "successful reception removes its temporary inbox copy")
         app.terminate(); app.launch()
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the USB model survives relaunch")
-        for _ in 0..<8 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
+        reveal(row, scroll: app.scrollViews[phone ? "library-phone-scroll" : "library-projects-scroll"])
         row.tap(); XCTAssertTrue(back.waitForExistence(timeout: 15)); back.tap()
-        for _ in 0..<8 where !row.isHittable { app.scrollViews["library-projects-scroll"].swipeUp() }
+        reveal(row, scroll: app.scrollViews[phone ? "library-phone-scroll" : "library-projects-scroll"])
         XCTAssertTrue(row.label.contains("数据线接收验证（临时）"))
         row.swipeLeft()
         app.buttons["swipe-delete-local-project-\(id)"].firstMatch.tap()
         app.buttons["confirm-delete-local-project"].firstMatch.tap()
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+    }
+
+    func testRemoveDisposablePhoneFixtures() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { throw XCTSkip("iPhone fixtures") }
+        let ids = (ProcessInfo.processInfo.environment["ATLAS_PHONE_CLEANUP_IDS"] ?? "").split(separator: ",").map(String.init)
+        guard !ids.isEmpty, ids.allSatisfy({ UUID(uuidString: $0) != nil }) else {
+            throw XCTSkip("Provide explicit disposable iPhone fixture IDs for cleanup")
+        }
+        continueAfterFailure = false
+        registerPhonePermissionHandler()
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication(); app.launch()
+        let scroll = app.scrollViews["library-phone-scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 15))
+        for id in ids {
+            let row = app.buttons["local-project-\(id)"]
+            XCTAssertTrue(row.exists)
+            XCTAssertTrue(row.label.contains("UI-iPhone-"), "Only delete explicitly identified test projects")
+            for _ in 0..<8 where !row.isHittable { scroll.swipeUp() }
+            row.swipeLeft()
+            app.buttons["swipe-delete-local-project-\(id)"].tap()
+            let confirm = app.buttons["confirm-delete-local-project"].firstMatch
+            XCTAssertTrue(confirm.waitForExistence(timeout: 5)); confirm.tap()
+            XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: row)], timeout: 10), .completed)
+        }
     }
 
     func testLocalProjectDeleteImmediatelyAfterSwipe() throws {
@@ -1169,8 +1443,14 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(view.imageView.image?.pngData(), originalPNG, "2D must preserve original colors when live coverage is enabled")
         let livePixel = try centerPixel(render(geometry))
         let globalPixel = try centerPixel(render(XCTUnwrap(view.overviewObject.geometry)))
-        XCTAssertGreaterThan(Int(livePixel[2]), Int(livePixel[0]) + 15, "opening 2D must preserve purple iPad coverage")
-        XCTAssertGreaterThan(Int(globalPixel[2]), Int(globalPixel[0]) + 15, "the global 3D overview keeps the selected iPad Pose purple")
+        for pixel in [livePixel, globalPixel] {
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                XCTAssertGreaterThan(Int(pixel[0]), Int(pixel[1]) + 50, "iPhone coverage stays red, distinct from cyan and gold Mac arms")
+                XCTAssertGreaterThan(Int(pixel[0]), Int(pixel[2]) + 50, "live and global overview coverage share the iPhone red palette")
+            } else {
+                XCTAssertGreaterThan(Int(pixel[2]), Int(pixel[0]) + 15, "live and global overview coverage keep the iPad purple palette")
+            }
+        }
         XCTAssertTrue(geometry.firstMaterial?.value(forKey: "atlasCoverageFrames") as? MTLBuffer === frames)
 
         // Force new snapshots after material changes and Pose selection; cached images can hide a shared-material leak.
@@ -2395,8 +2675,8 @@ final class AtlasTeachingUITests: XCTestCase {
             review.tap()
             let mac = app.buttons["review-pose-mac-fixture"], right = app.buttons["review-pose-mac-right-fixture"], ipad = app.buttons["review-pose-ipad-fixture"]
             XCTAssertTrue(mac.waitForExistence(timeout: 10))
-            XCTAssertTrue(mac.label.contains("Mac 左臂")); XCTAssertTrue(right.label.contains("Mac 右臂")); XCTAssertTrue(ipad.label.contains("iPad 示教"))
-            for (button, label) in [(mac, "Mac 左臂"), (right, "Mac 右臂"), (ipad, "iPad 示教")] {
+            XCTAssertTrue(mac.label.contains("Mac 左臂")); XCTAssertTrue(right.label.contains("Mac 右臂")); XCTAssertTrue(ipad.label.contains("移动端示教"))
+            for (button, label) in [(mac, "Mac 左臂"), (right, "Mac 右臂"), (ipad, "移动端示教")] {
                 button.tap()
                 let badge = app.descendants(matching: .any).matching(identifier: "pose-selected-origin").firstMatch
                 XCTAssertTrue(badge.waitForExistence(timeout: 5)); XCTAssertTrue(badge.label.contains(label))

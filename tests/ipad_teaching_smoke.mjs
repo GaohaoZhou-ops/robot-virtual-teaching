@@ -200,5 +200,16 @@ try {
   assert.equal((await request(sessionPath, { token: owner })).status, 'imported');
   await request(sessionPath, { method: 'DELETE', token: owner });
   await request(sessionPath + '/result', { token: paired.deviceToken, method: 'POST', body: result, expected: 410 });
+  const phoneSession = await request('/sessions', { method: 'POST', body: { manifest: packed.manifest }, expected: 201 });
+  const phonePath = `/sessions/${phoneSession.id}`;
+  await request(phonePath + '/model', { method: 'PUT', token: phoneSession.ownerToken, body: packed.buffer });
+  const phonePair = await request('/pair', { method: 'POST', body: {
+    code: phoneSession.pairingCode, deviceId: randomUUID(), deviceName: 'iPhone 15 Pro Max' } });
+  const phoneResult = { ...structuredClone(result), id: randomUUID(), sessionId: phoneSession.id,
+    device: { platform: 'iOS', model: 'iPhone 15 Pro Max', lidar: true, poseSource: 'camera' } };
+  await request(phonePath + '/result', { method: 'POST', token: phonePair.deviceToken, body: phoneResult });
+  const receivedPhone = await request(phonePath + '/result', { token: phoneSession.ownerToken });
+  assert.deepEqual(receivedPhone, phoneResult, 'iPhone results survive the real LAN receipt path');
+  assert.match((await ipadResultTask(receivedPhone, phoneSession, map)).name, /^iPhone 示教/);
   geometry.dispose(); console.log('iPad LAN, pre-sync model content checks, same-name mismatch rejection, independent poses, completion retry, persistence and workspace transforms passed.');
 } finally { await new Promise((resolve) => server.close(resolve)); await rm(directory, { recursive: true, force: true }); }

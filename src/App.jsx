@@ -753,7 +753,7 @@ export default function App() {
   const workbenchTeachingTasks = teachingDevice === 'desktop' ? desktopTeachingTasks : mobileTasksByDevice[teachingDevice];
   const teachingSources = useMemo(() => [
     { id: 'desktop', label: '电脑端示教', tasks: desktopTeachingTasks },
-    { id: 'ipad', label: 'iPad 示教', tasks: mobileTasksByDevice.ipad },
+    { id: 'ipad', label: 'iPad / iPhone 示教', tasks: mobileTasksByDevice.ipad },
     { id: 'vision', label: 'Vision Pro 示教', tasks: mobileTasksByDevice.vision },
   ].filter((source) => source.id === 'desktop' || source.tasks.length).map((source) => ({
     id: source.id, label: source.label, taskCount: source.tasks.length,
@@ -5987,6 +5987,7 @@ export default function App() {
       if (isCurrent()) setMobileComputation((value) => value?.id === run.id ? { ...value, ...change } : value);
     };
     setMobileComputation({ id: run.id, taskId, taskName: task.name, options, status: 'running', total, completed: 0,
+      rows: [], startedAt: new Date().toISOString(), mapPose: structuredClone(current.robotPose),
       feasibleCount: 0, name: '', side: '', error: '', preview: null, previewCount: 0, previewIndex: -1, followLatest: true });
     setMobileSolveTaskId(null);
     setRobotParkingGhost(null);
@@ -6004,7 +6005,11 @@ export default function App() {
           onStatus: (status) => { if (isCurrent()) { run.status = status; update({ status }); } },
           onProgress: (progress) => update(progress),
           onSample: ({ row, mapPose }) => {
-            if (!isCurrent() || !row.feasible) return;
+            if (!isCurrent()) return;
+            // Keep all rows for live review, including failures. Only the final
+            // report is saved into the task when this run completes.
+            setMobileComputation((value) => value?.id === run.id ? { ...value, rows: [...value.rows, row] } : value);
+            if (!row.feasible) return;
             const preview = { kind: 'mobile-solve', taskId, taskName: task.name, revision: `${run.id}:${row.sampleId}`,
               parkingPointId: `${run.id}:${row.parkingId || row.sampleId}`, parkingPointName: `计算停车点 ${row.parkingId?.replace('parking-', 'P') || ''}`, poseId: row.sampleId, poseName: row.name,
               side: row.pairedSampleId ? 'both' : row.selectedSide, targetPose: mapPose, sourceName: '计算预览',
@@ -6026,9 +6031,9 @@ export default function App() {
         latestWorkspaceRef.current = { ...latest, teachingTasks: next };
         setTeachingTasks(next);
         run.status = 'completed';
-        update({ status: 'completed', completed: total, feasibleCount: report.feasibleCount, side: '' });
+        update({ status: 'completed', rows: [], completed: total, feasibleCount: report.feasibleCount, side: '' });
       } catch (error) {
-        if (isCurrent()) { run.status = 'error'; update({ status: 'error', error: error.message }); }
+        if (isCurrent()) { run.status = 'error'; update({ status: 'error', rows: [], error: error.message }); }
       }
     })();
   };
@@ -6052,7 +6057,7 @@ export default function App() {
     run.controller.abort();
     run.status = 'cancelled';
     run.previews = [];
-    setMobileComputation((value) => value?.id === run.id ? { ...value, status: 'cancelled', preview: null,
+    setMobileComputation((value) => value?.id === run.id ? { ...value, status: 'cancelled', rows: [], preview: null,
       previewCount: 0, previewIndex: -1, followLatest: false } : value);
   };
 
@@ -6685,10 +6690,10 @@ export default function App() {
                     <Bot size={13} />{isIndependentTeachingSpace ? '独立示教' : '电脑示教'}
                   </button>
                   {['ipad', 'vision'].filter((device) => mobileTasksByDevice[device].length).map((device) => <button key={device} type="button" aria-pressed={teachingDevice === device}
-                    aria-label={`查看 ${device === 'vision' ? 'Vision Pro' : 'iPad'} 示教`}
+                    aria-label={`查看 ${device === 'vision' ? 'Vision Pro' : 'iPad / iPhone'} 示教`}
                     disabled={loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
                     onClick={() => switchTeachingSource(device)}>
-                    {device === 'vision' ? <Glasses size={13} /> : <Tablet size={13} />}{device === 'vision' ? 'Vision Pro' : 'iPad'} 示教
+                    {device === 'vision' ? <Glasses size={13} /> : <Tablet size={13} />}{device === 'vision' ? 'Vision Pro' : 'iPad / iPhone'} 示教
                   </button>)}
                 </div>
               </div>
@@ -7184,10 +7189,7 @@ export default function App() {
       initialSampleId={mobileSolveSampleId}
       key={mobileSolveTaskId} task={teachingTasks.find((task) => task.id === mobileSolveTaskId)} robot={selectedRobot} robotPose={robotPose}
       robotPresets={robotPresets}
-      initialOptions={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.options : undefined}
-      running={mobileComputation?.taskId === mobileSolveTaskId && ['running', 'pausing', 'paused'].includes(mobileComputation?.status)}
-      computationStatus={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.status : null}
-      computationError={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation.error : ''}
+      computation={mobileComputation?.taskId === mobileSolveTaskId ? mobileComputation : null}
       ready={!mobileSolveDisabledReason} readinessMessage={mobileSolveDisabledReason} robotLoadState={robotLoadState}
       robotSelectionDisabled={sessionState.status !== 'ready' || ['running', 'pausing', 'paused'].includes(mobileComputation?.status)}
       onSelectRobot={(value) => { dismissMobileTeaching(); handleSelectRobot(value); setShowRobotModel(true); }}
