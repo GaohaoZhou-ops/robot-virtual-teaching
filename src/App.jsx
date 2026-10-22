@@ -5165,6 +5165,46 @@ export default function App() {
     ],
   );
 
+  const applyTeachingUpperBodyPose = useCallback((taskId, parkingPointId, poseId) => {
+    const task = latestWorkspaceRef.current.teachingTasks.find((item) => item.id === taskId);
+    const parkingPoint = task?.parkingPoints?.find((item) => item.id === parkingPointId);
+    const pose = parkingPoint?.poses?.find((item) => item.id === poseId);
+    if (!pose) return;
+    if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
+      notify('当前地图或机器人与该姿态不一致，无法应用', 'warning');
+      return;
+    }
+    if (teachingCaptureBusyRef.current) {
+      notify('请等待当前姿态采集完成后再执行上身姿态', 'warning');
+      return;
+    }
+    let values;
+    try {
+      const savedValues = robotPresetValuesForEditing({ joints: pose.fullBodyJoints }, robotPresetJoints);
+      values = Object.fromEntries(robotPresetJoints.flatMap((joint) => (
+        Number.isFinite(savedValues[joint.name])
+          ? [[joint.name, clampJointValue(savedValues[joint.name], joint)]] : []
+      )));
+    } catch (error) {
+      notify(error.message || '无法读取上身姿态', 'warning');
+      return;
+    }
+    if (!Object.keys(values).length) {
+      notify('该姿态没有与当前机器人匹配的上身关节', 'warning');
+      return;
+    }
+    stopTeachingTaskPlayback(false);
+    setRobotControlEnabled(false);
+    // Apply the same non-wheel joints as robot presets without changing the base pose.
+    setRobotJointValues((current) => ({ ...current, ...values }));
+    setShowRobotModel(true);
+    setTeachingCaptureState({ status: 'idle', message: '' });
+    clearRobotParkingGhost();
+    requestSynchronizedFocus('robot', selectedRobot?.id || selectedRobot?.relativePath || 'active-robot');
+    notify(`${pose.name} 上身姿态已应用 · 当前位置和底盘朝向保持不变`, 'success');
+  }, [clearRobotParkingGhost, notify, requestSynchronizedFocus, robotLoadState.status,
+    robotPresetJoints, selectedRobot, stopTeachingTaskPlayback, teachingContextMatches]);
+
   const moveRobotToWaypoint = useCallback((id) => {
     const point = latestWorkspaceRef.current.waypoints.find((item) => item.id === id);
     if (!point || !selectedRobot || robotLoadState.status !== 'loaded' || loadState.loading) return;
@@ -6868,7 +6908,6 @@ export default function App() {
           onSelectMobilePose={selectMobilePose}
           onOpenMobileRobotPose={openMobileRobotPose}
           onOpenMobileSource={openMobileSource}
-          onEditTeachingPose={beginTeachingPoseEdit}
           activeTeachingTaskId={activeTeachingTaskId}
           activeTeachingParkingPointId={activeTeachingParkingPointId}
           robotParkingGhostId={robotParkingGhost?.parkingPointId || null}
@@ -6908,6 +6947,8 @@ export default function App() {
           onDeleteTeachingTask={deleteTeachingTask}
           onDeleteTeachingParkingPoint={deleteTeachingParkingPoint}
           onDeleteTeachingPoint={deleteTeachingPoint}
+          onApplyTeachingPoint={applyTeachingParkingPoint}
+          onApplyTeachingUpperBodyPose={applyTeachingUpperBodyPose}
           onSolveMobileTask={openMobileTeachingSolve}
           onSaveMobileTask={saveMobileTeachingTask}
           mobileSaveDisabledReason={mobileSaveDisabledReason}

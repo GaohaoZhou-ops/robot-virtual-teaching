@@ -150,7 +150,7 @@ def run():
             robot_pose = tasks[1]['parkingPoints'][0]['poses'][0]
             card = page.get_by_label('停车点机器人虚影', exact=True)
             expect(card).to_have_attribute('data-pose-id', robot_pose['id'])
-            page.get_by_role('button', name='调整选中姿态', exact=True).click()
+            card.get_by_role('button', name='调整姿态', exact=True).click()
             expect(card).to_have_attribute('data-pose-edit-state', 'editing')
             expect(page.get_by_role('dialog', name='全关节控制浮动窗口')).to_be_visible()
             page.get_by_role('spinbutton', name='right_J1 关节值', exact=True).fill('12')

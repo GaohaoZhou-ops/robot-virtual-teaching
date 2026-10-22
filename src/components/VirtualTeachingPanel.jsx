@@ -122,12 +122,15 @@ export default function VirtualTeachingPanel({
   onRenameParkingPoint,
   onDeleteParkingPoint,
   onApplyParkingPoint,
+  onMoveToParkingPoint,
+  parkingMoveDisabled = false,
   onRenameTask,
   onDeleteTask,
   onCapturePoint,
   onRenamePoint,
   onDeletePoint,
   onApplyPoint,
+  onApplyUpperBodyPose,
   onExportTeachingData,
   onOpenCapturePage,
   onSolveMobileTask,
@@ -141,7 +144,6 @@ export default function VirtualTeachingPanel({
   onSelectMobilePose,
   onOpenMobileRobotPose,
   onOpenMobileSource,
-  onEditPose,
   editingPoseId,
 }) {
   const isDataView = view === 'data';
@@ -154,6 +156,8 @@ export default function VirtualTeachingPanel({
     (parkingPoint) => parkingPoint.id === activeParkingPointId,
   ) || parkingPoints[0] || null;
   const activePoses = activeParkingPoint?.poses || [];
+  const previewedPose = previewParkingPointId === activeParkingPoint?.id
+    ? activePoses.find((pose) => pose.id === previewPoseId) : null;
   const [captureSelection, setCaptureSelection] = useState(null);
   const previousPreviewPoseId = useRef(previewPoseId);
   const captureSelectionMatches = captureSelection?.taskId === activeTask?.id
@@ -301,6 +305,11 @@ export default function VirtualTeachingPanel({
   const canCapture = Boolean(activeTask && activeParkingPoint && robotReady && contextMatches);
   const canCreateParkingPoint = Boolean(activeTask && robotReady && contextMatches);
   const captureInProgress = captureState?.status === 'capturing';
+  const canUseSelectedPose = Boolean(previewedPose
+    && robotReady && contextMatches && !captureInProgress && !editingPoseId);
+  const isParkingSelection = captureSelectionType === 'parking';
+  const canMoveToSelectedParkingPoint = Boolean(isParkingSelection && activeParkingPoint
+    && robotReady && !captureInProgress && !parkingMoveDisabled && !editingPoseId);
   const captureDeleteDisabled = captureInProgress || !activeTask
     || (captureSelectionType !== 'task' && Boolean(activeTask.abx))
     || !({ task: onDeleteTask, parking: onDeleteParkingPoint, pose: onDeletePoint }[captureSelectionType]);
@@ -549,10 +558,8 @@ export default function VirtualTeachingPanel({
           ? `保存到 ${activeParkingPoint.name}：${coordinateFrameLabel} 位姿、双臂/头部/躯干等全身关节与左右 Zivid RGB/XYZ 快照`
           : activeParkingPoint ? `当前${environmentLabel}、坐标系或机器人与任务不匹配` : '请先新增或选择停车点'}
       >
-        <span><Save size={15} /></span>
-        <div>
-          <strong>{captureInProgress ? '正在冻结双目视觉…' : '记录当前姿态'}</strong>
-        </div>
+        <Save size={13} />
+        <span>{captureInProgress ? '正在冻结双目视觉…' : '记录当前姿态'}</span>
       </button>
       <button
         type="button"
@@ -568,7 +575,38 @@ export default function VirtualTeachingPanel({
         <Trash2 size={13} />
         <span>{captureDeleteLabel}</span>
       </button>
+      <button
+        type="button"
+        className="teaching-pose-action"
+        disabled={!canUseSelectedPose || !onApplyPoint}
+        onClick={() => onApplyPoint(activeTask.id, activeParkingPoint.id, previewedPose.id)}
+        title={previewedPose ? `移动到 ${activeParkingPoint.name} 并执行 ${previewedPose.name} 的完整姿态` : '请先选择已保存的姿态'}
+      >
+        <Navigation size={13} />
+        <span>导航并执行</span>
+      </button>
+      <button
+        type="button"
+        className="teaching-pose-action"
+        disabled={isParkingSelection
+          ? !canMoveToSelectedParkingPoint || !onMoveToParkingPoint
+          : !canUseSelectedPose || !onApplyUpperBodyPose}
+        onClick={() => {
+          if (isParkingSelection) onMoveToParkingPoint(activeParkingPoint.id);
+          else onApplyUpperBodyPose(activeTask.id, activeParkingPoint.id, previewedPose.id);
+        }}
+        title={isParkingSelection
+          ? '移动到该停车点的 X/Y 并对齐底盘朝向，保持当前 Z 高度'
+          : previewedPose ? `保持当前位置和底盘朝向，仅执行 ${previewedPose.name} 的上身姿态` : '请先选择已保存的姿态'}
+      >
+        {isParkingSelection ? <Navigation size={13} /> : <Play size={13} />}
+        <span>{isParkingSelection ? '前往停车点' : '仅执行上身'}</span>
+      </button>
       </div>
+
+      {editingPoseId && <div className="teaching-review-hint">
+        <span>调整关节后，在 3D 预览卡片中点击“确认修改”。</span>
+      </div>}
 
       {captureState?.message && (
         <div
@@ -752,13 +790,6 @@ export default function VirtualTeachingPanel({
           {activeTask?.mobileSolveSource && <div className="teaching-review-hint">
             <span>已转换为机器人关节姿态；选择 Pose 后可调整并确认修改。</span>
             {onOpenMobileSource && <button type="button" onClick={() => onOpenMobileSource(activeTask.mobileSolveSource.taskId)}>查看来源采样</button>}
-          </div>}
-          {previewPoseId && activeParkingPoint?.poses.some((pose) => pose.id === previewPoseId) && onEditPose && <div className="teaching-review-hint">
-            <button type="button" disabled={Boolean(editingPoseId) || captureInProgress}
-              onClick={() => onEditPose(activeTask.id, activeParkingPoint.id, previewPoseId)}>
-              {editingPoseId ? '正在调整姿态' : '调整选中姿态'}
-            </button>
-            <span>{editingPoseId ? '调整关节后，在 3D 预览卡片中点击“确认修改”。' : '编辑已保存的机器人关节动作。'}</span>
           </div>}
         </section>
       )}

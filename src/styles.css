@@ -11431,6 +11431,39 @@ input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
 }
 
+.teaching-pose-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 42px;
+  padding: 5px 8px;
+  border: 1px solid rgba(89, 219, 232, 0.3);
+  background: rgba(89, 219, 232, 0.065);
+  color: var(--cyan);
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.teaching-pose-action svg { flex: 0 0 auto; }
+
+.teaching-pose-action:hover:not(:disabled) {
+  border-color: rgba(89, 219, 232, 0.6);
+  background: rgba(89, 219, 232, 0.13);
+}
+
+.teaching-pose-action:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.teaching-pose-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .teaching-capture-delete {
   display: flex;
   align-items: center;
@@ -11464,61 +11497,40 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .teaching-capture-button {
-  display: grid;
-  grid-template-columns: 31px minmax(0, 1fr);
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: calc(100% - 18px);
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
   min-height: 42px;
-  margin: 0 9px;
-  padding: 5px 8px 5px 5px;
-  border: 1px solid rgba(94, 229, 154, 0.32);
-  background:
-    linear-gradient(90deg, rgba(94, 229, 154, 0.1), transparent 54%),
-    rgba(5, 16, 18, 0.86);
-  color: inherit;
-  text-align: left;
+  padding: 5px 8px;
+  border: 1px solid rgba(94, 229, 154, 0.3);
+  background: rgba(94, 229, 154, 0.065);
+  color: var(--green);
+  font-size: 10px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
-.teaching-capture-button > span {
-  display: grid;
-  place-items: center;
-  width: 31px;
-  height: 31px;
-  color: var(--green);
-  background: rgba(94, 229, 154, 0.1);
-}
-
-.teaching-capture-button > div {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.teaching-capture-button strong {
-  color: #cfe2dc;
-  font-size: 8px;
-  font-weight: 570;
-}
+.teaching-capture-button svg { flex: 0 0 auto; }
 
 .teaching-capture-button:hover:not(:disabled) {
-  border-color: rgba(94, 229, 154, 0.56);
-  background:
-    linear-gradient(90deg, rgba(94, 229, 154, 0.15), transparent 58%),
-    rgba(5, 16, 18, 0.9);
+  border-color: rgba(94, 229, 154, 0.6);
+  background: rgba(94, 229, 154, 0.13);
+}
+
+.teaching-capture-button:focus-visible {
+  outline: 1px solid var(--green);
+  outline-offset: 2px;
 }
 
 .teaching-capture-button:disabled {
-  border-color: rgba(137, 177, 179, 0.12);
+  opacity: 0.45;
   cursor: not-allowed;
-  filter: saturate(0.3);
-  opacity: 0.48;
 }
 
 .teaching-capture-button[aria-busy="true"] {
   border-color: rgba(89, 219, 232, 0.48);
-  filter: none;
   opacity: 1;
   background:
     repeating-linear-gradient(
