@@ -1,5 +1,5 @@
 import { sha256Bytes } from './hash.js';
-import { IPAD_PROTOCOL, MAX_MODEL_BYTES, MAX_MODEL_VERTICES, MAX_MODEL_INDICES, validateIPadResult, mobileDeviceLabel } from './ipadProtocol.js';
+import { IPAD_PROTOCOL, MAX_MODEL_BYTES, MAX_MODEL_VERTICES, MAX_MODEL_INDICES, validateIPadResult, mobileDeviceLabel, withoutDesktopPoseReferences } from './ipadProtocol.js';
 
 export const IPAD_API = '/__atlas/ipad';
 const ticketKey = 'atlas-ipad-handoffs-v1';
@@ -98,9 +98,11 @@ export async function ipadResultTask(result, ticket, mapData) {
   if (manifest.modelHash !== ticket.manifest.modelHash || manifest.byteLength !== ticket.manifest.byteLength) {
     throw new IPadModelMismatchError(mapData, ticket.manifest, mobileDeviceLabel(result));
   }
+  const mobileCapture = withoutDesktopPoseReferences(result);
+  if (!mobileCapture.samples.length) throw new Error('此结果仅包含电脑端参考 Pose，没有可接收的 iPad 示教 Pose');
   return { id: `ipad-${result.id}`, name: `${mobileDeviceLabel(result)} 示教 · ${ticket.manifest.name}`,
     createdAt: result.createdAt, updatedAt: result.completedAt, coordinateFrame: 'virtual_origin',
     robot: {}, map: { id: mapData.mapId, fileName: mapData.name, sourceHash: mapData.sourceHash,
       teachingSpaceMode: 'independent', coordinateFrame: 'virtual_origin' },
-    parkingPoints: [], mobileCapture: result };
+    parkingPoints: [], mobileCapture };
 }

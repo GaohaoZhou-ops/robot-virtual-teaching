@@ -98,7 +98,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
                 <RobotPicker inline selectedRobot={robot} loadState={robotLoadState} onSelect={onSelectRobot}
                   disabled={robotSelectionDisabled || robotLoadState?.status === 'loading'} />
               </>}
-              <small>搜索参考位置 · 底盘高度保持当前值</small><small>XYZ {['x', 'y', 'z'].map((axis) => format(robotPose?.position?.[axis])).join(' / ')} m</small><small>底盘 RPY {['roll', 'pitch', 'yaw'].map((axis) => format(robotPose?.rpy?.[axis])).join(' / ')}°</small>
+              <small>XYZ {['x', 'y', 'z'].map((axis) => format(robotPose?.position?.[axis])).join(' / ')} m</small><small>底盘 RPY {['roll', 'pitch', 'yaw'].map((axis) => format(robotPose?.rpy?.[axis])).join(' / ')}°</small>
             </div>
             <label className="mobile-solve-select">参考起始姿态<select aria-label="参考起始姿态" value={referenceId}
               onChange={(event) => selectReference(event.target.value)}>
@@ -198,7 +198,7 @@ export default function MobileTeachingSolveDialog({ task, robot, robotPose, robo
           </section>
         </div>
         <footer className="mobile-solve-footer">
-          <div><p>静态姿态筛选 · {options.checkCollisions ? '保守包围盒碰撞检查' : '未启用碰撞筛选'} · 停车点间路径与连续运动尚未校验</p>
+          <div>
             {!ready && <p className="mobile-solve-notice" role="status">{readinessMessage}</p>}
             {!sampleCount && <p className="mobile-solve-notice" role="status">{options.keyframesOnly && task.mobileCapture.samples.length ? '没有手动记录点，请取消勾选「仅计算手动记录点」以计算轨迹采样点。' : '当前任务没有可计算的采样点。'}</p>}
             {(error || validation) && <p role="alert">{error || validation}</p>}</div>

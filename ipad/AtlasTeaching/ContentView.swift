@@ -1762,9 +1762,11 @@ struct PoseReviewView: View {
                 let ready = previewPreparation.sampleID == selected.id
                 GeometryReader { area in
                     let recordedAspect = ZividFieldOfView.nativeAspect
-                    let expanded = overviewExpanded && previewMode == .interactive
-                    let width = expanded ? area.size.width : min(area.size.width, area.size.height * recordedAspect)
-                    let height = expanded ? area.size.height : width / recordedAspect
+                    // Let the 3D surface anchor its overview to the whole preview area.
+                    // The surface fits the recorded camera's aspect ratio internally.
+                    let interactive = previewMode == .interactive
+                    let width = interactive ? area.size.width : min(area.size.width, area.size.height * recordedAspect)
+                    let height = interactive ? area.size.height : width / recordedAspect
                     PosePreviewView(rendered: renderer.geometry, overview: previewPreparation.overview,
                                     footprint: ready ? previewPreparation.footprint : nil,
                                     status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
@@ -1778,6 +1780,7 @@ struct PoseReviewView: View {
                         .accessibilityIdentifier("pose-review-preview")
                         .frame(width: area.size.width, height: area.size.height)
                 }
+                .ignoresSafeArea(.container, edges: previewMode == .interactive ? .bottom : [])
             } else { ContentUnavailableView("还没有 Pose", systemImage: "viewfinder") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black.opacity(0.25))
