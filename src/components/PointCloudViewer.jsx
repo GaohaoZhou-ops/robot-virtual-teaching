@@ -92,6 +92,7 @@ import {
 } from '../lib/robotCollision.js';
 import { createRobotCollisionBackend } from '../lib/robotCollisionBackend.js';
 import { buildWaypointLabels } from '../lib/waypointLabels.js';
+import { placedObjectLayers, placedObjectMask } from '../lib/placedObjectRendering.js';
 
 const RESOLUTION_LEVELS = [
   { ratio: 0.05, label: '极速', tone: 'turbo' },
@@ -965,8 +966,10 @@ const POINT_COLOR_MODES = [
 
 // Keep the source buffer untouched and perform all three color modes in the GPU.
 // The five height stops match the on-screen scale from low (blue) to high (coral).
-const installMapColorShader = (material, bounds, colorMode, { surface = false } = {}) => {
+const installMapColorShader = (material, bounds, colorMode, { surface = false, objectColorMode = colorMode } = {}) => {
   material.userData.mapColorMode = colorMode;
+  material.userData.objectColorMode = objectColorMode;
+  material.defaultAttributeValues = { ...material.defaultAttributeValues, atlasPlacedObject: [0] };
   material.userData.teachingTintVisibility = 1;
   material.userData.teachingTintOpacity = TEACHING_SURFACE_TINT_OPACITY;
   if (surface) {
@@ -976,6 +979,7 @@ const installMapColorShader = (material, bounds, colorMode, { surface = false } 
     shader.uniforms.atlasPointColorMode = {
       value: colorModeValue(material.userData.mapColorMode),
     };
+    shader.uniforms.atlasObjectColorMode = { value: colorModeValue(material.userData.objectColorMode) };
     shader.uniforms.atlasHeightMin = { value: bounds.min.z };
     shader.uniforms.atlasHeightMax = { value: bounds.max.z };
     shader.uniforms.atlasTeachingTintVisibility = {
@@ -989,6 +993,8 @@ const installMapColorShader = (material, bounds, colorMode, { surface = false } 
         '#include <common>',
         `#include <common>
 attribute float ${TEACHING_SURFACE_COVERAGE_ATTRIBUTE};
+attribute float atlasPlacedObject;
+varying float vAtlasPlacedObject;
 varying float vAtlasHeight;
 varying float vAtlasTeachingCoverage;
 ${surface ? 'varying vec3 vAtlasViewPosition;' : ''}`,
@@ -997,6 +1003,7 @@ ${surface ? 'varying vec3 vAtlasViewPosition;' : ''}`,
         '#include <begin_vertex>',
         `#include <begin_vertex>
 vAtlasTeachingCoverage = ${TEACHING_SURFACE_COVERAGE_ATTRIBUTE};
+vAtlasPlacedObject = atlasPlacedObject;
 #ifdef USE_INSTANCING
   vAtlasHeight = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).z;
 #else
@@ -1016,8 +1023,10 @@ vAtlasViewPosition = -mvPosition.xyz;`,
         `#include <common>
 varying float vAtlasHeight;
 varying float vAtlasTeachingCoverage;
+varying float vAtlasPlacedObject;
 ${surface ? 'varying vec3 vAtlasViewPosition;' : ''}
 uniform float atlasPointColorMode;
+uniform float atlasObjectColorMode;
 uniform float atlasHeightMin;
 uniform float atlasHeightMax;
 uniform float atlasTeachingTintVisibility;
@@ -1043,9 +1052,10 @@ vec3 atlasHeightPalette(float heightValue) {
       .replace(
         '#include <color_fragment>',
         `#include <color_fragment>
-if (atlasPointColorMode > 1.5) {
+float atlasActiveColorMode = vAtlasPlacedObject > 0.5 ? atlasObjectColorMode : atlasPointColorMode;
+if (atlasActiveColorMode > 1.5) {
   diffuseColor.rgb = vec3(1.0);
-} else if (atlasPointColorMode > 0.5) {
+} else if (atlasActiveColorMode > 0.5) {
   diffuseColor.rgb = atlasHeightPalette(vAtlasHeight);
 }
 ${surface ? `vec3 atlasDx = dFdx(vAtlasViewPosition);
@@ -1071,7 +1081,7 @@ diffuseColor.rgb = mix(
     material.userData.mapColorShader = shader;
   };
   material.customProgramCacheKey = () => (
-    surface ? 'atlas-map-color-v12-fragment-projection' : 'atlas-map-color-v12-points-tint-opacity'
+    surface ? 'atlas-map-color-v13-object-layers-surface' : 'atlas-map-color-v13-object-layers-points'
   );
 };
 
@@ -1526,12 +1536,17 @@ export default function PointCloudViewer({
   selectedEdgeId,
   colorMode = 'height',
   onColorModeChange,
+  placedObjectColorMode = colorMode,
+  onPlacedObjectColorModeChange,
+  workspaceTransfer = null,
   meshRenderQuality = 'auto',
   onMeshRenderQualityChange,
   showWaypoints = true,
   onShowWaypointsChange,
   showWaypointNames = true,
   onShowWaypointNamesChange,
+  showHeightLegend = true,
+  onShowHeightLegendChange,
   onSelectWaypoint,
   onInspectorPageRequest,
   onSelectEdge,
@@ -1627,6 +1642,7 @@ export default function PointCloudViewer({
   const cloudMaterialRef = useRef(null);
   const meshMaterialRef = useRef(null);
   const colorModeRef = useRef(colorMode);
+  const placedObjectColorModeRef = useRef(placedObjectColorMode);
   const renderActiveRef = useRef(Boolean(isActive));
   const onSelectWaypointRef = useRef(onSelectWaypoint);
   const onInspectorPageRequestRef = useRef(onInspectorPageRequest);
@@ -1708,6 +1724,7 @@ export default function PointCloudViewer({
   teachingSurfaceTintOpacityRef.current = teachingSurfaceTintOpacity;
   interactionModeRef.current = interactionMode;
   colorModeRef.current = colorMode;
+  placedObjectColorModeRef.current = placedObjectColorMode;
   renderActiveRef.current = Boolean(isActive);
   onSelectWaypointRef.current = onSelectWaypoint;
   onInspectorPageRequestRef.current = onInspectorPageRequest;
@@ -1837,13 +1854,21 @@ export default function PointCloudViewer({
   const renderedPointCount = renderablePointCount
     ? Math.max(1, Math.round(renderablePointCount * resolution.ratio))
     : 0;
-  const isHeightColor = colorMode === 'height';
+  const objectLayers = useMemo(() => teachingSpaceMode === 'map'
+    ? placedObjectLayers(mapData, workspaceTransfer) : null, [mapData, workspaceTransfer, teachingSpaceMode]);
+  const placedObjectPointCount = objectLayers?.objectRanges.reduce((count, range) => count + range.count, 0) || 0;
+  const hasObjectColorControl = teachingSpaceMode === 'map' && workspaceTransfer?.kind === 'placement';
+  const isHeightColor = (colorMode === 'height' && sourcePointCount > placedObjectPointCount)
+    || (placedObjectPointCount > 0 && placedObjectColorMode === 'height');
   const colorModeIndex = Math.max(
     0,
     POINT_COLOR_MODES.findIndex((option) => option.id === colorMode),
   );
   const colorModeMeta = POINT_COLOR_MODES[colorModeIndex];
   const nextColorMode = POINT_COLOR_MODES[(colorModeIndex + 1) % POINT_COLOR_MODES.length];
+  const objectColorModeIndex = Math.max(0, POINT_COLOR_MODES.findIndex((option) => option.id === placedObjectColorMode));
+  const objectColorModeMeta = POINT_COLOR_MODES[objectColorModeIndex];
+  const nextObjectColorMode = POINT_COLOR_MODES[(objectColorModeIndex + 1) % POINT_COLOR_MODES.length];
   const heightMin = mapData?.bounds?.min?.z ?? 0;
   const heightMax = mapData?.bounds?.max?.z ?? 1;
   const heightLegendTicks = [1, 0.75, 0.5, 0.25, 0].map(
@@ -3387,7 +3412,7 @@ export default function PointCloudViewer({
       transparent: true,
       opacity: 0.92,
     });
-    installMapColorShader(material, bounds, colorModeRef.current);
+    installMapColorShader(material, bounds, colorModeRef.current, { objectColorMode: placedObjectColorModeRef.current });
     cloudMaterialRef.current = material;
     renderer.domElement.dataset.colorMode = colorModeRef.current;
     const cloud = new THREE.Points(displayGeometry, material);
@@ -3441,7 +3466,7 @@ export default function PointCloudViewer({
         fog: true,
         toneMapped: false,
       });
-      installMapColorShader(meshMaterial, bounds, colorModeRef.current, { surface: true });
+      installMapColorShader(meshMaterial, bounds, colorModeRef.current, { surface: true, objectColorMode: placedObjectColorModeRef.current });
       meshMaterialRef.current = meshMaterial;
       const mesh = new THREE.Mesh(surfaceGeometry, meshMaterial);
       mesh.name = 'scene-map-embedded-mesh';
@@ -5103,7 +5128,7 @@ export default function PointCloudViewer({
         (Math.max(renderer.domElement.clientHeight, 1) / 2)
         / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
 
-      if (independentTeachingSpace && distanceScaleRef.current) {
+      if (distanceScaleRef.current) {
         const metersPerPixel = camera.position.distanceTo(controls.target)
           / (camera.zoom * focalPixels);
         const scale = viewportDistanceScale(metersPerPixel);
@@ -6389,18 +6414,41 @@ export default function PointCloudViewer({
   }, [isActive, mapData?.geometry, robotDescriptor, robotFollowEnabled, robotLoadState?.status, robotPose]);
 
   useEffect(() => {
+    const display = displayGeometryRef.current;
+    if (!display) return;
+    let attribute = display.getAttribute('atlasPlacedObject');
+    if (objectLayers?.objectRanges.length) {
+      const mask = placedObjectMask(sourcePointCount, objectLayers.objectRanges);
+      if (attribute?.count === sourcePointCount) {
+        attribute.array.set(mask);
+        attribute.needsUpdate = true;
+      } else attribute = new THREE.BufferAttribute(mask, 1);
+      display.setAttribute('atlasPlacedObject', attribute);
+      surfaceGeometryRef.current?.geometry.setAttribute('atlasPlacedObject', attribute);
+    } else if (attribute) {
+      attribute.array.fill(0);
+      attribute.needsUpdate = true;
+    }
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.placedObjectPointCount = String(placedObjectPointCount);
+  }, [mapData?.geometry, objectLayers, sourcePointCount, placedObjectPointCount]);
+
+  useEffect(() => {
     const materials = [cloudMaterialRef.current, meshMaterialRef.current].filter(Boolean);
     const canvas = controlsRef.current?.domElement;
     if (!materials.length || !canvas) return;
 
     materials.forEach((material) => {
       material.userData.mapColorMode = colorMode;
+      material.userData.objectColorMode = placedObjectColorMode;
       const shader = material.userData.mapColorShader;
       if (shader) shader.uniforms.atlasPointColorMode.value = colorModeValue(colorMode);
+      if (shader) shader.uniforms.atlasObjectColorMode.value = colorModeValue(placedObjectColorMode);
     });
     canvas.dataset.colorMode = colorMode;
     canvas.dataset.plyMeshColorMode = colorMode;
-  }, [colorMode, mapData?.geometry]);
+    canvas.dataset.placedObjectColorMode = placedObjectColorMode;
+  }, [colorMode, placedObjectColorMode, mapData?.geometry]);
 
   useEffect(() => {
     const surfaceState = surfaceGeometryRef.current;
@@ -7505,6 +7553,45 @@ export default function PointCloudViewer({
     )
   );
 
+  const mouseHelp = temporaryShiftPan
+    ? 'Shift + 左键平移 · 松开恢复旋转'
+    : persistentPanMode
+      ? '左键平移 · 点击“平移”切回旋转'
+      : chassisDragMode
+        ? '按住底盘拖拽 · 保持 Z / RPY'
+        : '左键旋转 · 点 / 路径可选';
+  const keyboardHelp = endEffectorControlActive
+    ? `Ctrl+Z 撤销拖拽 · Esc 取消${endEffectorControl.side === 'torso' ? '躯干' : '末端'}调整`
+    : chassisDragMode
+    ? 'Ctrl+Z 撤销最近一次拖拽'
+    : robotControlActive
+    ? robotHeightLockActive
+      ? 'W/S 前后 · A/D 麦轮横移 · ←→ 旋转 · Z 高度已锁'
+      : 'W/S 前后 · A/D 麦轮横移 · ←→ 旋转 · ↑↓ 高度'
+    : 'WASD 平移 · Q/E 升降 · ←→ Yaw · ↑↓ Pitch';
+  const navigationHelp = endEffectorControlActive
+    ? endEffectorControl.side === 'torso'
+      ? '胸甲高度 / YAW / PITCH · 躯干关节联动'
+      : endEffectorControl.locked
+      ? endEffectorControl.lockMode === 'map'
+        ? '地图绝对姿态锁定 · 底盘移动时全链 IK 补偿'
+        : '本体关节姿态锁定 · 双击另一末端继续调整'
+      : '空间球拖拽 XYZ / RPY · 面板支持精确输入'
+    : chassisDragMode
+      ? 'Esc 退出拖拽 · 双击底盘启用 WASD'
+    : robotControlActive
+    ? mapLockedSides.length
+      ? `全局锁定 ${mapLockSideLabel} · 移动底盘观察全链关节补偿`
+      : 'Shift + 左键视角平移 · Q/E 视角升降'
+    : 'Shift + 左键临时平移 · 右键平移';
+  const geometryHelp = hasEmbeddedMesh
+    ? `内嵌网格 ${formatPointCount(meshInfo.faceCount)} 面 · 档位仅调整未成面点`
+    : resolutionSelection === 'auto'
+      ? '点数超限 · 已自动降采样'
+      : '分辨率仅影响 3D 显示';
+  const robotHelp = robotLoadState?.status === 'loaded' && !endEffectorControlActive && !chassisDragMode
+    ? '双击底盘启用 WASD · 双击胸甲联动躯干 · 双击末端进入 6D 控制' : '';
+
   return (
     <div
       className={`point-cloud-view ${shiftPanArmed ? 'is-shift-pan-armed' : ''} ${effectiveViewportPan ? 'is-viewport-pan-mode' : ''} ${persistentPanMode ? 'is-persistent-pan-mode' : ''} ${robotControlActive ? 'is-robot-driving' : ''} ${endEffectorControlActive ? 'is-end-effector-control' : ''} ${chassisDragMode ? 'is-chassis-drag-mode' : ''} ${chassisDragging ? 'is-chassis-dragging' : ''} ${robotTrajectoryActive ? 'is-teaching-trajectory-active' : ''} ${robotParkingGhostVisible ? 'is-parking-ghost-visible' : ''} ${visionCoverageRenderingEnabled && visionCoverageStats.frameCount ? 'is-vision-coverage-active' : ''} ${visionCoverageRenderingEnabled && teachingSurfaceTintStats.status === 'visible' ? 'is-teaching-surface-tinted' : ''}`}
@@ -7899,17 +7986,17 @@ export default function PointCloudViewer({
               key={`display-${resolutionMapKey}`}
               label="显示设置"
               title={showVisionCoverageControls
-                ? '停车点名、点云颜色、投影渲染、表面透明度与显示质量'
-                : '停车点名、点云颜色、显示密度与网格质量'}
+                ? '点云颜色、高程色卡、停车点名、投影渲染、表面透明度与显示质量'
+                : '点云颜色、高程色卡、停车点名、显示密度与网格质量'}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
               <div className="viewer-display-settings__color">
-                <span><Palette size={13} /> 点云颜色</span>
+                <span><Palette size={13} /> {hasObjectColorControl ? '地图颜色' : '点云颜色'}</span>
                 <button
                   type="button"
                   className={`height-color-toggle mode-${colorModeMeta.id}`}
-                  aria-label="切换点云颜色模式"
+                  aria-label={hasObjectColorControl ? '切换地图颜色模式' : '切换点云颜色模式'}
                   data-color-mode={colorModeMeta.id}
                   title={`当前为${colorModeMeta.label}，点击切换为${nextColorMode.label}`}
                   onClick={() => onColorModeChange?.(nextColorMode.id)}
@@ -7918,6 +8005,34 @@ export default function PointCloudViewer({
                   <span>{colorModeMeta.label}</span>
                 </button>
               </div>
+              {hasObjectColorControl && <div className="viewer-display-settings__color">
+                <span><Box size={13} /> 独立对象颜色</span>
+                <button type="button" className={`height-color-toggle mode-${objectColorModeMeta.id}`}
+                  aria-label="切换独立对象颜色模式" data-color-mode={objectColorModeMeta.id}
+                  disabled={!placedObjectPointCount}
+                  title={placedObjectPointCount ? `当前为${objectColorModeMeta.label}，点击切换为${nextObjectColorMode.label}`
+                    : '尚未识别出独立对象，请加载包含原独立示教缓存的完整工程以恢复分组'}
+                  onClick={() => onPlacedObjectColorModeChange?.(nextObjectColorMode.id)}>
+                  <i aria-hidden="true" /><span>{objectColorModeMeta.label}</span>
+                </button>
+              </div>}
+              {hasObjectColorControl && !objectLayers?.complete && <p className="viewer-display-settings__layer-notice">
+                旧工程中未识别的对象沿用地图颜色；加载含原独立示教缓存的完整工程可恢复分组。
+              </p>}
+              {isHeightColor && <div className="viewer-display-settings__height-legend">
+                <span><Palette size={13} /> 高程色卡</span>
+                <button
+                  type="button"
+                  className="viewer-display-settings__toggle"
+                  aria-label={showHeightLegend ? '隐藏高程色卡' : '显示高程色卡'}
+                  aria-pressed={showHeightLegend}
+                  title={showHeightLegend ? '隐藏3D窗口右下角的高程色卡' : '显示3D窗口右下角的高程色卡'}
+                  onClick={() => onShowHeightLegendChange?.(!showHeightLegend)}
+                >
+                  {showHeightLegend ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showHeightLegend ? '显示' : '隐藏'}</span>
+                </button>
+              </div>}
               <div className="viewer-display-settings__waypoint-names">
                 <span><MapPin size={13} /> 停车点名</span>
                 <button
@@ -8048,29 +8163,27 @@ export default function PointCloudViewer({
                 </div>
               )}
             </ViewerMenu></>, displaySettingsContainer)}
-          {teachingSpaceMode === 'independent' && (
-            <aside
-              ref={distanceScaleRef}
-              className="viewport-distance-scale"
-              aria-label="三维距离比例尺"
-              aria-description="以视图焦点深度的屏幕水平方向为参考；透视视图中不同深度的比例不同。地面网格固定为 1 米。"
-              data-ready="false"
-            >
-              <div className="viewport-distance-scale__meta">
-                <Ruler size={12} />
-                <span>Z=0 · 网格 1 m</span>
+          <aside
+            ref={distanceScaleRef}
+            className="viewport-distance-scale"
+            aria-label="三维距离比例尺"
+            aria-description={`以视图焦点深度的屏幕水平方向为参考；透视视图中不同深度的比例不同。${teachingSpaceMode === 'independent' ? '地面网格固定为 1 米。' : ''}`}
+            data-ready="false"
+          >
+            <div className="viewport-distance-scale__meta">
+              <Ruler size={12} />
+              <span>{teachingSpaceMode === 'independent' ? 'Z=0 · 网格 1 m' : '三维距离'}</span>
+            </div>
+            <div className="viewport-distance-scale__ruler">
+              <div className="viewport-distance-scale__labels">
+                <span>0</span>
+                <strong ref={distanceScaleLabelRef}>—</strong>
               </div>
-              <div className="viewport-distance-scale__ruler">
-                <div className="viewport-distance-scale__labels">
-                  <span>0</span>
-                  <strong ref={distanceScaleLabelRef}>—</strong>
-                </div>
-                <div className="viewport-distance-scale__bar" aria-hidden="true" />
-              </div>
-              <small>视图焦点处比例</small>
-            </aside>
-          )}
-          {isHeightColor && (
+              <div className="viewport-distance-scale__bar" aria-hidden="true" />
+            </div>
+            <small>视图焦点处比例</small>
+          </aside>
+          {isHeightColor && showHeightLegend && (
             <aside className="height-color-legend" aria-label="点云高程比例尺">
               <div className="height-color-legend__heading">
                 <span>ELEVATION</span>
@@ -8109,59 +8222,15 @@ export default function PointCloudViewer({
             onClose={exitEndEffectorControl}
           />}
           <div className="viewer-help">
-            <span>
-              {effectiveViewportPan || chassisDragMode
-                ? <Move3D size={12} />
-                : <Rotate3D size={12} />}
-              {temporaryShiftPan
-                ? 'Shift + 左键平移 · 松开恢复旋转'
-                : persistentPanMode
-                  ? '左键平移 · 点击“平移”切回旋转'
-                  : chassisDragMode
-                    ? '按住底盘拖拽 · 保持 Z / RPY'
-                    : '左键旋转 · 点 / 路径可选'}
-            </span>
-            <span>
-              <Keyboard size={12} />
-              {endEffectorControlActive
-                ? `Ctrl+Z 撤销拖拽 · Esc 取消${endEffectorControl.side === 'torso' ? '躯干' : '末端'}调整`
-                : chassisDragMode
-                ? 'Ctrl+Z 撤销最近一次拖拽'
-                : robotControlActive
-                ? robotHeightLockActive
-                  ? 'W/S 前后 · A/D 麦轮横移 · ←→ 旋转 · Z 高度已锁'
-                  : 'W/S 前后 · A/D 麦轮横移 · ←→ 旋转 · ↑↓ 高度'
-                : 'WASD 平移 · Q/E 升降 · ←→ Yaw · ↑↓ Pitch'}
-            </span>
-            <span>
-              <MousePointer2 size={12} />
-              {endEffectorControlActive
-                ? endEffectorControl.side === 'torso'
-                  ? '胸甲高度 / YAW / PITCH · 躯干关节联动'
-                  : endEffectorControl.locked
-                  ? endEffectorControl.lockMode === 'map'
-                    ? '地图绝对姿态锁定 · 底盘移动时全链 IK 补偿'
-                    : '本体关节姿态锁定 · 双击另一末端继续调整'
-                  : '空间球拖拽 XYZ / RPY · 面板支持精确输入'
-                : chassisDragMode
-                  ? 'Esc 退出拖拽 · 双击底盘启用 WASD'
-                : robotControlActive
-                ? mapLockedSides.length
-                  ? `全局锁定 ${mapLockSideLabel} · 移动底盘观察全链关节补偿`
-                  : 'Shift + 左键视角平移 · Q/E 视角升降'
-                : 'Shift + 左键临时平移 · 右键平移'}
-            </span>
-            {robotLoadState?.status === 'loaded' && !endEffectorControlActive && !chassisDragMode && (
-              <span><Bot size={12} /> 双击底盘启用 WASD · 双击胸甲联动躯干 · 双击末端进入 6D 控制</span>
-            )}
-            <span className={hasEmbeddedMesh ? 'viewer-help__mesh' : undefined}>
-              <Gauge size={12} />
-              {hasEmbeddedMesh
-                ? `内嵌网格 ${formatPointCount(meshInfo.faceCount)} 面 · 档位仅调整未成面点`
-                : resolutionSelection === 'auto'
-                  ? '点数超限 · 已自动降采样'
-                  : '分辨率仅影响 3D 显示'}
-            </span>
+            <div className="viewer-help__row" title={[geometryHelp, robotHelp].filter(Boolean).join(' · ')}>
+              <span><Gauge size={12} />{geometryHelp}</span>
+              {robotHelp && <span><Bot size={12} />{robotHelp}</span>}
+            </div>
+            <div className="viewer-help__row" title={[mouseHelp, keyboardHelp, navigationHelp].join(' · ')}>
+              <span>{effectiveViewportPan || chassisDragMode ? <Move3D size={12} /> : <Rotate3D size={12} />}{mouseHelp}</span>
+              <span><Keyboard size={12} />{keyboardHelp}</span>
+              <span><MousePointer2 size={12} />{navigationHelp}</span>
+            </div>
           </div>
         </>
       )}

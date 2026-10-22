@@ -2874,8 +2874,9 @@ code {
   position: absolute;
   left: 11px;
   bottom: 9px;
-  display: flex;
-  gap: 15px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
   z-index: 4;
   pointer-events: none;
   color: rgba(176, 198, 198, 0.58);
@@ -2886,6 +2887,18 @@ code {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  margin-right: 15px;
+  vertical-align: middle;
+}
+
+.viewer-help span:last-child { margin-right: 0; }
+.viewer-help__row {
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: auto;
 }
 
 .point-cloud-view.is-end-effector-control .three-canvas {
@@ -3718,6 +3731,7 @@ code {
 }
 
 .viewer-display-settings__color,
+.viewer-display-settings__height-legend,
 .viewer-display-settings__waypoint-names,
 .viewer-display-settings__coverage,
 .robot-distance-settings__visibility {
@@ -3730,6 +3744,7 @@ code {
 }
 
 .viewer-display-settings__color > span,
+.viewer-display-settings__height-legend > span,
 .viewer-display-settings__waypoint-names > span,
 .viewer-display-settings__coverage > span,
 .robot-distance-settings__visibility > span {
@@ -3764,6 +3779,9 @@ code {
   border-color: var(--cyan);
   background: #153139;
 }
+
+.viewer-display-settings__color button:disabled { opacity: .4; cursor: not-allowed; }
+.viewer-display-settings__layer-notice { margin: 0; padding: 10px 14px; color: var(--muted); font-size: 10px; line-height: 1.6; border-bottom: 1px solid var(--line); }
 
 .viewer-display-settings__toggle > span,
 .distance-warning-toggle > span {
@@ -4037,23 +4055,16 @@ code {
   line-height: 1.2;
 }
 
-.point-cloud-view[data-teaching-space-mode="independent"]:has(.height-color-legend) .viewport-distance-scale {
+.point-cloud-view:has(.height-color-legend) .viewport-distance-scale {
   right: 112px;
 }
 
-.point-cloud-view[data-teaching-space-mode="independent"] .viewer-help {
+.point-cloud-view .viewer-help {
   right: 176px;
-  flex-wrap: wrap;
-  row-gap: 5px;
 }
 
-.point-cloud-view[data-teaching-space-mode="independent"]:has(.height-color-legend) .viewer-help {
+.point-cloud-view:has(.height-color-legend) .viewer-help {
   right: 274px;
-}
-
-.point-cloud-view[data-teaching-space-mode="independent"] .viewer-help__mesh {
-  order: -1;
-  flex-basis: 100%;
 }
 
 .height-color-legend {

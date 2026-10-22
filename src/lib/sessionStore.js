@@ -1,5 +1,6 @@
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
 import { normalizeIndependentTeachingName, validateIndependentTeachingName } from './independentTeachingName.js';
+import { matchesPlacedSource } from './placedObjectRendering.js';
 
 const DATABASE_NAME = 'atlas-route-studio';
 const DATABASE_VERSION = 1;
@@ -826,6 +827,33 @@ export async function loadWorkspaceSnapshot(sessionId, mode) {
   if ((map && map.sessionId !== sessionId) || (config && config.sessionId !== sessionId)
     || (map && config && config.mapId !== map.mapId)) throw new Error('工程缓存不完整，请重新加载工程');
   return { mode: workspaceMode, map: await unpackMapRecord(map), config: config || null };
+}
+
+// Legacy display-layer recovery reads only the matching object's geometry.
+// Avoid unpacking every historical model just to identify one appended block.
+export async function loadIndependentDisplaySource(sessionId, identity) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readonly');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  const [meta, history, current] = await Promise.all([
+    requestResult(store.get('meta')), requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+    requestResult(store.get(workspaceConfigKey('independent'))),
+  ]);
+  let found = null;
+  if (sessionId && meta?.sessionId === sessionId) {
+    const candidates = [{ config: current, mapKey: workspaceMapKey('independent') },
+      ...(history?.entries || []).map((entry) => ({ historyId: entry.historyId }))];
+    for (const candidate of candidates) {
+      const config = candidate.config || (candidate.historyId
+        ? await requestResult(store.get(historyConfigKey(candidate.historyId))) : null);
+      if (!matchesPlacedSource(identity, { ...config?.config?.project?.map, mapId: config?.mapId })) continue;
+      found = await requestResult(store.get(candidate.mapKey || historyMapKey(candidate.historyId)));
+      break;
+    }
+  }
+  await completion;
+  return found ? unpackMapRecord(found) : null;
 }
 
 export async function listIndependentHistory() {

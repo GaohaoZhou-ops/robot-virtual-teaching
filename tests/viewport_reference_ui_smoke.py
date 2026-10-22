@@ -5,6 +5,7 @@ from playwright.sync_api import expect, sync_playwright
 
 from teaching_transfer_ui_smoke import CHROME, ready, seed, snapshot
 from topbar_tools_helpers import topbar_action
+from waypoint_names_ui_smoke import display_settings
 
 
 def check_scale(page):
@@ -39,7 +40,10 @@ def check_scale(page):
     }""")
     assert math.isclose(metrics["projectedPixels"], metrics["rulerPixels"], abs_tol=0.03), metrics
     assert 47.9 <= metrics["rulerPixels"] <= 120.1, metrics
-    expect(ruler).to_contain_text("网格 1 m")
+    mode = page.locator('.point-cloud-view').get_attribute('data-teaching-space-mode')
+    expect(ruler).to_contain_text("网格 1 m" if mode == 'independent' else "三维距离")
+    if mode == 'map':
+        expect(ruler).not_to_contain_text("网格 1 m")
     expect(ruler).to_contain_text("视图焦点处比例")
     return metrics
 
@@ -54,13 +58,72 @@ def check_layout(page):
     assert style["blur"] == "none" and style["borders"] == ["0px"] * 4, style
     ruler = page.locator(".viewport-distance-scale").bounding_box()
     view = page.locator(".point-cloud-view").bounding_box()
-    legend = page.locator(".height-color-legend").bounding_box()
+    legend_element = page.locator(".height-color-legend")
+    legend = legend_element.bounding_box() if legend_element.count() else None
     assert ruler["x"] > view["x"] + view["width"] / 2
     assert ruler["x"] + ruler["width"] <= view["x"] + view["width"]
     assert ruler["y"] + ruler["height"] <= view["y"] + view["height"]
     if legend:
         assert ruler["x"] + ruler["width"] < legend["x"]
         assert math.isclose(legend["y"] + legend["height"], ruler["y"] + ruler["height"], abs_tol=1)
+    right_margin = view['x'] + view['width'] - ruler['x'] - ruler['width']
+    assert math.isclose(right_margin, 112 if legend else 14, abs_tol=1), right_margin
+    help_rows = page.locator('.viewer-help__row')
+    expect(help_rows).to_have_count(2)
+    first, second = (row.bounding_box() for row in help_rows.all())
+    assert first['y'] + first['height'] < second['y']
+    assert first['height'] <= 13 and second['height'] <= 13
+    assert second['y'] + second['height'] <= view['y'] + view['height']
+    for box in (first, second):
+        assert box['x'] + box['width'] < ruler['x']
+
+
+def check_legend_toggle(page, mode):
+    settings = display_settings(page)
+    color = settings.get_by_role('button', name='切换点云颜色模式', exact=True)
+    for _ in range(3):
+        if color.get_attribute('data-color-mode') == 'height':
+            break
+        color.click()
+    expect(page.locator('.height-color-legend')).to_be_visible()
+    rows = settings.locator('.viewer-display-settings__color, .viewer-display-settings__height-legend, .viewer-display-settings__waypoint-names')
+    assert rows.evaluate_all('els => els.map(el => el.firstElementChild.textContent.trim())') == ['点云颜色', '高程色卡', '停车点名']
+    before = page.locator('.viewport-distance-scale').bounding_box()
+    settings.get_by_role('button', name='隐藏高程色卡', exact=True).click()
+    expect(settings.get_by_role('button', name='显示高程色卡', exact=True)).to_have_attribute('aria-pressed', 'false')
+    expect(page.locator('.height-color-legend')).to_have_count(0)
+    expect(color).to_have_attribute('data-color-mode', 'height')
+    check_layout(page)
+    after = page.locator('.viewport-distance-scale').bounding_box()
+    assert before['y'] == after['y'] and before['height'] == after['height']
+    # Switching color modes does not erase the explicit hidden preference.
+    for color_mode in ('source', 'white', 'height'):
+        color.click()
+        expect(color).to_have_attribute('data-color-mode', color_mode)
+        expect(settings.locator('.viewer-display-settings__height-legend')).to_have_count(1 if color_mode == 'height' else 0)
+        expect(page.locator('.height-color-legend')).to_have_count(0)
+        check_layout(page)
+    page.keyboard.press('Escape')
+    page.screenshot(path=f'/tmp/atlas-height-legend-hidden-{mode}.png', full_page=True)
+    page.wait_for_function("""async mode => {
+      const store = await import('/src/lib/sessionStore.js');
+      const record = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, mode);
+      return record?.config.ui.showHeightLegend3D === false
+        && record?.config.project.workspace.showHeightLegend3D === false;
+    }""", arg=mode)
+    page.reload(wait_until='networkidle')
+    ready(page, mode)
+    expect(page.locator('.height-color-legend')).to_have_count(0)
+    check_scale(page)
+    check_layout(page)
+
+
+def show_legend(page):
+    settings = display_settings(page)
+    settings.get_by_role('button', name='显示高程色卡', exact=True).click()
+    expect(page.locator('.height-color-legend')).to_be_visible()
+    page.keyboard.press('Escape')
+    check_layout(page)
 
 
 def run():
@@ -132,9 +195,15 @@ def run():
             ready(page, "independent")
             check_scale(page)
             expect(canvas).to_have_attribute("data-reference-grid-spacing", "1")
+            check_legend_toggle(page, 'independent')
             topbar_action(page, name="切换到地图示教", exact=True).click()
             ready(page, "map")
-            expect(page.locator(".viewport-distance-scale")).to_have_count(0)
+            check_scale(page)
+            check_layout(page)
+            expect(page.locator('.height-color-legend')).to_be_visible()
+            check_legend_toggle(page, 'map')
+            show_legend(page)
+            page.screenshot(path='/tmp/atlas-height-legend-map-visible.png', full_page=True)
             expect(canvas).to_have_attribute("data-reference-plane", "map-reference-plane")
             assert canvas.get_attribute("data-virtual-ground-z") is None
             assert snapshot(page, "map")["positions"] == original_map["positions"]
@@ -142,6 +211,14 @@ def run():
             topbar_action(page, name="切换到独立示教", exact=True).click()
             ready(page, "independent")
             check_scale(page)
+            expect(page.locator('.height-color-legend')).to_have_count(0)
+            show_legend(page)
+            for width, height in ((1440, 1000), (1024, 768)):
+                page.set_viewport_size({'width': width, 'height': height})
+                page.wait_for_timeout(120)
+                check_scale(page)
+                check_layout(page)
+            page.screenshot(path='/tmp/atlas-height-legend-independent-visible.png', full_page=True)
             expect(canvas).to_have_attribute("data-reference-plane-position", "0,0,0")
             final = snapshot(page, "independent")
             assert final["positions"] == original["positions"]
@@ -151,7 +228,7 @@ def run():
             assert not errors, errors
         finally:
             browser.close()
-    print("PASS: ground/ruler, perspective projection, zoom, HiDPI resize, reload and mode switching")
+    print("PASS: both rulers, projection/zoom, legend toggle/layout, two-line hints, HiDPI resize and per-workspace persistence")
 
 
 if __name__ == "__main__":

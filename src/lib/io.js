@@ -729,8 +729,12 @@ export function normalizeProject(payload) {
       teachingSpaceMode,
       independentTeachingName: normalizeIndependentTeachingName(workspace.independentTeachingName),
       pointColorMode: String(workspace.pointColorMode || ''),
+      placedObjectColorMode: ['height', 'source', 'white'].includes(workspace.placedObjectColorMode)
+        ? workspace.placedObjectColorMode : ['height', 'source', 'white'].includes(workspace.pointColorMode)
+          ? workspace.pointColorMode : 'height',
       showWaypoints3D: workspace.showWaypoints3D !== false,
       showWaypointNames3D: workspace.showWaypointNames3D !== false,
+      showHeightLegend3D: workspace.showHeightLegend3D !== false,
       activeTeachingTaskId: workspace.activeTeachingTaskId
         ? String(workspace.activeTeachingTaskId)
         : null,
@@ -769,8 +773,10 @@ export function buildExport({
   jointPoses = [],
   meshRenderQuality = 'auto',
   pointColorMode = 'height',
+  placedObjectColorMode = pointColorMode,
   showWaypoints3D = true,
   showWaypointNames3D = true,
+  showHeightLegend3D = true,
   activeTeachingTaskId = null,
   activeTeachingParkingPointId = null,
   collapsedPanel = null,
@@ -820,7 +826,10 @@ export function buildExport({
         ? pointColorMode
         : 'height',
       showWaypoints3D: showWaypoints3D !== false,
+      placedObjectColorMode: ['height', 'source', 'white'].includes(placedObjectColorMode)
+        ? placedObjectColorMode : 'height',
       showWaypointNames3D: showWaypointNames3D !== false,
+      showHeightLegend3D: showHeightLegend3D !== false,
       activeTeachingTaskId: activeTeachingTaskId || null,
       activeTeachingParkingPointId: activeTeachingParkingPointId || null,
       collapsedPanel: ['2d', '3d'].includes(collapsedPanel) ? collapsedPanel : null,
