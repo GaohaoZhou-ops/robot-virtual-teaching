@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { applyRobotJointValues, getRobotEndEffector, normalizeRobotPose, readRobotJointValues, setRobotJointValue } from './robotLoader.js';
 import { getRobotJointLimits } from './robotJointLimits.js';
+import { getRobotJointCouplingPairs, normalizeArmJointCouplingEnabled, projectRobotJointCoupling, robotJointCouplingViolations } from './robotJointCoupling.js';
 import { mobileCaptureMatrix } from './ipadCaptureDisplay.js';
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
@@ -17,7 +18,7 @@ const plain = (v) => Object.fromEntries(XYZ.map((axis) => [axis, v[axis]]));
 const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 const abort = (signal) => { if (signal?.aborted) throw new DOMException('计算已取消', 'AbortError'); };
 const TORSO_PITCH_JOINTS = MOBILE_TORSO_PITCH_JOINTS;
-export const MOBILE_SOLVE_VERSION = 11;
+export const MOBILE_SOLVE_VERSION = 12;
 
 export const DEFAULT_MOBILE_SOLVE_OPTIONS = Object.freeze({
   positionTolerance: Object.freeze({ x: 0.05, y: 0.05, z: 0.05 }),
@@ -73,7 +74,7 @@ export function mobileReportSolveOptions(report) {
 }
 
 export function normalizeMobileSolveReport(value) {
-  if (!value || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
+  if (!value || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
   try {
     const options = mobileReportSolveOptions(value);
     const validPose = (pose) => XYZ.every((axis) => Number.isFinite(pose?.position?.[axis]))
@@ -228,6 +229,9 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
   // away when necessary, while continuity still penalizes needless motion.
   const clearanceJoints = avoidBody ? ['left', 'right'].flatMap((side) => getRobotEndEffector(robot, side)?.joints || []) : [];
   const joints = [...new Set([...goals.flatMap(({ controller }) => controller.joints), ...clearanceJoints])].filter((joint) => !locked.has(joint.name));
+  const couplingPairs = getRobotJointCouplingPairs(robot);
+  const movable = new Set(joints);
+  const projectCoupling = () => projectRobotJointCoupling(couplingPairs, movable, setRobotJointValue);
   const chestJoints = new Set();
   for (let node = chest; node && node !== robot; node = node.parent) chestJoints.add(node);
   const torsoJoints = TORSO_PITCH_JOINTS.map((name) => joints.find((joint) => joint.name === name)).filter(Boolean);
@@ -268,11 +272,12 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
     if (clearance) error.push(Math.max(0, 0.001 - clearance.selfSeparation) * 3);
     const chestTilt = up ? deg(up.angleTo(new THREE.Vector3(0, 0, 1))) : 0;
     const chestHeight = chest ? chest.getWorldPosition(new THREE.Vector3()).z - robot.parent.position.z : null;
-    const feasible = targets.every((metrics) => metrics.withinTolerance) && mobileChestWithinTolerance(chestTilt, options);
+    const jointCouplingViolations = robotJointCouplingViolations(couplingPairs);
+    const feasible = !jointCouplingViolations.length && targets.every((metrics) => metrics.withinTolerance) && mobileChestWithinTolerance(chestTilt, options);
     const cost = error.reduce((sum, n) => sum + n * n, 0);
     const comfortCost = clearanceErrors.reduce((sum, value) => sum + (value / 0.03) ** 2, 0) / 2;
     const referenceDeviation = mobileReferenceMetrics(upperBodyJoints, postureReference);
-    return { targets, feasible, chestTilt, chestHeight, up, error, cost, clearance,
+    return { targets, feasible, jointCouplingViolations, chestTilt, chestHeight, up, error, cost, clearance,
       referenceDeviation, score: postureCost() + (preferUpperBody ? referenceDeviation.cost * 4 : 0) + comfortCost * 2 + cost * 0.2 };
   };
   let best = null;
@@ -299,6 +304,7 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
     // Include standing and crouched seeds to escape the zero vertical
     // derivative at full extension, even when starting from a tilted chest.
     seedUprightTorso(robot, chest, torsoJoints, start);
+    projectCoupling();
     for (let iteration = 0; iteration <= 120; iteration += 1) {
       if (iteration % 12 === 0) await checkpoint();
       const state = measure();
@@ -363,6 +369,7 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
         const scale = Math.min(1, 0.25 / Math.max(...step.map(Math.abs), 1e-12));
         for (const line of [1, 0.5, 0.2, 0.05]) {
           joints.forEach((joint, i) => setRobotJointValue(joint, before[i] + step[i] * scale * line));
+          projectCoupling();
           if (measure().cost < state.cost - 1e-12) { improved = true; break; }
         }
         if (improved) break;
@@ -378,7 +385,8 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
   const feasible = metrics.feasible && (!collision || collision.clear);
   return metrics.targets.map((target, i) => {
     const armJoints = upperBodyJoints.filter((joint) => constraints[i].chain.has(joint));
-    const solution = { feasible, frameName: constraints[i].frame.name, positionError: target.positionError,
+    const solution = { feasible, jointCouplingViolations: metrics.jointCouplingViolations,
+      frameName: constraints[i].frame.name, positionError: target.positionError,
       rotationError: target.rotationError, chestTilt: metrics.chestTilt, chestTiltLowerBound, chestHeight: metrics.chestHeight, actualPose: target.actualPose,
       referenceDeviation: metrics.referenceDeviation, armReferenceCost: mobileReferenceMetrics(armJoints, postureReference).cost,
       jointValues: best.jointValues, score: metrics.score, errorCost: metrics.cost,
@@ -432,7 +440,14 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     // Explicit automatic height control overrides only these three locks.
     // Other body/arm locks and every URDF joint limit remain in effect.
     heightJointNames.forEach((name) => locked.delete(name));
-    const postureReference = applyMobileReferencePose(robot, options.referencePose, locked);
+    applyMobileReferencePose(robot, options.referencePose, locked);
+    // The saved trajectory also starts at this private reference pose. Bring
+    // unlocked wrists into the feasible region before recording that start,
+    // so interpolation to a valid result cannot start outside the constraint.
+    const initialCouplingPairs = getRobotJointCouplingPairs(robot);
+    projectRobotJointCoupling(initialCouplingPairs,
+      new Set(initialCouplingPairs.flatMap(({ joints }) => joints.filter((joint) => !locked.has(joint.name)))), setRobotJointValue);
+    const postureReference = readRobotJointValues(robot);
     const preferUpperBody = options.referencePreference === 'upper-body';
     const referenceFrames = [];
     if ((preferUpperBody || cooperative) && options.parkingMode !== 'fixed') {
@@ -741,6 +756,7 @@ export async function solveMobileTeaching({ robot: liveRobot, task, mapPose, env
     return { version: MOBILE_SOLVE_VERSION, taskId: task.id, captureId: task.mobileCapture.id, computedAt: new Date().toISOString(),
       coordinateFrame: task.coordinateFrame, mapPose: initialMapPose, options, lockedJointNames: [...locked], rows,
       heightJointNames, initialJointValues: postureReference,
+      armJointCouplingEnabled: normalizeArmJointCouplingEnabled(robot.userData.armJointCouplingEnabled),
       sourceCount: task.mobileCapture.samples.length, feasibleCount, parkingCount, motionCount, dualMotionCount,
       collisionScreening: collisionChecker ? { enabled: true, method: 'conservative-obb', proxyCount: collisionChecker.proxyCount,
         environmentKind: collisionChecker.environmentKind, environmentCount: collisionChecker.environmentCount } : { enabled: false } };

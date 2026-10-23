@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { setRobotJointValue } from './robotLoader.js';
 import { getRobotJointLimits } from './robotJointLimits.js';
+import { getRobotJointCouplingPairs, projectRobotJointCoupling, robotJointCouplingViolations } from './robotJointCoupling.js';
 
 const ORIENTATION_SCALE = 0.24;
 const MAX_ITERATIONS = 24;
@@ -106,6 +107,9 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
   const started = performance.now();
   const { robot, frame } = controller;
   const joints = controller.joints.filter((joint) => !excludedJoints.has(joint));
+  const couplingPairs = getRobotJointCouplingPairs(robot);
+  const movable = new Set(joints);
+  const projectCoupling = () => projectRobotJointCoupling(couplingPairs, movable, setRobotJointValue);
   // Read the configured limits on every solve. Never cache a ratio or shrink
   // the URDF bounds again; custom ratios must also work on cloned robots.
   const definitions = joints.map((joint) => {
@@ -150,6 +154,7 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
   // A caller may have tightened limits on a live model. Respect them before
   // computing a feasible bounded increment, without moving locked joints.
   joints.forEach((joint) => setRobotJointValue(joint, joint.userData.jointValue));
+  projectCoupling();
   let cost = measure(), damping = 0.025;
   const canCorrect = () => !correcting && positionError < 0.006 && rotationError < THREE.MathUtils.degToRad(2);
   const startCorrection = () => {
@@ -197,10 +202,11 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
       if (!step) break;
       for (const fraction of [1, 0.5, 0.25]) {
         joints.forEach((joint, i) => setRobotJointValue(joint, before[i] + step[i] * fraction));
+        projectCoupling();
         const candidateCost = measure();
         if (candidateCost < cost - 1e-12) {
           cost = candidateCost; improved = true;
-          largestStep = Math.max(...step.map((value) => Math.abs(value * fraction)));
+          largestStep = Math.max(...joints.map((joint, i) => Math.abs(joint.userData.jointValue - before[i])));
           damping = Math.max(0.008, damping * 0.7);
           break;
         }
@@ -228,7 +234,9 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
       rpy: { roll: degrees(euler.x), pitch: degrees(euler.y), yaw: degrees(euler.z) } },
     positionError,
     rotationError: THREE.MathUtils.radToDeg(rotationError),
-    status: joints.length && positionError < 0.006 && rotationError < THREE.MathUtils.degToRad(2) ? 'tracking' : 'limited',
+    status: joints.length && !robotJointCouplingViolations(couplingPairs).length
+      && positionError < 0.006 && rotationError < THREE.MathUtils.degToRad(2) ? 'tracking' : 'limited',
+    jointCouplingViolations: robotJointCouplingViolations(couplingPairs),
     frozenJointCount: controller.joints.length - joints.length,
     iterations,
     solveMs: performance.now() - started,

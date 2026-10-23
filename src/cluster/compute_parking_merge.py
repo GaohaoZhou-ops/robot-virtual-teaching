@@ -42,8 +42,10 @@ JOB_FORMAT = "atlas-parking-merge-server-job"
 RESULT_FORMAT = "atlas-parking-merge-server-result"
 ARCHIVE_VERSION = 1
 ALGORITHM_ID = "atlas-common-parking-dls-environment"
-ALGORITHM_VERSION = "1.1.0"
+ALGORITHM_VERSION = "1.2.0"
 ARM_SOFT_LIMIT_RATIO = 0.95
+ARM_JOINT_COUPLING_LIMIT = 1.8
+ARM_JOINT_COUPLING_MARGIN = 1e-6
 CHASSIS_PATTERN = re.compile(
     r"(?:^base(?:[_-]|$)|(?:^|[_-])(?:chassis|wheel|caster|mecanum)(?:[_-]|$)|(?:mobile|robot)[_-]base)",
     re.IGNORECASE,
@@ -315,6 +317,7 @@ class RobotModel:
         job_root: Path,
         progress: Optional[TerminalProgress] = None,
         arm_soft_limit_ratio: float = ARM_SOFT_LIMIT_RATIO,
+        arm_joint_coupling_enabled: bool = True,
     ):
         self.job_root = job_root
         ratio = arm_soft_limit_ratio if type(arm_soft_limit_ratio) in (int, float) and math.isfinite(arm_soft_limit_ratio) else ARM_SOFT_LIMIT_RATIO
@@ -360,12 +363,50 @@ class RobotModel:
             child_links.add(joint.child)
         self.root_link = next((name for name in self.links if name not in child_links), self.links[0])
         self.movable = {joint.name: joint for joint in self.joints if joint.movable}
+        self.coupling_pairs = []
+        if arm_joint_coupling_enabled is not False:
+            arms = {}
+            for joint in self.movable.values():
+                match = re.fullmatch(r"(left|right)[_-]J([67])", joint.name, re.IGNORECASE)
+                if match and joint.kind in {"revolute", "continuous"}:
+                    arms.setdefault(match[1].lower(), {})[match[2]] = joint
+            self.coupling_pairs = [(arm["6"], arm["7"]) for arm in arms.values() if "6" in arm and "7" in arm]
         self.proxies = self._read_collision_proxies(root, progress)
         progress and progress.update(
             0.25,
             "机器人模型就绪",
             f"{len(self.movable)} 个活动关节 / {len(self.proxies)} 个碰撞体",
         )
+
+    def coupling_satisfied(self, values: Dict[str, float]) -> bool:
+        return all(abs(sum(values.get(joint.name, 0.0) for joint in pair)) < ARM_JOINT_COUPLING_LIMIT
+                   for pair in self.coupling_pairs)
+
+    def project_coupling(self, values: Dict[str, float], joints: Sequence[Joint]) -> None:
+        # Match the browser's simultaneous projection, including locked joints,
+        # independent bounds and the strict (not inclusive) mechanical limit.
+        movable = {joint.name for joint in joints}
+        bound = ARM_JOINT_COUPLING_LIMIT - ARM_JOINT_COUPLING_MARGIN
+        for pair in self.coupling_pairs:
+            total = sum(values.get(joint.name, 0.0) for joint in pair)
+            if not math.isfinite(total) or abs(total) <= bound:
+                continue
+            direction = 1 if total > 0 else -1
+            remaining = abs(total) - bound
+            free = [joint for joint in pair if joint.name in movable]
+            for _ in range(2):
+                if not free or remaining <= 0:
+                    break
+                share = remaining / len(free)
+                next_free = []
+                for joint in free:
+                    before = values.get(joint.name, 0.0)
+                    room = max(0.0, before - joint.lower if direction > 0 else joint.upper - before)
+                    values[joint.name] = joint.clamp(before - direction * min(share, room))
+                    remaining -= direction * (before - values[joint.name])
+                    if room > share:
+                        next_free.append(joint)
+                free = next_free
 
     def _mesh_path(self, filename: str) -> Optional[Path]:
         package = re.match(r"^package://([^/]+)/(.+)$", filename, re.IGNORECASE)
@@ -535,6 +576,9 @@ def solve_ik(model: RobotModel, base_pose: dict, values: Dict[str, float], targe
     damping = finite(config.get("damping"), 0.045)
     orientation_scale = finite(config.get("orientationScale"), 0.24)
     current_values = dict(values)
+    for joint in joints:
+        current_values[joint.name] = joint.clamp(current_values.get(joint.name, 0.0))
+    model.project_coupling(current_values, joints)
     for _ in range(maximum_iterations):
         transforms = model.forward(base_pose, current_values)
         frame = transforms.get(frame_name)
@@ -565,6 +609,7 @@ def solve_ik(model: RobotModel, base_pose: dict, values: Dict[str, float], targe
             break
         for joint, step in zip(joints, steps):
             current_values[joint.name] = joint.clamp(current_values.get(joint.name, 0.0) + float(step))
+        model.project_coupling(current_values, joints)
     return current_values
 
 
@@ -756,7 +801,8 @@ def analyze(
     progress: TerminalProgress,
 ) -> dict:
     robot_file = job_root / manifest["binding"]["robot"]["primaryFile"]
-    model = RobotModel(robot_file, job_root, progress, config.get("armSoftLimitRatio", ARM_SOFT_LIMIT_RATIO))
+    model = RobotModel(robot_file, job_root, progress, config.get("armSoftLimitRatio", ARM_SOFT_LIMIT_RATIO),
+                       config.get("armJointCouplingEnabled", True))
     environment_meta = read_json(job_root / manifest["environmentFile"])
     collision_config = config.get("environmentCollision", {})
     collision = EnvironmentCollision(
@@ -862,7 +908,7 @@ def analyze(
                 collision_result = collision.check(model, transforms)
                 position_error = maximum_or_zero(item["positionError"] for item in side_errors.values()) if side_errors else 1e9
                 rotation_error = maximum_or_zero(item["rotationError"] for item in side_errors.values()) if side_errors else 1e9
-                feasible = bool(side_errors) and len(side_errors) == len(record["targets"]) and position_error <= position_tolerance and rotation_error <= rotation_tolerance and collision_result["state"] != "collision"
+                feasible = bool(side_errors) and len(side_errors) == len(record["targets"]) and position_error <= position_tolerance and rotation_error <= rotation_tolerance and collision_result["state"] != "collision" and model.coupling_satisfied(values)
                 planned.append({
                     "poseId": record["poseId"], "poseName": record["poseName"],
                     "sourceParkingPointId": record["sourceParkingPointId"], "sourceParkingPointName": record["sourceParkingPointName"],
@@ -902,7 +948,7 @@ def analyze(
             "poseCount": len(records), "targetCount": sum(len(item["targets"]) for item in records),
             "maximumPairDistance": cluster["maximumPairDistance"], "nearbyPairCount": cluster["nearbyPairCount"],
             "candidateCount": len(candidates), "feasible": feasible,
-            "reason": "" if feasible else "没有候选底盘位姿能同时满足末端容差与环境碰撞约束",
+            "reason": "" if feasible else "没有候选底盘位姿能同时满足末端容差、关节约束与环境碰撞约束",
             "candidate": ({key: best[key] for key in ("id", "source", "sourceLabel", "anchorParkingPointId", "anchorParkingPointName", "mapPose", "travel", "maximumPositionError", "maximumRotationError", "feasiblePoseCount", "failedPoseCount")} if best else None),
             "plannedPoses": best["plannedPoses"] if best else [],
         })
@@ -916,6 +962,7 @@ def analyze(
         "version": 1, "status": "ready" if clusters else "no-neighbors", "taskId": task["id"],
         "analyzedAt": utc_now(), "method": "server-xy-single-link+common-base-dual-optical-dls+final-pose-environment-obb",
         "distanceThreshold": threshold, "positionTolerance": position_tolerance, "rotationTolerance": rotation_tolerance,
+        "armJointCouplingEnabled": config.get("armJointCouplingEnabled", True) is not False,
         "environmentCollision": {"enabled": collision.enabled, "mode": "final-pose-obb", "safetyDistance": collision.safety, "contactMargin": collision.margin},
         "clusters": plans, "nearbyPairs": nearby_pairs, "isolatedParkingPointIds": isolated,
         "feasibleClusterCount": sum(1 for item in plans if item["feasible"]),

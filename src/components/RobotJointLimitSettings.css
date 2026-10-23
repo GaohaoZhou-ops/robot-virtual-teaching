@@ -59,3 +59,26 @@
   line-height: 1.7;
   letter-spacing: 0;
 }
+
+.robot-joint-coupling-settings__switch {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; padding: 4px 10px; border: 0; border-radius: 3px;
+  color: #c5d5d1; background: transparent; font: inherit; font-size: 12px; cursor: pointer;
+}
+.robot-joint-coupling-settings__switch > span:first-child { display: flex; align-items: center; gap: 8px; }
+.robot-joint-coupling-settings__switch svg { color: #7fa9a6; }
+.robot-joint-coupling-settings__switch:hover:not(:disabled) { background: #163230; }
+.robot-joint-coupling-settings__switch:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+.robot-joint-coupling-settings__switch:disabled { opacity: 0.45; cursor: default; }
+.robot-joint-coupling-settings__track {
+  position: relative; flex: 0 0 28px; height: 16px; border-radius: 10px; background: #365451;
+}
+.robot-joint-coupling-settings__track::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 10px; height: 10px;
+  border-radius: 50%; background: #b5c9c5;
+}
+.robot-joint-coupling-settings__switch[aria-checked="true"] .robot-joint-coupling-settings__track { background: var(--cyan); }
+.robot-joint-coupling-settings__switch[aria-checked="true"] .robot-joint-coupling-settings__track::after { left: 15px; background: #071317; }
+.robot-joint-coupling-settings > p {
+  margin: 7px 10px 3px; color: #78918f; font-size: 10px; line-height: 1.7; letter-spacing: 0;
+}
