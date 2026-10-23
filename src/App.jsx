@@ -7000,7 +7000,7 @@ export default function App() {
           onSelectTeachingTask={selectTeachingTask}
           onCreateTeachingParkingPoint={createTeachingParkingPoint}
           onSelectTeachingParkingPoint={(id, poseId) => previewTeachingParkingPoint(id, poseId, {
-            showReadout: Boolean(poseId),
+            showReadout: false,
           })}
           onCaptureTeachingPoint={captureTeachingPoint}
           onDeleteTeachingTask={deleteTeachingTask}

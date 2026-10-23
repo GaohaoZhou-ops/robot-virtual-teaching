@@ -59,17 +59,16 @@ def assert_preview(page, canvas, node, pose, joints, live_pose, live_joints):
     assert json.loads(canvas.get_attribute("data-robot-joint-values")) == live_joints
     expect(node).to_have_attribute("aria-selected", "true")
     assert page.locator('.teaching-capture-tree__pose-item[data-ghost-preview="true"]').count() == 1
-    card = page.get_by_label("停车点机器人虚影", exact=True)
-    expect(card).to_have_attribute("data-pose-id", pose_id)
-    assert card.get_by_role("button", name="使用当前姿态", exact=True).is_enabled()
-    assert card.get_by_role("button", name="移动到当前停车点", exact=True).count() == 0
+    expect(page.get_by_label("停车点机器人虚影", exact=True)).to_have_count(0)
+    panel = page.get_by_label("虚拟示教", exact=True)
+    expect(panel.get_by_role("button", name="导航并执行", exact=True)).to_be_enabled()
+    expect(panel.get_by_role("button", name="仅执行上身", exact=True)).to_be_enabled()
     assert int(canvas.get_attribute("data-parking-ghost-mesh-count")) > 0
 
 
 def apply_preview(page, canvas, parking_pose, joint_values):
-    card = page.get_by_label("停车点机器人虚影", exact=True)
-    card.get_by_role("button", name="使用当前姿态", exact=True).click()
-    card.wait_for(state="detached")
+    page.get_by_label("虚拟示教", exact=True).get_by_role("button", name="导航并执行", exact=True).click()
+    expect(page.get_by_label("停车点机器人虚影", exact=True)).to_have_count(0)
     wait_for_pose(page, parking_pose)
     page.wait_for_function(
         """expected => {
@@ -162,7 +161,7 @@ def run():
         assert_preview(page, canvas, second_node, first_pose, second_joints, live_pose, live_joints)
         expect(first_node).to_have_attribute("aria-selected", "false")
         card = page.get_by_label("停车点机器人虚影", exact=True)
-        assert card.get_by_text("姿态 · A02", exact=True).is_visible()
+        expect(card).to_have_count(0)
         page.wait_for_function("document.querySelector('.three-canvas').dataset.synchronizedFocusState === 'settled'")
         page.screenshot(path="/tmp/atlas-teaching-capture-pose-ghost.png", full_page=True)
 
@@ -237,7 +236,7 @@ def run():
         assert not errors, errors
         browser.close()
 
-    print("pose ghosts: expansion, parking-bound preview, action switching, one-click pose application, playback stop, Escape clearing, task selection and deletion passed")
+    print("pose ghosts: no sidebar-triggered popup, parking-bound preview, sidebar pose application, playback stop, Escape clearing, task selection and deletion passed")
 
 
 if __name__ == "__main__":

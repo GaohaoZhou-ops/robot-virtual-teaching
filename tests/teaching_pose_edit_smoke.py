@@ -44,6 +44,12 @@ def export_task(page, task_id):
     return task
 
 
+def open_pose_preview_actions(page, name):
+    topbar_action(page, name="打开示教数据管理页").click()
+    page.get_by_role("button", name=f"查看机械臂姿态 {name}", exact=True).click()
+    page.get_by_role("button", name="查看姿态", exact=True).click()
+
+
 def begin_edit(page, canvas, card, pose, saved_joints):
     card.get_by_role("button", name="调整姿态", exact=True).click()
     expect(card).to_have_attribute("data-pose-edit-state", "editing")
@@ -113,6 +119,8 @@ def run():
         second = nodes.get_by_role("treeitem", name="预览机械臂姿态 A02", exact=True)
         first.click()
         card = page.get_by_label("停车点机器人虚影", exact=True)
+        expect(card).to_have_count(0)
+        open_pose_preview_actions(page, "A01")
         height = card.bounding_box()["height"]
         assert card.get_by_role("button", name="使用当前姿态", exact=True).is_enabled()
         begin_edit(page, canvas, card, parking_pose, original_joints)
@@ -168,7 +176,7 @@ def run():
         field.press("Enter")
         page.get_by_role("button", name="关闭全关节浮动窗口").click()
         second.click()
-        expect(card).to_have_attribute("data-pose-edit-state", "idle")
+        expect(card).to_have_count(0)
         assert json.loads(canvas.get_attribute("data-parking-ghost-joint-values")) == sibling["fullBodyJoints"]["values"]
         assert export_task(page, task_id) == saved
 
@@ -179,6 +187,7 @@ def run():
         dock = page.get_by_label("示教任务轨迹播放控制", exact=True)
         expect(dock).to_have_attribute("data-playback-status", "playing")
         first.click()
+        open_pose_preview_actions(page, "A01")
         begin_edit(page, canvas, card, parking_pose, expected)
         dock.wait_for(state="detached")
         page.get_by_role("button", name="关闭全关节浮动窗口").click()
@@ -221,11 +230,15 @@ def run():
 
         # Torso linkage remains a nested adjustment and saves into the same pose.
         begin_edit(page, canvas, card, parking_pose, ik_joints)
+        page.get_by_role("button", name="关闭全关节浮动窗口").click()
         enter_torso(page, canvas)
+        page.get_by_role("button", name="打开全关节浮动窗口").click()
         yaw_joint = page.get_by_role("spinbutton", name="waist_yaw_J 关节值", exact=True)
         yaw_joint.fill("7")
         yaw_joint.press("Enter")
         expect(page.get_by_role("spinbutton", name="躯干YAW (°)", exact=True)).to_have_value("7.0")
+        # Close the floating joint window before interacting with the torso panel.
+        page.get_by_role("button", name="关闭全关节浮动窗口").click()
         torso_height = number_attr(canvas, "torso-height") - 0.04
         set_value(page, "躯干高度 (m)", torso_height)
         assert joints(canvas) != ik_joints

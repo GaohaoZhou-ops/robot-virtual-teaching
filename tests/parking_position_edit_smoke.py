@@ -127,10 +127,11 @@ def run():
 
         begin_edit(page, canvas, card)
         wait_for_pose(page, first_pose)
-        assert ghost_pose(canvas) == first_pose
+        # Live-pose data is rounded to six decimals; the ghost retains full precision.
+        assert all(abs(ghost_pose(canvas)[axis] - first_pose[axis]) < 1e-6 for axis in first_pose)
         assert card.bounding_box()["height"] == height_before
         moved = move_with_frozen_ghost(page, canvas)
-        assert ghost_pose(canvas) == first_pose
+        assert all(abs(ghost_pose(canvas)[axis] - first_pose[axis]) < 1e-6 for axis in first_pose)
         assert json.loads(canvas.get_attribute("data-robot-joint-values")) == recorded_joints[-1]
         page.screenshot(path="/tmp/atlas-parking-position-edit-keyboard.png", full_page=True)
 
@@ -191,13 +192,14 @@ def run():
         expect(first_stop).to_have_attribute("aria-expanded", "true")
         assert all(abs(ghost_pose(canvas)[axis] - moved[axis]) < 1e-5 for axis in moved)
 
-        # Pose previews keep their own action, without the parking edit button.
+        # Selecting a pose in the sidebar keeps the preview and sidebar actions,
+        # without reopening the 3D readout used by navigation-based editing.
         pose_node = tree.get_by_role("treeitem", name="预览机械臂姿态 A01", exact=True)
         pose_node.click()
-        assert card.get_by_role("button", name="修改停车点", exact=True).count() == 0
-        assert card.get_by_role("button", name="使用当前姿态", exact=True).is_enabled()
-        assert card.bounding_box()["height"] == height_before
-        print("unrecorded edit cancelled; pose action and card height preserved", flush=True)
+        expect(card).to_have_count(0)
+        expect(canvas).to_have_attribute("data-parking-ghost-pose-id", pose_node.get_attribute("data-pose-id"))
+        expect(page.get_by_role("button", name="导航并执行", exact=True)).to_be_enabled()
+        print("unrecorded edit cancelled; pose preview and sidebar action preserved without a popup", flush=True)
 
         # Editing during looping playback stops playback before enabling WASD.
         topbar_action(page, name="打开示教数据管理页").click()
@@ -207,6 +209,7 @@ def run():
         expect(dock).to_have_attribute("data-playback-status", "playing")
         wait_for_pose(page, moved)
         first_stop.click()
+        open_parking_preview_actions(page)
         begin_edit(page, canvas, card)
         dock.wait_for(state="detached")
         assert canvas.get_attribute("data-robot-trajectory-active") == "false"
