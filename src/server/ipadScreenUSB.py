@@ -57,8 +57,8 @@ def devices():
             if item.get('Properties', {}).get('ConnectionType') == 'USB']
 
 
-def request(command):
-    device = next((d for d in devices() if d.get('SerialNumber') == command['deviceId']), None)
+def connect(device_id):
+    device = next((d for d in devices() if d.get('SerialNumber') == device_id), None)
     if device is None:
         raise ConnectionError('USB device disconnected')
     sock, response = mux({'MessageType': 'Connect', 'DeviceID': device['DeviceID'],
@@ -66,6 +66,25 @@ def request(command):
     try:
         if response.get('Number') != 0:
             raise ConnectionError('Open the updated Atlas app on the device')
+        return sock
+    except Exception:
+        sock.close()
+        raise
+
+
+class Requests:
+    """One image/state request at a time; controls use a separate USB socket."""
+    def __init__(self):
+        self.sock = None
+        self.identity = None
+
+    def close(self):
+        if self.sock:
+            self.sock.close()
+        self.sock = None
+        self.identity = None
+
+    def request(self, command):
         body = base64.b64decode(command.get('body', ''), validate=True)
         method, path = command['method'], command['path']
         if method not in ('GET', 'POST', 'PUT', 'DELETE') or path not in ('/status', '/session', '/frame', '/heartbeat', '/workspace'):
@@ -73,27 +92,78 @@ def request(command):
         token = command.get('token', '')
         if len(body) > MAX_FRAME or any(c not in 'abcdef0123456789' for c in token):
             raise ValueError('Invalid screen payload')
-        headers = f'{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {len(body)}\r\nAuthorization: Bearer {token}\r\n\r\n'
-        sock.sendall(headers.encode('ascii') + body)
+        persistent = command.get('keepAlive') is True
+        identity = (command['deviceId'], token)
+        if not persistent or identity != self.identity:
+            self.close()
+        try:
+            if self.sock is None:
+                self.sock = connect(command['deviceId'])
+                self.identity = identity
+            connection = 'keep-alive' if persistent else 'close'
+            headers = f'{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: {connection}\r\nContent-Length: {len(body)}\r\nAuthorization: Bearer {token}\r\n\r\n'
+            self.sock.sendall(headers.encode('ascii') + body)
+            reply = http.client.HTTPResponse(self.sock)
+            reply.begin()
+            # Read the declared body, not until EOF on a persistent connection.
+            if reply.length is None or reply.length > 65536:
+                raise ValueError('Invalid app response length')
+            payload = reply.read()
+            if reply.will_close or not persistent or method == 'DELETE':
+                self.close()
+            return {'status': reply.status, 'body': json.loads(payload)}
+        except Exception:
+            self.close()
+            raise
+
+
+def request(command):
+    client = Requests()
+    try:
+        return client.request(command)
+    finally:
+        client.close()
+
+
+def events(command):
+    """A bounded NDJSON control stream, independent of JPEG transfer/encoding."""
+    token = command.get('token', '')
+    if len(token) != 64 or any(c not in 'abcdef0123456789' for c in token):
+        raise ValueError('Invalid event credentials')
+    sock = connect(command['deviceId'])
+    try:
+        sock.settimeout(10)
+        sock.sendall(f'GET /events HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\nAuthorization: Bearer {token}\r\n\r\n'.encode('ascii'))
         reply = http.client.HTTPResponse(sock)
         reply.begin()
-        payload = reply.read(65537)
-        if len(payload) > 65536:
-            raise ValueError('App response too large')
-        return {'status': reply.status, 'body': json.loads(payload)}
+        if reply.status != 200:
+            raise ConnectionError('USB control stream rejected')
+        while True:
+            line = reply.readline(65537)
+            if not line or len(line) > 65536 or not line.endswith(b'\n'):
+                raise ConnectionError('USB control stream closed or invalid')
+            print(json.dumps({'event': json.loads(line)}), flush=True)
     finally:
         sock.close()
 
 
 def main():
+    client = Requests()
     for line in sys.stdin:
+        command = {}
         try:
             command = json.loads(line)
+            if command['action'] == 'events':
+                events(command)
+                return
             value = ([{'id': d['SerialNumber']} for d in devices()] if command['action'] == 'devices'
-                     else request(command))
+                     else client.request(command))
             print(json.dumps({'value': value}), flush=True)
         except Exception as error:
             print(json.dumps({'error': str(error)}), flush=True)
+            if isinstance(command, dict) and command.get('action') == 'events':
+                return
+    client.close()
 
 
 if __name__ == '__main__':

@@ -5,6 +5,7 @@ import ZividCameraPanel from './ZividCameraPanel.jsx';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
 import { screenJointState, screenJointCommand, screenPoseCaptureCommand, screenViewportCommand } from '../lib/ipadScreenControl.js';
 import { connectIPadUSBBridge } from '../lib/ipadUSBBridge.js';
+import { createScreenJPEGEncoder } from '../lib/ipadScreenEncoder.js';
 import './IPadScreenCollaboration.css';
 
 const api = '/__atlas/ipad-screen';
@@ -48,6 +49,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   controlRef.current = { state: { ...screenJointState(robot, robotLoadState?.movableJoints, jointValues, controlBlockedReason), capture: poseCaptureState }, onChangeJoint, onRecordPose };
   const sessionRef = useRef(null), operationRef = useRef(0), mountedRef = useRef(true), startingRef = useRef(false);
   const cache = useRef({ left: null, right: null });
+  const cameraRenderRefs = useRef({ left: { current: null }, right: { current: null } });
   const dialogRef = useRef(null), stopRef = useRef(null);
   const canStream = Boolean(mapData?.geometry && robotLoadState?.status === 'loaded' && cameraPoses?.left && cameraPoses?.right);
 
@@ -187,6 +189,10 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   useEffect(() => {
     if (!session) return undefined;
     let cancelled = false, connected = false, deviceReady = session.mode !== 'wifi', sending = false, timer, sent = 0, ack = 0, publishedAck = 0, page = 'cameras', viewportSent = false;
+    const realtimeUSB = session.realtimeUSB === true && !session.bridge;
+    const encoder = realtimeUSB ? createScreenJPEGEncoder() : null;
+    const encode = (canvas, channel) => encoder ? encoder.encode(canvas, channel) : jpeg(canvas);
+    let frameTickPending = false, lastWorkspaceAt = -Infinity, lastState = '';
     const awaitingCommit = new Map();
     const captureRequests = new Set();
     let captureResult = null;
@@ -198,6 +204,12 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     const url = new URL(`${api}/session/${session.id}/events`, window.location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const connection = session.bridge ? session.bridge.events(session) : new WebSocket(url);
+    const finishTick = () => {
+      if (frameTickPending && !cancelled) {
+        frameTickPending = false;
+        connection.send(JSON.stringify({ frameReady: true }));
+      }
+    };
     const fail = (message) => {
       if (cancelled) return;
       cancelled = true; clearTimeout(timer); controller.abort();
@@ -209,6 +221,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       if (cancelled || sessionRef.current?.id !== session.id) return;
       const status = JSON.parse(event.data);
       if (status.error) { fail(status.error); return; }
+      if (realtimeUSB && status.frameTick) { frameTickPending = true; void send(); return; }
       if (status.deviceReady === true && !deviceReady) {
         deviceReady = true; waitingSince = performance.now(); setDeviceConnected(true);
         sessionRef.current = { ...sessionRef.current, deviceName: status.deviceName || 'iPad' }; setSession(sessionRef.current);
@@ -236,12 +249,12 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
         changedViewport = Boolean(viewportCaptureRef.current?.navigate(command)) || changedViewport;
         viewportAck = command.sequence;
       }
-      if (changedPage || changedJoint || changedViewport) void send();
+      if (!realtimeUSB && (changedPage || changedJoint || changedViewport)) void send();
       const capture = screenPoseCaptureCommand(status.captureRequest, controlRef.current.state);
       if (capture && !captureRequests.has(capture.id) && captureResult?.status !== 'recording') {
         captureRequests.add(capture.id);
         captureResult = { id: capture.id, status: 'recording', message: '正在记录姿态…' };
-        void send();
+        if (!realtimeUSB) void send();
         void (async () => {
           try {
             const result = awaitingCommit.size
@@ -254,7 +267,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
             if (cancelled) return;
             captureResult = { id: capture.id, status: 'error', message: String(failure.message || '记录姿态失败，请重试。').slice(0, 512) };
           }
-          void send();
+          if (!realtimeUSB) void send();
         })();
       }
     };
@@ -265,7 +278,12 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       clearTimeout(timer); sending = true;
       const began = performance.now();
       try {
-        if (!cache.current.left || !cache.current.right) {
+        const needsCameras = !realtimeUSB || page === 'cameras';
+        if (realtimeUSB && needsCameras) {
+          // Render on the server-driven clock, including when the tab is hidden.
+          cameraRenderRefs.current.left.current?.(); cameraRenderRefs.current.right.current?.();
+        }
+        if (needsCameras && (!cache.current.left || !cache.current.right)) {
           if (!document.hidden && began - waitingSince > 7000) throw new Error('左右臂相机未就绪，请检查机器人模型和图形渲染。');
         } else {
           waitingSince = began;
@@ -274,37 +292,44 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
             if (currentState.joints.some((joint) => joint.name === name && Math.abs(joint.value - value) < 1e-7)) awaitingCommit.delete(name);
           }
           if (!awaitingCommit.size) publishedAck = ack;
-          const state = new Blob([JSON.stringify({ ...currentState, ack: publishedAck, captureResult, viewportControl: viewportControl() })]);
-          let picture = new Blob();
-          if ((page === 'joints' || !viewportSent) && viewportCaptureRef.current?.capture(viewport)) {
-            picture = await jpeg(viewport); viewportSent = true;
+          const stateJSON = JSON.stringify({ ...currentState, ack: publishedAck, captureResult, viewportControl: viewportControl() });
+          if (!realtimeUSB || page === 'joints' || !viewportSent || stateJSON !== lastState || began - lastWorkspaceAt >= 500) {
+            const state = new Blob([stateJSON]);
+            let picture = new Blob();
+            if ((page === 'joints' || !viewportSent) && viewportCaptureRef.current?.capture(viewport)) {
+              picture = await encode(viewport, 'viewport'); viewportSent = true;
+            }
+            if (cancelled) return;
+            const workspaceHeader = new ArrayBuffer(8), workspaceView = new DataView(workspaceHeader);
+            workspaceView.setUint32(0, state.size); workspaceView.setUint32(4, picture.size);
+            await sessionRequest(session, `/session/${session.id}/workspace`, { method: 'PUT', signal: controller.signal,
+              headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' },
+              body: new Blob([workspaceHeader, state, picture]) });
+            lastState = stateJSON; lastWorkspaceAt = began;
           }
-          if (cancelled) return;
-          const workspaceHeader = new ArrayBuffer(8), workspaceView = new DataView(workspaceHeader);
-          workspaceView.setUint32(0, state.size); workspaceView.setUint32(4, picture.size);
-          await sessionRequest(session, `/session/${session.id}/workspace`, { method: 'PUT', signal: controller.signal,
-            headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' },
-            body: new Blob([workspaceHeader, state, picture]) });
-          const blobs = await Promise.all([jpeg(cache.current.left), jpeg(cache.current.right)]);
-          if (cancelled) return;
-          const header = new ArrayBuffer(8), view = new DataView(header);
-          view.setUint32(0, blobs[0].size); view.setUint32(4, blobs[1].size);
-          await sessionRequest(session, `/session/${session.id}/frame`, { method: 'PUT', signal: controller.signal,
-            headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' }, body: new Blob([header, ...blobs]) });
-          if (!cancelled) { sent += 1; setFrames(sent); }
+          if (needsCameras) {
+            const blobs = await Promise.all([encode(cache.current.left, 'left'), encode(cache.current.right, 'right')]);
+            if (cancelled) return;
+            const header = new ArrayBuffer(8), view = new DataView(header);
+            view.setUint32(0, blobs[0].size); view.setUint32(4, blobs[1].size);
+            await sessionRequest(session, `/session/${session.id}/frame`, { method: 'PUT', signal: controller.signal,
+              headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' }, body: new Blob([header, ...blobs]) });
+          }
+          if (!cancelled) { sent += 1; if (!realtimeUSB || sent === 1 || sent % 30 === 0) setFrames(sent); }
         }
       } catch (failure) {
         fail(failure.message);
         return;
-      } finally { sending = false; }
+      } finally { sending = false; finishTick(); }
       // Backpressure: at most one encoded pair and one request in flight.
-      if (!cancelled) timer = setTimeout(send, Math.max(0, (document.hidden && page !== 'joints' ? 1000 : 150) - (performance.now() - began)));
+      if (!cancelled && !realtimeUSB) timer = setTimeout(send, Math.max(0, (document.hidden && page !== 'joints' ? 1000 : 150) - (performance.now() - began)));
     };
     const resume = () => { if (!document.hidden) { waitingSince = performance.now(); void send(); } };
     document.addEventListener('visibilitychange', resume);
     document.addEventListener('resume', resume);
     return () => {
       cancelled = true; clearTimeout(timer); clearTimeout(connectTimer); controller.abort(); connection.close();
+      encoder?.dispose();
       document.removeEventListener('visibilitychange', resume); document.removeEventListener('resume', resume);
     };
   }, [session?.id]);
@@ -315,6 +340,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     {session && deviceConnected && <div className="ipad-screen-renderers" aria-hidden="true">
       {['left', 'right'].map((side) => <ZividCameraPanel key={side} streamOnly side={side} activeSide={side} mapData={mapData}
         robot={robot} robotLoadState={robotLoadState} cameraPoses={cameraPoses} meshRenderQuality={meshRenderQuality}
+        streamRenderRef={session.realtimeUSB && !session.bridge ? cameraRenderRefs.current[side] : undefined}
         onStreamFrame={(source) => copyFrame(side, source)} />)}
     </div>}
     {session && !open && <div className="ipad-screen-dock" role="status"><Monitor size={16}/><span>{session.deviceName} · {!deviceConnected ? '等待配对…' : frames ? remotePage === 'joints' ? '关节协作中' : '画面协作中' : '准备画面…'}</span>

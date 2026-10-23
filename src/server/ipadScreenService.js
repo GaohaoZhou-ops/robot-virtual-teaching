@@ -43,8 +43,10 @@ export function validateScreenWorkspace(body) {
 
 export function createScreenUSBTransport(root) {
   let child, pending, closed = false, queue = Promise.resolve();
+  const streams = new Set();
+  const launch = () => spawn('python3', ['-u', path.join(root, 'src/server/ipadScreenUSB.py')], { stdio: ['pipe', 'pipe', 'ignore'] });
   function start() {
-    const process = spawn('python3', ['-u', path.join(root, 'src/server/ipadScreenUSB.py')], { stdio: ['pipe', 'pipe', 'ignore'] });
+    const process = launch();
     child = process;
     const lines = createInterface({ input: process.stdout });
     lines.on('line', (line) => {
@@ -78,8 +80,30 @@ export function createScreenUSBTransport(root) {
     queue = next.catch(() => {}); return next;
   };
   return { devices: () => run({ action: 'devices' }),
-    request: (deviceId, method, route, body = Buffer.alloc(0), token = '') => run({ action: 'request', deviceId, method, path: route, token, body: body.toString('base64') }),
-    close() { closed = true; pending?.reject(new Error('USB transport closed')); child?.kill(); child = undefined; } };
+    request: (deviceId, method, route, body = Buffer.alloc(0), token = '', options = {}) => run({ action: 'request', deviceId, method, path: route, token,
+      keepAlive: options.keepAlive === true, body: body.toString('base64') }),
+    events(deviceId, token, onStatus, onError) {
+      if (closed) throw new Error('USB transport closed');
+      const process = launch(), lines = createInterface({ input: process.stdout });
+      let stopped = false;
+      const stop = () => { if (stopped) return; stopped = true; streams.delete(stop); lines.close(); process.kill(); };
+      const failed = (error) => { if (!stopped) { stop(); onError(error); } };
+      lines.on('line', (line) => {
+        if (stopped) return;
+        try {
+          const value = JSON.parse(line);
+          if (value.error) throw new Error(value.error);
+          if (value.event) onStatus(value.event);
+        } catch (error) { failed(error); }
+      });
+      process.on('error', failed);
+      process.on('exit', () => failed(new Error('USB control stream closed')));
+      process.stdin.on('error', failed);
+      streams.add(stop);
+      process.stdin.end(`${JSON.stringify({ action: 'events', deviceId, token })}\n`);
+      return stop;
+    },
+    close() { closed = true; for (const stop of [...streams]) stop(); pending?.reject(new Error('USB transport closed')); child?.kill(); child = undefined; } };
 }
 
 const checkLocalRequest = (req) => {
@@ -144,19 +168,19 @@ export function createIPadScreenService({ transport, supported = process.platfor
     if (!isLocalRequest(req) && !advertised) fail(403, '请使用当前服务的局域网地址打开工作台。');
   };
   const status = (current) => ({ mode: current.mode || 'usb', deviceReady: current.mode !== 'wifi' || !!current.deviceReady,
-    deviceName: current.deviceName, pairingStatus: current.deviceReady ? 'paired' : 'ready' });
+    deviceName: current.deviceName, pairingStatus: current.deviceReady ? 'paired' : 'ready', realtimeUSB: !!current.realtimeUSB });
   const publishStatus = (current) => {
     if (isCurrent(current) && current.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify(status(current)));
   };
-  const appRequest = async (deviceId, method, route, body, token) => {
+  const appRequest = async (deviceId, method, route, body, token, options) => {
     let reply;
-    try { reply = await transport.request(deviceId, method, route, body, token); }
+    try { reply = await transport.request(deviceId, method, route, body, token, options); }
     catch { fail(502, '有线画面连接已断开，请保持设备解锁，并在前台打开新版 Atlas App。'); }
     if (reply.status !== 200) fail(reply.status, reply.body?.error || '设备已结束画面协作，请重新连接');
     return reply.body;
   };
   const deviceRequest = async (current, method, route, body) => {
-    if (current.mode !== 'wifi') return appRequest(current.deviceId, method, route, body, current.token);
+    if (current.mode !== 'wifi') return appRequest(current.deviceId, method, route, body, current.token, { keepAlive: !!current.realtimeUSB });
     let reply;
     try { reply = await current.lan.request(method, route, body); }
     catch { fail(502, 'Wi-Fi 协作已断开，请保持 iPad App 在前台，并检查局域网连接。'); }
@@ -166,6 +190,8 @@ export function createIPadScreenService({ transport, supported = process.platfor
   const end = async (current, error) => {
     if (!current || current.ended) return;
     current.ended = true;
+    clearTimeout(current.frameTimer);
+    current.stopControls?.();
     if (isCurrent(current)) sessions.delete(current.id);
     if (current.socket?.readyState === WebSocket.OPEN) {
       if (error) current.socket.send(JSON.stringify({ error }));
@@ -210,13 +236,28 @@ export function createIPadScreenService({ transport, supported = process.platfor
     if (!current.keepingAlive && now() - current.updatedAt >= (current.page === 'joints' ? 200 : 2000)) {
       current.keepingAlive = true;
       void deviceRequest(current, 'PUT', '/heartbeat')
-        .then((status) => { current.updatedAt = now(); publishControls(current, status); })
+        .then((status) => { current.updatedAt = now(); if (!current.realtimeUSB) publishControls(current, status); })
         .catch((error) => end(current, error.message))
         .finally(() => { current.keepingAlive = false; });
     }
   };
   const timer = setInterval(() => { for (const current of sessions.values()) keepAlive(current); }, 250);
   timer.unref?.();
+  // The desktop clock lives outside the tab. Only one unacknowledged tick is
+  // allowed, so a hidden/frozen browser cannot accumulate stale render requests.
+  const scheduleFrame = (current) => {
+    if (!isCurrent(current) || !current.realtimeUSB || current.tickPending || current.frameTimer
+      || current.socket?.readyState !== WebSocket.OPEN) return;
+    current.frameTimer = setTimeout(() => {
+      current.frameTimer = null;
+      if (!isCurrent(current) || current.socket?.readyState !== WebSocket.OPEN) return;
+      current.lastFrameTick = performance.now();
+      if (current.socket.bufferedAmount > SCREEN_CONTROL_LIMIT) { scheduleFrame(current); return; }
+      current.tickPending = true;
+      current.socket.send(JSON.stringify({ frameTick: true }));
+    }, Math.max(0, 1000 / 30 - (performance.now() - (current.lastFrameTick ?? -Infinity))));
+    current.frameTimer.unref?.();
+  };
   const discover = () => {
     if (discovering) return discovering;
     discovering = (async () => {
@@ -300,10 +341,11 @@ export function createIPadScreenService({ transport, supported = process.platfor
           const status = await appRequest(body.deviceId, 'GET', '/status');
           if (status.protocol !== SCREEN_PROTOCOL || status.keepalive !== true || status.jointControl !== true) fail(409, '请更新设备上的 Atlas App 以支持关节协作。');
           if (status.active) fail(409, '设备正在进行画面协作，请先在设备上结束协作');
-          const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), deviceId: body.deviceId, deviceName: status.deviceName, updatedAt: now() };
+          const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), deviceId: body.deviceId, deviceName: status.deviceName, updatedAt: now(),
+            realtimeUSB: status.realtimeUSB === true && typeof transport.events === 'function' };
           await appRequest(current.deviceId, 'POST', '/session', Buffer.from(JSON.stringify({ protocol: SCREEN_PROTOCOL })), current.token);
           sessions.set(current.id, current);
-          return json(res, 201, { id: current.id, token: current.token, deviceName: current.deviceName });
+          return json(res, 201, { id: current.id, token: current.token, deviceName: current.deviceName, realtimeUSB: current.realtimeUSB });
         } finally { starting = false; }
       }
       const match = route.match(/^\/__atlas\/ipad-screen\/session\/([a-f0-9-]{36})(\/frame|\/workspace|\/pairing-qr|\/renew)?$/);
@@ -339,7 +381,9 @@ export function createIPadScreenService({ transport, supported = process.platfor
         if (!isCurrent(current)) fail(410, '画面协作已结束');
         const status = await deviceRequest(current, 'PUT', match[2], body);
         if (isCurrent(current)) current.updatedAt = now();
-        publishControls(current, status);
+        // The independent stream owns realtime input/page order. An older HTTP
+        // image reply must not overwrite a newer page switch from that stream.
+        if (!current.realtimeUSB) publishControls(current, status);
         return json(res, 200, status);
       } catch (error) { if (error.status !== 400 && error.status !== 413) void end(current); throw error; }
       finally { current.frameBusy = false; }
@@ -389,7 +433,20 @@ export function createIPadScreenService({ transport, supported = process.platfor
             clearTimeout(authTimer);
             current.socket = connection; current.lastPong = now(); current.lastPing = now();
             connection.on('pong', () => { current.lastPong = now(); });
+            if (current.realtimeUSB) {
+              connection.on('message', (data) => {
+                if (data.length > 128 || !isCurrent(current)) return;
+                try {
+                  if (JSON.parse(data.toString()).frameReady === true && current.tickPending) {
+                    current.tickPending = false; scheduleFrame(current);
+                  }
+                } catch { /* Ignore invalid clock acknowledgements. */ }
+              });
+              current.stopControls = transport.events(current.deviceId, current.token,
+                (value) => publishControls(current, value), () => { void end(current, 'USB 控制连接已断开，请重新连接画面协作。'); });
+            }
             connection.send(JSON.stringify({ ready: true, ...status(current) }));
+            scheduleFrame(current);
           });
         });
       } catch { socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); }
@@ -398,7 +455,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
   };
   middleware.close = () => {
     clearInterval(timer);
-    for (const current of sessions.values()) current.lan?.close();
+    for (const current of sessions.values()) { clearTimeout(current.frameTimer); current.stopControls?.(); current.lan?.close(); }
     sessions.clear();
     for (const [server, upgrade] of attachments) server.off('upgrade', upgrade);
     attachments.clear();

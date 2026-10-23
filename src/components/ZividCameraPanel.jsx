@@ -1657,6 +1657,7 @@ export default function ZividCameraPanel({
   onCaptureProviderChange,
   streamOnly = false,
   onStreamFrame,
+  streamRenderRef,
 }) {
   const enabled = isM70Robot(robot, robotLoadState);
   const viewEnabled = active && enabled;
@@ -2282,11 +2283,12 @@ export default function ZividCameraPanel({
     let backgroundTimer;
     let lastStreamRenderAt = -Infinity;
     const scheduleRender = () => {
+      if (streamOnly && streamRenderRef) return;
       if (streamOnly && document.hidden) backgroundTimer = setTimeout(render, 1000);
       else frameId = requestAnimationFrame(render);
     };
     const render = () => {
-      if (streamOnly && performance.now() - lastStreamRenderAt < 100) {
+      if (streamOnly && !streamRenderRef && performance.now() - lastStreamRenderAt < 100) {
         scheduleRender();
         return;
       }
@@ -2395,10 +2397,12 @@ export default function ZividCameraPanel({
       cancelAnimationFrame(frameId); clearTimeout(backgroundTimer); scheduleRender();
     };
     if (streamOnly) document.addEventListener('visibilitychange', visibility);
+    if (streamRenderRef) streamRenderRef.current = render;
     scheduleRender();
 
     return () => {
       cancelAnimationFrame(frameId); clearTimeout(backgroundTimer);
+      if (streamRenderRef?.current === render) streamRenderRef.current = null;
       if (streamOnly) document.removeEventListener('visibilitychange', visibility);
       onStreamFrameRef.current?.(null);
       resizeObserver.disconnect();
@@ -2426,6 +2430,7 @@ export default function ZividCameraPanel({
     meshRenderQuality,
     settledCameraMeshRegionKey,
     streamOnly,
+    streamRenderRef,
   ]);
 
   if (!active) return null;
