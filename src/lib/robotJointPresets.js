@@ -79,7 +79,7 @@ export function jointPresetErrors(joints, values) {
     const tolerance = 1e-8;
     if ((Number.isFinite(joint.lower) && value < joint.lower - tolerance)
       || (Number.isFinite(joint.upper) && value > joint.upper + tolerance)) {
-      return [[joint.name, '超出关节限位']];
+      return [[joint.name, joint.softLimitRatio ? '超出关节软限位（硬限位中间 95%）' : '超出关节限位']];
     }
     return [];
   }));

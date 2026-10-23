@@ -12,6 +12,7 @@
     "test:model-composition": "node tests/model_composition_smoke.mjs",
     "test:torso": "node tests/torso_control_smoke.mjs",
     "test:robot-presets": "node tests/robot_joint_presets_smoke.mjs",
+    "test:robot-limits": "node tests/robot_joint_limits_smoke.mjs",
     "test:teaching-insert": "node tests/teaching_preset_insertion_smoke.mjs",
     "test:playback": "node tests/teaching_playback_smoke.mjs",
     "test:archive": "node tests/project_archive_smoke.mjs",

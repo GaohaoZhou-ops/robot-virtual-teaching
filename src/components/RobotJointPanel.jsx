@@ -44,8 +44,8 @@ function JointValueRow({ joint, value, locked, onChange, onToggleLock }) {
   const fallbackLower = prismatic ? -1 : -180;
   const fallbackUpper = prismatic ? 1 : 180;
   const currentValue = Number.isFinite(Number(value)) ? Number(value) : 0;
-  const lower = Math.min(explicitLower ?? fallbackLower, currentValue);
-  const upper = Math.max(explicitUpper ?? fallbackUpper, currentValue);
+  const lower = explicitLower ?? Math.min(fallbackLower, currentValue);
+  const upper = explicitUpper ?? Math.max(fallbackUpper, currentValue);
   const step = prismatic ? 0.001 : 0.1;
   const unit = prismatic ? 'm' : '°';
   const [draft, setDraft] = useState(formatValue(currentValue, prismatic));
@@ -86,7 +86,9 @@ function JointValueRow({ joint, value, locked, onChange, onToggleLock }) {
       data-joint-locked={locked ? 'true' : 'false'}
     >
       <div className="joint-value-row__name">
-        <strong title={joint.name}>{joint.name}</strong>
+        <strong title={joint.softLimitRatio
+          ? `${joint.name} · 软限位 ${formatValue(explicitLower, prismatic)} ～ ${formatValue(explicitUpper, prismatic)} ${unit}（硬限位中间 95%）`
+          : joint.name}>{joint.name}</strong>
         <small>{String(joint.type || 'joint').toUpperCase()}</small>
       </div>
       <input

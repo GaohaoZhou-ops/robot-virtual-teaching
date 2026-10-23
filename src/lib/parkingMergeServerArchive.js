@@ -15,7 +15,7 @@ export const PARKING_MERGE_SERVER_JOB_FORMAT = 'atlas-parking-merge-server-job';
 export const PARKING_MERGE_SERVER_RESULT_FORMAT = 'atlas-parking-merge-server-result';
 export const PARKING_MERGE_SERVER_ARCHIVE_VERSION = 1;
 export const PARKING_MERGE_SERVER_ALGORITHM = 'atlas-common-parking-dls-environment';
-export const PARKING_MERGE_SERVER_ALGORITHM_VERSION = '1.0.0';
+export const PARKING_MERGE_SERVER_ALGORITHM_VERSION = '1.1.0';
 
 const MANIFEST_PATH = 'manifest.json';
 const TASK_PATH = 'input/task.json';

@@ -215,6 +215,22 @@ playwright/.auth/
 /screen-viewport-validation/
 /screen-capture-validation.[zZ][iI][pP]
 /screen-viewport-validation.[zZ][iI][pP]
+# Standalone copies of iPad gesture/layout/Pose and robot soft-limit validation.
+# These contain local device captures and session reports; keep nested fixtures visible.
+/ipad-viewport-input-fix/
+/ipad-viewport-framing/
+/ipad-collaboration-layout/
+/ipad-welcome-collaboration/
+/ipad-pose-button-layout/
+/ipad-pose-orientation/
+/robot-soft-limits/
+/ipad-viewport-input-fix.[zZ][iI][pP]
+/ipad-viewport-framing.[zZ][iI][pP]
+/ipad-collaboration-layout.[zZ][iI][pP]
+/ipad-welcome-collaboration.[zZ][iI][pP]
+/ipad-pose-button-layout.[zZ][iI][pP]
+/ipad-pose-orientation.[zZ][iI][pP]
+/robot-soft-limits.[zZ][iI][pP]
 # Grouped topbar/cascading-menu captures and packed review copies from /tmp.
 # Keep the same prefixes in source artwork and nested fixtures trackable.
 /atlas-toolbar-*/

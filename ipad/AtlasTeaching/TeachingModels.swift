@@ -242,7 +242,9 @@ struct TeachingPoseSeed: Codable {
 // calibration segments. Keep the entire captured sample while asking the user.
 struct NearbyPoseConfirmation: Identifiable {
     static let distanceThresholdMeters: Float = 0.10
-    static let angleThresholdDegrees: Double = 5
+    // Manual captures may deliberately scan adjacent views from one position.
+    // Reserve the duplicate reminder for almost unchanged orientations.
+    static let angleThresholdDegrees: Double = 1
     let sample: TeachingSample
     let previousSampleID: String
     let distanceMeters: Float
@@ -267,7 +269,7 @@ struct NearbyPoseConfirmation: Identifiable {
               let previous = normalized(previousSample.cameraPose.quaternion) else { return nil }
         let relative = current * previous.inverse
         let angle = 2 * atan2(simd_length(relative.imag), abs(relative.real)) * 180 / .pi
-        // Serialized Float quaternions can round an exact 5-degree turn down
+        // Serialized Float quaternions can round an exact 1-degree turn down
         // slightly. Treat that boundary as a direct capture, as with 10 cm.
         guard angle.isFinite, angle + 0.0001 < Self.angleThresholdDegrees else { return nil }
         self.sample = sample

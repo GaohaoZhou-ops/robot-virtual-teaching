@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { applyRobotJointValues, getRobotEndEffector, normalizeRobotPose, readRobotJointValues, setRobotJointValue } from './robotLoader.js';
+import { getRobotJointLimits } from './robotJointLimits.js';
 import { mobileCaptureMatrix } from './ipadCaptureDisplay.js';
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
@@ -16,7 +17,7 @@ const plain = (v) => Object.fromEntries(XYZ.map((axis) => [axis, v[axis]]));
 const pause = () => new Promise((resolve) => setTimeout(resolve, 0));
 const abort = (signal) => { if (signal?.aborted) throw new DOMException('计算已取消', 'AbortError'); };
 const TORSO_PITCH_JOINTS = MOBILE_TORSO_PITCH_JOINTS;
-export const MOBILE_SOLVE_VERSION = 10;
+export const MOBILE_SOLVE_VERSION = 11;
 
 export const DEFAULT_MOBILE_SOLVE_OPTIONS = Object.freeze({
   positionTolerance: Object.freeze({ x: 0.05, y: 0.05, z: 0.05 }),
@@ -72,7 +73,7 @@ export function mobileReportSolveOptions(report) {
 }
 
 export function normalizeMobileSolveReport(value) {
-  if (!value || ![1, 2, 3, 4, 5, 6, 7, 8, 9, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
+  if (!value || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, MOBILE_SOLVE_VERSION].includes(value.version) || !Array.isArray(value.rows)) return null;
   try {
     const options = mobileReportSolveOptions(value);
     const validPose = (pose) => XYZ.every((axis) => Number.isFinite(pose?.position?.[axis]))
@@ -234,7 +235,8 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
   const weights = [...XYZ.map((axis) => 0.05 / options.positionTolerance[axis]),
     ...RPY.map((axis) => 0.24 * 5 / options.rotationTolerance[axis])];
   const postureCost = () => joints.reduce((sum, joint) => {
-    const { jointValue: value, jointType, jointLimit = {} } = joint.userData;
+    const { jointValue: value, jointType } = joint.userData;
+    const jointLimit = getRobotJointLimits(joint);
     const linear = jointType === 'prismatic', unit = linear ? 0.5 : Math.PI;
     const reference = linear ? (seed[joint.name] || 0) : rad(seed[joint.name] || 0);
     const origin = linear ? (postureReference[joint.name] || 0) : rad(postureReference[joint.name] || 0);
@@ -289,7 +291,7 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
     if (start > 1) joints.forEach((joint, index) => {
       if (chestJoints.has(joint)) return;
       const wave = Math.sin((index + 1) * (start + 1) * 1.7);
-      const { lower, upper } = joint.userData.jointLimit || {};
+      const { lower, upper } = getRobotJointLimits(joint);
       const amount = (joint.userData.jointType === 'prismatic' ? 0.06 : 0.9) * wave;
       setRobotJointValue(joint, start >= 5 && Number.isFinite(lower) && Number.isFinite(upper)
         ? lower + (upper - lower) * (0.5 + 0.4 * wave) : joint.userData.jointValue + amount);
@@ -327,7 +329,7 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
           ? axis.clone().cross(state.up).multiplyScalar(2).toArray() : [0, 0, 0]));
         if (avoidBody) {
           const before = joint.userData.jointValue, epsilon = prismatic ? 1e-5 : 1e-4;
-          const direction = before + epsilon > (joint.userData.jointLimit?.upper ?? Infinity) ? -1 : 1;
+          const direction = before + epsilon > getRobotJointLimits(joint).upper ? -1 : 1;
           setRobotJointValue(joint, before + direction * epsilon);
           const moved = joint.userData.jointValue - before;
           const clearance = collisionChecker.measurePostureClearance(preferredClearance);
@@ -351,7 +353,7 @@ async function solveTargets({ goals, chest, options, locked, baseline, postureRe
           if (!values) break;
           step = joints.map(() => 0); active.forEach((i, k) => { step[i] = values[k]; });
           const free = active.filter((i) => {
-            const { lower, upper } = joints[i].userData.jointLimit || {};
+            const { lower, upper } = getRobotJointLimits(joints[i]);
             return !((before[i] <= lower + 1e-8 && step[i] < 0) || (before[i] >= upper - 1e-8 && step[i] > 0));
           });
           if (free.length === active.length) break;

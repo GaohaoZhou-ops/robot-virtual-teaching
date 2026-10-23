@@ -17,7 +17,7 @@ const unitLabel = (joint, unit) => joint.type === 'prismatic' ? 'm' : unit === '
 function limitLabel(joint, unit) {
   const format = (value, fallback) => Number.isFinite(value)
     ? String(Number(jointValueToInput(value, joint, unit).toFixed(4))) : fallback;
-  return `${format(joint.lower, '−∞')} ～ ${format(joint.upper, '+∞')} ${unitLabel(joint, unit)}`;
+  return `${joint.softLimitRatio ? '软限位 ' : ''}${format(joint.lower, '−∞')} ～ ${format(joint.upper, '+∞')} ${unitLabel(joint, unit)}`;
 }
 
 export default function RobotPresetDialog({ snapshot, currentJointValues = snapshot.values, onSave, onClose, returnFocusRef }) {

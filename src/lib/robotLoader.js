@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { ARM_SOFT_LIMIT_RATIO, getRobotJointLimits } from './robotJointLimits.js';
 
 const ROBOT_FILE_PREFIX = '/__atlas/robot-files/';
 const SUPPORTED_FORMATS = new Set(['urdf', 'glb', 'gltf', 'stl']);
@@ -706,8 +707,12 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
     );
     const axisLength = Math.hypot(...axis);
     const limitElement = childElement(jointElement, 'limit');
-    const lower = Number(limitElement?.getAttribute('lower'));
-    const upper = Number(limitElement?.getAttribute('upper'));
+    const parseLimit = (name) => {
+      const value = limitElement?.getAttribute(name);
+      return value == null || value.trim() === '' ? NaN : Number(value);
+    };
+    const lower = parseLimit('lower');
+    const upper = parseLimit('upper');
     joint.userData.jointAxis = axisLength > 1e-12
       ? axis.map((value) => value / axisLength)
       : [0, 0, 1];
@@ -718,6 +723,7 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
     joint.userData.restPosition = joint.position.toArray();
     joint.userData.restQuaternion = joint.quaternion.toArray();
     joint.userData.jointValue = 0;
+    setRobotJointValue(joint, 0);
     joint.add(childLink);
     parentLink.add(joint);
     childLinkNames.add(childName);
@@ -742,7 +748,7 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
     const joint = name ? robot.getObjectByName(name) : null;
     const type = joint?.userData?.jointType;
     if (!joint || !['revolute', 'continuous', 'prismatic'].includes(type)) return [];
-    const rawLimit = joint.userData.jointLimit || {};
+    const limit = getRobotJointLimits(joint);
     const convertLimit = (value) => {
       if (!Number.isFinite(value)) return null;
       return type === 'prismatic' ? value : THREE.MathUtils.radToDeg(value);
@@ -751,8 +757,11 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
       name,
       type,
       unit: type === 'prismatic' ? 'meter' : 'degree',
-      lower: convertLimit(rawLimit.lower),
-      upper: convertLimit(rawLimit.upper),
+      lower: convertLimit(limit.lower),
+      upper: convertLimit(limit.upper),
+      hardLower: convertLimit(limit.hardLower),
+      hardUpper: convertLimit(limit.hardUpper),
+      softLimitRatio: limit.softLimited ? ARM_SOFT_LIMIT_RATIO : null,
       axis: [...(joint.userData.jointAxis || [0, 0, 1])],
     }];
   });
@@ -872,7 +881,7 @@ const movableJointTypes = new Set(['revolute', 'continuous', 'prismatic']);
 
 export const setRobotJointValue = (joint, rawValue) => {
   if (!joint || !movableJointTypes.has(joint.userData?.jointType)) return 0;
-  const limit = joint.userData.jointLimit || {};
+  const limit = getRobotJointLimits(joint);
   const value = THREE.MathUtils.clamp(
     Number(rawValue) || 0,
     Number.isFinite(limit.lower) ? limit.lower : Number.NEGATIVE_INFINITY,

@@ -42,7 +42,8 @@ JOB_FORMAT = "atlas-parking-merge-server-job"
 RESULT_FORMAT = "atlas-parking-merge-server-result"
 ARCHIVE_VERSION = 1
 ALGORITHM_ID = "atlas-common-parking-dls-environment"
-ALGORITHM_VERSION = "1.0.0"
+ALGORITHM_VERSION = "1.1.0"
+ARM_SOFT_LIMIT_RATIO = 0.95
 CHASSIS_PATTERN = re.compile(
     r"(?:^base(?:[_-]|$)|(?:^|[_-])(?:chassis|wheel|caster|mecanum)(?:[_-]|$)|(?:mobile|robot)[_-]base)",
     re.IGNORECASE,
@@ -335,8 +336,14 @@ class RobotModel:
             upper = finite(limit.get("upper"), math.inf) if limit is not None else math.inf
             if kind == "continuous":
                 lower, upper = -math.inf, math.inf
+            name = node.get("name", f"joint-{len(self.joints)}")
+            # Match robotJointLimits.js: central 95% of each arm's hard range.
+            if (kind == "revolute" and re.fullmatch(r"(?:left|right)[_-]J\d+", name, re.IGNORECASE)
+                    and math.isfinite(lower) and math.isfinite(upper) and upper > lower):
+                margin = (upper - lower) * (1 - ARM_SOFT_LIMIT_RATIO) / 2
+                lower, upper = lower + margin, upper - margin
             joint = Joint(
-                name=node.get("name", f"joint-{len(self.joints)}"),
+                name=name,
                 kind=kind,
                 parent=parent.get("link", ""),
                 child=child.get("link", ""),

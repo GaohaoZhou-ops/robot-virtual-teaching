@@ -3089,6 +3089,11 @@ export default function PointCloudViewer({
     const appliedValues = applyRobotJointStateToScene(robotJointValues, 'external-control');
     if (loadedRobotRef.current) {
       robotJointValuesRef.current = appliedValues;
+      // Applying an older saved pose may clamp it to today's operating limits.
+      // Publish the actual pose so the controls, iPad and new captures agree.
+      if (!sameNumericValues(normalizeRobotJointValues(robotJointValues), appliedValues)) {
+        onRobotJointValuesChangeRef.current?.(appliedValues);
+      }
       reportZividCameraPoses(true);
       const active = endEffectorControlRef.current;
       if (changed && active?.side === 'torso') {
@@ -4683,11 +4688,17 @@ export default function PointCloudViewer({
     const captureCollaborationViewport = (target) => {
       if (renderer.getContext().isContextLost()) return false;
       renderer.render(scene, camera);
-      const source = renderer.domElement, context = target.getContext('2d');
-      const scale = Math.min(target.width / source.width, target.height / source.height);
+      const source = renderer.domElement;
+      if (!source.width || !source.height) return false;
+      // Keep the source aspect ratio instead of baking colored bars into the
+      // shared image. Use fixed bounds so resizing never shrinks it repeatedly.
+      const scale = Math.min(960 / source.width, 600 / source.height);
+      const width = Math.max(1, Math.round(source.width * scale));
+      const height = Math.max(1, Math.round(source.height * scale));
+      if (target.width !== width || target.height !== height) { target.width = width; target.height = height; }
+      const context = target.getContext('2d');
       context.fillStyle = '#071119'; context.fillRect(0, 0, target.width, target.height);
-      context.drawImage(source, (target.width - source.width * scale) / 2, (target.height - source.height * scale) / 2,
-        source.width * scale, source.height * scale);
+      context.drawImage(source, 0, 0, width, height);
       return true;
     };
     const collaborationViewport = {

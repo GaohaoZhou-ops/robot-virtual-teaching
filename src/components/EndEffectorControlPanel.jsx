@@ -309,7 +309,7 @@ export default function EndEffectorControlPanel({
             ? '本体锁定：关节角保持不变 · Esc 取消调整'
             : mapLocked
               ? '全局锁定：地图 XYZ / RPY 保持不变 · Esc 取消调整'
-              : 'Ctrl+Z 撤销拖拽 · Esc 取消本次调整'}
+              : null}
         </span>
         <div className="end-effector-panel__actions">
           <button type="button" disabled={locked || control.dragging} onClick={onReset}>
