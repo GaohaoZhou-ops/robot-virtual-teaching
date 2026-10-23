@@ -6,6 +6,8 @@
 .ipad-nav-title { display: flex; align-items: center; gap: 10px; margin: 0 5px 4px; padding: 10px 5px; border-bottom: 1px solid var(--line); color: var(--cyan); font-size: 11px; }
 .ipad-nav-menu, .ipad-nav-submenu { position: fixed; z-index: 390; padding: 5px; border: 1px solid #59dbe84d; background: #071114fc; box-shadow: 0 18px 48px #0009; backdrop-filter: blur(16px); outline: none; }
 .ipad-nav-menu { width: min(232px, calc(100vw - 16px)); }
+.ipad-teaching-action[data-submenu-side="left"] > svg:last-child,
+.ipad-nav-menu[data-side="left"] > button[aria-haspopup="menu"] > svg:last-child { transform: rotate(180deg); }
 .ipad-nav-submenu { position: absolute; width: min(310px, calc(100vw - 16px)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #294247 transparent; }
 .ipad-nav-menu button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; padding: 10px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; text-align: left; }
 .ipad-nav-menu button > span:not(.ipad-nav-pending) { display: grid; flex: 1; min-width: 0; gap: 4px; }

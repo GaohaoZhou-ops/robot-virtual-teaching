@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown, LoaderCircle } from 'lucide-react';
+import { WorkbenchMenuContext } from './WorkbenchMenuContext.js';
 import './WorkbenchToolbar.css';
 
 export default function WorkbenchToolbar({ sections, isActive = true, children }) {
@@ -10,14 +11,17 @@ export default function WorkbenchToolbar({ sections, isActive = true, children }
   const panelsRef = useRef(new Map());
   const focusEdgeRef = useRef('first');
   const [openId, setOpenId] = useState(null);
+  const [submenuId, setSubmenuId] = useState(null);
   const [position, setPosition] = useState({});
 
   const close = (restoreFocus = false) => {
     if (restoreFocus) triggersRef.current.get(openId)?.focus();
     setOpenId(null);
+    setSubmenuId(null);
   };
   const open = (id, edge = 'first') => {
     focusEdgeRef.current = edge;
+    setSubmenuId(null);
     setOpenId(id);
   };
   const moveSection = (id, direction, focusMenu) => {
@@ -67,8 +71,10 @@ export default function WorkbenchToolbar({ sections, isActive = true, children }
   useEffect(() => {
     if (!openId) return undefined;
     const outside = (event) => {
+      const owner = event.target.closest('[data-workbench-menu-owner]')?.dataset.workbenchMenuOwner;
       if (!toolbarRef.current?.contains(event.target)
-        && !panelsRef.current.get(openId)?.contains(event.target)) setOpenId(null);
+        && !panelsRef.current.get(openId)?.contains(event.target)
+        && owner !== panelsRef.current.get(openId)?.id) close();
     };
     document.addEventListener('pointerdown', outside, true);
     return () => document.removeEventListener('pointerdown', outside, true);
@@ -153,12 +159,21 @@ export default function WorkbenchToolbar({ sections, isActive = true, children }
           hidden={!isActive || openId !== id}
           style={position}
           onKeyDown={(event) => onPanelKeyDown(event, id)}
+          onPointerMove={(event) => {
+            const button = event.target.closest('button');
+            if (event.pointerType === 'mouse' && button && event.currentTarget.contains(button)
+              && !button.hasAttribute('data-workbench-submenu-trigger')) setSubmenuId(null);
+          }}
           onClickCapture={(event) => {
             const button = event.target.closest('button');
-            if (button && !button.disabled && event.currentTarget.contains(button)) close(true);
+            if (button && !button.disabled && event.currentTarget.contains(button)
+              && !button.hasAttribute('data-workbench-submenu-trigger')) close(true);
           }}
         >
-          {content}
+          <WorkbenchMenuContext.Provider value={{ isOpen: isActive && openId === id,
+            ownerId: `${menuId}-${id}`, submenuId, setSubmenuId, close }}>
+            {content}
+          </WorkbenchMenuContext.Provider>
         </div>, document.body, id,
       ))}
     </nav>

@@ -72,6 +72,7 @@
 }
 
 .workbench-menu-panel .action-button:hover:not(:disabled),
+.workbench-menu-panel .action-button[aria-expanded="true"],
 .workbench-menu-panel .action-button:focus-visible {
   border-color: #59dbe833;
   color: #dcf8f3;

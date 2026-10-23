@@ -1579,6 +1579,7 @@ export default function PointCloudViewer({
   selectedMobilePose = null,
   spaceMouseInputRef,
   viewportCanvasRef,
+  collaborationViewportRef,
   cameraTeachingCommand,
   collisionProtectionEnabled = true,
   ignoredCollisionJointNames = [],
@@ -4676,6 +4677,19 @@ export default function PointCloudViewer({
         pixelStep,
       };
     };
+    // Capture synchronously after rendering, before WebGL discards its buffer.
+    // This also refreshes the scene when the workbench's animation loop is hidden.
+    const captureCollaborationViewport = (target) => {
+      if (renderer.getContext().isContextLost()) return false;
+      renderer.render(scene, camera);
+      const source = renderer.domElement, context = target.getContext('2d');
+      const scale = Math.min(target.width / source.width, target.height / source.height);
+      context.fillStyle = '#071119'; context.fillRect(0, 0, target.width, target.height);
+      context.drawImage(source, (target.width - source.width * scale) / 2, (target.height - source.height * scale) / 2,
+        source.width * scale, source.height * scale);
+      return true;
+    };
+    if (collaborationViewportRef) collaborationViewportRef.current = captureCollaborationViewport;
     renderer.setAnimationLoop(() => {
       const deltaSeconds = Math.min(frameClock.getDelta(), 0.05);
       if (!renderActiveRef.current) return;
@@ -5418,6 +5432,7 @@ export default function PointCloudViewer({
 
     return () => {
       renderer.setAnimationLoop(null);
+      if (collaborationViewportRef?.current === captureCollaborationViewport) collaborationViewportRef.current = null;
       if (pendingWheelArbitrationTimer) {
         window.clearTimeout(pendingWheelArbitrationTimer);
         pendingWheelArbitrationTimer = null;

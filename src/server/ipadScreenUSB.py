@@ -61,7 +61,7 @@ def request(command):
             raise ConnectionError('Open the updated Atlas app on the device')
         body = base64.b64decode(command.get('body', ''), validate=True)
         method, path = command['method'], command['path']
-        if method not in ('GET', 'POST', 'PUT', 'DELETE') or path not in ('/status', '/session', '/frame'):
+        if method not in ('GET', 'POST', 'PUT', 'DELETE') or path not in ('/status', '/session', '/frame', '/heartbeat', '/workspace'):
             raise ValueError('Invalid app endpoint')
         token = command.get('token', '')
         if len(body) > MAX_FRAME or any(c not in 'abcdef0123456789' for c in token):

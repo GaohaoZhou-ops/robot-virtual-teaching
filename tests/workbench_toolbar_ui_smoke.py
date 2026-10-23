@@ -69,14 +69,23 @@ def run():
                     topbar_action(page, device, exact=True).click()
                     mobile = page.get_by_role('menu', name=device, exact=True)
                     expect(mobile).to_be_visible()
-                    expect(page.locator('.workbench-menu-panel:visible')).to_have_count(0)
-                    page.keyboard.press('ArrowDown')
+                    devices = page.get_by_role('dialog', name='设备菜单', exact=True)
+                    expect(devices).to_be_visible()
+                    expect(devices.get_by_role('button', name=device, exact=True)).to_have_attribute('aria-expanded', 'true')
+                    page.keyboard.press('Home')
+                    if device == 'iPad / iPhone':
+                        page.keyboard.press('ArrowDown')
                     expect(mobile.get_by_role('menuitem', name='示教来源')).to_be_focused()
                     page.keyboard.press('ArrowRight')
                     expect(page.get_by_role('menuitemradio', name='查看独立示教')).to_be_focused()
+                    expect(devices).to_be_visible()
+                    parent_box, child_box = devices.bounding_box(), mobile.bounding_box()
+                    assert child_box['x'] + child_box['width'] <= parent_box['x'] or child_box['x'] >= parent_box['x'] + parent_box['width']
                     page.keyboard.press('Escape')
                     page.keyboard.press('Escape')
                     expect(mobile).to_have_count(0)
+                    expect(devices.get_by_role('button', name=device, exact=True)).to_be_focused()
+                    page.keyboard.press('Escape')
                     expect(toolbar.get_by_role('button', name='设备菜单')).to_be_focused()
 
                 # Pairing failures still retain the selected device and its recovery path.

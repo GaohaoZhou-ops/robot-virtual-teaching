@@ -1,5 +1,7 @@
 """Explicit live-device test; uses an isolated browser and disposable fixture."""
 import os
+import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -10,13 +12,23 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:21992')
 
 
+def native_status(device_id):
+    command = {'action': 'request', 'deviceId': device_id, 'method': 'GET', 'path': '/status'}
+    result = subprocess.run([sys.executable, str(ROOT / 'src/server/ipadScreenUSB.py')],
+                            input=json.dumps(command) + '\n', text=True, capture_output=True, timeout=8, check=True)
+    reply = json.loads(result.stdout)
+    assert reply.get('value', {}).get('status') == 200, reply
+    return reply['value']['body']
+
+
 def run():
     if os.environ.get('ATLAS_SCREEN_LIVE') != '1':
         raise SystemExit('Set ATLAS_SCREEN_LIVE=1 with an unlocked USB device running Atlas.')
     output = ROOT / 'build/ipad-screen-test'
     output.mkdir(parents=True, exist_ok=True)
     native_stop = os.environ.get('ATLAS_SCREEN_NATIVE_STOP') == '1'
-    errors, frames = [], []
+    joint_control = os.environ.get('ATLAS_SCREEN_JOINTS') == '1'
+    errors, frames, sessions = [], [], []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, executable_path=os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE') or None,
                                     args=['--use-angle=metal', '--enable-gpu'] if sys.platform == 'darwin' else [])
@@ -26,6 +38,15 @@ def run():
           const original = window.fetch;
           window.__screenSpy = { count: 0 };
           window.fetch = async (url, options) => {
+            if (String(url).endsWith('/workspace') && options?.body instanceof Blob) {
+              const data = await options.body.arrayBuffer(), view = new DataView(data), size = view.getUint32(0);
+              window.__screenSpy.joints = JSON.parse(new TextDecoder().decode(new Uint8Array(data, 8, size)));
+              if (view.getUint32(4)) {
+                let hash = 2166136261;
+                for (const byte of new Uint8Array(data, 8 + size)) hash = Math.imul(hash ^ byte, 16777619) >>> 0;
+                window.__screenSpy.viewportHash = hash;
+              }
+            }
             if (String(url).endsWith('/frame') && options?.body instanceof Blob) {
               const data = await options.body.arrayBuffer(), bytes = new Uint8Array(data);
               let hash = 2166136261;
@@ -48,6 +69,7 @@ def run():
         })()''')
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.on('response', lambda response: frames.append(response.status) if '/ipad-screen/session/' in response.url and response.url.endswith('/frame') else None)
+        page.on('response', lambda response: sessions.append(response.status) if response.url.endswith('/ipad-screen/session') and response.request.method == 'POST' else None)
         def save_pair(request):
             if request.url.endswith('/frame') and request.post_data_buffer is not None and not (output / 'pair.bin').exists():
                 (output / 'pair.bin').write_bytes(request.post_data_buffer)
@@ -56,6 +78,7 @@ def run():
         while True:
             devices = page.request.get(BASE + '/__atlas/ipad-screen/devices').json().get('devices', [])
             if any(device.get('ready') for device in devices):
+                device_id = next(device['id'] for device in devices if device.get('ready'))
                 break
             if time.monotonic() > deadline:
                 raise AssertionError(f'No foreground Atlas App on USB: {devices}')
@@ -96,7 +119,70 @@ def run():
         page.screenshot(path=str(output / 'desktop-streaming.png'))
         print(f'STREAM_READY {len(frames)} USB frames acknowledged; screenshot: {output}', flush=True)
         ready = output / 'stream-ready'; ready.write_text('ready')
+        if joint_control:
+            page.get_by_role('button', name='打开全关节浮动窗口').click()
+            arm_joint = page.get_by_role('spinbutton', name='left_J1 关节值', exact=True)
+            arm_joint.fill('12'); arm_joint.press('Enter')
+            page.wait_for_function("window.__screenSpy.joints?.joints.some(j => j.name === 'left_J1' && j.value === 12)")
+            viewport_hash = page.evaluate('window.__screenSpy.viewportHash')
+            # XCTest selects the joint page and drags the actual native Slider.
+            page.wait_for_function("Number(document.querySelector('.joint-value-row[data-joint-name=left_J1]')?.dataset.jointValue) !== 12", timeout=90000)
+            moved, previous, settled = None, None, time.monotonic()
+            deadline = time.monotonic() + 20
+            while True:
+                moved = float(page.locator('.joint-value-row[data-joint-name="left_J1"]').get_attribute('data-joint-value'))
+                status = native_status(device_id)
+                state = (moved, status['controlAck'], status['pendingControls'])
+                if state != previous: previous, settled = state, time.monotonic()
+                if status['controlAck'] > 0 and status['pendingControls'] == 0 and time.monotonic() - settled > 0.8:
+                    assert abs(status['jointValues']['left_J1'] - moved) < 0.001, (status, moved)
+                    assert status['controlPage'] == 'joints' and status['viewportFrames'] > 1, status
+                    break
+                assert time.monotonic() < deadline, status
+                page.wait_for_timeout(150)
+            page.wait_for_function('(old) => window.__screenSpy.viewportHash !== old', arg=viewport_hash)
+            print(f'JOINT_CONTROL_ACKNOWLEDGED left_J1={moved}; 3D viewport updated', flush=True)
+            arm_joint.fill('24'); arm_joint.press('Enter')
+            page.get_by_role('button', name='关闭全关节浮动窗口').click()
         if not native_stop:
+            # Simulate a hidden workbench, then pause its JS execution. An active
+            # WebSocket can exempt a tab from Chrome's normal lifecycle freezing.
+            # The browser network stack must retain the USB session beyond both
+            # the original 8-second server and 10-second native frame deadlines.
+            page.evaluate('''() => {
+              Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+              document.dispatchEvent(new Event('visibilitychange'));
+            }''')
+            page.wait_for_timeout(2500)
+            expect(page.get_by_role('button', name='结束画面协作', exact=True)).to_be_visible()
+            client = page.context.new_cdp_session(page)
+            client.send('Debugger.enable')
+            client.send('Debugger.pause')
+            try:
+                time.sleep(3)
+                paused = native_status(device_id)
+                time.sleep(11)
+                retained = native_status(device_id)
+                assert retained['active'] and retained['stale'], f'iPad must wait for frames without ending: {retained}'
+                assert retained['receivedFrames'] == paused['receivedFrames'], 'heartbeat must not replace the retained camera frames'
+                assert retained['width'] == 960 and retained['height'] == 600, retained
+                devices = page.request.get(BASE + '/__atlas/ipad-screen/devices').json()['devices']
+                assert any(device.get('active') for device in devices), f'suspended workbench lost USB session: {devices}'
+            finally:
+                client.send('Debugger.resume')
+                client.send('Debugger.disable')
+                page.evaluate('''() => {
+                  delete document.hidden;
+                  document.dispatchEvent(new Event('visibilitychange'));
+                }''')
+                client.detach()
+            before = len(frames)
+            deadline = time.monotonic() + 15
+            while len(frames) <= before + 2 and time.monotonic() < deadline:
+                page.wait_for_timeout(200)
+            assert len(frames) > before + 2, 'frame delivery must resume without clicking Start'
+            assert sessions == [201], f'background/resume must preserve the same session: {sessions}'
+            assert all(code == 200 for code in frames), frames
             old_hash = page.evaluate('window.__screenSpy.hash')
             page.get_by_role('button', name='打开全关节浮动窗口').click()
             # Choose an actual arm joint, leaving the base and fixture unchanged.
@@ -108,17 +194,35 @@ def run():
         if hold:
             deadline = time.monotonic() + hold
             while time.monotonic() < deadline and not (output / 'finish').exists():
-                if native_stop and 410 in frames:
+                if native_stop and page.locator('.ipad-screen-renderer').count() == 0:
                     break
                 page.wait_for_timeout(500)
         if native_stop:
-            assert 410 in frames, 'device-side stop must reach the desktop sender'
+            expect(page.locator('.ipad-screen-renderer')).to_have_count(0)
+            expect(page.get_by_role('alert').filter(has_text='协作')).to_be_visible()
         if page.get_by_role('button', name='结束画面协作', exact=True).count():
             page.get_by_role('button', name='结束画面协作', exact=True).click()
         expect(page.locator('.ipad-screen-renderer')).to_have_count(0)
+        if not native_stop:
+            # An actual page close must release the device, even with keepalive enabled.
+            topbar_action(page, name='iPad / iPhone', exact=True).click()
+            page.get_by_role('menuitem', name='画面协作', exact=True).click()
+            expect(page.get_by_text('正在共享双臂画面', exact=True)).to_be_visible()
+            page.close()
+            deadline = time.monotonic() + 10
+            while native_status(device_id)['active']:
+                assert time.monotonic() < deadline, 'closing the workbench must stop device collaboration'
+                time.sleep(0.2)
         assert not errors, errors
         browser.close()
-        print('iPad screen live UI passed: menu, auto-connect, dual rendering, background inspector, acknowledgement and stop.', flush=True)
+        checks = ['menu', 'dual rendering']
+        if joint_control:
+            checks.extend(['native joint drag', 'bidirectional joint values', '3D viewport update'])
+        if native_stop:
+            checks.append('native stop')
+        else:
+            checks.extend(['hidden/suspended workbench', 'native retained frames', 'automatic resume', 'same session', 'explicit stop', 'tab close'])
+        print('iPad screen live UI passed: ' + ', '.join(checks) + '.', flush=True)
 
 
 if __name__ == '__main__':

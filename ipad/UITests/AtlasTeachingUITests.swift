@@ -7,6 +7,44 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    /// Run alongside the desktop fixture with ATLAS_SCREEN_JOINTS=1.
+    func testLiveScreenJointControl() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_LIVE"] == "1" else {
+            throw XCTSkip("Set TEST_RUNNER_ATLAS_SCREEN_LIVE=1 and run the desktop USB joint fixture")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        print("ATLAS_SCREEN_WAITING_FOR_DESKTOP")
+        let stop = app.buttons["screen-collaboration-stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 150))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
+        let viewport = app.images["screen-robot-viewport"]
+        XCTAssertTrue(viewport.waitForExistence(timeout: 30))
+        app.buttons["screen-joint-group-左机械臂"].tap()
+        let slider = app.sliders["screen-joint-left_J1"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 15))
+        let value = app.staticTexts["screen-joint-value-left_J1"]
+        let macUpdate = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "12.0 °"), object: value)
+        XCTAssertEqual(XCTWaiter.wait(for: [macUpdate], timeout: 30), .completed)
+        XCTAssertTrue(slider.isEnabled)
+        slider.adjust(toNormalizedSliderPosition: 0.81)
+        XCTAssertNotEqual(value.label, "12.0 °")
+        let secondMacUpdate = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "24.0 °"), object: value)
+        XCTAssertEqual(XCTWaiter.wait(for: [secondMacUpdate], timeout: 30), .completed)
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(slider.isHittable)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(viewport.frame))
+            XCTAssertGreaterThan(viewport.frame.height, 100)
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "USB joint control - \(orientation.rawValue)"; capture.lifetime = .keepAlways; add(capture)
+        }
+        app.segmentedControls["screen-page-tabs"].buttons["相机画面"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["screen-camera-left"].firstMatch.waitForExistence(timeout: 10))
+        stop.tap(); XCTAssertTrue(stop.waitForNonExistence(timeout: 10))
+    }
+
     /// Start the desktop live-screen fixture while this test waits for USB.
     func testLiveScreenCollaboration() throws {
         guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_LIVE"] == "1" else {
