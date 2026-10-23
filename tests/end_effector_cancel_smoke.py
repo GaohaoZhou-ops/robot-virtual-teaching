@@ -139,6 +139,7 @@ def run():
         move_x(page, canvas)
         adjusted = state(canvas)
         page.screenshot(path="/tmp/atlas-end-effector-escape-hint.png", full_page=True)
+        page.get_by_role("tab", name="示教", exact=True).click()
         page.get_by_role("button", name="新建示教任务", exact=True).click()
         dialog = page.get_by_role("dialog", name="新建示教任务", exact=True)
         dialog.get_by_role("textbox").first.focus()

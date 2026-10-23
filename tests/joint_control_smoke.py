@@ -259,7 +259,10 @@ def run():
 
         left_pose_before = csv_vector(canvas, "data-zivid-left-optical-position")
         joints_before_camera_move = scene_joint_values(page)
-        camera_teach.get_by_role("button", name="左臂相机靠近").click()
+        # At the zero pose the arm is fully extended: moving farther along
+        # optical +Z is unreachable. Test motion toward the reachable interior;
+        # the IK regression separately checks that outward requests stop safely.
+        camera_teach.get_by_role("button", name="左臂相机远离").click()
         page.wait_for_function(
             """
             () => {
@@ -273,7 +276,7 @@ def run():
             "['tracking', 'limited'].includes(document.querySelector('[aria-label=\"相机视角反算示教\"]')?.dataset.cameraTeachingStatus)"
         )
         assert canvas.get_attribute("data-camera-teaching-side") == "left"
-        assert canvas.get_attribute("data-camera-teaching-action") == "near"
+        assert canvas.get_attribute("data-camera-teaching-action") == "far"
         assert canvas.get_attribute("data-camera-teaching-ik-status") in {"tracking", "limited"}
         left_pose_after = csv_vector(canvas, "data-zivid-left-optical-position")
         joints_after_camera_move = scene_joint_values(page)
