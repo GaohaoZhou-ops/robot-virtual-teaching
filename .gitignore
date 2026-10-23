@@ -268,6 +268,16 @@ playwright/.auth/
 /tests/atlas-toolbar-*/
 /atlas-toolbar-*.[zZ][iI][pP]
 /tests/atlas-toolbar-*.[zZ][iI][pP]
+# Menu/preset layout review copies from build/menu-review/, including captures
+# and the previous service index. Keep source artwork and nested fixtures visible.
+/menu-review/
+/tests/menu-review/
+/menu-review.[zZ][iI][pP]
+/tests/menu-review.[zZ][iI][pP]
+/preset-manager-*.png
+/tests/preset-manager-*.png
+/robot-menu-*.png
+/tests/robot-menu-*.png
 # Grouped inspector layout / button-size captures and packed review copies.
 # Scope these to local output roots; source artwork and fixtures stay visible.
 /atlas-inspector-*/

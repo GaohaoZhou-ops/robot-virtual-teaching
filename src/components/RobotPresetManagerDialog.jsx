@@ -111,7 +111,7 @@ export default function RobotPresetManagerDialog({
             <Plus size={14} />新建预设姿态
           </button>
         </div>
-        <div className="robot-preset-dialog__body robot-preset-manager__body">
+        <div className="robot-preset-manager__body">
           {!poses.length ? <div className="robot-preset-manager__empty">
             <List size={30} /><strong>暂无预设姿态</strong>
             <p>{canEdit ? '点击“新建预设姿态”，保存常用的关节姿态。' : '请先加载机器人，再创建预设姿态。'}</p>
