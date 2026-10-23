@@ -558,6 +558,7 @@ export default function App() {
   const teachingPlaybackRuntimeRef = useRef(null);
   const spaceMouseInputRef = useRef(createSpaceMouseInputState());
   const main3DCanvasRef = useRef(null);
+  const collaborationViewportRef = useRef(null);
   const [appPage, setAppPage] = useState(appPageFromLocation);
   const [startPageMode, setStartPageMode] = useState(null);
   const [workspaceTransfer, setWorkspaceTransfer] = useState(null);
@@ -6773,6 +6774,7 @@ export default function App() {
                 selectedMobilePose={selectedMobilePose}
                 spaceMouseInputRef={spaceMouseInputRef}
                 viewportCanvasRef={main3DCanvasRef}
+                collaborationViewportRef={collaborationViewportRef}
                 cameraTeachingCommand={cameraTeachingCommand}
                 collisionProtectionEnabled={robotCollisionProtectionEnabled}
                 ignoredCollisionJointNames={ignoredRobotCollisionJointNames}
@@ -7219,7 +7221,10 @@ export default function App() {
       onClose={() => setMobileSolveTaskId(null)} onCalculate={calculateMobileTeaching}
       onApply={applyMobileTeachingSolution} onSave={saveMobileTeachingSolutions} onPlay={playMobileTeachingSolutions} />}
     {appPage === APP_PAGE_WORKBENCH && <IPadScreenCollaboration open={ipadScreenOpen} onClose={() => setIPadScreenOpen(false)}
-      mapData={mapData} robot={selectedRobot} robotLoadState={robotLoadState} cameraPoses={zividCameraPoses} meshRenderQuality={meshRenderQuality} />}
+      mapData={mapData} robot={selectedRobot} robotLoadState={robotLoadState} cameraPoses={zividCameraPoses} meshRenderQuality={meshRenderQuality}
+      jointValues={robotJointValues} onChangeJoint={updateRobotJointValue} viewportCaptureRef={collaborationViewportRef}
+      controlBlockedReason={['playing', 'paused'].includes(teachingPlayback.status) ? '请先在 Mac 结束轨迹播放，再调整关节。'
+        : teachingCaptureState.status === 'capturing' ? '正在记录 Pose，请稍候。' : ''} />}
     {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog

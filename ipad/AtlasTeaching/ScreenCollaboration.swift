@@ -6,6 +6,43 @@ import ImageIO
 private let screenProtocol = "atlas-ipad-screen/1"
 private let screenAccent = Color(red: 0.35, green: 0.86, blue: 0.91)
 
+struct ScreenJoint: Decodable, Identifiable, Equatable {
+    let name: String
+    let group: String
+    let lower: Double
+    let upper: Double
+    let step: Double
+    let unit: String
+    let value: Double
+    var id: String { name }
+    func formatted(_ value: Double) -> String { String(format: unit == "m" ? "%.3f" : "%.1f", value) }
+}
+
+struct ScreenJointState: Decodable, Equatable {
+    let robotId: String
+    let robotName: String
+    let editable: Bool
+    let reason: String
+    let ack: Int
+    let joints: [ScreenJoint]
+    var valid: Bool {
+        !robotId.isEmpty && robotId.count <= 256 && robotName.count <= 256 && reason.count <= 256 && ack >= 0
+        && joints.count <= 128 && Set(joints.map(\.name)).count == joints.count
+        && joints.allSatisfy { joint in
+            !joint.name.isEmpty && joint.name.count <= 128 && joint.group.count <= 64 && ["m", "°"].contains(joint.unit)
+            && [joint.lower, joint.upper, joint.step, joint.value].allSatisfy { $0.isFinite && abs($0) <= 1e7 }
+            && joint.lower <= joint.upper && joint.step > 0
+        }
+    }
+}
+
+private struct ScreenJointCommand {
+    let sequence: Int
+    let name: String
+    let value: Double
+    let created: Date
+}
+
 private struct ScreenCollaborationActiveKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -24,13 +61,52 @@ final class ScreenCollaboration: ObservableObject {
     @Published private(set) var stale = true
     @Published private(set) var left: UIImage?
     @Published private(set) var right: UIImage?
+    @Published private(set) var workspace: ScreenJointState?
+    @Published private(set) var viewport: UIImage?
+    @Published private(set) var controlsStale = true
+    @Published private(set) var controlMessage = ""
+    @Published private var pending: [String: ScreenJointCommand] = [:]
+    @Published var page = "cameras"
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
     private var token = ""
     private var lastFrame = Date.distantPast
+    private var lastContact = Date.distantPast
     private var timer: Timer?
     private var receivedFrames = 0
     private var previousIdleTimerDisabled = false
+    private var lastWorkspace = Date.distantPast
+    private var sequence = 0
+    private var viewportFrames = 0
+    private var leftData: Data?
+    private var rightData: Data?
+    private var viewportData: Data?
+    var canControl: Bool { active && !controlsStale && workspace?.editable == true }
+    var awaitingControl: Bool { !pending.isEmpty }
+
+    func jointValue(_ joint: ScreenJoint) -> Double { pending[joint.name]?.value ?? joint.value }
+
+    func changeJoint(_ joint: ScreenJoint, value: Double) {
+        guard canControl, value.isFinite else { return }
+        let value = min(joint.upper, max(joint.lower, value))
+        guard abs(jointValue(joint) - value) > 1e-8 else { return }
+        sequence += 1; controlMessage = ""
+        pending[joint.name] = ScreenJointCommand(sequence: sequence, name: joint.name, value: value, created: Date())
+    }
+
+    private func expireCommands() {
+        let fresh = pending.filter { Date().timeIntervalSince($0.value.created) < 3 }
+        if fresh.count != pending.count { pending = fresh; controlMessage = "操作未同步，请在画面恢复后重试。" }
+    }
+
+    private func collaborationStatus() -> [String: Any] {
+        expireCommands()
+        let commands: [[String: Any]] = pending.values.sorted { $0.sequence < $1.sequence }.prefix(32).map { command in
+            ["sequence": command.sequence, "robotId": workspace?.robotId ?? "", "name": command.name,
+             "value": command.value, "ageMs": max(0, Date().timeIntervalSince(command.created) * 1000)]
+        }
+        return ["page": page, "commands": commands]
+    }
 
     func start() {
         guard listener == nil else { return }
@@ -51,8 +127,12 @@ final class ScreenCollaboration: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, self.active else { return }
-                self.stale = Date().timeIntervalSince(self.lastFrame) > 2.5
-                if Date().timeIntervalSince(self.lastFrame) > 10 { self.finish() }
+                let stale = self.left == nil || Date().timeIntervalSince(self.lastFrame) > 2.5
+                if self.stale != stale { self.stale = stale }
+                let controlsStale = Date().timeIntervalSince(self.lastWorkspace) > 2.5
+                if self.controlsStale != controlsStale { self.controlsStale = controlsStale }
+                self.expireCommands()
+                if Date().timeIntervalSince(self.lastContact) > 10 { self.finish() }
             }
         }
     }
@@ -68,6 +148,9 @@ final class ScreenCollaboration: ObservableObject {
     func finish() {
         if active { UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled }
         active = false; stale = true; token = ""; left = nil; right = nil
+        workspace = nil; viewport = nil; pending = [:]; sequence = 0; viewportFrames = 0
+        controlsStale = true; controlMessage = ""; page = "cameras"; lastWorkspace = .distantPast
+        leftData = nil; rightData = nil; viewportData = nil
     }
 
     private func accept(_ connection: NWConnection) {
@@ -125,7 +208,10 @@ final class ScreenCollaboration: ObservableObject {
         func respond(_ status: Int = 200, _ value: [String: Any]) { reply(connection, id: id, status: status, value: value) }
         if method == "GET", path == "/status" {
             respond(200, ["protocol": screenProtocol, "deviceName": UIDevice.current.name, "active": active,
-                     "stale": stale, "receivedFrames": receivedFrames,
+                     "stale": stale, "receivedFrames": receivedFrames, "keepalive": true, "jointControl": true,
+                     "controlPage": page, "jointCount": workspace?.joints.count ?? 0, "viewportFrames": viewportFrames,
+                     "jointValues": Dictionary(uniqueKeysWithValues: (workspace?.joints ?? []).map { ($0.name, $0.value) }),
+                     "controlAck": workspace?.ack ?? 0, "pendingControls": pending.count,
                      "width": left?.size.width ?? 0, "height": left?.size.height ?? 0]); return
         }
         if method == "POST", path == "/session" {
@@ -135,23 +221,61 @@ final class ScreenCollaboration: ObservableObject {
                   candidate.allSatisfy({ "0123456789abcdef".contains($0) }),
                   let value = try? JSONSerialization.jsonObject(with: body) as? [String: String],
                   value["protocol"] == screenProtocol else { respond(400, ["error": "协作协议无效"]); return }
-            token = candidate; receivedFrames = 0; lastFrame = Date(); stale = true
+            token = candidate; receivedFrames = 0; lastFrame = Date(); lastContact = lastFrame; stale = true
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             UIApplication.shared.isIdleTimerDisabled = true
             active = true; respond(200, ["ready": true]); return
         }
         guard active, authorization == "Bearer \(token)" else { respond(410, ["error": "设备已结束画面协作"]); return }
         if method == "DELETE", path == "/session" { finish(); respond(200, ["stopped": true]); return }
+        if method == "PUT", path == "/heartbeat", body.isEmpty {
+            lastContact = Date(); respond(200, collaborationStatus()); return
+        }
+        if method == "PUT", path == "/workspace" {
+            guard body.count >= 10 else { respond(400, ["error": "关节数据不完整"]); return }
+            let stateSize = body[0..<4].reduce(0) { ($0 << 8) | Int($1) }
+            let imageSize = body[4..<8].reduce(0) { ($0 << 8) | Int($1) }
+            guard stateSize <= 65536, 8 + stateSize + imageSize == body.count,
+                  let state = try? JSONDecoder().decode(ScreenJointState.self, from: body.subdata(in: 8..<(8 + stateSize))), state.valid else {
+                respond(400, ["error": "关节状态无效"]); return
+            }
+            var image: UIImage?, imageData: Data?
+            if imageSize > 0 {
+                let data = body.subdata(in: (8 + stateSize)..<body.count)
+                guard let decoded = data == viewportData ? viewport : decodeImage(data) else {
+                    respond(400, ["error": "三维画面无效"]); return
+                }
+                image = decoded; imageData = data
+            }
+            if !pending.isEmpty {
+                if workspace?.robotId != state.robotId || !state.editable { pending = [:] }
+                else if pending.values.contains(where: { $0.sequence <= state.ack }) { pending = pending.filter { $0.value.sequence > state.ack } }
+            }
+            if workspace != state { workspace = state }
+            lastWorkspace = Date(); lastContact = lastWorkspace
+            if controlsStale { controlsStale = false }
+            if let image {
+                if imageData != viewportData { viewport = image; viewportData = imageData }
+                viewportFrames += 1
+            }
+            respond(200, collaborationStatus()); return
+        }
         guard method == "PUT", path == "/frame", body.count >= 16 else { respond(400, ["error": "画面请求无效"]); return }
         func size(at offset: Int) -> Int { body[offset..<(offset + 4)].reduce(0) { ($0 << 8) | Int($1) } }
         let leftSize = size(at: 0), rightSize = size(at: 4)
-        guard leftSize >= 4, rightSize >= 4, leftSize + rightSize + 8 == body.count,
-              let leftImage = decodeImage(body.subdata(in: 8..<(8 + leftSize))),
-              let rightImage = decodeImage(body.subdata(in: (8 + leftSize)..<body.count)) else {
+        guard leftSize >= 4, rightSize >= 4, leftSize + rightSize + 8 == body.count else {
             respond(400, ["error": "双臂画面不完整"]); return
         }
-        left = leftImage; right = rightImage; lastFrame = Date(); stale = false; receivedFrames += 1
-        respond(200, ["received": true, "receivedFrames": receivedFrames])
+        let nextLeft = body.subdata(in: 8..<(8 + leftSize)), nextRight = body.subdata(in: (8 + leftSize)..<body.count)
+        guard let leftImage = nextLeft == leftData ? left : decodeImage(nextLeft),
+              let rightImage = nextRight == rightData ? right : decodeImage(nextRight) else {
+            respond(400, ["error": "双臂画面不完整"]); return
+        }
+        if nextLeft != leftData { left = leftImage; leftData = nextLeft }
+        if nextRight != rightData { right = rightImage; rightData = nextRight }
+        lastFrame = Date(); lastContact = lastFrame; if stale { stale = false }; receivedFrames += 1
+        var result = collaborationStatus(); result["received"] = true; result["receivedFrames"] = receivedFrames
+        respond(200, result)
     }
 
     private func decodeImage(_ data: Data) -> UIImage? {
@@ -198,13 +322,20 @@ private struct ScreenCollaborationView: View {
                     Image(systemName: "cable.connector").foregroundStyle(screenAccent)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("画面协作").font(.headline)
-                        Text(screen.stale ? "等待电脑画面…" : "USB 已连接 · 末端相机仿真画面")
+                        Text(screen.page == "joints" ? "USB 已连接 · 关节与姿态同步" : screen.stale ? "USB 已连接 · 等待画面更新" : "USB 已连接 · 末端相机仿真画面")
                             .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
                     }
                     Spacer()
                     Button("结束协作", systemImage: "xmark", action: screen.finish)
                         .buttonStyle(.bordered).accessibilityIdentifier("screen-collaboration-stop")
                 }
+                Picker("协作子页", selection: $screen.page) {
+                    Text("相机画面").tag("cameras")
+                    Text("关节控制").tag("joints")
+                }.pickerStyle(.segmented).accessibilityIdentifier("screen-page-tabs")
+                if screen.page == "joints" {
+                    ScreenJointWorkspace(screen: screen, landscape: landscape, height: viewport.size.height)
+                } else {
                 Picker("相机画面", selection: $selection) {
                     Text("双臂").tag("both"); Text("左臂").tag("left"); Text("右臂").tag("right")
                 }.pickerStyle(.segmented).accessibilityIdentifier("screen-collaboration-selection")
@@ -215,6 +346,7 @@ private struct ScreenCollaborationView: View {
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 Text(selection == "both" ? "轻点画面，放大查看单臂" : "轻点画面，返回双臂视图")
                     .font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(TeachingDevice.isPhone ? 16 : 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
@@ -230,14 +362,17 @@ private struct ScreenCollaborationView: View {
             }
             ZStack {
                 Color.black.opacity(0.35)
-                if let image { Image(uiImage: image).resizable().scaledToFit().opacity(screen.stale ? 0.25 : 1) }
-                if screen.stale {
+                if let image { Image(uiImage: image).resizable().scaledToFit() }
+                if image == nil {
                     VStack(spacing: 10) {
-                        Image(systemName: "cable.connector.slash").font(.title2)
-                        Text(image == nil ? "正在连接相机画面" : "画面已暂停，请检查电脑和数据线").font(.callout)
+                        Image(systemName: "cable.connector").font(.title2)
+                        Text("正在连接相机画面").font(.callout)
                     }.foregroundStyle(.secondary)
                 }
             }.clipShape(RoundedRectangle(cornerRadius: 10)).frame(maxWidth: .infinity, maxHeight: .infinity)
+            if screen.stale && image != nil {
+                Text("显示最近画面 · 连接保持中，更新后自动继续").font(.caption).foregroundStyle(.orange)
+            }
         }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.25)))
@@ -246,5 +381,130 @@ private struct ScreenCollaborationView: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("\(title)末端相机画面").accessibilityIdentifier("screen-camera-\(side)")
             .accessibilityAddTraits(.isButton)
+    }
+}
+
+private struct ScreenJointWorkspace: View {
+    @ObservedObject var screen: ScreenCollaboration
+    let landscape: Bool
+    let height: CGFloat
+    var body: some View {
+        let layout = landscape ? AnyLayout(HStackLayout(alignment: .top, spacing: 18)) : AnyLayout(VStackLayout(spacing: 14))
+        layout {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("3D 姿态", systemImage: "cube.transparent").font(.headline)
+                    Spacer()
+                    Text("与 Mac 同步").font(.caption).foregroundStyle(screenAccent)
+                }
+                ZStack {
+                    Color.black.opacity(0.35)
+                    if let image = screen.viewport {
+                        Image(uiImage: image).resizable().scaledToFit()
+                            .accessibilityLabel("与 Mac 同步的机器人三维视图")
+                            .accessibilityIdentifier("screen-robot-viewport")
+                    } else {
+                        ProgressView("正在同步三维画面…").tint(screenAccent)
+                    }
+                }.clipShape(RoundedRectangle(cornerRadius: 12)).frame(maxWidth: .infinity, maxHeight: .infinity)
+                Text(screen.controlsStale ? "显示最近姿态 · 等待电脑更新" : "视角跟随 Mac，拖动关节可同步调整虚拟机器人。")
+                    .font(.caption).foregroundStyle(screen.controlsStale ? .orange : .secondary)
+            }.padding(16)
+                .frame(maxWidth: .infinity, maxHeight: landscape ? .infinity : height * 0.34)
+                .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+            ScreenJointEditor(screen: screen)
+                .frame(width: landscape ? (TeachingDevice.isPhone ? 320 : 380) : nil)
+                .frame(maxWidth: landscape ? nil : .infinity, maxHeight: .infinity)
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ScreenJointEditor: View {
+    @ObservedObject var screen: ScreenCollaboration
+    @State private var selectedGroup = "全部"
+    private let groups = ["底盘轮组", "躯干与升降", "头部", "左机械臂", "右机械臂", "其他关节"]
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(screen.workspace?.robotName ?? "机器人").font(.headline).lineLimit(1)
+                    Text("全关节控制 · \(screen.workspace?.joints.count ?? 0) 个关节").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(screen.awaitingControl ? "同步中…" : "双向同步").font(.caption)
+                    .foregroundStyle(screen.awaitingControl ? .orange : screenAccent)
+            }
+            if screen.controlsStale {
+                Label("等待电脑更新，恢复后可继续调节。", systemImage: "pause.circle")
+                    .font(.caption).foregroundStyle(.orange)
+            } else if let state = screen.workspace, !state.editable {
+                Text(state.reason).font(.caption).foregroundStyle(.orange)
+            }
+            if !screen.controlMessage.isEmpty { Text(screen.controlMessage).font(.caption).foregroundStyle(.orange) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    groupButton("全部", title: "全部")
+                    groupButton("左机械臂", title: "左臂")
+                    groupButton("右机械臂", title: "右臂")
+                    groupButton("躯干与升降", title: "躯干")
+                    groupButton("头部", title: "头部")
+                    groupButton("底盘轮组", title: "底盘")
+                    groupButton("其他关节", title: "其他")
+                }
+            }.fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    ForEach(groups.filter { selectedGroup == "全部" || selectedGroup == $0 }, id: \.self) { group in
+                        let joints = screen.workspace?.joints.filter { $0.group == group } ?? []
+                        if !joints.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text(group).font(.subheadline.bold())
+                                    Spacer()
+                                    Text("\(joints.count)").font(.caption.monospaced()).foregroundStyle(.secondary)
+                                }.foregroundStyle(screenAccent)
+                                ForEach(joints) { joint in jointRow(joint) }
+                            }
+                        }
+                    }
+                }.padding(.vertical, 4)
+            }.accessibilityIdentifier("screen-joint-list")
+        }.padding(16).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    @ViewBuilder private func groupButton(_ group: String, title: String) -> some View {
+        if group == "全部" || screen.workspace?.joints.contains(where: { $0.group == group }) == true {
+            Button { selectedGroup = group } label: {
+                Text(title).font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 9)
+                    .foregroundStyle(selectedGroup == group ? Color.black : screenAccent)
+                    .background(selectedGroup == group ? screenAccent : screenAccent.opacity(0.1), in: Capsule())
+            }.buttonStyle(.plain).accessibilityLabel(group)
+                .accessibilityIdentifier("screen-joint-group-\(group)")
+                .accessibilityAddTraits(selectedGroup == group ? .isSelected : [])
+        }
+    }
+
+    private func jointRow(_ joint: ScreenJoint) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(joint.name).font(.subheadline.monospaced()).lineLimit(1)
+                Spacer()
+                Text("\(joint.formatted(screen.jointValue(joint))) \(joint.unit)")
+                    .font(.subheadline.monospaced()).monospacedDigit().foregroundStyle(screenAccent)
+                    .accessibilityIdentifier("screen-joint-value-\(joint.name)")
+            }
+            Slider(value: Binding(get: { min(joint.upper, max(joint.lower, screen.jointValue(joint))) },
+                                  set: { screen.changeJoint(joint, value: $0) }),
+                   in: joint.lower...max(joint.upper, joint.lower + joint.step), step: joint.step)
+                .tint(screenAccent).disabled(!screen.canControl || joint.lower == joint.upper)
+                .accessibilityLabel("\(joint.name) 关节滑块")
+                .accessibilityValue("\(joint.formatted(screen.jointValue(joint))) \(joint.unit)")
+                .accessibilityIdentifier("screen-joint-\(joint.name)")
+            HStack {
+                Text("\(joint.formatted(joint.lower)) \(joint.unit)")
+                Spacer()
+                Text("\(joint.formatted(joint.upper)) \(joint.unit)")
+            }.font(.caption2.monospaced()).foregroundStyle(.secondary)
+        }.padding(12).background(.black.opacity(0.18), in: RoundedRectangle(cornerRadius: 10))
     }
 }

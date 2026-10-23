@@ -1,7 +1,8 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ArrowDownToLine, ArrowLeftRight, Bot, Check, ChevronDown, ChevronRight, FileUp, Glasses, History, Monitor, Plus, QrCode, RefreshCw, Tablet, Wifi } from 'lucide-react';
 import { ipadRequest, readDeviceTickets, rememberIPadTicket } from '../lib/ipadTeaching.js';
+import { WorkbenchMenuContext } from './WorkbenchMenuContext.js';
 import './IPadTeachingMenu.css';
 
 const transferStatus = { preparing: '准备模型', ready: '等待配对', paired: '设备示教中', completed: '待接收', imported: '已接收', cancelled: '已结束' };
@@ -11,8 +12,15 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
   const DeviceIcon = vision ? Glasses : Tablet;
   const savedTickets = () => readDeviceTickets(device);
   const menuId = useId();
+  const parentMenu = useContext(WorkbenchMenuContext);
   const triggerRef = useRef(null), menuRef = useRef(null), submenuRef = useRef(null);
-  const [open, setOpen] = useState(false);
+  const focusFirstRef = useRef(false);
+  const [standaloneOpen, setStandaloneOpen] = useState(false);
+  const open = parentMenu ? parentMenu.isOpen && parentMenu.submenuId === menuId : standaloneOpen;
+  const setOpen = (value) => {
+    if (parentMenu) parentMenu.setSubmenuId(value ? menuId : (current) => current === menuId ? null : current);
+    else setStandaloneOpen(value);
+  };
   const [section, setSection] = useState(null);
   const [tickets, setTickets] = useState(savedTickets);
   const [position, setPosition] = useState({});
@@ -25,9 +33,17 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
 
   const close = (focus = false) => {
     setOpen(false); setSection(null);
-    if (focus) (menuAnchorRef?.current || triggerRef.current)?.focus();
+    if (focus) (parentMenu ? triggerRef.current : menuAnchorRef?.current || triggerRef.current)?.focus();
   };
-  const run = (action) => { close(true); action(); };
+  const showMenu = (focusFirst = false) => {
+    focusFirstRef.current = focusFirst;
+    setOpen(true);
+    if (open) {
+      (focusFirst ? menuRef.current?.querySelector(':scope > button:not(:disabled)') : menuRef.current)?.focus();
+      focusFirstRef.current = false;
+    }
+  };
+  const run = (action) => { close(!parentMenu); parentMenu?.close(true); action(); };
   const sync = (action, ticketId = currentTicket?.id) => run(() => onOpenSync({ action, ticketId, device }));
   const sections = allowTeaching ? [
     { id: 'source', label: '示教来源', detail: currentSourceLabel, icon: Bot },
@@ -36,6 +52,7 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
   ] : [];
 
   useEffect(() => { if (!isActive || disabled) { setOpen(false); setSection(null); } }, [isActive, disabled]);
+  useEffect(() => { if (!open) setSection(null); }, [open]);
   useEffect(() => {
     if (!open) return undefined;
     const controller = new AbortController();
@@ -62,7 +79,9 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
     };
     document.addEventListener('pointerdown', outside, true);
     window.addEventListener('storage', refresh);
-    menuRef.current?.focus();
+    if (focusFirstRef.current) menuRef.current?.querySelector(':scope > button:not(:disabled)')?.focus();
+    else menuRef.current?.focus();
+    focusFirstRef.current = false;
     return () => {
       controller.abort(); clearInterval(timer);
       document.removeEventListener('pointerdown', outside, true);
@@ -73,27 +92,39 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
   useLayoutEffect(() => {
     if (!open) return undefined;
     const update = () => {
-      const trigger = (menuAnchorRef?.current || triggerRef.current)?.getBoundingClientRect(), menu = menuRef.current;
+      const trigger = (parentMenu ? triggerRef.current : menuAnchorRef?.current || triggerRef.current)?.getBoundingClientRect(), menu = menuRef.current;
       if (!trigger || !menu) return;
       const padding = 8, gap = 4;
-      const left = Math.max(padding, Math.min(trigger.right - menu.offsetWidth, innerWidth - menu.offsetWidth - padding));
-      const top = trigger.bottom + 8;
-      setPosition({ left, top });
+      const clampLeft = (left, width) => Math.max(padding, Math.min(left, innerWidth - width - padding));
+      const clampTop = (top, height) => Math.max(padding, Math.min(top, innerHeight - Math.min(height, innerHeight - padding * 2) - padding));
+      const root = triggerRef.current?.closest('.workbench-menu-panel')?.getBoundingClientRect();
+      const side = parentMenu && root
+        ? root.right + gap + menu.offsetWidth <= innerWidth - padding ? 'right'
+          : root.left - gap - menu.offsetWidth >= padding ? 'left' : 'below'
+        : 'below';
+      const left = clampLeft(side === 'right' ? root.right + gap : side === 'left' ? root.left - gap - menu.offsetWidth : trigger.right - menu.offsetWidth, menu.offsetWidth);
+      const top = clampTop(side === 'below' ? trigger.bottom + gap : trigger.top - menu.clientTop - 5, menu.offsetHeight);
+      setPosition({ left, top, side });
       const parent = menu.querySelector(`[data-section="${section}"]`);
       if (!parent || !submenuRef.current) return;
       const width = submenuRef.current.offsetWidth;
       const fitsRight = left + menu.offsetWidth + gap + width <= innerWidth - padding;
-      const childLeft = fitsRight ? left + menu.offsetWidth + gap : Math.max(padding, left - width - gap);
-      const childTop = Math.max(padding, Math.min(top + parent.offsetTop, innerHeight - Math.min(submenuRef.current.scrollHeight, innerHeight - padding * 2) - padding));
+      const fitsLeft = left - gap - width >= padding;
+      const childSide = side === 'left' ? fitsLeft ? 'left' : fitsRight ? 'right' : 'below'
+        : fitsRight ? 'right' : fitsLeft ? 'left' : 'below';
+      const childLeft = clampLeft(childSide === 'right' ? left + menu.offsetWidth + gap : childSide === 'left' ? left - width - gap : left, width);
+      const childTop = clampTop(top + parent.offsetTop + (childSide === 'below' ? parent.offsetHeight + gap : 0), submenuRef.current.scrollHeight);
       setSubmenuPosition({ left: childLeft - left - menu.clientLeft, top: childTop - top - menu.clientTop, maxHeight: innerHeight - childTop - padding });
     };
     update();
     const observer = new ResizeObserver(update);
+    observer.observe(menuRef.current);
+    observer.observe(triggerRef.current);
     if (submenuRef.current) observer.observe(submenuRef.current);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
     return () => { observer.disconnect(); window.removeEventListener('resize', update); window.removeEventListener('scroll', update, true); };
-  }, [open, section, menuAnchorRef]);
+  }, [open, section, menuAnchorRef, parentMenu?.ownerId]);
 
   const focusChild = (id) => {
     setSection(id);
@@ -103,11 +134,11 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
     event.stopPropagation();
     const child = submenuRef.current?.contains(event.target);
     const parent = menuRef.current?.querySelector(`[data-section="${section}"]`);
-    if (event.key === 'Escape' || (child && event.key === 'ArrowLeft')) {
+    if (event.key === 'Escape' || event.key === 'ArrowLeft') {
       event.preventDefault();
       if (child) { parent?.focus(); setSection(null); } else close(true);
     } else if (event.key === 'Tab') {
-      close(true);
+      close(!parentMenu); parentMenu?.close(true);
     } else if (event.key === 'ArrowRight' && event.target.dataset.section) {
       event.preventDefault(); focusChild(event.target.dataset.section);
     } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
@@ -125,12 +156,22 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
     if (!triggerRef.current?.contains(event.relatedTarget) && !menuRef.current?.contains(event.relatedTarget)) close();
   }}>
     <button type="button" className="action-button ipad-teaching-action" ref={triggerRef}
+      data-workbench-submenu-trigger={parentMenu ? menuId : undefined}
+      data-submenu-side={open ? position.side : undefined}
       aria-label={deviceLabel} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined}
-      disabled={disabled} onClick={() => { if (open) close(); else setOpen(true); }}
-      onKeyDown={(event) => { if (event.key === 'ArrowDown' && !menuAnchorRef) { event.preventDefault(); setOpen(true); } }}>
-      <DeviceIcon size={15}/><span><strong>{deviceLabel}</strong><small>{vision ? '配对码连接 · 空间示教' : '扫码连接 · AR 示教'}</small></span><ChevronDown size={12}/>
+      disabled={disabled} onClick={() => { if (open && !parentMenu) close(); else showMenu(); }}
+      onPointerMove={(event) => { if (parentMenu && !disabled && event.pointerType === 'mouse') setOpen(true); }}
+      onKeyDown={(event) => {
+        if ((parentMenu && event.key === 'ArrowRight') || (!menuAnchorRef && event.key === 'ArrowDown')) {
+          event.preventDefault(); event.stopPropagation(); showMenu(true);
+        }
+      }}>
+      <DeviceIcon size={15}/><span><strong>{deviceLabel}</strong><small>{vision ? '配对码连接 · 空间示教' : '扫码连接 · AR 示教'}</small></span>
+      {parentMenu ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}
     </button>
-    {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label={deviceLabel} tabIndex={-1} style={position} onKeyDown={keyDown}>
+    {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label={deviceLabel} tabIndex={-1}
+      data-workbench-menu-owner={parentMenu?.ownerId} data-side={position.side}
+      style={{ left: position.left, top: position.top }} onKeyDown={keyDown}>
       <p className="ipad-nav-title"><DeviceIcon size={14}/>{deviceLabel}</p>
       {!vision && onOpenScreen && <button type="button" role="menuitem" aria-label="画面协作"
         onPointerMove={() => setSection(null)} onClick={() => run(onOpenScreen)}>

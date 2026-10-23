@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Cable, CheckCircle2, LoaderCircle, Monitor, RefreshCw, Square, X } from 'lucide-react';
 import ZividCameraPanel from './ZividCameraPanel.jsx';
+import { screenJointState, screenJointCommand } from '../lib/ipadScreenControl.js';
 import './IPadScreenCollaboration.css';
 
 const api = '/__atlas/ipad-screen';
@@ -16,7 +17,8 @@ const endSession = (session) => session && request(`/session/${session.id}`, {
 }).catch(() => {});
 const jpeg = (canvas) => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('相机画面编码失败')), 'image/jpeg', 0.8));
 
-export default function IPadScreenCollaboration({ open, onClose, mapData, robot, robotLoadState, cameraPoses, meshRenderQuality }) {
+export default function IPadScreenCollaboration({ open, onClose, mapData, robot, robotLoadState, cameraPoses, meshRenderQuality,
+  jointValues, onChangeJoint, viewportCaptureRef, controlBlockedReason = '' }) {
   const [devices, setDevices] = useState([]);
   const [selected, setSelected] = useState('');
   const [session, setSession] = useState(null);
@@ -25,6 +27,9 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [frames, setFrames] = useState(0);
+  const [remotePage, setRemotePage] = useState('cameras');
+  const controlRef = useRef(null);
+  controlRef.current = { state: screenJointState(robot, robotLoadState?.movableJoints, jointValues, controlBlockedReason), onChangeJoint };
   const sessionRef = useRef(null), operationRef = useRef(0), mountedRef = useRef(true), startingRef = useRef(false);
   const cache = useRef({ left: null, right: null });
   const dialogRef = useRef(null), stopRef = useRef(null);
@@ -40,12 +45,8 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   useEffect(() => {
     mountedRef.current = true;
     const leaving = () => { void endSession(sessionRef.current); };
-    const visibility = () => {
-      if (document.hidden && sessionRef.current) { stopRef.current(); setError('电脑工作台已进入后台，画面协作已停止。请返回工作台重新连接。'); }
-    };
     window.addEventListener('pagehide', leaving);
-    document.addEventListener('visibilitychange', visibility);
-    return () => { mountedRef.current = false; operationRef.current += 1; leaving(); window.removeEventListener('pagehide', leaving); document.removeEventListener('visibilitychange', visibility); };
+    return () => { mountedRef.current = false; operationRef.current += 1; leaving(); window.removeEventListener('pagehide', leaving); };
   }, []);
 
   const start = async (deviceId) => {
@@ -102,15 +103,65 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   }, []);
   useEffect(() => {
     if (!session) return undefined;
-    let cancelled = false, timer, sent = 0;
+    let cancelled = false, connected = false, sending = false, timer, sent = 0, ack = 0, publishedAck = 0, page = 'cameras', viewportSent = false;
+    const awaitingCommit = new Map();
+    setRemotePage('cameras');
+    const viewport = document.createElement('canvas'); viewport.width = 960; viewport.height = 600;
     const controller = new AbortController(); let waitingSince = performance.now();
+    const url = new URL(`${api}/session/${session.id}/events`, window.location.href);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const connection = new WebSocket(url);
+    const fail = (message) => {
+      if (cancelled) return;
+      cancelled = true; clearTimeout(timer); controller.abort();
+      stopRef.current(); setError(message);
+    };
+    const connectTimer = setTimeout(() => fail('电脑画面连接未就绪，请重新连接。'), 8000);
+    connection.onopen = () => connection.send(JSON.stringify({ token: session.token }));
+    connection.onmessage = (event) => {
+      if (cancelled || sessionRef.current?.id !== session.id) return;
+      const status = JSON.parse(event.data);
+      if (status.error) { fail(status.error); return; }
+      if (status.ready && !connected) { connected = true; clearTimeout(connectTimer); void send(); }
+      const changedPage = status.page && status.page !== page;
+      if (status.page) { page = status.page; setRemotePage(page); }
+      let changedJoint = false;
+      for (const candidate of status.commands || []) {
+        const command = screenJointCommand(candidate, controlRef.current.state, ack);
+        if (!command) continue;
+        ack = command.sequence; changedJoint = true;
+        awaitingCommit.set(command.name, command.value);
+        controlRef.current.onChangeJoint?.(command.name, command.value);
+      }
+      if (changedPage || changedJoint) void send();
+    };
+    connection.onerror = () => fail('电脑画面连接已断开，请重新连接。');
+    connection.onclose = () => fail('画面协作已结束，请重新连接。');
     const send = async () => {
+      if (cancelled || sending || !connected) return;
+      clearTimeout(timer); sending = true;
       const began = performance.now();
       try {
         if (!cache.current.left || !cache.current.right) {
-          if (began - waitingSince > 7000) throw new Error('左右臂相机未就绪，请检查机器人模型和图形渲染。');
+          if (!document.hidden && began - waitingSince > 7000) throw new Error('左右臂相机未就绪，请检查机器人模型和图形渲染。');
         } else {
           waitingSince = began;
+          const currentState = controlRef.current.state;
+          for (const [name, value] of awaitingCommit) {
+            if (currentState.joints.some((joint) => joint.name === name && Math.abs(joint.value - value) < 1e-7)) awaitingCommit.delete(name);
+          }
+          if (!awaitingCommit.size) publishedAck = ack;
+          const state = new Blob([JSON.stringify({ ...currentState, ack: publishedAck })]);
+          let picture = new Blob();
+          if ((page === 'joints' || !viewportSent) && viewportCaptureRef.current?.(viewport)) {
+            picture = await jpeg(viewport); viewportSent = true;
+          }
+          if (cancelled) return;
+          const workspaceHeader = new ArrayBuffer(8), workspaceView = new DataView(workspaceHeader);
+          workspaceView.setUint32(0, state.size); workspaceView.setUint32(4, picture.size);
+          await request(`/session/${session.id}/workspace`, { method: 'PUT', signal: controller.signal,
+            headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' },
+            body: new Blob([workspaceHeader, state, picture]) });
           const blobs = await Promise.all([jpeg(cache.current.left), jpeg(cache.current.right)]);
           if (cancelled) return;
           const header = new ArrayBuffer(8), view = new DataView(header);
@@ -120,14 +171,19 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
           if (!cancelled) { sent += 1; setFrames(sent); }
         }
       } catch (failure) {
-        if (!cancelled) { stopRef.current(); setError(failure.message); }
+        fail(failure.message);
         return;
-      }
+      } finally { sending = false; }
       // Backpressure: at most one encoded pair and one request in flight.
-      if (!cancelled) timer = setTimeout(send, Math.max(0, 150 - (performance.now() - began)));
+      if (!cancelled) timer = setTimeout(send, Math.max(0, (document.hidden && page !== 'joints' ? 1000 : 150) - (performance.now() - began)));
     };
-    void send();
-    return () => { cancelled = true; clearTimeout(timer); controller.abort(); };
+    const resume = () => { if (!document.hidden) { waitingSince = performance.now(); void send(); } };
+    document.addEventListener('visibilitychange', resume);
+    document.addEventListener('resume', resume);
+    return () => {
+      cancelled = true; clearTimeout(timer); clearTimeout(connectTimer); controller.abort(); connection.close();
+      document.removeEventListener('visibilitychange', resume); document.removeEventListener('resume', resume);
+    };
   }, [session]);
   useEffect(() => () => stopRef.current(), [mapData?.geometry, robot?.id]);
   useEffect(() => { if (!canStream && sessionRef.current) { stop(); setError('相机或工程已切换，画面协作已停止。'); } }, [canStream, stop]);
@@ -138,14 +194,14 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
         robot={robot} robotLoadState={robotLoadState} cameraPoses={cameraPoses} meshRenderQuality={meshRenderQuality}
         onStreamFrame={(source) => copyFrame(side, source)} />)}
     </div>}
-    {session && !open && <div className="ipad-screen-dock" role="status"><Monitor size={16}/><span>{session.deviceName} · {frames ? '画面协作中' : '准备画面…'}</span>
+    {session && !open && <div className="ipad-screen-dock" role="status"><Monitor size={16}/><span>{session.deviceName} · {frames ? remotePage === 'joints' ? '关节协作中' : '画面协作中' : '准备画面…'}</span>
       <button type="button" onClick={stop} aria-label="结束画面协作"><Square size={13}/>结束协作</button></div>}
     {error && !open && <div className="ipad-screen-dock is-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="关闭协作提示"><X size={14}/></button></div>}
     {open && createPortal(<div className="ipad-screen-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="ipad-screen-dialog" role="dialog" aria-modal="true" aria-labelledby="ipad-screen-title" ref={dialogRef} tabIndex={-1}>
         <header><span className="ipad-screen-mark"><Monitor size={24}/></span><div><small>USB CAMERA VIEW</small><h2 id="ipad-screen-title">画面协作</h2></div>
           <button type="button" onClick={onClose} aria-label="关闭画面协作窗口"><X size={18}/></button></header>
-        <p className="ipad-screen-intro">在 iPad / iPhone 上同时查看左右臂末端相机，轻点画面可放大单臂。</p>
+        <p className="ipad-screen-intro">在 iPad / iPhone 上自由切换相机画面与关节控制，边看 3D 姿态边拖动关节，两端同步更新。</p>
         <div className="ipad-screen-pair" aria-label="共享画面内容"><div><i/>左臂相机<small>ZIVID 2 M70</small></div><div><i/>右臂相机<small>ZIVID 2 M70</small></div></div>
         {!canStream && <p className="ipad-screen-notice">请先打开示教工程，加载带左右臂末端相机的机器人。</p>}
         {session ? <div className="ipad-screen-connection"><CheckCircle2 size={20}/><div><strong>{session.deviceName}</strong><span>{frames ? '正在共享双臂画面' : '正在准备左右臂画面…'}</span></div><span className="ipad-screen-live">USB</span></div>
@@ -161,7 +217,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
         <footer><small>共享当前工程的相机仿真画面</small>{session
           ? <button type="button" className="ipad-screen-primary" onClick={stop}><Square size={14}/>结束协作</button>
           : <button type="button" className="ipad-screen-primary" disabled={!canStream || !selected || busy || checking} onClick={() => start(selected)}>{busy ? <LoaderCircle size={15} className="is-spinning"/> : <Monitor size={15}/>}开始协作</button>}</footer>
-        {session && <p className="ipad-screen-footnote">关闭此窗口后继续共享；结束协作可在电脑或设备上操作。</p>}
+        {session && <p className="ipad-screen-footnote">关闭此窗口、切换 Mac 窗口或标签页后仍保持协作；结束协作可在电脑或设备上操作。</p>}
       </section>
     </div>, document.body)}
   </>;

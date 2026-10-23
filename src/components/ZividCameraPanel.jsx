@@ -2276,10 +2276,15 @@ export default function ZividCameraPanel({
     resize();
 
     let frameId = 0;
+    let backgroundTimer;
     let lastStreamRenderAt = -Infinity;
+    const scheduleRender = () => {
+      if (streamOnly && document.hidden) backgroundTimer = setTimeout(render, 1000);
+      else frameId = requestAnimationFrame(render);
+    };
     const render = () => {
       if (streamOnly && performance.now() - lastStreamRenderAt < 100) {
-        frameId = requestAnimationFrame(render);
+        scheduleRender();
         return;
       }
       const pose = poseRef.current;
@@ -2300,7 +2305,7 @@ export default function ZividCameraPanel({
         pose?.quaternion?.w ?? 1,
       ].join('|');
       if (renderSignature === lastRenderSignature) {
-        frameId = requestAnimationFrame(render);
+        scheduleRender();
         return;
       }
       lastRenderSignature = renderSignature;
@@ -2381,12 +2386,17 @@ export default function ZividCameraPanel({
           setRendererStatus('error');
         }
       }
-      frameId = requestAnimationFrame(render);
+      scheduleRender();
     };
-    frameId = requestAnimationFrame(render);
+    const visibility = () => {
+      cancelAnimationFrame(frameId); clearTimeout(backgroundTimer); scheduleRender();
+    };
+    if (streamOnly) document.addEventListener('visibilitychange', visibility);
+    scheduleRender();
 
     return () => {
-      cancelAnimationFrame(frameId);
+      cancelAnimationFrame(frameId); clearTimeout(backgroundTimer);
+      if (streamOnly) document.removeEventListener('visibilitychange', visibility);
       onStreamFrameRef.current?.(null);
       resizeObserver.disconnect();
       renderer.domElement.removeEventListener('webglcontextlost', handleContextLost, false);
