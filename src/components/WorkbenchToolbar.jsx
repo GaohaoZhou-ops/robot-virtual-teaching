@@ -89,7 +89,12 @@ export default function WorkbenchToolbar({ sections, isActive = true, children }
       event.preventDefault();
       close(true);
     } else if (event.key === 'Tab') {
-      close(true);
+      const controls = [...panel.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]')]
+        .filter((element) => element.getClientRects().length);
+      if (event.target === (event.shiftKey ? controls[0] : controls.at(-1))) close(true);
+    } else if (event.target.closest('input, textarea, select')) {
+      // Sliders and numeric settings own their arrows, Home and End keys.
+      return;
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault();
       moveSection(id, event.key === 'ArrowLeft' ? -1 : 1, true);
@@ -167,6 +172,7 @@ export default function WorkbenchToolbar({ sections, isActive = true, children }
           onClickCapture={(event) => {
             const button = event.target.closest('button');
             if (button && !button.disabled && event.currentTarget.contains(button)
+              && !button.closest('[data-workbench-menu-keep-open]')
               && !button.hasAttribute('data-workbench-submenu-trigger')) close(true);
           }}
         >

@@ -67,6 +67,9 @@ import IPadScreenCollaboration from './components/IPadScreenCollaboration.jsx';
 import { screenPoseCaptureState } from './lib/ipadScreenControl.js';
 import { analyzeParkingPointDrift } from './lib/teachingParkingDrift.js';
 import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
+import RobotJointLimitSettings from './components/RobotJointLimitSettings.jsx';
+import { RobotJointLimitContext } from './components/RobotJointLimitContext.js';
+import { ARM_SOFT_LIMIT_RATIO, normalizeArmSoftLimitRatio } from './lib/robotJointLimits.js';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
 import { buildMobileSolvedTask, MOBILE_SOLVE_VERSION, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
@@ -617,6 +620,7 @@ export default function App() {
   const [robotLoadState, setRobotLoadState] = useState({ status: 'idle' });
   const [robotPose, setRobotPose] = useState(() => normalizeRobotPose(null));
   const [robotJointValues, setRobotJointValues] = useState({});
+  const [robotArmSoftLimitRatio, setRobotArmSoftLimitRatio] = useState(ARM_SOFT_LIMIT_RATIO);
   const [lockedRobotJointNames, setLockedRobotJointNames] = useState([]);
   const [ignoredRobotCollisionJointNames, setIgnoredRobotCollisionJointNames] = useState([]);
   const [robotControlEnabled, setRobotControlEnabled] = useState(false);
@@ -827,6 +831,7 @@ export default function App() {
     robotJointValues,
     lockedRobotJointNames,
     ignoredRobotCollisionJointNames,
+    robotArmSoftLimitRatio,
     robotHeightLocked,
     teachingTasks,
     activeTeachingTaskId,
@@ -839,13 +844,14 @@ export default function App() {
     if (!run) return;
     const task = teachingTasks.find((item) => item.id === run.taskId);
     if (run.map !== mapData || run.robot !== selectedRobot || run.workspaceId !== sessionIdRef.current
+      || run.armSoftLimitRatio !== robotArmSoftLimitRatio
       || run.sourceCapture !== task?.mobileCapture || run.sourceTransform !== JSON.stringify(task?.mobileTransform)) {
       mobileTeachingRunRef.current = null;
       run.controller.abort();
       setMobileComputation(null);
       setMobileSolveTaskId(null);
     }
-  }, [mapData, selectedRobot, teachingTasks, teachingSpaceMode]);
+  }, [mapData, selectedRobot, teachingTasks, teachingSpaceMode, robotArmSoftLimitRatio]);
 
   useEffect(() => () => {
     mobileTeachingRunRef.current?.controller.abort();
@@ -1079,6 +1085,7 @@ export default function App() {
           robotJointValues: current.robotJointValues,
           lockedRobotJointNames: current.lockedRobotJointNames,
           ignoredRobotCollisionJointNames: current.ignoredRobotCollisionJointNames,
+          robotArmSoftLimitRatio: current.robotArmSoftLimitRatio,
           robotHeightLocked: current.robotHeightLocked,
           teachingTasks: current.teachingTasks,
           jointPoses: current.jointPoses,
@@ -1127,6 +1134,7 @@ export default function App() {
               joints: current.robotJointValues,
               lockedJoints: current.lockedRobotJointNames,
               collisionIgnoredJoints: current.ignoredRobotCollisionJointNames,
+              armSoftLimitRatio: current.robotArmSoftLimitRatio,
               heightLocked: current.robotHeightLocked,
             }
           : null,
@@ -1370,6 +1378,7 @@ export default function App() {
         setRobotJointValues({});
         setLockedRobotJointNames([]);
         setIgnoredRobotCollisionJointNames([]);
+        setRobotArmSoftLimitRatio(ARM_SOFT_LIMIT_RATIO);
         setRobotControlEnabled(false);
         setRobotHeightLocked(false);
         setRobotCollisionProtectionEnabled(true);
@@ -1643,6 +1652,8 @@ export default function App() {
           setIgnoredRobotCollisionJointNames(restoredRobot
             ? normalizeIgnoredCollisionJoints(project?.robot?.collisionIgnoredJoints
               ?? snapshot?.ui?.selectedRobot?.collisionIgnoredJoints) : []);
+          setRobotArmSoftLimitRatio(normalizeArmSoftLimitRatio(restoredRobot
+            ? project?.robot?.armSoftLimitRatio ?? snapshot?.ui?.selectedRobot?.armSoftLimitRatio : undefined));
           setRobotControlEnabled(false);
           setRobotLoadState({ status: restoredRobot ? 'pending' : 'idle' });
           restored = restored || Boolean(restoredRobot);
@@ -1872,6 +1883,7 @@ export default function App() {
           setRobotJointValues({});
           setLockedRobotJointNames([]);
           setIgnoredRobotCollisionJointNames([]);
+          setRobotArmSoftLimitRatio(ARM_SOFT_LIMIT_RATIO);
           setRobotControlEnabled(false);
           setRobotHeightLocked(false);
           setTeachingTasks([]);
@@ -2033,6 +2045,7 @@ export default function App() {
     robotJointValues,
     lockedRobotJointNames,
     ignoredRobotCollisionJointNames,
+    robotArmSoftLimitRatio,
     robotHeightLocked,
     teachingTasks,
     teachingSpaceMode,
@@ -2412,6 +2425,7 @@ export default function App() {
         heightRange: clampSlice(suggestedSlice(positions, bounds), bounds),
         waypoints: [], edges: [],
         robot: current.selectedRobot, robotPose: normalizeRobotPose(null), robotJointValues: {},
+        robotArmSoftLimitRatio: current.robotArmSoftLimitRatio,
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
         placedObjectColorMode: current.placedObjectColorMode,
         showWaypoints3D: syncRoute || current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
@@ -2557,6 +2571,7 @@ export default function App() {
         : [];
       const importedIgnoredCollisionJoints = importedRobot
         ? normalizeIgnoredCollisionJoints(project.robot?.collisionIgnoredJoints) : [];
+      const importedArmSoftLimitRatio = normalizeArmSoftLimitRatio(project.robot?.armSoftLimitRatio);
       const importedRobotHeightLocked = Boolean(
         importedRobot && project.robot?.heightLocked,
       );
@@ -2575,6 +2590,7 @@ export default function App() {
       setRobotJointValues(importedRobotJoints);
       setLockedRobotJointNames(importedLockedJoints);
       setIgnoredRobotCollisionJointNames(importedIgnoredCollisionJoints);
+      setRobotArmSoftLimitRatio(importedArmSoftLimitRatio);
       setRobotHeightLocked(importedRobotHeightLocked);
       setRobotLoadState({ status: importedRobot ? 'pending' : 'idle' });
       let effectiveMap = importedTeachingSpaceMode === teachingSpaceMode ? mapData : null;
@@ -2752,6 +2768,7 @@ export default function App() {
             robotJointValues: importedRobotJoints,
             lockedRobotJointNames: importedLockedJoints,
             ignoredRobotCollisionJointNames: importedIgnoredCollisionJoints,
+            robotArmSoftLimitRatio: importedArmSoftLimitRatio,
             robotHeightLocked: importedRobotHeightLocked,
             teachingTasks: project.teachingTasks,
             jointPoses: project.jointPoses,
@@ -2793,6 +2810,7 @@ export default function App() {
                   joints: importedRobotJoints,
                   lockedJoints: importedLockedJoints,
                   collisionIgnoredJoints: importedIgnoredCollisionJoints,
+                  armSoftLimitRatio: importedArmSoftLimitRatio,
                   heightLocked: importedRobotHeightLocked,
                 }
               : null,
@@ -4307,6 +4325,7 @@ export default function App() {
     robotJointValues,
     lockedRobotJointNames,
     ignoredRobotCollisionJointNames,
+    robotArmSoftLimitRatio,
     robotHeightLocked,
     teachingTasks,
     jointPoses,
@@ -4674,6 +4693,7 @@ export default function App() {
       setRobotJointValues({});
       setLockedRobotJointNames([]);
       setIgnoredRobotCollisionJointNames([]);
+      setRobotArmSoftLimitRatio(ARM_SOFT_LIMIT_RATIO);
       setRobotControlEnabled(false);
       setRobotHeightLocked(false);
       setRobotCollisionProtectionEnabled(true);
@@ -6029,6 +6049,7 @@ export default function App() {
     const run = { id: createId('mobile-compute'), taskId, taskName: task.name, options,
       controller: new AbortController(), status: 'running', controls: null, previews: [],
       map: current.mapData, robot: current.selectedRobot, workspaceId: sessionIdRef.current,
+      armSoftLimitRatio: current.robotArmSoftLimitRatio,
       sourceCapture: task.mobileCapture, sourceTransform: JSON.stringify(task.mobileTransform) };
     mobileTeachingRunRef.current = run;
     const isCurrent = () => mobileTeachingRunRef.current === run && !run.controller.signal.aborted;
@@ -6405,7 +6426,7 @@ export default function App() {
     }
   };
   return (
-    <>
+    <RobotJointLimitContext.Provider value={robotArmSoftLimitRatio}>
     <input ref={mapInputRef} className="visually-hidden" type="file" accept=".ply" onChange={handleMapFile} />
     <input ref={abxTeachingInputRef} className="visually-hidden" type="file"
       accept=".zip,.abxteach.ndjson,.ndjson" aria-label="机器人示教文件"
@@ -6609,6 +6630,12 @@ export default function App() {
                   <button type="button" className="action-button" disabled={!robotPresetManagerReady}
                     onClick={openRobotPresetManager}><List size={15} /><span>管理预设姿态</span></button>
                 </section>
+                <RobotJointLimitSettings ratio={robotArmSoftLimitRatio} onChange={setRobotArmSoftLimitRatio}
+                  disabledReason={robotLoadState.status !== 'loaded' ? '加载机器人后可调整双臂关节软限位。'
+                    : !robotLoadState.movableJoints?.some((joint) => joint.softLimitRatio) ? '当前模型没有可配置的双臂关节。'
+                      : teachingCaptureState.status === 'capturing' ? '采集完成后可调整关节软限位。'
+                        : ['playing', 'paused'].includes(teachingPlayback.status) ? '停止轨迹播放后可调整关节软限位。'
+                          : mobileComputation ? '结束示教计算后可调整关节软限位。' : ''} />
                 <section className="workbench-menu-section robot-presets-list">
                   <p>预设姿态{robotPresets.length > 0 ? ` · ${robotPresets.length}` : ''}</p>
                   {robotPresets.map((pose) => <button key={pose.id} type="button" className="action-button"
@@ -7315,6 +7342,6 @@ export default function App() {
     />}
     {cacheActionDialog && <WorkspaceCacheDialog state={cacheActionDialog} onConfirm={confirmCacheAction}
       onClose={() => { if (!independentSwitchBusyRef.current) setCacheActionDialog(null); }} />}
-    </>
+    </RobotJointLimitContext.Provider>
   );
 }

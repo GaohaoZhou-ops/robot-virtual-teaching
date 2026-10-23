@@ -314,8 +314,11 @@ class RobotModel:
         urdf_path: Path,
         job_root: Path,
         progress: Optional[TerminalProgress] = None,
+        arm_soft_limit_ratio: float = ARM_SOFT_LIMIT_RATIO,
     ):
         self.job_root = job_root
+        ratio = arm_soft_limit_ratio if type(arm_soft_limit_ratio) in (int, float) and math.isfinite(arm_soft_limit_ratio) else ARM_SOFT_LIMIT_RATIO
+        ratio = max(0.01, min(1.0, ratio))
         progress and progress.update(0.11, "读取机器人模型", urdf_path.name)
         root = ET.parse(urdf_path).getroot()
         self.links = [node.get("name", "") for node in root.findall("link")]
@@ -337,10 +340,10 @@ class RobotModel:
             if kind == "continuous":
                 lower, upper = -math.inf, math.inf
             name = node.get("name", f"joint-{len(self.joints)}")
-            # Match robotJointLimits.js: central 95% of each arm's hard range.
+            # Match robotJointLimits.js using this job's configured arm range.
             if (kind == "revolute" and re.fullmatch(r"(?:left|right)[_-]J\d+", name, re.IGNORECASE)
                     and math.isfinite(lower) and math.isfinite(upper) and upper > lower):
-                margin = (upper - lower) * (1 - ARM_SOFT_LIMIT_RATIO) / 2
+                margin = (upper - lower) * (1 - ratio) / 2
                 lower, upper = lower + margin, upper - margin
             joint = Joint(
                 name=name,
@@ -753,7 +756,7 @@ def analyze(
     progress: TerminalProgress,
 ) -> dict:
     robot_file = job_root / manifest["binding"]["robot"]["primaryFile"]
-    model = RobotModel(robot_file, job_root, progress)
+    model = RobotModel(robot_file, job_root, progress, config.get("armSoftLimitRatio", ARM_SOFT_LIMIT_RATIO))
     environment_meta = read_json(job_root / manifest["environmentFile"])
     collision_config = config.get("environmentCollision", {})
     collision = EnvironmentCollision(

@@ -14,11 +14,14 @@ from joint_lock_smoke import double_click_tool
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:21992').rstrip('/')
 OUTPUT = ROOT / 'build/robot-soft-limits'
 LIMITS = {}
+CUSTOM_LIMITS = {}
 for node in ET.parse(ROOT / 'robots/botx_abx_zivid_m70/urdf/botx_abx_zivid_m70.urdf').findall('joint'):
     if node.get('name').startswith(('left_J', 'right_J')):
         hard = [math.degrees(float(node.find('limit').get(key))) for key in ['lower', 'upper']]
         margin = (hard[1] - hard[0]) * 0.025
         LIMITS[node.get('name')] = [hard[0] + margin, hard[1] - margin]
+        margin = (hard[1] - hard[0]) * 0.1
+        CUSTOM_LIMITS[node.get('name')] = [hard[0] + margin, hard[1] - margin]
 
 
 def run():
@@ -76,6 +79,68 @@ def run():
             page.wait_for_function("document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'")
             page.get_by_role('tab', name='示教', exact=True).click()
             page.get_by_role('button', name='打开全关节浮动窗口').click()
+
+            # Tightening a configured range must update the loaded model, its
+            # controls and persistence without another URDF/mesh request.
+            field = page.get_by_role('spinbutton', name='right_J2 关节值', exact=True)
+            field.fill('999'); field.press('Enter'); applied('right_J2', LIMITS['right_J2'][1])
+            requests = []
+            page.on('request', lambda request: requests.append(request.url) if '/__atlas/robot-files/' in request.url else None)
+            robot_menu = page.locator('[data-workbench-menu-trigger="robot"]')
+            robot_menu.click()
+            percent = page.get_by_role('spinbutton', name='关节软限位百分比', exact=True)
+            ratio_slider = page.get_by_role('slider', name='关节软限位比例滑块', exact=True)
+            expect(percent).to_have_value('95')
+            percent.fill('80'); percent.press('Enter')
+            applied('right_J2', CUSTOM_LIMITS['right_J2'][1])
+            right_slider = page.get_by_role('slider', name='right_J2 关节滑块', exact=True)
+            assert abs(float(right_slider.get_attribute('min')) - CUSTOM_LIMITS['right_J2'][0]) < 1e-7
+            assert abs(float(right_slider.get_attribute('max')) - CUSTOM_LIMITS['right_J2'][1]) < 1e-7
+            expect(robot_menu).to_have_attribute('aria-expanded', 'true')
+            ratio_slider.focus(); ratio_slider.press('ArrowRight')
+            expect(percent).to_have_value('81')
+            expect(robot_menu).to_have_attribute('aria-expanded', 'true')
+            ratio_slider.press('Tab'); expect(percent).to_be_focused()
+            percent.fill(''); percent.press('Enter'); expect(percent).to_have_value('81')
+            for raw, bounded in [('200', '100'), ('-10', '1')]:
+                percent.fill(raw); percent.press('Enter'); expect(percent).to_have_value(bounded)
+            percent.fill('80'); percent.press('Tab')
+            expect(robot_menu).to_have_attribute('aria-expanded', 'false')
+            robot_menu.click()
+            expect(ratio_slider).to_have_value('80')
+            assert not requests, requests
+            page.screenshot(path=str(OUTPUT / 'adjustable-limits-menu.png'))
+            saved = False
+            expected_joint = values()['right_J2']
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                saved = page.evaluate('''async (expected) => {
+                const db = await new Promise(resolve => {
+                    const request = indexedDB.open('atlas-route-studio', 1);
+                    request.onsuccess = () => resolve(request.result);
+                });
+                try { return await new Promise(resolve => {
+                    const transaction = db.transaction('workspace-session');
+                    const request = transaction.objectStore('workspace-session').get('workspace-config:map');
+                    transaction.oncomplete = () => resolve(request.result?.config?.project?.robot?.armSoftLimitRatio === 0.8
+                        && Math.abs(request.result.config.project.robot.joints.right_J2 - expected) < 1e-7);
+                }); } finally { db.close(); }
+                }''', expected_joint)
+                if saved: break
+                page.wait_for_timeout(100)
+            assert saved, 'custom ratio and current pose must finish saving before reload'
+            page.reload(wait_until='networkidle')
+            page.wait_for_function("document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'")
+            robot_menu.click(); expect(percent).to_have_value('80')
+            page.get_by_role('button', name='恢复默认软限位 95%', exact=True).click()
+            expect(percent).to_have_value('95')
+            expect(robot_menu).to_have_attribute('aria-expanded', 'true')
+            percent.press('Escape')
+            expect(robot_menu).to_have_attribute('aria-expanded', 'false')
+            page.get_by_role('tab', name='示教', exact=True).click()
+            page.get_by_role('button', name='打开全关节浮动窗口').click()
+            print('PASS adjustable ratio, live clamping without reload, keyboard editing, bounds, reset and workspace restore', flush=True)
+
             for name, (lower, upper) in LIMITS.items():
                 slider = page.get_by_role('slider', name=name + ' 关节滑块', exact=True)
                 field = page.get_by_role('spinbutton', name=name + ' 关节值', exact=True)
@@ -173,6 +238,20 @@ def run():
                 applied(name, LIMITS[name][bound])
                 assert abs(next(j['value'] for j in current['joints'] if j['name'] == name) - LIMITS[name][bound]) < 1e-7
             within_limits()
+            robot_menu.click()
+            percent.fill('80'); percent.press('Enter')
+            percent.press('Escape')
+            remote = wait(lambda s: abs(next((j['upper'] for j in s.get('joints', []) if j['name'] == 'right_J2'), 0)
+                - CUSTOM_LIMITS['right_J2'][1]) < 1e-7, 'updated custom limits shared with iPad')
+            for joint in remote['joints']:
+                if joint['name'] in CUSTOM_LIMITS:
+                    lower, upper = CUSTOM_LIMITS[joint['name']]
+                    assert abs(joint['lower'] - lower) < 1e-8
+                    assert abs(joint['upper'] - upper) < 1e-8
+            command = {'robotId': remote['robotId'], 'sequence': 3, 'name': 'right_J2', 'value': 999}
+            (OUTPUT / 'command.json').write_text(json.dumps({'page': 'joints', 'commands': [command], 'created': int(time.time() * 1000)}))
+            wait(lambda s: s.get('ack') == 3, 'custom-limit remote acknowledgement')
+            applied('right_J2', CUSTOM_LIMITS['right_J2'][1])
             page.get_by_role('button', name='结束画面协作', exact=True).click()
             assert not errors, errors
             page.screenshot(path=str(OUTPUT / 'desktop-limits.png'))

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
-import { applyRobotJointValues, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { getRobotJointLimits, normalizeArmSoftLimitRatio } from '../src/lib/robotJointLimits.js';
+import { applyRobotJointValues, configureRobotArmSoftLimits, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { buildExport, normalizeProject } from '../src/lib/io.js';
+import { jointPresetErrors } from '../src/lib/robotJointPresets.js';
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
 import { applyMobileReferencePose } from '../src/lib/mobileTeachingReference.js';
 
@@ -79,4 +81,50 @@ assert.throws(() => applyMobileReferencePose(robot, {
   type: 'preset', id: 'old', name: 'Old pose', robotId: 'botx',
   joints: { angularUnit: 'degree', linearUnit: 'meter', values: { right_J2: 175 } },
 }, new Set()), /超出关节限位/);
-console.log('PASS: central 95%, asymmetric ranges, all 14 BOTX joints, numeric clamping, non-arm limits, worker snapshots and old references');
+// Changing the ratio updates both live values and UI definitions from the
+// original hard bounds. Worker copies retain the ratio at dispatch time.
+for (const invalid of [undefined, null, '', '0.8', true, NaN, Infinity]) {
+  assert.equal(normalizeArmSoftLimitRatio(invalid), 0.95);
+}
+assert.equal(normalizeArmSoftLimitRatio(-1), 0.01);
+assert.equal(normalizeArmSoftLimitRatio(2), 1);
+let workerCopy;
+const nonArmBefore = getRobotJointLimits(robot.getObjectByName('head_pitch_J'));
+for (const ratio of [0.8, 0.5, 1, 0.01, 0.95, 0.8]) {
+  const definitions = configureRobotArmSoftLimits(robot, ratio);
+  for (const name of Object.keys(expected)) {
+    const joint = robot.getObjectByName(name);
+    const { lower, upper } = joint.userData.jointLimit;
+    const margin = (upper - lower) * (1 - ratio) / 2;
+    const limit = getRobotJointLimits(joint);
+    close(limit.lower, lower + margin);
+    close(limit.upper, upper - margin);
+    assert.ok(joint.userData.jointValue >= limit.lower - 1e-9 && joint.userData.jointValue <= limit.upper + 1e-9);
+    const definition = definitions.find((item) => item.name === name);
+    close(definition.lower, THREE.MathUtils.radToDeg(limit.lower));
+    close(definition.upper, THREE.MathUtils.radToDeg(limit.upper));
+    assert.equal(definition.softLimitRatio, ratio);
+    close(setRobotJointValue(joint, 99), limit.upper);
+    close(setRobotJointValue(joint, -99), limit.lower);
+  }
+  assert.deepEqual(getRobotJointLimits(robot.getObjectByName('head_pitch_J')), nonArmBefore);
+  if (!workerCopy) workerCopy = restoreMobileTeachingRobot(serializeMobileTeachingRobot(robot));
+  assert.equal(getRobotJointLimits(workerCopy.getObjectByName('right_J2')).softLimitRatio, 0.8);
+  const right = definitions.find((joint) => joint.name === 'right_J2');
+  assert.match(jointPresetErrors([right], { right_J2: 999 }).right_J2, new RegExp(`${ratio * 100}%`));
+}
+const restoredCustom = restoreMobileTeachingRobot(serializeMobileTeachingRobot(robot));
+close(applyRobotJointValues(restoredCustom, { right_J2: 999 }).right_J2, 157.6, 1e-4);
+assert.throws(() => applyMobileReferencePose(restoredCustom, {
+  type: 'preset', id: 'outside-custom', name: 'Outside 80%', robotId: 'botx',
+  joints: { angularUnit: 'degree', linearUnit: 'meter', values: { right_J2: 170 } },
+}, new Set()), /超出关节限位/);
+
+for (const ratio of [undefined, 0.8, 1, 0.01]) {
+  const exported = buildExport({ mapData: { name: 'limits.ply' }, heightRange: [0, 1], waypoints: [], edges: [],
+    robot: { id: 'botx.urdf', relativePath: 'botx.urdf' }, robotArmSoftLimitRatio: ratio });
+  const restored = normalizeProject(JSON.parse(JSON.stringify(exported)));
+  assert.equal(restored.robot.armSoftLimitRatio, ratio ?? 0.95);
+}
+assert.equal(normalizeProject({ robot: { relativePath: 'legacy.urdf' } }).robot.armSoftLimitRatio, 0.95);
+console.log('PASS: default/custom ratios, all 14 BOTX joints, live clamping, hard-limit preservation, worker isolation, references, dynamic validation and project round trips');
