@@ -47,6 +47,9 @@ private struct PoseOriginLegend: View {
 
 struct ContentView: View {
     @EnvironmentObject private var session: TeachingSession
+    @EnvironmentObject private var screen: ScreenCollaboration
+    @State private var collaboration = false
+    private var pairingBusy: Bool { session.busy || screen.connecting }
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var discovery = LANServiceDiscovery()
     @StateObject private var usbReceiver = USBFileReceiver()
@@ -131,10 +134,10 @@ struct ContentView: View {
         }
         .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
         .sheet(isPresented: $scanning, onDismiss: finishScanning) {
-            PairingScannerView { qr in scannedCode = qr; scanning = false }
+            PairingScannerView(purpose: collaboration ? .screen : .receiveModel) { qr in scannedCode = qr; scanning = false }
         }
         .sheet(item: $pairingServer, onDismiss: finishWiFiPairing) { server in
-            WiFiPairingSheet(server: server) { code in
+            WiFiPairingSheet(server: server, collaboration: collaboration) { code in
                 requestedWiFiPairing = (server, code)
                 pairingServer = nil
             }
@@ -160,7 +163,7 @@ struct ContentView: View {
         .onChange(of: session.serverAddress) { _, _ in discovery.resetProbe() }
     }
     private func handleLibraryTap(at location: CGPoint) {
-        guard !session.busy else { return }
+        guard !pairingBusy else { return }
         // A native scroll view can consume the first button touch while settling.
         // Route a tap on its visible delete area to the same confirmation before
         // dismissing the swipe; outside taps still reach the other controls.
@@ -173,7 +176,10 @@ struct ContentView: View {
     private func finishScanning() {
         if let qr = scannedCode {
             scannedCode = nil
-            Task { await session.pair(qr: qr) }
+            if qr.isScreen {
+                collaboration = true; session.serverAddress = qr.address
+                Task { await screen.connect(address: qr.address, code: qr.code, deviceID: session.deviceID, qr: qr) }
+            } else { Task { await session.pair(qr: qr) } }
         } else { searchConfiguredServer() }
     }
     private func beginScanning() {
@@ -183,15 +189,17 @@ struct ContentView: View {
         DispatchQueue.main.async { scanning = true }
     }
     private var canPairManually: Bool {
-        !session.busy && !scanning && pairingServer == nil && session.current == nil
+        !pairingBusy && !scanning && pairingServer == nil && session.current == nil
             && session.serverConnection.canConnect && PairingCode.isValid(session.code)
     }
     private func pairManually() {
         guard canPairManually else { return }
-        Task { await session.pair() }
+        if collaboration {
+            Task { await screen.connect(address: session.serverAddress, code: session.code, deviceID: session.deviceID) }
+        } else { Task { await session.pair() } }
     }
     private func presentWiFiPairing(_ server: DiscoveredTeachingServer) {
-        guard !session.busy, !scanning, pairingServer == nil, session.current == nil else { return }
+        guard !pairingBusy, !scanning, pairingServer == nil, session.current == nil else { return }
         discovery.stop()
         session.serverAddress = server.address
         session.code = ""; session.error = ""
@@ -211,12 +219,12 @@ struct ContentView: View {
             session.serverAddress = request.server.address
             session.code = request.code
             pairManually()
-        } else if !session.busy && !scanning && session.current == nil {
+        } else if !pairingBusy && !scanning && session.current == nil {
             searchConfiguredServer()
         }
     }
     private func searchConfiguredServer() {
-        guard !session.busy, !scanning, pairingServer == nil, session.current == nil else { return }
+        guard !pairingBusy, !scanning, pairingServer == nil, session.current == nil else { return }
         discovery.probe(address: session.serverAddress)
     }
     private var libraryHeader: some View {
@@ -233,6 +241,13 @@ struct ContentView: View {
     private var pairingPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("与电脑配对", systemImage: "desktopcomputer").font(.title2.weight(.medium))
+            if !TeachingDevice.isPhone {
+                Picker("配对用途", selection: $collaboration) {
+                    Text("接收物体").tag(false)
+                    Text("画面协作").tag(true)
+                }.pickerStyle(.segmented).disabled(pairingBusy)
+                    .accessibilityIdentifier("library-pairing-purpose")
+            }
             Divider().padding(.vertical, 8)
             if TeachingDevice.isPhone {
                 pairingContents
@@ -256,7 +271,7 @@ struct ContentView: View {
                     Text("扫码").tag(0)
                     Text("Wi-Fi").tag(1)
                     Text("数据线").tag(2)
-                }.pickerStyle(.segmented).disabled(session.busy)
+                }.pickerStyle(.segmented).disabled(pairingBusy)
                     .accessibilityIdentifier("phone-pairing-method")
             }
             if !TeachingDevice.isPhone || phonePairingMethod == 0 {
@@ -264,17 +279,28 @@ struct ContentView: View {
             Button(action: beginScanning) {
                 pairingActionLabel("扫码配对", systemImage: "qrcode.viewfinder")
             }.buttonStyle(.bordered)
-                .disabled(session.busy).accessibilityIdentifier("scan-pairing-code")
+                .disabled(pairingBusy).accessibilityIdentifier("scan-pairing-code")
             }
             if !TeachingDevice.isPhone { Divider().padding(.vertical, 4) }
             if !TeachingDevice.isPhone || phonePairingMethod == 1 {
             pairingMethodHeader("方式二", title: "Wifi连接", symbol: "globe")
-            LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(session.busy)
+            LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(pairingBusy)
             discoveryPanel
             }
             if !TeachingDevice.isPhone { Divider().padding(.vertical, 4) }
             if !TeachingDevice.isPhone || phonePairingMethod == 2 {
-            usbReceivingPanel
+                if collaboration {
+                    Label("Mac 数据线协作：保持 App 打开，在电脑上选择「画面协作 → 数据线」。", systemImage: "cable.connector")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else { usbReceivingPanel }
+            }
+            if collaboration {
+                Text("电脑与 iPad 连接同一局域网。在电脑的画面协作窗口选择扫码或 Wi-Fi；Windows 使用这两种方式。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if screen.connecting {
+                    HStack { ProgressView("正在连接画面协作…"); Spacer(); Button("取消", action: screen.finish) }
+                }
+                if !screen.connectionError.isEmpty { Text(screen.connectionError).font(.callout).foregroundStyle(.orange) }
             }
             if session.busy && session.transferProgress == nil { ProgressView() }
             if !session.error.isEmpty { Text(session.error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
@@ -295,7 +321,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Button(action: refreshUSBConnection) {
                     pairingActionLabel("刷新数据线状态", systemImage: "arrow.clockwise", refreshing: refreshingUSB, activity: .refresh)
-                }.buttonStyle(.bordered).disabled(session.busy || refreshingUSB)
+                }.buttonStyle(.bordered).disabled(pairingBusy || refreshingUSB)
                     .accessibilityValue(refreshingUSB ? "正在刷新" : "")
                     .accessibilityIdentifier("refresh-usb-connection")
                 if let connection = usbReceiver.connection {
@@ -324,7 +350,7 @@ struct ContentView: View {
                             Text(ByteCountFormatter.string(fromByteCount: Int64(transfer.manifest.byteLength), countStyle: .file))
                                 .font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
-                    }.buttonStyle(.borderedProminent).disabled(session.busy)
+                    }.buttonStyle(.borderedProminent).disabled(pairingBusy)
                         .accessibilityIdentifier("receive-usb-model-\(transfer.id)")
                 }
             }
@@ -332,7 +358,7 @@ struct ContentView: View {
         }.accessibilityElement(children: .contain).accessibilityIdentifier("usb-receiving-panel")
     }
     private func refreshUSBConnection() {
-        guard !refreshingUSB, !session.busy else { return }
+        guard !refreshingUSB, !pairingBusy else { return }
         refreshingUSB = true
         usbRefreshTask = Task {
             // Keep one full turn visible even when the local status read is fast.
@@ -418,7 +444,7 @@ struct ContentView: View {
             Button(action: searchConfiguredServer) {
                 pairingActionLabel("搜索服务器", systemImage: "network", refreshing: discovery.isSearching, activity: .globe)
             }.buttonStyle(.bordered)
-                .disabled(session.busy).allowsHitTesting(!discovery.isSearching)
+                .disabled(pairingBusy).allowsHitTesting(!discovery.isSearching)
                 .accessibilityValue(discovery.isSearching ? "正在搜索" : "")
                 .accessibilityIdentifier("discover-services")
             if !discovery.servers.isEmpty {
@@ -430,7 +456,7 @@ struct ContentView: View {
                             } label: {
                                 serverConnectionCard(name: server.name, detail: LANAddressInput(address: server.address).displayAddress,
                                                      connected: session.serverAddress == server.address)
-                            }.buttonStyle(.plain).disabled(session.busy)
+                            }.buttonStyle(.plain).disabled(pairingBusy)
                                 .accessibilityIdentifier("discovered-service-\(server.id)")
                         }
                     }
@@ -479,7 +505,7 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     ForEach(session.projects) { project in
                         LocalProjectSwipeRow(projectID: project.id, revealedProjectID: $revealedProjectID,
-                                             disabled: session.busy, onDelete: { projectToDelete = project }) {
+                                             disabled: pairingBusy, onDelete: { projectToDelete = project }) {
                             Button { Task { await session.open(project) } } label: {
                                 HStack(spacing: TeachingDevice.isPhone ? 10 : 18) {
                                     VStack(alignment: .leading, spacing: 10) {
@@ -505,7 +531,7 @@ struct ContentView: View {
                                 }
                                 .padding(TeachingDevice.isPhone ? 12 : 20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                                 .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                            }.buttonStyle(.plain).disabled(session.busy).accessibilityIdentifier("local-project-\(project.id)")
+                            }.buttonStyle(.plain).disabled(pairingBusy).accessibilityIdentifier("local-project-\(project.id)")
                         }
                     }
                 }
@@ -731,6 +757,7 @@ private struct PairingActivityFrame: View {
 
 private struct WiFiPairingSheet: View {
     let server: DiscoveredTeachingServer
+    var collaboration = false
     let onPair: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -755,7 +782,8 @@ private struct WiFiPairingSheet: View {
                                 .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
                         }
                     }
-                    Text("输入此电脑窗口中的 4 位配对码，字母或数字均可。输入完成后自动连接。")
+                    Text(collaboration ? "输入电脑「画面协作」窗口中的 4 位配对码，完成后自动连接。"
+                         : "输入此电脑窗口中的 4 位配对码，字母或数字均可。输入完成后自动连接。")
                         .font(.callout).foregroundStyle(.secondary)
                     PairingCodeField(code: Binding(get: { code }, set: { value in
                         code = value; submit(after: .milliseconds(600))

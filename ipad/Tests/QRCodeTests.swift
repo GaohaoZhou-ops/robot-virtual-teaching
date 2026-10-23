@@ -27,6 +27,7 @@ import simd
         let smallText = try read(VNImageRequestHandler(cgImage: small))
         precondition(smallText == text)
         let qr = try PairingQRCode.parse(text)
+        precondition(!qr.isScreen)
         precondition(qr.address == address && qr.sessionId == sessionID && qr.serverId == serverID)
         let fields = try JSONSerialization.jsonObject(with: Data(text.utf8)) as! [String: Any]
         precondition(fields["ownerToken"] == nil && fields["deviceToken"] == nil, "QR must never expose long-lived credentials")
@@ -36,7 +37,7 @@ import simd
         }
         var invalid = ["https://example.com", "{}", String(repeating: "x", count: 2049),
             try changed("protocol", "other/1"), try changed("expiresAt", 1),
-            try changed("code", "ABCDE"), try changed("sessionId", "not-a-session")]
+            try changed("code", "ABCDE"), try changed("sessionId", "not-a-session"), try changed("purpose", "unknown")]
         for address in ["https://example.com", "http://8.8.8.8", "http://192.168.1.2@outside.com",
                         "http://192.168.1.2/path", "http://192.168.1.a.2", "http://192..168.1.2", "http://192.168.1.2:99999"] {
             invalid.append(try changed("address", address))
@@ -46,6 +47,12 @@ import simd
             catch is TeachingError {}
         }
         let client = try LANClient(address: address), deviceID = UUID().uuidString
+        let screenQR = try PairingQRCode.parse(changed("purpose", "screen"))
+        precondition(screenQR.isScreen)
+        do { _ = try await client.pair(code: screenQR.code, deviceID: deviceID, name: "QR Test", qr: screenQR); preconditionFailure("Screen QR accepted as a model transfer") }
+        catch is TeachingError {}
+        do { _ = try await client.pairScreen(code: qr.code, deviceID: deviceID, name: "QR Test", qr: qr); preconditionFailure("Model QR accepted as screen collaboration") }
+        catch is TeachingError {}
         for field in ["serverId", "sessionId"] {
             let wrong = try PairingQRCode.parse(changed(field, UUID().uuidString.lowercased()))
             do { _ = try await client.pair(code: wrong.code, deviceID: deviceID, name: "QR Test", qr: wrong); preconditionFailure("Mismatched identity was paired") }

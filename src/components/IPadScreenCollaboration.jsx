@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Cable, CheckCircle2, LoaderCircle, Monitor, RefreshCw, Square, X } from 'lucide-react';
+import { Cable, CheckCircle2, LoaderCircle, Monitor, QrCode, RefreshCw, Square, Wifi, X } from 'lucide-react';
 import ZividCameraPanel from './ZividCameraPanel.jsx';
-import { screenJointState, screenJointCommand } from '../lib/ipadScreenControl.js';
+import IPadPairingQRCode from './IPadPairingQRCode.jsx';
+import { screenJointState, screenJointCommand, screenPoseCaptureCommand, screenViewportCommand } from '../lib/ipadScreenControl.js';
 import './IPadScreenCollaboration.css';
 
 const api = '/__atlas/ipad-screen';
@@ -16,9 +17,13 @@ const endSession = (session) => session && request(`/session/${session.id}`, {
   method: 'DELETE', headers: { Authorization: `Bearer ${session.token}` }, keepalive: true,
 }).catch(() => {});
 const jpeg = (canvas) => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('相机画面编码失败')), 'image/jpeg', 0.8));
+const getQRCode = (ticket, address, signal) => request(`/session/${ticket.id}/pairing-qr`, {
+  method: 'POST', signal, headers: { Authorization: `Bearer ${ticket.ownerToken}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ address, code: ticket.pairingCode }),
+});
 
 export default function IPadScreenCollaboration({ open, onClose, mapData, robot, robotLoadState, cameraPoses, meshRenderQuality,
-  jointValues, onChangeJoint, viewportCaptureRef, controlBlockedReason = '' }) {
+  jointValues, onChangeJoint, viewportCaptureRef, controlBlockedReason = '', poseCaptureState, onRecordPose }) {
   const [devices, setDevices] = useState([]);
   const [selected, setSelected] = useState('');
   const [session, setSession] = useState(null);
@@ -28,8 +33,14 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   const [error, setError] = useState('');
   const [frames, setFrames] = useState(0);
   const [remotePage, setRemotePage] = useState('cameras');
+  const [capabilities, setCapabilities] = useState(null);
+  const [method, setMethod] = useState(null);
+  const methodRef = useRef(null); methodRef.current = method;
+  const [address, setAddress] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [deviceConnected, setDeviceConnected] = useState(false);
   const controlRef = useRef(null);
-  controlRef.current = { state: screenJointState(robot, robotLoadState?.movableJoints, jointValues, controlBlockedReason), onChangeJoint };
+  controlRef.current = { state: { ...screenJointState(robot, robotLoadState?.movableJoints, jointValues, controlBlockedReason), capture: poseCaptureState }, onChangeJoint, onRecordPose };
   const sessionRef = useRef(null), operationRef = useRef(0), mountedRef = useRef(true), startingRef = useRef(false);
   const cache = useRef({ left: null, right: null });
   const dialogRef = useRef(null), stopRef = useRef(null);
@@ -38,7 +49,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   const stop = useCallback(() => {
     operationRef.current += 1;
     const current = sessionRef.current; sessionRef.current = null;
-    setSession(null); setFrames(0); setBusy(false); setMessage('协作已结束，可重新连接。'); cache.current = { left: null, right: null };
+    setSession(null); setDeviceConnected(false); setFrames(0); setBusy(false); setMessage('协作已结束，可重新连接。'); cache.current = { left: null, right: null };
     void endSession(current);
   }, []);
   stopRef.current = stop;
@@ -58,7 +69,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       const current = await request('/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
       if (!mountedRef.current || operation !== operationRef.current) { void endSession(current); return; }
       cache.current = { left: null, right: null }; sessionRef.current = current;
-      setSession(current); setFrames(0); setMessage('正在准备左右臂画面…');
+      setSession(current); setDeviceConnected(true); setFrames(0); setMessage('正在准备左右臂画面…');
     } catch (failure) { if (mountedRef.current && operation === operationRef.current) setError(failure.message); }
     finally { startingRef.current = false; if (mountedRef.current && operation === operationRef.current) setBusy(false); }
   };
@@ -71,11 +82,54 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       const ready = value.devices.filter((device) => device.ready);
       const deviceId = ready.find((device) => device.id === selected)?.id || (ready.length === 1 ? ready[0].id : '');
       setSelected(deviceId);
-      if (autoStart && ready.length === 1 && !sessionRef.current) void start(deviceId);
+      if (autoStart && methodRef.current === 'usb' && ready.length === 1 && !sessionRef.current) void start(deviceId);
     } catch (failure) { if (mountedRef.current) setError(failure.message); }
     finally { if (mountedRef.current) setChecking(false); }
   };
-  useEffect(() => { if (open && !sessionRef.current) void refresh(true); }, [open, canStream]);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    request('/info').then((info) => {
+      if (cancelled) return;
+      setCapabilities(info); setAddress((value) => info.addresses.includes(value) ? value : info.addresses[0] || '');
+      const next = methodRef.current && (methodRef.current !== 'usb' || info.usbSupported) ? methodRef.current : info.usbSupported ? 'usb' : 'qr';
+      methodRef.current = next; setMethod(next);
+      if (next === 'usb' && !sessionRef.current) void refresh(true);
+    }).catch((failure) => { if (!cancelled) setError(failure.message); });
+    return () => { cancelled = true; };
+  }, [open, canStream]);
+  const startWireless = useCallback(async () => {
+    if (!canStream || !address || sessionRef.current || startingRef.current) return;
+    const operation = ++operationRef.current; startingRef.current = true; setBusy(true); setError(''); setCopied(false);
+    try {
+      const current = await request('/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'wifi' }) });
+      if (!mountedRef.current || operation !== operationRef.current) { void endSession(current); return; }
+      sessionRef.current = current; setSession(current); setDeviceConnected(false); setFrames(0);
+    } catch (failure) { if (mountedRef.current && operation === operationRef.current) setError(failure.message); }
+    finally { startingRef.current = false; if (mountedRef.current && operation === operationRef.current) setBusy(false); }
+  }, [canStream, address]);
+  useEffect(() => {
+    // Entering the QR page prepares one pairing; cancelling or a failed request
+    // must not immediately create another session.
+    if (open && method === 'qr') void startWireless();
+  }, [open, method, startWireless]);
+  const renewPairing = async () => {
+    const current = sessionRef.current;
+    if (!current || deviceConnected || busy) return;
+    setBusy(true); setError(''); setCopied(false);
+    try {
+      const update = await request(`/session/${current.id}/renew`, { method: 'POST', headers: { Authorization: `Bearer ${current.token}` } });
+      if (sessionRef.current?.id !== current.id) return;
+      sessionRef.current = { ...current, ...update }; setSession(sessionRef.current);
+    } catch (failure) { if (sessionRef.current?.id === current.id) setError(failure.message); }
+    finally { if (mountedRef.current) setBusy(false); }
+  };
+  const selectMethod = (next) => {
+    if (deviceConnected || busy || method === next) return;
+    if (sessionRef.current?.mode !== 'wifi' && sessionRef.current) stop();
+    setMethod(next); methodRef.current = next; setError(''); setMessage('');
+    if (next === 'usb') { if (sessionRef.current) stop(); void refresh(); }
+  };
   useEffect(() => {
     if (!open) return undefined;
     const previous = document.activeElement; dialogRef.current?.focus();
@@ -103,8 +157,12 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   }, []);
   useEffect(() => {
     if (!session) return undefined;
-    let cancelled = false, connected = false, sending = false, timer, sent = 0, ack = 0, publishedAck = 0, page = 'cameras', viewportSent = false;
+    let cancelled = false, connected = false, deviceReady = session.mode !== 'wifi', sending = false, timer, sent = 0, ack = 0, publishedAck = 0, page = 'cameras', viewportSent = false;
     const awaitingCommit = new Map();
+    const captureRequests = new Set();
+    let captureResult = null;
+    let viewportAck = 0;
+    const viewportControl = () => ({ ...(viewportCaptureRef.current?.getState() || { enabled: false, aspect: 1.6 }), ack: viewportAck });
     setRemotePage('cameras');
     const viewport = document.createElement('canvas'); viewport.width = 960; viewport.height = 600;
     const controller = new AbortController(); let waitingSince = performance.now();
@@ -122,23 +180,59 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       if (cancelled || sessionRef.current?.id !== session.id) return;
       const status = JSON.parse(event.data);
       if (status.error) { fail(status.error); return; }
+      if (status.deviceReady === true && !deviceReady) {
+        deviceReady = true; waitingSince = performance.now(); setDeviceConnected(true);
+        sessionRef.current = { ...sessionRef.current, deviceName: status.deviceName || 'iPad' }; setSession(sessionRef.current);
+        void send();
+      }
       if (status.ready && !connected) { connected = true; clearTimeout(connectTimer); void send(); }
       const changedPage = status.page && status.page !== page;
       if (status.page) { page = status.page; setRemotePage(page); }
       let changedJoint = false;
       for (const candidate of status.commands || []) {
+        if (captureResult?.status === 'recording') break;
         const command = screenJointCommand(candidate, controlRef.current.state, ack);
         if (!command) continue;
         ack = command.sequence; changedJoint = true;
         awaitingCommit.set(command.name, command.value);
         controlRef.current.onChangeJoint?.(command.name, command.value);
       }
-      if (changedPage || changedJoint) void send();
+      let changedViewport = false;
+      const viewState = { ...controlRef.current.state, viewportControl: viewportControl() };
+      for (const candidate of status.viewportCommands || []) {
+        const command = screenViewportCommand(candidate, viewState, viewportAck);
+        if (!command) continue;
+        // Consume once even at a zoom limit; repeated transport replies must
+        // never repeat a relative camera movement.
+        changedViewport = Boolean(viewportCaptureRef.current?.navigate(command)) || changedViewport;
+        viewportAck = command.sequence;
+      }
+      if (changedPage || changedJoint || changedViewport) void send();
+      const capture = screenPoseCaptureCommand(status.captureRequest, controlRef.current.state);
+      if (capture && !captureRequests.has(capture.id) && captureResult?.status !== 'recording') {
+        captureRequests.add(capture.id);
+        captureResult = { id: capture.id, status: 'recording', message: '正在记录姿态…' };
+        void send();
+        void (async () => {
+          try {
+            const result = awaitingCommit.size
+              ? { success: false, message: '关节正在同步，请稍候再记录姿态。' }
+              : await controlRef.current.onRecordPose?.(capture, () => !cancelled && sessionRef.current?.id === session.id);
+            if (cancelled) return;
+            captureResult = { id: capture.id, status: result?.success ? 'complete' : 'error',
+              message: String(result?.message || '未能记录姿态，请在网页端检查任务和停车点。').slice(0, 512) };
+          } catch (failure) {
+            if (cancelled) return;
+            captureResult = { id: capture.id, status: 'error', message: String(failure.message || '记录姿态失败，请重试。').slice(0, 512) };
+          }
+          void send();
+        })();
+      }
     };
     connection.onerror = () => fail('电脑画面连接已断开，请重新连接。');
     connection.onclose = () => fail('画面协作已结束，请重新连接。');
     const send = async () => {
-      if (cancelled || sending || !connected) return;
+      if (cancelled || sending || !connected || !deviceReady) return;
       clearTimeout(timer); sending = true;
       const began = performance.now();
       try {
@@ -151,9 +245,9 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
             if (currentState.joints.some((joint) => joint.name === name && Math.abs(joint.value - value) < 1e-7)) awaitingCommit.delete(name);
           }
           if (!awaitingCommit.size) publishedAck = ack;
-          const state = new Blob([JSON.stringify({ ...currentState, ack: publishedAck })]);
+          const state = new Blob([JSON.stringify({ ...currentState, ack: publishedAck, captureResult, viewportControl: viewportControl() })]);
           let picture = new Blob();
-          if ((page === 'joints' || !viewportSent) && viewportCaptureRef.current?.(viewport)) {
+          if ((page === 'joints' || !viewportSent) && viewportCaptureRef.current?.capture(viewport)) {
             picture = await jpeg(viewport); viewportSent = true;
           }
           if (cancelled) return;
@@ -184,40 +278,63 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       cancelled = true; clearTimeout(timer); clearTimeout(connectTimer); controller.abort(); connection.close();
       document.removeEventListener('visibilitychange', resume); document.removeEventListener('resume', resume);
     };
-  }, [session]);
+  }, [session?.id]);
   useEffect(() => () => stopRef.current(), [mapData?.geometry, robot?.id]);
   useEffect(() => { if (!canStream && sessionRef.current) { stop(); setError('相机或工程已切换，画面协作已停止。'); } }, [canStream, stop]);
 
   return <>
-    {session && <div className="ipad-screen-renderers" aria-hidden="true">
+    {session && deviceConnected && <div className="ipad-screen-renderers" aria-hidden="true">
       {['left', 'right'].map((side) => <ZividCameraPanel key={side} streamOnly side={side} activeSide={side} mapData={mapData}
         robot={robot} robotLoadState={robotLoadState} cameraPoses={cameraPoses} meshRenderQuality={meshRenderQuality}
         onStreamFrame={(source) => copyFrame(side, source)} />)}
     </div>}
-    {session && !open && <div className="ipad-screen-dock" role="status"><Monitor size={16}/><span>{session.deviceName} · {frames ? remotePage === 'joints' ? '关节协作中' : '画面协作中' : '准备画面…'}</span>
+    {session && !open && <div className="ipad-screen-dock" role="status"><Monitor size={16}/><span>{session.deviceName} · {!deviceConnected ? '等待配对…' : frames ? remotePage === 'joints' ? '关节协作中' : '画面协作中' : '准备画面…'}</span>
       <button type="button" onClick={stop} aria-label="结束画面协作"><Square size={13}/>结束协作</button></div>}
     {error && !open && <div className="ipad-screen-dock is-error" role="alert"><span>{error}</span><button onClick={() => setError('')} aria-label="关闭协作提示"><X size={14}/></button></div>}
     {open && createPortal(<div className="ipad-screen-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="ipad-screen-dialog" role="dialog" aria-modal="true" aria-labelledby="ipad-screen-title" ref={dialogRef} tabIndex={-1}>
-        <header><span className="ipad-screen-mark"><Monitor size={24}/></span><div><small>USB CAMERA VIEW</small><h2 id="ipad-screen-title">画面协作</h2></div>
+        <header><span className="ipad-screen-mark"><Monitor size={24}/></span><div><small>IPAD COLLABORATION</small><h2 id="ipad-screen-title">画面协作</h2></div>
           <button type="button" onClick={onClose} aria-label="关闭画面协作窗口"><X size={18}/></button></header>
-        <p className="ipad-screen-intro">在 iPad / iPhone 上自由切换相机画面与关节控制，边看 3D 姿态边拖动关节，两端同步更新。</p>
+        <p className="ipad-screen-intro">在 iPad 上自由切换相机画面与关节控制，边看 3D 姿态边拖动关节，两端同步更新。</p>
         <div className="ipad-screen-pair" aria-label="共享画面内容"><div><i/>左臂相机<small>ZIVID 2 M70</small></div><div><i/>右臂相机<small>ZIVID 2 M70</small></div></div>
         {!canStream && <p className="ipad-screen-notice">请先打开示教工程，加载带左右臂末端相机的机器人。</p>}
-        {session ? <div className="ipad-screen-connection"><CheckCircle2 size={20}/><div><strong>{session.deviceName}</strong><span>{frames ? '正在共享双臂画面' : '正在准备左右臂画面…'}</span></div><span className="ipad-screen-live">USB</span></div>
-          : <div className="ipad-screen-devices">
+        <div className="ipad-screen-methods" role="tablist" aria-label="协作连接方式">
+          {[['qr', '扫码', QrCode], ['wifi', 'Wi-Fi', Wifi], ...(capabilities?.usbSupported ? [['usb', '数据线', Cable]] : [])].map(([id, label, Icon]) =>
+            <button key={id} type="button" role="tab" aria-selected={method === id} disabled={deviceConnected || busy || !capabilities}
+              onClick={() => selectMethod(id)}><Icon size={15}/>{label}</button>)}
+        </div>
+        {session && deviceConnected ? <div className="ipad-screen-connection"><CheckCircle2 size={20}/><div><strong>{session.deviceName}</strong><span>{frames ? '正在共享双臂画面' : '正在准备左右臂画面…'}</span></div><span className="ipad-screen-live">{session.mode === 'wifi' ? 'Wi-Fi' : 'USB'}</span></div>
+          : method === 'usb' ? <div className="ipad-screen-devices">
             <div className="ipad-screen-device-heading"><span><Cable size={16}/>数据线连接</span><button type="button" disabled={checking || busy} onClick={() => refresh()}><RefreshCw size={14} className={checking ? 'is-spinning' : ''}/>刷新设备</button></div>
             {devices.length > 0 && <select aria-label="画面协作设备" value={selected} disabled={busy} onChange={(event) => setSelected(event.target.value)}>
               <option value="">选择已连接的设备</option>{devices.map((device) => <option key={device.id} value={device.id} disabled={!device.ready}>{device.name}{!device.ready ? ` · ${device.message}` : ''}</option>)}
             </select>}
             {devices.filter((device) => !device.ready).map((device) => <p key={device.id}>{device.name}：{device.message}</p>)}
             {message && <p>{message}</p>}{checking && <p role="status">正在检测有线设备与 App…</p>}
+          </div> : <div className="ipad-screen-wireless">
+            {session?.mode === 'wifi' ? <>
+              <IPadPairingQRCode key={`${session.id}-${session.pairingCode}-${address}-${method}`} purpose="screen" mode={method} getQRCode={getQRCode}
+                ticket={{ ...session, ownerToken: session.token, status: 'ready' }} address={address} disabled={busy} copied={copied}
+                onCopy={() => navigator.clipboard.writeText(session.pairingCode).then(() => setCopied(true)).catch(() => setError('复制失败，请手动输入配对码。'))}/>
+              {method === 'wifi' && <button type="button" onClick={renewPairing} disabled={busy}><RefreshCw size={14}/>更新配对码</button>}
+            </> : <p>{method === 'wifi' ? '生成配对码后，在 iPad 首页选择「画面协作」，填写电脑地址并输入配对码。' : busy ? '正在生成二维码…' : '使用 iPad 上 Atlas App 首页的「扫码配对」扫描二维码即可连接。'}</p>}
+            <label className="ipad-screen-address">电脑局域网地址
+              <select aria-label="协作电脑地址" value={address} disabled={busy} onChange={(event) => { setAddress(event.target.value); setCopied(false); }}>
+                {!address && <option value="">未找到局域网地址</option>}
+                {(capabilities?.addresses || []).map((value) => <option key={value} value={value}>{value}</option>)}
+              </select>
+            </label>
+            <p className="ipad-screen-footnote">{address ? '电脑与 iPad 需在同一局域网；Windows 使用扫码或 Wi-Fi，Mac 还可使用数据线。' : '请先连接局域网，再重新打开此窗口。'}</p>
           </div>}
         {error && <p className="ipad-screen-error" role="alert">{error}</p>}
-        <footer><small>共享当前工程的相机仿真画面</small>{session
-          ? <button type="button" className="ipad-screen-primary" onClick={stop}><Square size={14}/>结束协作</button>
-          : <button type="button" className="ipad-screen-primary" disabled={!canStream || !selected || busy || checking} onClick={() => start(selected)}>{busy ? <LoaderCircle size={15} className="is-spinning"/> : <Monitor size={15}/>}开始协作</button>}</footer>
-        {session && <p className="ipad-screen-footnote">关闭此窗口、切换 Mac 窗口或标签页后仍保持协作；结束协作可在电脑或设备上操作。</p>}
+        <footer><small>共享当前工程的相机仿真画面</small><div className="ipad-screen-actions">{session && (deviceConnected || method !== 'qr')
+          ? <button type="button" className="ipad-screen-primary" onClick={stop}><Square size={14}/>{deviceConnected ? '结束协作' : '取消配对'}</button>
+          : <>{session && <button type="button" onClick={stop} disabled={busy}><Square size={14}/>取消配对</button>}
+            <button type="button" className="ipad-screen-primary" disabled={!canStream || !capabilities || busy || (method === 'usb' ? !selected || checking : !address)}
+              onClick={() => method === 'usb' ? start(selected) : session ? renewPairing() : startWireless()}>{busy ? <LoaderCircle size={15} className="is-spinning"/> : method === 'qr' ? <RefreshCw size={15}/> : <Monitor size={15}/>}
+              {method === 'usb' ? '开始协作' : method === 'wifi' ? '生成配对码' : '重新生成二维码'}</button></>}
+        </div></footer>
+        {session && <p className="ipad-screen-footnote">关闭此窗口、切换电脑窗口或标签页后仍保持协作；结束协作可在电脑或 iPad 上操作。</p>}
       </section>
     </div>, document.body)}
   </>;

@@ -1,9 +1,9 @@
-import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, readdir, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
-import { networkInterfaces, hostname } from 'node:os';
+import { hostname } from 'node:os';
 import path from 'node:path';
-import QRCode from 'qrcode';
+import { ipadServerIdentity, lanAddresses, randomPairingCode, pairingQRCode } from './ipadPairing.js';
 import { IPAD_PROTOCOL, MAX_MODEL_BYTES, validateModelBytes, validateIPadResult, validateIPadPoseSeed, ipadPoseArm } from '../lib/ipadProtocol.js';
 import { advertiseIPadService } from './ipadDiscovery.js';
 import { modelThumbnail } from './modelThumbnail.js';
@@ -13,9 +13,6 @@ import { validateIPadNavigationReference } from '../lib/ipadNavigationReference.
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const secret = () => randomBytes(32).toString('hex');
-const randomPairingCode = () => randomInt(36 ** 4).toString(36).padStart(4, '0').toUpperCase();
-const lanAddresses = (port) => [...new Set(Object.values(networkInterfaces()).flat()
-  .filter((item) => item?.family === 'IPv4' && !item.internal).map((item) => `http://${item.address}:${port}`))];
 const fail = (code, message) => { const error = new Error(message); error.status = code; throw error; };
 const equal = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length
   && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -271,7 +268,7 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
             || !equal(session.pairingCodeHash, hash(code))) fail(409, '配对码已更新，请刷新任务或更新配对码');
           const payload = { protocol: 'atlas-ipad-pairing/1', address, code,
             sessionId: session.id, serverId, expiresAt: session.pairingExpiresAt };
-          const image = await QRCode.toDataURL(JSON.stringify(payload), { errorCorrectionLevel: 'M', margin: 4, scale: 8 });
+          const image = await pairingQRCode(payload);
           return json(res, 200, { image, expiresAt: session.pairingExpiresAt });
         }
         if (action === 'renew' && req.method === 'POST') {
@@ -352,7 +349,7 @@ export function ipadTeachingPlugin() {
   let root, logger;
   const cleanups = new Set();
   const install = (server) => {
-    const identity = { serverId: randomUUID(), serverName: hostname().replace(/\.local$/i, '').slice(0, 120) };
+    const identity = ipadServerIdentity(server.httpServer);
     const usbBridge = createIPadUSBBridge({ directory: path.join(root, '.atlas-cache', 'ipad-usb'), ...identity });
     server.middlewares.use(createIPadTeachingService({ directory: path.join(root, '.atlas-cache', 'ipad-teaching'), ...identity, usbBridge }));
     if (server.httpServer) {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { WebSocket } from 'ws';
 import { createIPadScreenService, SCREEN_PROTOCOL, validateScreenFrame, validateScreenWorkspace } from '../src/server/ipadScreenService.js';
-import { screenJointState, screenJointCommand } from '../src/lib/ipadScreenControl.js';
+import { screenJointState, screenJointCommand, screenPoseCaptureState, screenPoseCaptureCommand } from '../src/lib/ipadScreenControl.js';
 
 const jpeg = Buffer.from([255, 216, 255, 217]);
 const pair = Buffer.alloc(16); pair.writeUInt32BE(4, 0); pair.writeUInt32BE(4, 4); jpeg.copy(pair, 8); jpeg.copy(pair, 12);
@@ -11,7 +11,7 @@ assert.throws(() => validateScreenFrame(pair.subarray(0, 15)));
 const corrupt = Buffer.from(pair); corrupt.writeUInt32BE(100, 0);
 assert.throws(() => validateScreenFrame(corrupt));
 let active = false, wired = true, frames = 0, now = 0, closed = false, heartbeats = 0, keepalive = true;
-let nativePage = 'cameras', nativeCommands = [];
+let nativePage = 'cameras', nativeCommands = [], nativeCaptureRequest, nativeViewportCommands = [];
 const jointState = screenJointState({ id: 'robot-1', name: 'Test Robot' }, [
   { name: 'left_J1', type: 'revolute', lower: -90, upper: 90 },
   { name: 'lift', type: 'prismatic', lower: 0, upper: 1 },
@@ -37,6 +37,23 @@ for (const invalid of [{ ...command, name: 'unknown' }, { ...command, robotId: '
 assert.equal(screenJointCommand(command, jointState, 1, 0), null);
 assert.equal(screenJointCommand(command, jointState, 0, 4000), null, 'suspended-page commands expire');
 assert.equal(screenJointCommand(command, { ...jointState, editable: false }, 0, 0), null);
+const captureTask = { id: 'task-1', name: '示教任务', parkingPoints: [{ id: 'parking-1', name: '停车点' }] };
+assert.match(screenPoseCaptureState(null).reason, /网页端.*示教任务/);
+assert.match(screenPoseCaptureState(captureTask, null).reason, /网页端.*停车点/);
+assert.match(screenPoseCaptureState({ ...captureTask, mobileCapture: {} }, 'parking-1').reason, /虚拟示教任务/);
+jointState.capture = screenPoseCaptureState(captureTask, 'parking-1');
+assert.equal(jointState.capture.reason, '');
+const captureRequest = { id: '00000000-1111-2222-3333-444444444444', robotId: 'robot-1', taskId: 'task-1', parkingPointId: 'parking-1', ageMs: 0, receivedAt: 0 };
+assert.deepEqual(screenPoseCaptureCommand(captureRequest, jointState, 0), captureRequest);
+for (const invalid of [{ ...captureRequest, id: 'bad' }, { ...captureRequest, robotId: 'other' },
+  { ...captureRequest, taskId: {} }, { ...captureRequest, ageMs: -1 }, { ...captureRequest, ageMs: 4000 }]) {
+  assert.equal(screenPoseCaptureCommand(invalid, jointState, 0), null);
+}
+assert.equal(screenPoseCaptureCommand(captureRequest, jointState, 4000), null, 'suspended recording requests expire');
+assert.deepEqual(validateScreenWorkspace(workspaceBody({ ...jointState,
+  captureResult: { id: captureRequest.id, status: 'complete', message: '已记录停车点 / A01' } })).capture, jointState.capture);
+assert.throws(() => validateScreenWorkspace(workspaceBody({ ...jointState, capture: { taskId: {} } })));
+assert.throws(() => validateScreenWorkspace(workspaceBody({ ...jointState, captureResult: { id: 'bad', status: 'complete', message: '' } })));
 const calls = [];
 const transport = {
   devices: async () => wired ? [{ id: 'test-usb-device' }] : [],
@@ -48,11 +65,12 @@ const transport = {
     if (method === 'POST') { active = true; return { status: 200, body: { ready: true } }; }
     if (method === 'DELETE') { active = false; return { status: 200, body: { stopped: true } }; }
     if (!active) return { status: 410, body: { error: 'Device ended session' } };
-    if (route === '/heartbeat') { heartbeats += 1; return { status: 200, body: { page: nativePage, commands: nativeCommands } }; }
+    if (route === '/heartbeat') { heartbeats += 1; return { status: 200, body: { page: nativePage, commands: nativeCommands, captureRequest: nativeCaptureRequest, viewportCommands: nativeViewportCommands } }; }
     if (route === '/workspace') {
       const state = validateScreenWorkspace(body);
       nativeCommands = nativeCommands.filter((item) => item.sequence > state.ack);
-      return { status: 200, body: { page: nativePage, commands: nativeCommands } };
+      nativeViewportCommands = nativeViewportCommands.filter((item) => item.sequence > (state.viewportControl?.ack || 0));
+      return { status: 200, body: { page: nativePage, commands: nativeCommands, captureRequest: nativeCaptureRequest, viewportCommands: nativeViewportCommands } };
     }
     assert.deepEqual(body, pair); frames += 1;
     return { status: 200, body: { received: true, page: nativePage, commands: nativeCommands } };
@@ -132,6 +150,24 @@ try {
   await waitFor(() => events.length > previousEvents);
   assert.equal(events.at(-1).commands.length, 0, 'blocked or expired gestures cannot move the robot');
   nativeCommands = []; nativePage = 'cameras'; await workspace(final, jointState);
+  nativeCaptureRequest = { ...captureRequest, receivedAt: undefined };
+  await workspace(final, jointState);
+  await waitFor(() => events.some((event) => event.captureRequest?.id === captureRequest.id));
+  assert.equal(events.find((event) => event.captureRequest).captureRequest.taskId, 'task-1');
+  nativeCaptureRequest = { ...nativeCaptureRequest, ageMs: 3100 };
+  const beforeExpiredCapture = events.length;
+  await workspace(final, jointState);
+  await waitFor(() => events.length > beforeExpiredCapture);
+  assert.equal(events.at(-1).captureRequest, null, 'USB relay drops stale recording requests');
+  nativeCaptureRequest = undefined;
+  jointState.viewportControl = { enabled: true, aspect: 1.6, ack: 0 };
+  nativeViewportCommands = [{ robotId: 'robot-1', sequence: 1, kind: 'rotate', dx: 0.1, dy: 0, zoom: 0, ageMs: 0 }];
+  await workspace(final, { ...jointState, editable: false });
+  await waitFor(() => events.some((event) => event.viewportCommands?.length));
+  assert.equal(events.find((event) => event.viewportCommands?.length).viewportCommands[0].kind, 'rotate');
+  jointState.viewportControl.ack = 1;
+  await workspace(final, jointState);
+  assert.equal(nativeViewportCommands.length, 0, 'viewport acknowledgement clears relative gestures separately from joints');
   const savedFrames = frames;
   for (let i = 0; i < 5; i++) {
     const previous = heartbeats; now += 4000;

@@ -64,6 +64,8 @@ import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
 import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
 import IPadScreenCollaboration from './components/IPadScreenCollaboration.jsx';
+import { screenPoseCaptureState } from './lib/ipadScreenControl.js';
+import { analyzeParkingPointDrift } from './lib/teachingParkingDrift.js';
 import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
@@ -3642,21 +3644,21 @@ export default function App() {
     const task = teachingTasks.find((item) => item.id === (options?.taskId || activeTeachingTaskId));
     if (!task) {
       notify('请先新建或选择一个示教任务', 'warning');
-      return;
+      return { success: false, message: '请先在网页端新建或选择示教任务。' };
     }
     const selectedParkingPoint = task.parkingPoints?.find(
       (item) => item.id === (options?.parkingPointId || activeTeachingParkingPointId),
     );
     if (!selectedParkingPoint && !createParkingPoint) {
       notify('请先新增或选择一个停车点', 'warning');
-      return;
+      return { success: false, message: '请先在网页端新增或选择停车点。' };
     }
     const originalPoint = replacePoseId
       ? selectedParkingPoint?.poses?.find((point) => point.id === replacePoseId)
       : null;
     if (task.abx && (!replacePoseId || originalPoint?.abx?.located === false)) {
       notify('原生任务保留机器人动作顺序；请新建虚拟任务添加步骤，缺少定位的原生姿态请在机器人端编辑', 'warning');
-      return;
+      return { success: false, message: '请先在网页端新建或选择虚拟示教任务。' };
     }
     const edit = robotParkingGhostRef.current;
     if (replacePoseId && (
@@ -3669,9 +3671,9 @@ export default function App() {
     )) return;
     if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
       notify('当前地图或机器人与该示教任务不一致，无法记录', 'warning');
-      return;
+      return { success: false, message: '当前地图或机器人与任务不一致，请在网页端选择匹配的任务。' };
     }
-    if (teachingCaptureBusyRef.current) return;
+    if (teachingCaptureBusyRef.current) return { success: false, message: '正在记录姿态，请稍候。' };
     const pose = normalizeRobotPose(replacePoseId
       ? originalPoint?.abx ? originalPoint.mapPose : selectedParkingPoint.mapPose : robotPose);
     const joints = normalizeRobotJointValues(replacePoseId ? options.jointValues : robotJointValues);
@@ -3700,7 +3702,7 @@ export default function App() {
         const message = '左右 Zivid 画面正在准备，请稍后重试';
         setTeachingCaptureState({ status: 'error', message });
         notify(message, 'warning');
-        return;
+        return { success: false, message };
       }
       teachingCaptureBusyRef.current = true;
       setTeachingCaptureState({
@@ -3708,17 +3710,23 @@ export default function App() {
         message: '正在冻结左右 RGB 与点云快照',
       });
       try {
-        const capturePromise = provider(replacePoseId ? { cameraPoses: options.cameraPoses } : undefined);
-        await waitForPaint();
+        const capturePromise = provider(replacePoseId ? { cameraPoses: options.cameraPoses }
+          : options.allowBackground ? { allowBackground: true } : undefined);
+        if (options.allowBackground) await new Promise((resolve) => window.setTimeout(resolve, 0));
+        else await waitForPaint();
         cameraCapture = await capturePromise;
       } catch (error) {
         const message = error?.message || '双目视觉快照采集失败';
         setTeachingCaptureState({ status: 'error', message });
         notify(message, 'error');
-        return;
+        return { success: false, message };
       } finally {
         teachingCaptureBusyRef.current = false;
       }
+    }
+    if (options.isCurrent && !options.isCurrent()) {
+      setTeachingCaptureState({ status: 'idle', message: '' });
+      return { success: false, message: '协作连接、任务或停车点已切换，本次未记录，请确认后重试。' };
     }
     // A closed preview, a new selection or Escape invalidates an in-flight edit.
     if (replacePoseId && (
@@ -3805,6 +3813,7 @@ export default function App() {
       parkingPointId: parkingPoint.id,
       frameCount: cameraCapture ? Object.keys(cameraCapture.frames || {}).length : 0,
     });
+    return { success: true, message: `已记录 ${parkingPoint.name} / ${point.name}`, pointId: point.id };
   }, [
     activeTeachingParkingPointId,
     activeTeachingTaskId,
@@ -3819,6 +3828,27 @@ export default function App() {
     teachingTasks,
     waypoints,
   ]);
+
+  const screenCaptureParkingPoint = activeTeachingTask?.parkingPoints?.find((point) => point.id === activeTeachingParkingPointId);
+  const ipadPoseCaptureState = screenPoseCaptureState(activeTeachingTask, activeTeachingParkingPointId,
+    ['playing', 'paused'].includes(teachingPlayback.status) ? '请先在网页端结束轨迹播放，再记录姿态。'
+      : robotParkingGhost?.editing ? '请先在网页端完成或取消姿态编辑，再记录姿态。'
+        : teachingCaptureState.status === 'capturing' ? '正在记录姿态，请稍候。'
+          : robotLoadState.status !== 'loaded' || !teachingContextMatches(activeTeachingTask) ? '请在网页端加载与当前任务匹配的地图和机器人。'
+            : analyzeParkingPointDrift(robotPose, screenCaptureParkingPoint?.poses)?.shouldWarn
+              ? '机器人底盘已偏离当前停车点，请先在网页端确认或新增停车点，再记录姿态。' : '');
+  const recordPoseFromIPad = async (request, isConnected) => {
+    if (ipadPoseCaptureState.reason) return { success: false, message: ipadPoseCaptureState.reason };
+    const map = mapData, robotId = selectedRobot?.id;
+    const isCurrent = () => {
+      const current = latestWorkspaceRef.current;
+      return isConnected() && current.mapData === map && current.selectedRobot?.id === robotId
+        && current.activeTeachingTaskId === request.taskId && current.activeTeachingParkingPointId === request.parkingPointId
+        && current.teachingTasks.some((task) => task.id === request.taskId && task.parkingPoints?.some((point) => point.id === request.parkingPointId));
+    };
+    if (!isCurrent()) return { success: false, message: '网页端的任务或停车点已切换，请确认后重新记录。' };
+    return captureTeachingPoint({ taskId: request.taskId, parkingPointId: request.parkingPointId, isCurrent, allowBackground: true });
+  };
 
   const renameTeachingPoint = useCallback((taskId, parkingPointId, pointId, name) => {
     const nextName = String(name || '').trim();
@@ -7223,7 +7253,8 @@ export default function App() {
     {appPage === APP_PAGE_WORKBENCH && <IPadScreenCollaboration open={ipadScreenOpen} onClose={() => setIPadScreenOpen(false)}
       mapData={mapData} robot={selectedRobot} robotLoadState={robotLoadState} cameraPoses={zividCameraPoses} meshRenderQuality={meshRenderQuality}
       jointValues={robotJointValues} onChangeJoint={updateRobotJointValue} viewportCaptureRef={collaborationViewportRef}
-      controlBlockedReason={['playing', 'paused'].includes(teachingPlayback.status) ? '请先在 Mac 结束轨迹播放，再调整关节。'
+      poseCaptureState={ipadPoseCaptureState} onRecordPose={recordPoseFromIPad}
+      controlBlockedReason={['playing', 'paused'].includes(teachingPlayback.status) ? '请先在网页端结束轨迹播放，再调整关节。'
         : teachingCaptureState.status === 'capturing' ? '正在记录 Pose，请稍候。' : ''} />}
     {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}

@@ -80,6 +80,8 @@ struct PairingQRCode: Decodable {
     let sessionId: String
     let serverId: String
     let expiresAt: Double
+    var purpose: String? = nil
+    var isScreen: Bool { purpose == "screen" }
 
     static func parse(_ text: String) throws -> PairingQRCode {
         guard text.utf8.count <= 2048, let data = text.data(using: .utf8),
@@ -90,7 +92,7 @@ struct PairingQRCode: Decodable {
         return value
     }
     func validate() throws {
-        guard self.protocol == "atlas-ipad-pairing/1", PairingCode.isValid(code),
+        guard self.protocol == "atlas-ipad-pairing/1", purpose == nil || purpose == "screen", PairingCode.isValid(code),
               UUID(uuidString: sessionId) != nil, UUID(uuidString: serverId) != nil, expiresAt.isFinite else {
             throw TeachingError("二维码格式不支持，请在电脑上更新配对码后重新扫描")
         }
@@ -99,6 +101,13 @@ struct PairingQRCode: Decodable {
             throw TeachingError("二维码已过期，请在电脑点击「更新配对码」后重新扫描")
         }
     }
+}
+
+struct ScreenPairedSession: Decodable {
+    let `protocol`: String
+    let id: String
+    let serverId: String
+    let deviceToken: String
 }
 
 struct ModelDownloadProgress: Sendable {
@@ -274,6 +283,7 @@ struct LANClient {
         var fields = ["code": code, "deviceId": deviceID, "deviceName": name]
         if let qr {
             try qr.validate()
+            guard !qr.isScreen else { throw TeachingError("这是画面协作二维码，请从首页扫码连接。") }
             guard try LANClient(address: qr.address).baseURL == baseURL, PairingCode.normalize(qr.code) == code else {
                 throw TeachingError("二维码配对信息已变更，请重新扫描")
             }
@@ -287,6 +297,46 @@ struct LANClient {
         let paired = try JSONDecoder().decode(PairedSession.self, from: data)
         if let qr, paired.id != qr.sessionId { throw TeachingError("接收任务与二维码不匹配，请重新扫描") }
         return paired
+    }
+    func pairScreen(code: String, deviceID: String, name: String, qr: PairingQRCode? = nil) async throws -> ScreenPairedSession {
+        let code = PairingCode.normalize(code)
+        guard PairingCode.isValid(code) else { throw TeachingError("请输入电脑画面协作窗口中的 4 位配对码") }
+        let info = try await identify()
+        var fields = ["code": code, "deviceId": deviceID, "deviceName": name, "serverId": info.serverId]
+        if let qr {
+            try qr.validate()
+            guard qr.isScreen, try LANClient(address: qr.address).baseURL == baseURL, qr.code == code,
+                  qr.serverId == info.serverId else { throw TeachingError("协作二维码与电脑不匹配，请重新扫码") }
+            fields["sessionId"] = qr.sessionId
+        }
+        var request = URLRequest(url: baseURL.appendingPathComponent("__atlas/ipad-screen/pair"))
+        request.httpMethod = "POST"; request.timeoutInterval = 8
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: fields)
+        let (bytes, response) = try await Self.session.bytes(for: request)
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < 16384 else { throw TeachingError("协作配对信息过大") }
+            data.append(byte)
+        }
+        try check(response, data: data)
+        let paired = try JSONDecoder().decode(ScreenPairedSession.self, from: data)
+        guard paired.protocol == "atlas-ipad-screen/1", UUID(uuidString: paired.id) != nil,
+              paired.serverId == info.serverId, qr == nil || qr?.sessionId == paired.id,
+              paired.deviceToken.count == 64, paired.deviceToken.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+            throw TeachingError("协作配对响应无效，请重新连接")
+        }
+        return paired
+    }
+    func screenSocket(_ paired: ScreenPairedSession) throws -> URLSessionWebSocketTask {
+        var url = URLComponents(url: baseURL.appendingPathComponent("__atlas/ipad-screen/session/\(paired.id)/device"), resolvingAgainstBaseURL: false)!
+        url.scheme = baseURL.scheme == "https" ? "wss" : "ws"
+        guard let address = url.url else { throw TeachingError("协作地址无效") }
+        var request = URLRequest(url: address); request.timeoutInterval = 8
+        request.setValue("Bearer \(paired.deviceToken)", forHTTPHeaderField: "Authorization")
+        let socket = Self.session.webSocketTask(with: request)
+        socket.maximumMessageSize = 2 * 1024 * 1024 + 5
+        return socket
     }
     func download(_ paired: PairedSession, onProgress: @escaping @Sendable (ModelDownloadProgress) -> Void = { _ in }) async throws -> Data {
         guard UUID(uuidString: paired.id) != nil else { throw TeachingError("配对任务标识无效") }
@@ -319,6 +369,7 @@ struct LANClient {
     }
     func pairResult(_ project: LocalProject, modelURL: URL, qr: PairingQRCode, deviceID: String, name: String) async throws -> PairedSession {
         try qr.validate()
+        guard !qr.isScreen else { throw TeachingError("这是画面协作二维码，请使用示教同步窗口的二维码。") }
         guard try LANClient(address: qr.address).baseURL == baseURL else { throw TeachingError("二维码地址已变更，请重新扫描") }
         let identity = try await verifiedLocalModel(project, modelURL: modelURL)
         let info = try await identify()

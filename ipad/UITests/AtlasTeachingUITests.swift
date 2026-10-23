@@ -7,17 +7,127 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    private func launchScreenFixture() throws -> XCUIApplication {
+        let app = XCUIApplication()
+        let environment = ProcessInfo.processInfo.environment
+        if let address = environment["ATLAS_SCREEN_LAN_ADDRESS"], let code = environment["ATLAS_SCREEN_LAN_CODE"] {
+            app.launchArguments = ["-serverAddress", address]
+            app.launch()
+            let purpose = app.segmentedControls["library-pairing-purpose"]
+            XCTAssertTrue(purpose.waitForExistence(timeout: 20)); purpose.buttons["画面协作"].tap()
+            if environment["ATLAS_SCREEN_SCAN_UI"] == "1" {
+                app.buttons["scan-pairing-code"].tap()
+                XCTAssertTrue(app.buttons["cancel-pairing-scan"].waitForExistence(timeout: 10))
+                app.buttons["cancel-pairing-scan"].tap()
+            }
+            let service = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "discovered-service-")).firstMatch
+            XCTAssertTrue(service.waitForExistence(timeout: 15), app.debugDescription); service.tap()
+            let field = app.textFields["pairing-code"]
+            XCTAssertTrue(field.waitForExistence(timeout: 10)); field.typeText(code)
+            let stop = app.buttons["screen-collaboration-stop"]
+            XCTAssertTrue(stop.waitForExistence(timeout: 20), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["Wi-Fi 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 30))
+        } else { app.launch() }
+        return app
+    }
+
+    func testLiveScreenViewportGestures() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_VIEWPORT_LIVE"] == "1" else {
+            throw XCTSkip("Run with the desktop viewport gesture fixture")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        XCTAssertTrue(app.buttons["screen-collaboration-stop"].waitForExistence(timeout: 180))
+        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
+        let viewport = app.otherElements["screen-viewport-gestures"]
+        XCTAssertTrue(viewport.waitForExistence(timeout: 30))
+        XCTAssertTrue(viewport.isHittable)
+        let start = viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.42, dy: 0.42))
+        let end = viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.65, dy: 0.55))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.1)
+        viewport.pinch(withScale: 1.5, velocity: 1)
+        viewport.pinch(withScale: 0.8, velocity: -1)
+        let landscape = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        landscape.name = "iPad 3D view gestures landscape"; landscape.lifetime = .keepAlways; add(landscape)
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(viewport.isHittable)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(viewport.frame))
+        viewport.pinch(withScale: 1.2, velocity: 1)
+        let portrait = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        portrait.name = "iPad 3D view gestures portrait"; portrait.lifetime = .keepAlways; add(portrait)
+        XCTAssertTrue(app.buttons["screen-record-pose"].exists)
+        app.buttons["screen-collaboration-stop"].tap()
+    }
+
+    /// Paired with ipad_screen_capture_ui_smoke.py using its disposable USB fixture.
+    func testLiveScreenPoseCapture() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_CAPTURE_LIVE"] == "1" else {
+            throw XCTSkip("Run with the live desktop pose-capture fixture")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let record = app.buttons["screen-record-pose"]
+        XCTAssertTrue(record.waitForExistence(timeout: 180))
+        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        record.tap()
+        let alert = app.alerts["无法记录姿态"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 15))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "新建或选择示教任务")).firstMatch.exists)
+        alert.buttons["知道了"].tap()
+        let destination = app.staticTexts["screen-capture-destination"]
+        let taskReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "未选择停车点"), object: destination)
+        XCTAssertEqual(XCTWaiter.wait(for: [taskReady], timeout: 30), .completed)
+        record.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 15))
+        XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "为当前任务新增或选择停车点")).firstMatch.exists)
+        alert.buttons["知道了"].tap()
+        let parkingReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "停车点 P01"), object: destination)
+        XCTAssertEqual(XCTWaiter.wait(for: [parkingReady], timeout: 30), .completed)
+        record.tap()
+        let result = app.staticTexts["screen-capture-status"]
+        let first = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "A01"), object: result)
+        XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 60), .completed)
+        app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
+        XCTAssertTrue(app.images["screen-robot-viewport"].waitForExistence(timeout: 30))
+        record.tap()
+        let second = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "A02"), object: result)
+        XCTAssertEqual(XCTWaiter.wait(for: [second], timeout: 60), .completed)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "iPad collaboration recorded pose"; capture.lifetime = .keepAlways; add(capture)
+        app.buttons["screen-collaboration-stop"].tap()
+    }
+
+    /// Desktop fixture verifies background keepalive and stops the Wi-Fi session.
+    func testLiveScreenWiFiCollaboration() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_LAN_CODE"] != nil else { throw XCTSkip("Provide the live desktop Wi-Fi fixture") }
+        continueAfterFailure = false
+        let app = try launchScreenFixture()
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            let left = app.descendants(matching: .any)["screen-camera-left"].firstMatch
+            let right = app.descendants(matching: .any)["screen-camera-right"].firstMatch
+            XCTAssertTrue(left.waitForExistence(timeout: 10)); XCTAssertTrue(right.exists)
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(left.frame))
+            XCTAssertTrue(app.windows.firstMatch.frame.contains(right.frame))
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Wi-Fi cameras - \(orientation.rawValue)"; capture.lifetime = .keepAlways; add(capture)
+        }
+        XCTAssertTrue(app.buttons["screen-collaboration-stop"].waitForNonExistence(timeout: 120))
+    }
+
     /// Run alongside the desktop fixture with ATLAS_SCREEN_JOINTS=1.
     func testLiveScreenJointControl() throws {
         guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_LIVE"] == "1" else {
             throw XCTSkip("Set TEST_RUNNER_ATLAS_SCREEN_LIVE=1 and run the desktop USB joint fixture")
         }
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launch()
+        let app = try launchScreenFixture()
         print("ATLAS_SCREEN_WAITING_FOR_DESKTOP")
         let stop = app.buttons["screen-collaboration-stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 150))
-        XCUIDevice.shared.orientation = .landscapeLeft
+        if XCUIDevice.shared.orientation != .landscapeLeft { XCUIDevice.shared.orientation = .landscapeLeft }
         app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
         let viewport = app.images["screen-robot-viewport"]
         XCTAssertTrue(viewport.waitForExistence(timeout: 30))
@@ -33,12 +143,12 @@ final class AtlasTeachingUITests: XCTestCase {
         let secondMacUpdate = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", "24.0 °"), object: value)
         XCTAssertEqual(XCTWaiter.wait(for: [secondMacUpdate], timeout: 30), .completed)
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
-            XCUIDevice.shared.orientation = orientation
+            if XCUIDevice.shared.orientation != orientation { XCUIDevice.shared.orientation = orientation }
             XCTAssertTrue(slider.isHittable)
             XCTAssertTrue(app.windows.firstMatch.frame.contains(viewport.frame))
             XCTAssertGreaterThan(viewport.frame.height, 100)
             let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            capture.name = "USB joint control - \(orientation.rawValue)"; capture.lifetime = .keepAlways; add(capture)
+            capture.name = "Screen joint control - \(orientation.rawValue)"; capture.lifetime = .keepAlways; add(capture)
         }
         app.segmentedControls["screen-page-tabs"].buttons["相机画面"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["screen-camera-left"].firstMatch.waitForExistence(timeout: 10))

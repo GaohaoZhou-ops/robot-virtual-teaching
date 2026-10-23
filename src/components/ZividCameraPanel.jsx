@@ -1067,6 +1067,7 @@ const captureZividTeachingVision = async ({
   mapData,
   cameraPoses,
   meshRenderQuality,
+  allowBackground = false,
 }) => {
   const sourceGeometry = mapData?.geometry;
   if (!sourceGeometry?.getAttribute('position')?.count) {
@@ -1087,7 +1088,8 @@ const captureZividTeachingVision = async ({
   const frames = {};
   let storageByteLength = 0;
 
-  await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  // Remote recording must also work when the workbench's animation frames pause.
+  await new Promise((resolve) => allowBackground ? window.setTimeout(resolve, 0) : requestAnimationFrame(() => resolve()));
   for (const side of ['left', 'right']) {
     const pose = poses[side];
     const pointCapture = captureVisiblePointCloud(sourceGeometry, pose);
@@ -2021,6 +2023,7 @@ export default function ZividCameraPanel({
       mapData,
       cameraPoses: options.cameraPoses || cameraPosesRef.current,
       meshRenderQuality,
+      allowBackground: options.allowBackground,
     });
     onCaptureProviderChange(provider);
     return () => onCaptureProviderChange(null);
