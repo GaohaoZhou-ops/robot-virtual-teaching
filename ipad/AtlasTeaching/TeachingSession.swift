@@ -53,7 +53,7 @@ final class TeachingSession: ObservableObject {
     private var saveTask: Task<Void, Never>?
     private var modelTransferID: UUID?
     private var lastSaved = Date.distantPast
-    private var deviceID: String {
+    var deviceID: String {
         if let id = UserDefaults.standard.string(forKey: "deviceID") { return id }
         let id = UUID().uuidString; UserDefaults.standard.set(id, forKey: "deviceID"); return id
     }

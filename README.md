@@ -168,22 +168,38 @@ iPhone 保留深色卡片、青色操作按钮及控制分组：首页通过「�
 
 旧 iPad 项目、传输协议和 Pose 来源字段保持兼容；新 iPhone 结果记录 `device.platform = "iOS"`，电脑导入后的任务标为 iPhone 示教。模拟器可以验证界面、模型预览和文件流程，AR / LiDAR 定位需在真机验证。原生手机 UI 回归为 `testPhoneLibraryConnectionsAndRotation` 和 `testPhoneTeachingReviewAndCompletion`；后者使用 `node tests/iphone_layout_fixture.mjs <临时目录>` 生成的专用项目，复制到测试设备应用容器的 `Library/Application Support/AtlasTeaching/` 后运行。真机 AR 回归为 `testPhoneLiveLiDARPlacementAndCapture`，使用生成器第三个参数 `UI-iPhone-LiveAR` 创建另一份专用项目；运行时需让镜头朝向明亮、有纹理的表面并缓慢移动。测试项目可用 `testRemoveDisposablePhoneFixtures` 清理，必须通过 `ATLAS_PHONE_CLEANUP_IDS` 明确传入本次生成的项目 UUID（逗号分隔），且只接受名称带 `UI-iPhone-` 的项目。
 
-### iPad / iPhone 有线画面协作
+### iPad 画面协作：扫码、Wi-Fi 与数据线
 
-在电脑上操作虚拟机器人时，可把左右臂的 Zivid 2 M70 仿真画面显示到通过数据线连接的 iPad / iPhone，也可在移动设备上拖动关节并查看与 Mac 同步的 3D 姿态。无需传输模型到移动设备，也不依赖 Wi-Fi。
+在电脑上操作虚拟机器人时，可在 iPad 上查看左右臂 Zivid 2 M70 仿真画面，或拖动关节并查看与电脑同步的 3D 姿态。无需先把模型传到 iPad。
 
-1. 更新并启动电脑服务（`./scripts/restart.sh`），通过 `http://127.0.0.1:21990` 或 `http://localhost:21990` 打开地图示教或独立示教工程，加载带左右臂末端相机的机器人。
-2. 用数据线连接并解锁设备，打开新版 Atlas App。首次更新 App 可运行 `./scripts/deploy_ipad.sh`（iPhone 使用 `./scripts/deploy_iphone.sh`）。
-3. 点击 **设备 → iPad / iPhone → 画面协作**。只有一台就绪设备时自动连接；有多台时选择设备后点击 **开始协作**。
-4. 设备顶部可切换 **相机画面 / 关节控制**。相机页默认显示双臂：横屏并排、竖屏上下排列。轻点画面或使用切换按钮可放大单臂，再次轻点返回双臂。
-5. 关节页横屏并排显示 3D 视图与滑块，竖屏上下排列。可选择左臂、右臂、躯干等分组；旋转关节使用角度、移动关节使用米，范围取自当前机器人的关节限位。拖动同步修改 Mac 的虚拟机器人，Mac 调整也会回传数值与画面；3D 视角跟随 Mac 工作台。轨迹播放或 Pose 记录期间暂停关节操作。
-6. 电脑端关闭协作窗口、切换相机面板、Mac 窗口、桌面或浏览器标签页后仍保持协作，无需重复点击 **开始协作**。后台画面按较低频率刷新；浏览器暂停渲染时，设备保留最近画面并提示等待更新，返回工作台后自动继续。点击任一端的 **结束协作**、切换工程、关闭工作台或设备 App 退出前台会停止协作。
+| 电脑 | 支持的协作连接方式 |
+| --- | --- |
+| Windows | 扫码、Wi-Fi 配对码 |
+| Mac | 扫码、Wi-Fi 配对码、数据线 |
 
-画面来自当前虚拟工程，保留完整相机视野；电脑相机面板的数字缩放不改变共享画面。设备超过 2.5 秒没有收到新画面或关节状态时提示等待更新、暂停滑块操作，连接保活与画面刷新独立；拔线、浏览器退出或电脑服务停止后自动结束。关节协作需要更新设备上的 Atlas App。拖动复用 Mac 的全关节控制，只调整当前虚拟姿态；保存为示教 Pose 仍使用工作台的记录或确认操作。滑块输入只保留每个关节的最新值，超过 3 秒未送达的操作会丢弃，避免恢复页面时执行过期动作。
+1. 更新并启动电脑服务，通过 `http://127.0.0.1:21990` 或 `http://localhost:21990` 打开地图示教或独立示教工程，加载带左右臂末端相机的机器人。进入 **设备 → iPad / iPhone → 画面协作**。
+2. iPad 打开新版 Atlas App，选择下列一种方式连接：
+   - **扫码**：电脑选择 **扫码** 后自动展示二维码，可点击 **重新生成二维码** 刷新。iPad 在首页点击 **扫码配对**，App 自动识别协作用途并进入协作页面，无需先选择“画面协作”。
+   - **Wi-Fi**：电脑选择 **Wi-Fi → 生成配对码**；iPad 首页选择 **画面协作**，填写电脑窗口显示的局域网地址与端口，搜索并选择服务器，输入 4 位配对码。
+   - **数据线（仅 Mac）**：连接、解锁并信任电脑，保持 Atlas App 在前台，电脑选择 **数据线**。只有一台就绪设备时自动连接；有多台时选择设备后点击 **开始协作**。有线方式不依赖 Wi-Fi，仍兼容 iPhone。
+3. iPad 顶部切换 **相机画面 / 关节控制**。相机页横屏并排、竖屏上下排列；轻点画面或使用切换按钮可放大单臂，再次轻点返回双臂。
+4. 关节页横屏并排显示 3D 视图与滑块，竖屏上下排列。在 **3D 姿态** 画面内，**单指拖动旋转、双指开合缩放、双指拖动平移**；双指缩放和平移可以同时进行。iPad 和电脑同步共享视角，手势不改变机器人位姿或关节值。关节面板可选择左臂、右臂、躯干等分组；角度或米数与限位来自当前机器人。拖动关节同步修改电脑的虚拟机器人，电脑调整也会回传数值与画面。轨迹播放或 Pose 记录期间暂停关节操作，仍可调整观察视角。
+5. 相机页与关节页底部均可点击 **记录姿态**，复用网页端记录流程，把当前全身关节、机器人位姿及双目 RGB/XYZ 快照保存到当前任务的停车点，成功后显示保存位置。任务与停车点需要先在网页端新建或选择；缺少任一项时，iPad 弹窗提示对应操作。底盘偏离停车点、正在编辑姿态或播放轨迹时，也需先在网页端处理。iPad 不提供任务与停车点管理。
+6. 关闭电脑协作弹窗、切换电脑窗口、桌面或浏览器标签页后仍保持连接，无需重复开始协作。浏览器暂停渲染时，iPad 保留最近画面并提示等待更新，返回工作台后自动继续。任一端结束协作、切换工程、关闭工作台或 iPad App 退出前台会停止协作。
 
-实现使用 macOS 的 USB 多路复用连接与 Python 3 标准库，移动端只监听回环地址。每臂画面为 960 × 600 JPEG，最多约每 150 毫秒发送一组；实际刷新速度受渲染和设备性能影响，发送过程只保留最新画面。服务回归：`npm run test:ipad:screen`；真机界面验证：`ATLAS_SCREEN_LIVE=1 BASE_URL=http://127.0.0.1:21990 uv run --with playwright python tests/ipad_screen_ui_smoke.py`。原生界面回归 `testLiveScreenCollaboration` 需为 `xcodebuild test` 设置 `TEST_RUNNER_ATLAS_SCREEN_LIVE=1`，在等待期间同时运行电脑真机测试脚本，并设置 `ATLAS_SCREEN_NATIVE_STOP=1 ATLAS_SCREEN_HOLD=120` 保持发送、检查设备端结束协作。
+扫码与 Wi-Fi 使用同一局域网通道，两种入口可切换并保留当前配对码。电脑可以通过网线接入路由器，iPad 使用同一网络的 Wi-Fi；多个网卡时选择 iPad 能访问的地址。Windows 启动服务时允许 Node.js 通过专用网络防火墙，并确保服务端口（默认 21990）可从局域网访问。访客 Wi-Fi、设备隔离或 VPN 可能阻止互通。配对码有效 15 分钟、仅允许一台 iPad；可点击 **更新配对码**，旧码随即失效。服务重启或协作结束后需重新配对。
 
-关节页真机回归使用原生 `testLiveScreenJointControl`，电脑脚本额外设置 `ATLAS_SCREEN_JOINTS=1 ATLAS_SCREEN_NATIVE_STOP=1 ATLAS_SCREEN_HOLD=120`。测试实际拖动 iPad 滑块，检查 Mac 数值、指令确认和 3D 画面变化，再从 Mac 修改数值验证回传，并检查横竖屏与子页切换。
+协作复用原有扫码器、地址输入、服务器检测和配对码控件；**接收物体** 与 **画面协作** 在首页区分，二维码自带用途，避免误触发模型接收或结果上传。App 更新可运行 `./scripts/deploy_ipad.sh`，覆盖安装保留已有项目。
+
+画面来自当前虚拟工程，保留完整相机视野，电脑相机面板的数字缩放不改变共享画面。超过 2.5 秒未收到新画面或关节状态时提示等待更新、暂停滑块；连接保活与画面刷新独立。滑块只调整虚拟姿态，点击 **记录姿态** 才会保存 Pose。记录期间暂停关节操作和重复点击；请求重发不会重复保存，任务或停车点在记录期间切换会取消本次记录。每个关节仅保留最新指令，超过 3 秒未送达的操作会丢弃。
+
+无线方式由 iPad 主动连接电脑 WebSocket，配对后共用有线协作的画面、关节与心跳协议；电脑浏览器控制接口仅接受本机请求，设备凭据与浏览器凭据分离。Mac 有线方式使用 USB 多路复用与 Python 3，iPad 的有线监听端口仍仅绑定回环地址。每臂 JPEG 为 960 × 600，最多约每 150 毫秒发送一组；实际速度受网络、渲染与设备性能影响，发送只保留最新画面。
+
+服务与原生协议回归：`npm run test:ipad:screen`，覆盖 Windows 无 USB 分支、配对过期/更新/占用、权限、无线帧与关节传输、后台保活和断线；macOS 额外使用 Apple Vision 识别真实协作二维码并通过 Swift 网络客户端连接。
+
+真机界面回归使用 `tests/ipad_screen_ui_smoke.py`，需 `ATLAS_SCREEN_LIVE=1` 与 `BASE_URL`。有线模式自动连接；无线模式额外设置 `ATLAS_SCREEN_WIFI=1 ATLAS_SCREEN_DEVICE_ID=<iPad UDID>`，模拟 Windows 连接选项并输出 `build/ipad-screen-test/pairing.json`。将其中的地址与配对码传给 `xcodebuild test` 的 `TEST_RUNNER_ATLAS_SCREEN_LAN_ADDRESS`、`TEST_RUNNER_ATLAS_SCREEN_LAN_CODE`，运行原生 `testLiveScreenWiFiCollaboration` 验证相机与后台恢复。USB 只用于真机调试和读取诊断状态，协作帧通过 Wi-Fi 发送。
+
+关节真机回归运行原生 `testLiveScreenJointControl` 并设置 `TEST_RUNNER_ATLAS_SCREEN_LIVE=1`；电脑脚本增加 `ATLAS_SCREEN_JOINTS=1 ATLAS_SCREEN_NATIVE_STOP=1 ATLAS_SCREEN_HOLD=120`。无线模式同时传入上述地址与配对码。检查 iPad 实际滑块拖动、电脑数值、指令确认、3D 画面变化、电脑反向修改、横竖屏与子页切换。
 
 ### 服务管理
 

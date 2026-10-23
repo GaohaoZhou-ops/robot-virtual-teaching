@@ -175,7 +175,7 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
       <p className="ipad-nav-title"><DeviceIcon size={14}/>{deviceLabel}</p>
       {!vision && onOpenScreen && <button type="button" role="menuitem" aria-label="画面协作"
         onPointerMove={() => setSection(null)} onClick={() => run(onOpenScreen)}>
-        <Monitor size={14}/><span><strong>画面协作</strong><small>数据线连接 · 左右臂相机</small></span><ChevronRight size={13}/>
+        <Monitor size={14}/><span><strong>画面协作</strong><small>相机画面 · 关节控制</small></span><ChevronRight size={13}/>
       </button>}
       {sections.map(({ id, label, detail, icon: Icon }) => <button key={id} type="button" role="menuitem" data-section={id}
         aria-label={label} aria-haspopup="menu" aria-expanded={section === id} aria-controls={section === id ? `${menuId}-${id}` : undefined}

@@ -24,7 +24,8 @@ def native_status(device_id):
 def run():
     if os.environ.get('ATLAS_SCREEN_LIVE') != '1':
         raise SystemExit('Set ATLAS_SCREEN_LIVE=1 with an unlocked USB device running Atlas.')
-    output = ROOT / 'build/ipad-screen-test'
+    wireless = os.environ.get('ATLAS_SCREEN_WIFI') == '1'
+    output = ROOT / os.environ.get('ATLAS_SCREEN_OUTPUT', 'build/ipad-screen-test')
     output.mkdir(parents=True, exist_ok=True)
     native_stop = os.environ.get('ATLAS_SCREEN_NATIVE_STOP') == '1'
     joint_control = os.environ.get('ATLAS_SCREEN_JOINTS') == '1'
@@ -34,6 +35,14 @@ def run():
                                     args=['--use-angle=metal', '--enable-gpu'] if sys.platform == 'darwin' else [])
         page = browser.new_page(viewport={'width': 1440, 'height': 1000})
         page.set_default_timeout(90000)
+        if wireless:
+            # Exercise Windows presentation against the real wireless service.
+            # The physical cable is used only by native_status diagnostics.
+            def windows_info(route):
+                response = route.fetch()
+                info = response.json(); info['usbSupported'] = False
+                route.fulfill(response=response, json=info)
+            page.route('**/__atlas/ipad-screen/info', windows_info)
         page.add_init_script('''(() => {
           const original = window.fetch;
           window.__screenSpy = { count: 0 };
@@ -74,8 +83,9 @@ def run():
             if request.url.endswith('/frame') and request.post_data_buffer is not None and not (output / 'pair.bin').exists():
                 (output / 'pair.bin').write_bytes(request.post_data_buffer)
         page.on('request', save_pair)
+        device_id = os.environ.get('ATLAS_SCREEN_DEVICE_ID', '')
         deadline = time.monotonic() + 90
-        while True:
+        while not wireless:
             devices = page.request.get(BASE + '/__atlas/ipad-screen/devices').json().get('devices', [])
             if any(device.get('ready') for device in devices):
                 device_id = next(device['id'] for device in devices if device.get('ready'))
@@ -91,11 +101,29 @@ def run():
         page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70').click()
         page.wait_for_function("document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'")
         topbar_action(page, name='iPad / iPhone', exact=True).click()
-        page.get_by_role('menuitem', name='画面协作', exact=True).click()
+        if wireless:
+            with page.expect_response(lambda r: r.url.endswith('/ipad-screen/session') and r.request.method == 'POST') as created:
+                page.get_by_role('menuitem', name='画面协作', exact=True).click()
+        else:
+            page.get_by_role('menuitem', name='画面协作', exact=True).click()
         dialog = page.get_by_role('dialog', name='画面协作', exact=True)
         expect(dialog).to_be_visible()
+        if wireless:
+            expect(dialog.get_by_role('tab', name='数据线', exact=True)).to_have_count(0)
+            ticket = created.value.json()
+            expect(dialog.get_by_alt_text('设备配对二维码')).to_be_visible()
+            expect(dialog.get_by_role('button', name='重新生成二维码', exact=True)).to_be_enabled()
+            page.screenshot(path=str(output / 'desktop-qr.png'))
+            (output / 'pairing-qr.png').write_bytes(__import__('base64').b64decode(dialog.get_by_alt_text('设备配对二维码').get_attribute('src').split(',')[1]))
+            dialog.get_by_role('tab', name='Wi-Fi', exact=True).click()
+            expect(dialog.get_by_label('配对码 ' + ticket['pairingCode'], exact=True)).to_be_visible()
+            assert sessions == [201], 'switching QR/Wi-Fi must preserve the pending pairing'
+            page.screenshot(path=str(output / 'desktop-wifi.png'))
+            ticket['address'] = dialog.get_by_label('协作电脑地址').input_value()
+            (output / 'pairing.json').write_text(json.dumps(ticket))
+            print('WIRELESS_PAIRING_READY ' + str(output / 'pairing.json'), flush=True)
         try:
-            expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible(timeout=45000)
+            expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible(timeout=600000 if wireless else 45000)
         except Exception:
             print(dialog.inner_text(), flush=True)
             page.screenshot(path=str(output / 'desktop-error.png'))
@@ -117,7 +145,9 @@ def run():
         page.wait_for_timeout(1500)
         assert all(code == 200 or (native_stop and code == 410) for code in frames), frames
         page.screenshot(path=str(output / 'desktop-streaming.png'))
-        print(f'STREAM_READY {len(frames)} USB frames acknowledged; screenshot: {output}', flush=True)
+        print(f'STREAM_READY {len(frames)} {"Wi-Fi" if wireless else "USB"} frames acknowledged; screenshot: {output}', flush=True)
+        if wireless:
+            assert native_status(device_id)['connectionKind'] == 'Wi-Fi'
         ready = output / 'stream-ready'; ready.write_text('ready')
         if joint_control:
             page.get_by_role('button', name='打开全关节浮动窗口').click()
@@ -126,7 +156,7 @@ def run():
             page.wait_for_function("window.__screenSpy.joints?.joints.some(j => j.name === 'left_J1' && j.value === 12)")
             viewport_hash = page.evaluate('window.__screenSpy.viewportHash')
             # XCTest selects the joint page and drags the actual native Slider.
-            page.wait_for_function("Number(document.querySelector('.joint-value-row[data-joint-name=left_J1]')?.dataset.jointValue) !== 12", timeout=90000)
+            page.wait_for_function("Number(document.querySelector('.joint-value-row[data-joint-name=left_J1]')?.dataset.jointValue) !== 12", timeout=int(os.environ.get('ATLAS_SCREEN_NATIVE_TIMEOUT', '90000')))
             moved, previous, settled = None, None, time.monotonic()
             deadline = time.monotonic() + 20
             while True:
@@ -144,7 +174,7 @@ def run():
             print(f'JOINT_CONTROL_ACKNOWLEDGED left_J1={moved}; 3D viewport updated', flush=True)
             arm_joint.fill('24'); arm_joint.press('Enter')
             page.get_by_role('button', name='关闭全关节浮动窗口').click()
-        if not native_stop:
+        if not native_stop or os.environ.get('ATLAS_SCREEN_BACKGROUND') == '1':
             # Simulate a hidden workbench, then pause its JS execution. An active
             # WebSocket can exempt a tab from Chrome's normal lifecycle freezing.
             # The browser network stack must retain the USB session beyond both
@@ -203,7 +233,7 @@ def run():
         if page.get_by_role('button', name='结束画面协作', exact=True).count():
             page.get_by_role('button', name='结束画面协作', exact=True).click()
         expect(page.locator('.ipad-screen-renderer')).to_have_count(0)
-        if not native_stop:
+        if not native_stop and not wireless:
             # An actual page close must release the device, even with keepalive enabled.
             topbar_action(page, name='iPad / iPhone', exact=True).click()
             page.get_by_role('menuitem', name='画面协作', exact=True).click()
@@ -216,12 +246,18 @@ def run():
         assert not errors, errors
         browser.close()
         checks = ['menu', 'dual rendering']
+        if wireless:
+            checks.extend(['Windows connection choices', 'QR/Wi-Fi pairing reuse', 'native Wi-Fi transport'])
         if joint_control:
             checks.extend(['native joint drag', 'bidirectional joint values', '3D viewport update'])
+        if not native_stop or os.environ.get('ATLAS_SCREEN_BACKGROUND') == '1':
+            checks.extend(['hidden/suspended workbench', 'native retained frames', 'automatic resume', 'same session'])
         if native_stop:
             checks.append('native stop')
         else:
-            checks.extend(['hidden/suspended workbench', 'native retained frames', 'automatic resume', 'same session', 'explicit stop', 'tab close'])
+            checks.append('explicit stop')
+            if not wireless:
+                checks.append('tab close')
         print('iPad screen live UI passed: ' + ', '.join(checks) + '.', flush=True)
 
 

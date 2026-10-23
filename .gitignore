@@ -26,6 +26,8 @@ node_modules/
 # device/signing reports, products, and native UI verification attachments.
 # Camera/joint collaboration checks use build/{screen-validation,ipad-screen-test}/
 # and ipad/build/screen-tests/, including captured frames and Xcode results.
+# Pose capture and viewport gesture checks use build/screen-{capture,viewport}-validation/;
+# peer.json, state.json, command.json, saved poses and native captures stay local.
 # Menu review captures and preview bundles use build/{menu-review,menu-validation}/.
 dist/
 build/
@@ -189,7 +191,7 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
-# USB camera collaboration diagnostics copied from /tmp or build/.
+# USB / Wi-Fi collaboration diagnostics copied from /tmp or build/.
 # Keep reports, frame captures, review bundles and local environments scoped
 # to output locations so source files and nested regression fixtures stay visible.
 /atlas-screen-*/
@@ -205,6 +207,12 @@ playwright/.auth/
 /tests/atlas-screen-*.bin
 /ipad/atlas-screen-*.bin
 /ipad/atlas-screen-*.png
+# Standalone copies of pose/viewport validation output and their ZIP archives.
+# Match only repository-root exports; source modules and nested fixtures stay visible.
+/screen-capture-validation/
+/screen-viewport-validation/
+/screen-capture-validation.[zZ][iI][pP]
+/screen-viewport-validation.[zZ][iI][pP]
 # Grouped topbar/cascading-menu captures and packed review copies from /tmp.
 # Keep the same prefixes in source artwork and nested fixtures trackable.
 /atlas-toolbar-*/

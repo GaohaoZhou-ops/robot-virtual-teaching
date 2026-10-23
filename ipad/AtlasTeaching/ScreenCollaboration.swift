@@ -25,8 +25,12 @@ struct ScreenJointState: Decodable, Equatable {
     let reason: String
     let ack: Int
     let joints: [ScreenJoint]
+    let capture: ScreenPoseCaptureState?
+    let captureResult: ScreenPoseCaptureResult?
+    let viewportControl: ScreenViewportControl?
     var valid: Bool {
         !robotId.isEmpty && robotId.count <= 256 && robotName.count <= 256 && reason.count <= 256 && ack >= 0
+        && (capture?.valid ?? true) && (captureResult?.valid ?? true) && (viewportControl?.valid ?? true)
         && joints.count <= 128 && Set(joints.map(\.name)).count == joints.count
         && joints.allSatisfy { joint in
             !joint.name.isEmpty && joint.name.count <= 128 && joint.group.count <= 64 && ["m", "°"].contains(joint.unit)
@@ -34,6 +38,46 @@ struct ScreenJointState: Decodable, Equatable {
             && joint.lower <= joint.upper && joint.step > 0
         }
     }
+}
+
+struct ScreenViewportControl: Decodable, Equatable {
+    let enabled: Bool
+    let aspect: Double
+    let ack: Int
+    var valid: Bool { aspect.isFinite && aspect >= 0.01 && aspect <= 100 && ack >= 0 }
+}
+
+private struct ScreenViewportCommand {
+    let sequence: Int
+    let kind: String
+    let dx: Double
+    let dy: Double
+    let zoom: Double
+    let created: Date
+}
+
+struct ScreenPoseCaptureState: Decodable, Equatable {
+    let taskId: String
+    let parkingPointId: String
+    let taskName: String
+    let parkingPointName: String
+    let reason: String
+    var valid: Bool { [taskId, parkingPointId, taskName, parkingPointName, reason].allSatisfy { $0.count <= 256 } }
+}
+
+struct ScreenPoseCaptureResult: Decodable, Equatable {
+    let id: String
+    let status: String
+    let message: String
+    var valid: Bool { UUID(uuidString: id) != nil && ["recording", "complete", "error"].contains(status) && message.count <= 512 }
+}
+
+private struct ScreenPoseCaptureRequest {
+    let id = UUID().uuidString
+    let robotId: String
+    let taskId: String
+    let parkingPointId: String
+    let created = Date()
 }
 
 private struct ScreenJointCommand {
@@ -66,7 +110,21 @@ final class ScreenCollaboration: ObservableObject {
     @Published private(set) var controlsStale = true
     @Published private(set) var controlMessage = ""
     @Published private var pending: [String: ScreenJointCommand] = [:]
+    @Published private var pendingCapture: ScreenPoseCaptureRequest?
+    @Published private(set) var captureMessage = ""
+    @Published var captureNotice: String?
+    private var captureAccepted = false
+    private var pendingViewport: [ScreenViewportCommand] = []
+    private var viewportSequence = 0
+    private var viewportSentSequence = 0
     @Published var page = "cameras"
+    @Published private(set) var connecting = false
+    @Published private(set) var connectionError = ""
+    @Published private(set) var connectionKind = "USB"
+    private var networkSocket: URLSessionWebSocketTask?
+    private var networkTask: Task<Void, Never>?
+    private var networkToken = ""
+    private var networkGeneration = UUID()
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
     private var token = ""
@@ -81,8 +139,45 @@ final class ScreenCollaboration: ObservableObject {
     private var leftData: Data?
     private var rightData: Data?
     private var viewportData: Data?
-    var canControl: Bool { active && !controlsStale && workspace?.editable == true }
+    var canControl: Bool { active && !controlsStale && workspace?.editable == true && !awaitingCapture }
     var awaitingControl: Bool { !pending.isEmpty }
+    var awaitingCapture: Bool { pendingCapture != nil }
+    var canNavigateViewport: Bool {
+        active && page == "joints" && !controlsStale && viewport != nil && workspace?.viewportControl?.enabled == true
+    }
+
+    func navigateViewport(kind: String, dx: Double = 0, dy: Double = 0, zoom: Double = 0) {
+        guard canNavigateViewport, ["rotate", "pan", "zoom"].contains(kind),
+              [dx, dy, zoom].allSatisfy({ $0.isFinite && abs($0) <= 4 }),
+              abs(dx) + abs(dy) + abs(zoom) > 1e-8 else { return }
+        pendingViewport.removeAll { Date().timeIntervalSince($0.created) >= 3 }
+        guard pendingViewport.count < 128 else { return }
+        viewportSequence += 1
+        // Only merge motions that have never been sent. Once sent, their
+        // sequence and delta remain immutable until the computer acknowledges.
+        if let last = pendingViewport.last, last.sequence > viewportSentSequence, last.kind == kind,
+           [last.dx + dx, last.dy + dy, last.zoom + zoom].allSatisfy({ abs($0) <= 4 }) {
+            pendingViewport.removeLast()
+            pendingViewport.append(ScreenViewportCommand(sequence: viewportSequence, kind: kind,
+                dx: last.dx + dx, dy: last.dy + dy, zoom: last.zoom + zoom, created: last.created))
+        } else {
+            pendingViewport.append(ScreenViewportCommand(sequence: viewportSequence, kind: kind, dx: dx, dy: dy, zoom: zoom, created: Date()))
+        }
+    }
+
+    func recordPose() {
+        guard !awaitingCapture else { return }
+        guard active, !controlsStale, let state = workspace else {
+            captureNotice = "电脑姿态尚未同步，请等待画面恢复后再记录。"; return
+        }
+        guard let capture = state.capture else {
+            captureNotice = "请更新并刷新网页端，再重新连接协作。"; return
+        }
+        guard capture.reason.isEmpty else { captureNotice = capture.reason; return }
+        guard !awaitingControl else { captureNotice = "关节正在同步，请稍候再记录姿态。"; return }
+        captureAccepted = false; captureMessage = "正在记录姿态…"; captureNotice = nil
+        pendingCapture = ScreenPoseCaptureRequest(robotId: state.robotId, taskId: capture.taskId, parkingPointId: capture.parkingPointId)
+    }
 
     func jointValue(_ joint: ScreenJoint) -> Double { pending[joint.name]?.value ?? joint.value }
 
@@ -95,8 +190,13 @@ final class ScreenCollaboration: ObservableObject {
     }
 
     private func expireCommands() {
+        pendingViewport.removeAll { Date().timeIntervalSince($0.created) >= 3 }
         let fresh = pending.filter { Date().timeIntervalSince($0.value.created) < 3 }
         if fresh.count != pending.count { pending = fresh; controlMessage = "操作未同步，请在画面恢复后重试。" }
+        if let capture = pendingCapture, !captureAccepted, Date().timeIntervalSince(capture.created) > 8 {
+            pendingCapture = nil; captureMessage = ""
+            captureNotice = "记录请求超时，请先在网页端确认记录结果后重试。"
+        }
     }
 
     private func collaborationStatus() -> [String: Any] {
@@ -105,7 +205,60 @@ final class ScreenCollaboration: ObservableObject {
             ["sequence": command.sequence, "robotId": workspace?.robotId ?? "", "name": command.name,
              "value": command.value, "ageMs": max(0, Date().timeIntervalSince(command.created) * 1000)]
         }
-        return ["page": page, "commands": commands]
+        var status: [String: Any] = ["page": page, "commands": commands]
+        let motions = Array(pendingViewport.prefix(32))
+        if let sequence = motions.last?.sequence { viewportSentSequence = max(viewportSentSequence, sequence) }
+        status["viewportCommands"] = motions.map { command in
+            ["sequence": command.sequence, "robotId": workspace?.robotId ?? "", "kind": command.kind,
+             "dx": command.dx, "dy": command.dy, "zoom": command.zoom,
+             "ageMs": max(0, Date().timeIntervalSince(command.created) * 1000)] as [String: Any]
+        }
+        if let capture = pendingCapture, !captureAccepted {
+            status["captureRequest"] = ["id": capture.id, "robotId": capture.robotId, "taskId": capture.taskId,
+                "parkingPointId": capture.parkingPointId, "ageMs": max(0, Date().timeIntervalSince(capture.created) * 1000)]
+        }
+        return status
+    }
+
+    func connect(address: String, code: String, deviceID: String, qr: PairingQRCode? = nil) async {
+        guard !active, !connecting else { return }
+        connecting = true; connectionError = ""; lastContact = Date()
+        let generation = UUID(); networkGeneration = generation
+        do {
+            let client = try LANClient(address: qr?.address ?? address)
+            let paired = try await client.pairScreen(code: qr?.code ?? code, deviceID: deviceID, name: UIDevice.current.name, qr: qr)
+            guard networkGeneration == generation, connecting else { return }
+            UserDefaults.standard.set(client.baseURL.absoluteString, forKey: "serverAddress")
+            let socket = try client.screenSocket(paired)
+            networkSocket = socket; networkToken = paired.deviceToken; connectionKind = "Wi-Fi"
+            socket.resume()
+            networkTask = Task { [weak self] in
+                do {
+                    while !Task.isCancelled {
+                        let message = try await socket.receive()
+                        guard let self, self.networkGeneration == generation, self.networkSocket === socket else { return }
+                        guard case let .data(data) = message, data.count >= 5 else { throw TeachingError("电脑协作数据无效") }
+                        let id = data[1..<5].reduce(0) { ($0 << 8) | Int($1) }
+                        let actions: [UInt8: (String, String)] = [1: ("POST", "/session"), 2: ("PUT", "/frame"),
+                            3: ("PUT", "/workspace"), 4: ("PUT", "/heartbeat"), 5: ("DELETE", "/session")]
+                        guard let (method, path) = actions[data[0]] else { throw TeachingError("电脑协作请求无效") }
+                        var reply: [String: Any] = [:]
+                        self.process(method: method, path: path, authorization: "Bearer \(paired.deviceToken)", body: Data(data.dropFirst(5))) {
+                            reply = ["requestId": id, "status": $0, "body": $1]
+                        }
+                        guard self.networkSocket === socket else { return }
+                        let response = try JSONSerialization.data(withJSONObject: reply)
+                        try await socket.send(.string(String(decoding: response, as: UTF8.self)))
+                    }
+                } catch {
+                    guard let self, self.networkGeneration == generation else { return }
+                    self.finish(); self.connectionError = "Wi-Fi 协作已断开，请检查电脑服务与网络后重新配对。"
+                }
+            }
+        } catch {
+            guard networkGeneration == generation else { return }
+            finish(); connectionError = error.localizedDescription
+        }
     }
 
     func start() {
@@ -126,13 +279,17 @@ final class ScreenCollaboration: ObservableObject {
         server.start(queue: .main)
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.active else { return }
+                guard let self, self.active || self.connecting else { return }
                 let stale = self.left == nil || Date().timeIntervalSince(self.lastFrame) > 2.5
                 if self.stale != stale { self.stale = stale }
                 let controlsStale = Date().timeIntervalSince(self.lastWorkspace) > 2.5
                 if self.controlsStale != controlsStale { self.controlsStale = controlsStale }
                 self.expireCommands()
-                if Date().timeIntervalSince(self.lastContact) > 10 { self.finish() }
+                if Date().timeIntervalSince(self.lastContact) > 10 {
+                    let wireless = self.connecting || self.connectionKind == "Wi-Fi"
+                    self.finish()
+                    if wireless { self.connectionError = "电脑连接超时，请检查网络后重新配对。" }
+                }
             }
         }
     }
@@ -146,9 +303,14 @@ final class ScreenCollaboration: ObservableObject {
     }
 
     func finish() {
+        networkGeneration = UUID(); networkTask?.cancel(); networkTask = nil
+        networkSocket?.cancel(with: .normalClosure, reason: nil); networkSocket = nil; networkToken = ""
+        connecting = false; connectionError = ""; connectionKind = "USB"
         if active { UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled }
         active = false; stale = true; token = ""; left = nil; right = nil
         workspace = nil; viewport = nil; pending = [:]; sequence = 0; viewportFrames = 0
+        pendingCapture = nil; captureAccepted = false; captureMessage = ""; captureNotice = nil
+        pendingViewport = []; viewportSequence = 0; viewportSentSequence = 0
         controlsStale = true; controlMessage = ""; page = "cameras"; lastWorkspace = .distantPast
         leftData = nil; rightData = nil; viewportData = nil
     }
@@ -205,18 +367,28 @@ final class ScreenCollaboration: ObservableObject {
     }
 
     private func handle(_ connection: NWConnection, id: UUID, method: String, path: String, authorization: String, body: Data) {
-        func respond(_ status: Int = 200, _ value: [String: Any]) { reply(connection, id: id, status: status, value: value) }
+        process(method: method, path: path, authorization: authorization, body: body) { status, value in
+            reply(connection, id: id, status: status, value: value)
+        }
+    }
+
+    private func process(method: String, path: String, authorization: String, body: Data, response: (Int, [String: Any]) -> Void) {
+        func respond(_ status: Int = 200, _ value: [String: Any]) { response(status, value) }
         if method == "GET", path == "/status" {
             respond(200, ["protocol": screenProtocol, "deviceName": UIDevice.current.name, "active": active,
                      "stale": stale, "receivedFrames": receivedFrames, "keepalive": true, "jointControl": true,
-                     "controlPage": page, "jointCount": workspace?.joints.count ?? 0, "viewportFrames": viewportFrames,
+                     "controlPage": page, "connectionKind": connectionKind, "jointCount": workspace?.joints.count ?? 0, "viewportFrames": viewportFrames,
                      "jointValues": Dictionary(uniqueKeysWithValues: (workspace?.joints ?? []).map { ($0.name, $0.value) }),
                      "controlAck": workspace?.ack ?? 0, "pendingControls": pending.count,
+                     "viewportAck": workspace?.viewportControl?.ack ?? 0, "pendingViewport": pendingViewport.count,
+                     "captureTaskId": workspace?.capture?.taskId ?? "", "captureParkingPointId": workspace?.capture?.parkingPointId ?? "",
+                     "capturePending": awaitingCapture, "captureMessage": captureMessage, "captureNotice": captureNotice ?? "",
                      "width": left?.size.width ?? 0, "height": left?.size.height ?? 0]); return
         }
         if method == "POST", path == "/session" {
             guard !active else { respond(409, ["error": "设备已有画面协作"]); return }
             let candidate = String(authorization.dropFirst(7))
+            guard !connecting || candidate == networkToken else { respond(409, ["error": "设备正在进行 Wi-Fi 配对"]); return }
             guard authorization.hasPrefix("Bearer "), candidate.count == 64,
                   candidate.allSatisfy({ "0123456789abcdef".contains($0) }),
                   let value = try? JSONSerialization.jsonObject(with: body) as? [String: String],
@@ -224,7 +396,7 @@ final class ScreenCollaboration: ObservableObject {
             token = candidate; receivedFrames = 0; lastFrame = Date(); lastContact = lastFrame; stale = true
             previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
             UIApplication.shared.isIdleTimerDisabled = true
-            active = true; respond(200, ["ready": true]); return
+            connecting = false; connectionError = ""; active = true; respond(200, ["ready": true]); return
         }
         guard active, authorization == "Bearer \(token)" else { respond(410, ["error": "设备已结束画面协作"]); return }
         if method == "DELETE", path == "/session" { finish(); respond(200, ["stopped": true]); return }
@@ -251,7 +423,16 @@ final class ScreenCollaboration: ObservableObject {
                 if workspace?.robotId != state.robotId || !state.editable { pending = [:] }
                 else if pending.values.contains(where: { $0.sequence <= state.ack }) { pending = pending.filter { $0.value.sequence > state.ack } }
             }
+            if workspace?.robotId != state.robotId || state.viewportControl?.enabled != true { pendingViewport = [] }
+            else { pendingViewport.removeAll { $0.sequence <= (state.viewportControl?.ack ?? 0) } }
             if workspace != state { workspace = state }
+            if let capture = pendingCapture, let result = state.captureResult, result.id == capture.id {
+                captureAccepted = true; captureMessage = result.message
+                if result.status != "recording" {
+                    pendingCapture = nil
+                    if result.status == "error" { captureNotice = result.message }
+                }
+            }
             lastWorkspace = Date(); lastContact = lastWorkspace
             if controlsStale { controlsStale = false }
             if let image {
@@ -302,6 +483,7 @@ struct ScreenCollaborationHost: View {
     @StateObject private var screen = ScreenCollaboration()
     var body: some View {
         ContentView()
+            .environmentObject(screen)
             .environment(\.screenCollaborationActive, screen.active)
             .fullScreenCover(isPresented: Binding(get: { screen.active }, set: { if !$0 { screen.finish() } })) {
                 ScreenCollaborationView(screen: screen).interactiveDismissDisabled()
@@ -319,10 +501,10 @@ private struct ScreenCollaborationView: View {
             let landscape = viewport.size.width > viewport.size.height
             VStack(spacing: 16) {
                 HStack(spacing: 12) {
-                    Image(systemName: "cable.connector").foregroundStyle(screenAccent)
+                    Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
                     VStack(alignment: .leading, spacing: 4) {
                         Text("画面协作").font(.headline)
-                        Text(screen.page == "joints" ? "USB 已连接 · 关节与姿态同步" : screen.stale ? "USB 已连接 · 等待画面更新" : "USB 已连接 · 末端相机仿真画面")
+                        Text("\(screen.connectionKind) 已连接 · \(screen.page == "joints" ? "关节与姿态同步" : screen.stale ? "等待画面更新" : "末端相机仿真画面")")
                             .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
                     }
                     Spacer()
@@ -347,10 +529,14 @@ private struct ScreenCollaborationView: View {
                 Text(selection == "both" ? "轻点画面，放大查看单臂" : "轻点画面，返回双臂视图")
                     .font(.caption).foregroundStyle(.secondary)
                 }
+                ScreenPoseCaptureBar(screen: screen)
             }.padding(TeachingDevice.isPhone ? 16 : 24)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
         }.accessibilityElement(children: .contain).accessibilityIdentifier("screen-collaboration-view")
+            .alert("无法记录姿态", isPresented: Binding(get: { screen.captureNotice != nil }, set: { if !$0 { screen.captureNotice = nil } })) {
+                Button("知道了", role: .cancel) { screen.captureNotice = nil }
+            } message: { Text(screen.captureNotice ?? "") }
     }
     private func camera(_ image: UIImage?, side: String, title: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -384,6 +570,36 @@ private struct ScreenCollaborationView: View {
     }
 }
 
+private struct ScreenPoseCaptureBar: View {
+    @ObservedObject var screen: ScreenCollaboration
+    private var destination: String {
+        guard let capture = screen.workspace?.capture, !capture.taskName.isEmpty else { return "保存到网页端当前任务与停车点" }
+        return "\(capture.taskName) / \(capture.parkingPointName.isEmpty ? "未选择停车点" : capture.parkingPointName)"
+    }
+    var body: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(destination).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    .accessibilityIdentifier("screen-capture-destination")
+                if !screen.captureMessage.isEmpty {
+                    Text(screen.captureMessage).font(.callout).foregroundStyle(screenAccent).lineLimit(2)
+                        .accessibilityIdentifier("screen-capture-status")
+                }
+            }
+            Spacer(minLength: 0)
+            Button(action: screen.recordPose) {
+                HStack(spacing: 8) {
+                    if screen.awaitingCapture { ProgressView().tint(.black) }
+                    else { Image(systemName: "square.and.arrow.down") }
+                    Text(screen.awaitingCapture ? "正在记录…" : "记录姿态").fontWeight(.semibold)
+                }
+            }.buttonStyle(.borderedProminent).tint(screenAccent).foregroundStyle(.black).controlSize(.large)
+                .disabled(screen.awaitingCapture || screen.awaitingControl)
+                .accessibilityIdentifier("screen-record-pose")
+        }.padding(.top, 4)
+    }
+}
+
 private struct ScreenJointWorkspace: View {
     @ObservedObject var screen: ScreenCollaboration
     let landscape: Bool
@@ -395,19 +611,20 @@ private struct ScreenJointWorkspace: View {
                 HStack {
                     Label("3D 姿态", systemImage: "cube.transparent").font(.headline)
                     Spacer()
-                    Text("与 Mac 同步").font(.caption).foregroundStyle(screenAccent)
+                    Text("与电脑同步").font(.caption).foregroundStyle(screenAccent)
                 }
                 ZStack {
                     Color.black.opacity(0.35)
                     if let image = screen.viewport {
                         Image(uiImage: image).resizable().scaledToFit()
-                            .accessibilityLabel("与 Mac 同步的机器人三维视图")
+                            .accessibilityLabel("与电脑同步的机器人三维视图")
                             .accessibilityIdentifier("screen-robot-viewport")
                     } else {
                         ProgressView("正在同步三维画面…").tint(screenAccent)
                     }
+                    ScreenViewportGestures(screen: screen)
                 }.clipShape(RoundedRectangle(cornerRadius: 12)).frame(maxWidth: .infinity, maxHeight: .infinity)
-                Text(screen.controlsStale ? "显示最近姿态 · 等待电脑更新" : "视角跟随 Mac，拖动关节可同步调整虚拟机器人。")
+                Text(screen.controlsStale ? "显示最近姿态 · 等待电脑更新" : "单指旋转 · 双指开合缩放 · 双指拖动平移")
                     .font(.caption).foregroundStyle(screen.controlsStale ? .orange : .secondary)
             }.padding(16)
                 .frame(maxWidth: .infinity, maxHeight: landscape ? .infinity : height * 0.34)
@@ -416,6 +633,72 @@ private struct ScreenJointWorkspace: View {
                 .frame(width: landscape ? (TeachingDevice.isPhone ? 320 : 380) : nil)
                 .frame(maxWidth: landscape ? nil : .infinity, maxHeight: .infinity)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct ScreenViewportGestures: UIViewRepresentable {
+    @ObservedObject var screen: ScreenCollaboration
+    func makeUIView(context: Context) -> ScreenViewportGestureView { ScreenViewportGestureView() }
+    func updateUIView(_ view: ScreenViewportGestureView, context: Context) {
+        view.sourceAspect = screen.workspace?.viewportControl?.aspect ?? 1.6
+        view.imageAspect = Double((screen.viewport?.size.width ?? 960) / (screen.viewport?.size.height ?? 600))
+        view.onMotion = { [weak screen] kind, dx, dy, zoom in screen?.navigateViewport(kind: kind, dx: dx, dy: dy, zoom: zoom) }
+        view.setGesturesEnabled(screen.canNavigateViewport)
+    }
+}
+
+// UIKit distinguishes finger counts and permits two-finger pan and pinch
+// together without allowing either gesture to rotate the view.
+private final class ScreenViewportGestureView: UIView, UIGestureRecognizerDelegate {
+    var sourceAspect = 1.6
+    var imageAspect = 1.6
+    var onMotion: ((String, Double, Double, Double) -> Void)?
+    private var drag: UIPanGestureRecognizer!
+    private var pinch: UIPinchGestureRecognizer!
+    private var previousTouches = 0
+    private var previousSize = CGSize.zero
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear; isMultipleTouchEnabled = true
+        isAccessibilityElement = true; accessibilityIdentifier = "screen-viewport-gestures"
+        accessibilityLabel = "三维视角控制"; accessibilityHint = "单指旋转，双指开合缩放，双指拖动平移"
+        drag = UIPanGestureRecognizer(target: self, action: #selector(dragged(_:)))
+        drag.minimumNumberOfTouches = 1; drag.maximumNumberOfTouches = 2; drag.delegate = self
+        pinch = UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))); pinch.delegate = self
+        addGestureRecognizer(drag); addGestureRecognizer(pinch)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func setGesturesEnabled(_ enabled: Bool) {
+        if drag.isEnabled != enabled { drag.isEnabled = enabled; pinch.isEnabled = enabled; previousTouches = 0 }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.size != previousSize {
+            previousSize = bounds.size; previousTouches = 0
+            let enabled = drag.isEnabled
+            drag.isEnabled = false; pinch.isEnabled = false
+            drag.isEnabled = enabled; pinch.isEnabled = enabled
+        }
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        (gestureRecognizer === drag && otherGestureRecognizer === pinch) || (gestureRecognizer === pinch && otherGestureRecognizer === drag)
+    }
+    private var contentHeight: Double {
+        let imageHeight = min(Double(bounds.height), Double(bounds.width) / imageAspect)
+        return max(1, min(imageHeight, imageHeight * imageAspect / sourceAspect))
+    }
+    @objc private func dragged(_ gesture: UIPanGestureRecognizer) {
+        let touches = gesture.numberOfTouches, delta = gesture.translation(in: self)
+        gesture.setTranslation(.zero, in: self)
+        defer { previousTouches = touches }
+        guard gesture.state == .changed, touches == previousTouches, touches == 1 || touches == 2 else { return }
+        onMotion?(touches == 1 ? "rotate" : "pan", Double(delta.x) / contentHeight, Double(delta.y) / contentHeight, 0)
+    }
+    @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
+        let scale = Double(gesture.scale); gesture.scale = 1
+        guard gesture.state == .changed, gesture.numberOfTouches == 2, scale.isFinite, scale > 0 else { return }
+        onMotion?("zoom", 0, 0, log(scale))
     }
 }
 

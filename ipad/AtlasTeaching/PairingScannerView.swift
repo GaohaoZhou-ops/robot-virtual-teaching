@@ -3,7 +3,7 @@ import AVFoundation
 import VisionKit
 
 struct PairingScannerView: View {
-    enum Purpose { case receiveModel, syncResult }
+    enum Purpose { case receiveModel, syncResult, screen }
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var permission = AVCaptureDevice.authorizationStatus(for: .video)
@@ -20,11 +20,12 @@ struct PairingScannerView: View {
             VStack(spacing: 18) {
                 Text(purpose == .syncResult
                     ? "在电脑打开相同物体的「iPad / iPhone / Vision Pro」窗口，扫描其中的二维码。模型核对通过后，自动上传当前已完成的示教结果。"
-                    : "扫描电脑「iPad / iPhone / Vision Pro」窗口中的二维码，识别后自动连接并接收物体。")
+                    : purpose == .screen ? "在电脑打开「设备 → iPad / iPhone → 画面协作」，扫描二维码后即可查看相机或调整机器人关节。"
+                    : "扫描电脑上的 Atlas 二维码，自动接收物体或进入画面协作。")
                     .font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
                 Group {
                     if DataScannerViewController.isSupported && permission == .authorized && cameraError == nil {
-                        PairingCamera(active: scenePhase == .active, onScan: onScan,
+                        PairingCamera(active: scenePhase == .active, purpose: purpose, onScan: onScan,
                             onMessage: { scanMessage = $0 }, onError: { cameraError = $0 })
                             .accessibilityIdentifier("pairing-camera")
                     } else {
@@ -72,6 +73,7 @@ struct PairingScannerView: View {
 
 private struct PairingCamera: UIViewControllerRepresentable {
     let active: Bool
+    let purpose: PairingScannerView.Purpose
     let onScan: (PairingQRCode) -> Void
     let onMessage: (String) -> Void
     let onError: (String) -> Void
@@ -112,6 +114,8 @@ private struct PairingCamera: UIViewControllerRepresentable {
                 lastValue = value
                 do {
                     let qr = try PairingQRCode.parse(value)
+                    if parent.purpose == .screen && !qr.isScreen { throw TeachingError("请扫描电脑「画面协作」窗口中的二维码。") }
+                    if parent.purpose == .syncResult && qr.isScreen { throw TeachingError("这是画面协作二维码，请使用示教同步窗口的二维码。") }
                     finished = true; scanner.stopScanning(); parent.onScan(qr)
                     return
                 } catch { parent.onMessage(error.localizedDescription) }

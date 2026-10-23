@@ -38,6 +38,7 @@ import ViewerMenu from './ViewerMenu.jsx';
 import TeachingSurfaceCoverage from './TeachingSurfaceCoverage.jsx';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
+import { applyScreenViewportGesture } from '../lib/ipadScreenViewport.js';
 import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
@@ -4689,7 +4690,20 @@ export default function PointCloudViewer({
         source.width * scale, source.height * scale);
       return true;
     };
-    if (collaborationViewportRef) collaborationViewportRef.current = captureCollaborationViewport;
+    const collaborationViewport = {
+      capture: captureCollaborationViewport,
+      getState: () => ({ enabled: !renderer.getContext().isContextLost(), aspect: camera.aspect }),
+      navigate(command) {
+        if (renderer.getContext().isContextLost()) return false;
+        if (focusAnimationRef.current) { cancelAnimationFrame(focusAnimationRef.current); focusAnimationRef.current = null; }
+        if (!applyScreenViewportGesture(camera, controls, navigation, command)) return false;
+        syncDetailView(); reportCameraView();
+        renderer.domElement.dataset.collaborationGesture = command.kind;
+        renderer.domElement.dataset.collaborationGestureSequence = String(command.sequence);
+        return true;
+      },
+    };
+    if (collaborationViewportRef) collaborationViewportRef.current = collaborationViewport;
     renderer.setAnimationLoop(() => {
       const deltaSeconds = Math.min(frameClock.getDelta(), 0.05);
       if (!renderActiveRef.current) return;
@@ -5432,7 +5446,7 @@ export default function PointCloudViewer({
 
     return () => {
       renderer.setAnimationLoop(null);
-      if (collaborationViewportRef?.current === captureCollaborationViewport) collaborationViewportRef.current = null;
+      if (collaborationViewportRef?.current === collaborationViewport) collaborationViewportRef.current = null;
       if (pendingWheelArbitrationTimer) {
         window.clearTimeout(pendingWheelArbitrationTimer);
         pendingWheelArbitrationTimer = null;
