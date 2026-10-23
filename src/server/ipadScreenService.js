@@ -98,7 +98,11 @@ const validToken = (current, token) => typeof token === 'string' && /^[a-f0-9]{6
 
 export function createIPadScreenService({ transport, supported = process.platform === 'darwin', now = Date.now,
   serverId = randomUUID(), serverName = 'Atlas', getAddresses = lanAddresses, generatePairingCode = randomPairingCode }) {
-  let session = null, starting = false, discovering;
+  const sessions = new Map();
+  let starting = false, discovering;
+  const isCurrent = (current) => sessions.get(current.id) === current;
+  const wirelessSessions = () => [...sessions.values()].filter((current) => current.mode === 'wifi');
+  const usbBusy = () => starting || [...sessions.values()].some((current) => current.mode !== 'wifi');
   const sockets = new WebSocketServer({ noServer: true, maxPayload: SCREEN_CONTROL_LIMIT, perMessageDeflate: false });
   const attachments = new Map();
   const attempts = new Map();
@@ -112,18 +116,36 @@ export function createIPadScreenService({ transport, supported = process.platfor
   const newPairingCode = (previous) => {
     for (let i = 0; i < 128; i++) {
       const code = generatePairingCode();
-      if (/^[A-Z0-9]{4}$/.test(code) && code !== previous) return code;
+      if (/^[A-Z0-9]{4}$/.test(code) && code !== previous
+        && !wirelessSessions().some((current) => current.pairingCode === code)) return code;
     }
     fail(503, '暂时无法分配配对码，请重试');
   };
   const checkOrigin = (req) => {
-    try { if (req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) fail(403, '不允许跨站访问协作服务'); }
+    try {
+      if (req.headers.origin) {
+        const origin = new URL(req.headers.origin);
+        if (origin.host !== req.headers.host || !['http:', 'https:'].includes(origin.protocol)) fail(403, '不允许跨站访问协作服务');
+      }
+    }
     catch { fail(403, '不允许跨站访问协作服务'); }
+  };
+  const isLocalRequest = (req) => {
+    try { checkLocalRequest(req); return true; } catch { return false; }
+  };
+  const checkWorkbenchRequest = (req) => {
+    checkOrigin(req);
+    // LAN browsers may relay their own workspace. Restrict Host to this service's
+    // advertised interfaces; USB access still requires the loopback browser.
+    let host;
+    try { host = new URL(`http://${req.headers.host}`).host; } catch { fail(403, '画面协作请求来源无效'); }
+    const advertised = getAddresses(req.socket.localPort).some((address) => new URL(address).host === host);
+    if (!isLocalRequest(req) && !advertised) fail(403, '请使用当前服务的局域网地址打开工作台。');
   };
   const status = (current) => ({ mode: current.mode || 'usb', deviceReady: current.mode !== 'wifi' || !!current.deviceReady,
     deviceName: current.deviceName, pairingStatus: current.deviceReady ? 'paired' : 'ready' });
   const publishStatus = (current) => {
-    if (session === current && current.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify(status(current)));
+    if (isCurrent(current) && current.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify(status(current)));
   };
   const appRequest = async (deviceId, method, route, body, token) => {
     let reply;
@@ -143,7 +165,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
   const end = async (current, error) => {
     if (!current || current.ended) return;
     current.ended = true;
-    if (session === current) session = null;
+    if (isCurrent(current)) sessions.delete(current.id);
     if (current.socket?.readyState === WebSocket.OPEN) {
       if (error) current.socket.send(JSON.stringify({ error }));
       current.socket.close();
@@ -152,7 +174,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
     current.lan?.close();
   };
   const publishControls = (current, status) => {
-    if (session !== current) return;
+    if (!isCurrent(current)) return;
     current.page = status.page === 'joints' ? 'joints' : 'cameras';
     const commands = (Array.isArray(status.commands) ? status.commands.slice(0, 128) : [])
       .map((command) => screenJointCommand({ ...command, receivedAt: now() }, current.controlState, current.controlState?.ack || 0, now()))
@@ -163,9 +185,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
       .filter(Boolean).sort((a, b) => a.sequence - b.sequence);
     if (current.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ page: current.page, commands, captureRequest, viewportCommands }));
   };
-  const timer = setInterval(() => {
-    const current = session;
-    if (!current) return;
+  const keepAlive = (current) => {
     if (current.mode === 'wifi' && !current.deviceReady) {
       if (now() >= current.pairingExpiresAt || (current.pairedAt != null && now() - current.pairedAt > 10000)) {
         void end(current, '配对已过期或 iPad 未连接，请重新开始协作。'); return;
@@ -193,7 +213,8 @@ export function createIPadScreenService({ transport, supported = process.platfor
         .catch((error) => end(current, error.message))
         .finally(() => { current.keepingAlive = false; });
     }
-  }, 250);
+  };
+  const timer = setInterval(() => { for (const current of sessions.values()) keepAlive(current); }, 250);
   timer.unref?.();
   const discover = () => {
     if (discovering) return discovering;
@@ -225,41 +246,48 @@ export function createIPadScreenService({ transport, supported = process.platfor
           if (++entry.count > (key === 'all' ? 100 : 12)) fail(429, '配对尝试过于频繁，请一分钟后重试');
           attempts.set(key, entry);
         }
-        const body = await readJSON(req), current = session;
+        const body = await readJSON(req);
         if (typeof body.code !== 'string' || !/^[A-Za-z0-9]{4}$/.test(body.code)
           || typeof body.deviceId !== 'string' || !/^[a-zA-Z0-9-]{8,80}$/.test(body.deviceId)) fail(400, '请输入有效的 4 位配对码');
-        if (!current || current.mode !== 'wifi' || current.pairingCode !== body.code.toUpperCase()) fail(404, '配对码无效，请使用电脑画面协作窗口中的配对码');
+        const current = wirelessSessions().find((candidate) => candidate.pairingCode === body.code.toUpperCase());
+        if (!current) fail(404, '配对码无效，请使用电脑画面协作窗口中的配对码');
         if (now() >= current.pairingExpiresAt) fail(410, '配对码已过期，请在电脑更新配对码');
         if ((body.serverId && body.serverId !== serverId) || (body.sessionId && body.sessionId !== current.id)) fail(409, '电脑服务或协作已改变，请重新扫码');
         if (current.deviceReady || (current.deviceId && current.deviceId !== body.deviceId)) fail(409, '已有 iPad 正在连接，请先结束当前协作');
+        if (wirelessSessions().some((candidate) => candidate !== current && candidate.deviceId === body.deviceId)) {
+          fail(409, '此 iPad 已连接其他协作，请先在 iPad 上结束协作再扫码。');
+        }
         current.deviceId = body.deviceId; current.deviceName = String(body.deviceName || 'iPad').slice(0, 80);
         current.deviceToken ||= randomBytes(32).toString('hex'); current.pairedAt ??= now();
         return json(res, 200, { protocol: SCREEN_PROTOCOL, id: current.id, serverId, deviceToken: current.deviceToken });
       }
-      checkLocalRequest(req);
+      checkWorkbenchRequest(req);
       if (route === '/__atlas/ipad-screen/info' && req.method === 'GET') {
-        return json(res, 200, { protocol: SCREEN_PROTOCOL, serverId, serverName, usbSupported: supported,
-          wirelessSupported: true, addresses: getAddresses(req.socket.localPort) });
+        const addresses = [...getAddresses(req.socket.localPort)];
+        addresses.sort((a, b) => Number(new URL(b).host === req.headers.host) - Number(new URL(a).host === req.headers.host));
+        return json(res, 200, { protocol: SCREEN_PROTOCOL, serverId, serverName, usbSupported: supported && isLocalRequest(req),
+          wirelessSupported: true, addresses });
       }
       if (route === '/__atlas/ipad-screen/devices' && req.method === 'GET') {
-        return json(res, 200, supported ? await discover() : { supported: false, devices: [], message: '请使用扫码或 Wi-Fi 配对。' });
+        return json(res, 200, supported && isLocalRequest(req) ? await discover()
+          : { supported: false, devices: [], message: '请使用扫码或 Wi-Fi 配对；数据线仅限服务器本机使用。' });
       }
       if (route === '/__atlas/ipad-screen/session' && req.method === 'POST') {
-        if (session || starting) fail(409, '已有画面协作，请先结束当前协作');
         const body = await readJSON(req);
-        if (session || starting) fail(409, '已有画面协作，请先结束当前协作');
         if (body.mode === 'wifi') {
+          if (wirelessSessions().length >= 16) fail(429, '当前协作较多，请关闭不再使用的协作窗口后重试');
           const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), mode: 'wifi', deviceName: 'iPad',
             updatedAt: now(), pairingCode: newPairingCode(), pairingExpiresAt: now() + 15 * 60 * 1000 };
-          session = current;
+          sessions.set(current.id, current);
           return json(res, 201, { id: current.id, token: current.token, ...status(current), serverId,
             pairingCode: current.pairingCode, pairingExpiresAt: current.pairingExpiresAt });
         }
         if (body.mode && body.mode !== 'usb') fail(400, '连接方式无效');
+        checkLocalRequest(req);
         if (!supported) fail(503, 'Windows 请使用扫码或 Wi-Fi 配对');
         if (!/^[a-zA-Z0-9-]{8,80}$/.test(body.deviceId || '')) fail(400, '设备参数无效');
         // Reserve before the first asynchronous device operation (two browser tabs).
-        if (session || starting) fail(409, '已有画面协作，请先结束当前协作');
+        if (usbBusy()) fail(409, '已有有线画面协作，请先结束当前有线协作');
         starting = true;
         try {
           const status = await appRequest(body.deviceId, 'GET', '/status');
@@ -267,14 +295,15 @@ export function createIPadScreenService({ transport, supported = process.platfor
           if (status.active) fail(409, '设备正在进行画面协作，请先在设备上结束协作');
           const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), deviceId: body.deviceId, deviceName: status.deviceName, updatedAt: now() };
           await appRequest(current.deviceId, 'POST', '/session', Buffer.from(JSON.stringify({ protocol: SCREEN_PROTOCOL })), current.token);
-          session = current;
+          sessions.set(current.id, current);
           return json(res, 201, { id: current.id, token: current.token, deviceName: current.deviceName });
         } finally { starting = false; }
       }
       const match = route.match(/^\/__atlas\/ipad-screen\/session\/([a-f0-9-]{36})(\/frame|\/workspace|\/pairing-qr|\/renew)?$/);
       if (!match) fail(404, '画面协作接口不存在');
-      const current = session, token = req.headers.authorization?.replace(/^Bearer /, '') || '';
-      if (!current || current.id !== match[1]) fail(410, '画面协作已结束，请重新连接');
+      const current = sessions.get(match[1]), token = req.headers.authorization?.replace(/^Bearer /, '') || '';
+      if (!current) fail(410, '画面协作已结束，请重新连接');
+      if (current.mode !== 'wifi') checkLocalRequest(req);
       if (!validToken(current, token)) fail(401, '画面协作凭据无效');
       if (req.method === 'DELETE' && !match[2]) { await end(current); return json(res, 200, { stopped: true }); }
       if (req.method === 'POST' && ['/pairing-qr', '/renew'].includes(match[2])) {
@@ -286,7 +315,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
         const body = await readJSON(req);
         if (now() >= current.pairingExpiresAt) fail(410, '配对码已过期，请更新配对码');
         if (body.code !== current.pairingCode) fail(409, '配对码已改变，请刷新二维码');
-        if (!getAddresses(req.socket.localPort).includes(body.address)) fail(400, '请选择当前电脑的局域网地址');
+        if (!getAddresses(req.socket.localPort).includes(body.address)) fail(400, '请选择当前服务的局域网地址');
         const image = await pairingQRCode({ protocol: 'atlas-ipad-pairing/1', purpose: 'screen', address: body.address,
           code: current.pairingCode, sessionId: current.id, serverId, expiresAt: current.pairingExpiresAt });
         return json(res, 200, { image, expiresAt: current.pairingExpiresAt });
@@ -300,9 +329,9 @@ export function createIPadScreenService({ transport, supported = process.platfor
         const body = await readBody(req);
         if (match[2] === '/workspace') current.controlState = validateScreenWorkspace(body);
         else validateScreenFrame(body);
-        if (session !== current) fail(410, '画面协作已结束');
+        if (!isCurrent(current)) fail(410, '画面协作已结束');
         const status = await deviceRequest(current, 'PUT', match[2], body);
-        if (session === current) current.updatedAt = now();
+        if (isCurrent(current)) current.updatedAt = now();
         publishControls(current, status);
         return json(res, 200, status);
       } catch (error) { if (error.status !== 400 && error.status !== 413) void end(current); throw error; }
@@ -315,8 +344,8 @@ export function createIPadScreenService({ transport, supported = process.platfor
       const match = req.url?.split('?')[0].match(/^\/__atlas\/ipad-screen\/session\/([a-f0-9-]{36})\/(events|device)$/);
       if (!match) return;
       try {
-        const current = session;
-        if (!current || current.id !== match[1]) fail(410, '画面协作已结束');
+        const current = sessions.get(match[1]);
+        if (!current) fail(410, '画面协作已结束');
         if (match[2] === 'device') {
           checkOrigin(req);
           const token = req.headers.authorization?.replace(/^Bearer /, '');
@@ -329,13 +358,14 @@ export function createIPadScreenService({ transport, supported = process.platfor
             connection.on('close', () => { void end(current, 'iPad 已结束协作或网络连接已断开。'); });
             void deviceRequest(current, 'POST', '/session', Buffer.from(JSON.stringify({ protocol: SCREEN_PROTOCOL })))
               .then(() => {
-                if (session !== current) return;
+                if (!isCurrent(current)) return;
                 current.deviceReady = true; current.updatedAt = now(); publishStatus(current);
               }).catch((error) => end(current, error.message));
           });
           return;
         }
-        checkLocalRequest(req);
+        checkWorkbenchRequest(req);
+        if (current.mode !== 'wifi') checkLocalRequest(req);
         sockets.handleUpgrade(req, socket, head, (connection) => {
           // Authenticate in the first message; never put session tokens in URLs.
           const authTimer = setTimeout(() => connection.terminate(), 5000);
@@ -348,7 +378,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
           connection.once('message', (data) => {
             let token;
             try { if (data.length <= 1024) token = JSON.parse(data.toString()).token; } catch { /* Rejected below. */ }
-            if (session !== current || current.socket || !validToken(current, token)) { connection.close(1008); return; }
+            if (!isCurrent(current) || current.socket || !validToken(current, token)) { connection.close(1008); return; }
             clearTimeout(authTimer);
             current.socket = connection; current.lastPong = now(); current.lastPing = now();
             connection.on('pong', () => { current.lastPong = now(); });
@@ -360,7 +390,9 @@ export function createIPadScreenService({ transport, supported = process.platfor
     attachments.set(server, upgrade); server.on('upgrade', upgrade);
   };
   middleware.close = () => {
-    clearInterval(timer); session = null;
+    clearInterval(timer);
+    for (const current of sessions.values()) current.lan?.close();
+    sessions.clear();
     for (const [server, upgrade] of attachments) server.off('upgrade', upgrade);
     attachments.clear();
     for (const socket of sockets.clients) socket.terminate();

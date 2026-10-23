@@ -110,23 +110,36 @@ final class AtlasTeachingUITests: XCTestCase {
             throw XCTSkip("Run with the live desktop pose-capture fixture")
         }
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launch()
+        let app = XCUIApplication()
+        if ProcessInfo.processInfo.environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
+        else { app.launch() }
         let record = app.buttons["screen-record-pose"]
         XCTAssertTrue(record.waitForExistence(timeout: 180))
         XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        let title = app.staticTexts["screen-collaboration-title"]
+        let stop = app.buttons["screen-collaboration-stop"]
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(window.contains(record.frame))
+        XCTAssertGreaterThan(record.frame.minX, window.midX)
+        XCTAssertLessThanOrEqual(window.maxX - record.frame.maxX, 32)
+        XCTAssertLessThan(abs(record.frame.midY - title.frame.midY), 30)
+        XCTAssertGreaterThan(stop.frame.minX, title.frame.maxX)
+        XCTAssertLessThan(stop.frame.minX - title.frame.maxX, 24)
+        XCTAssertLessThan(abs(stop.frame.midY - title.frame.midY), 10)
+        XCTAssertEqual(app.segmentedControls["screen-page-tabs"].frame.midX, window.midX, accuracy: 2)
+        XCTAssertFalse(app.staticTexts["screen-capture-destination"].exists)
         record.tap()
         let alert = app.alerts["无法记录姿态"]
         XCTAssertTrue(alert.waitForExistence(timeout: 15))
         XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "新建或选择示教任务")).firstMatch.exists)
         alert.buttons["知道了"].tap()
-        let destination = app.staticTexts["screen-capture-destination"]
-        let taskReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "未选择停车点"), object: destination)
+        let taskReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "未选择停车点"), object: record)
         XCTAssertEqual(XCTWaiter.wait(for: [taskReady], timeout: 30), .completed)
         record.tap()
         XCTAssertTrue(alert.waitForExistence(timeout: 15))
         XCTAssertTrue(alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "为当前任务新增或选择停车点")).firstMatch.exists)
         alert.buttons["知道了"].tap()
-        let parkingReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "停车点 P01"), object: destination)
+        let parkingReady = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", "停车点 P01"), object: record)
         XCTAssertEqual(XCTWaiter.wait(for: [parkingReady], timeout: 30), .completed)
         record.tap()
         let result = app.staticTexts["screen-capture-status"]
@@ -134,9 +147,16 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [first], timeout: 60), .completed)
         app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
         XCTAssertTrue(app.images["screen-robot-viewport"].waitForExistence(timeout: 30))
+        let viewportTitle = app.staticTexts["screen-viewport-title"]
+        XCTAssertGreaterThan(result.frame.minX, viewportTitle.frame.maxX)
+        XCTAssertLessThan(abs(result.frame.midY - viewportTitle.frame.midY), 24)
+        XCTAssertLessThanOrEqual(window.maxY - app.otherElements["screen-viewport-panel"].frame.maxY, 32)
+        let recordBefore = record.frame
         record.tap()
         let second = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "A02"), object: result)
         XCTAssertEqual(XCTWaiter.wait(for: [second], timeout: 60), .completed)
+        XCTAssertEqual(record.frame.minY, recordBefore.minY, accuracy: 1)
+        XCTAssertEqual(record.frame.maxX, recordBefore.maxX, accuracy: 1)
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "iPad collaboration recorded pose"; capture.lifetime = .keepAlways; add(capture)
         app.buttons["screen-collaboration-stop"].tap()

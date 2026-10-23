@@ -31,6 +31,9 @@ node_modules/
 # Menu review captures and preview bundles use build/{menu-review,menu-validation}/.
 # Teaching popup checks and typography reviews use build/teaching-pose-popup-validation/
 # and build/teaching-tree-type-review/, including browser captures and local runners.
+# Independent-browser collaboration and iPad top-action checks use
+# build/{ipad-remote-collaboration,ipad-collaboration-top-actions}/; pairing
+# credentials, exported projects, native test plans and screenshots stay local.
 dist/
 build/
 out/
@@ -224,6 +227,8 @@ playwright/.auth/
 /ipad-pose-button-layout/
 /ipad-pose-orientation/
 /ipad-non-lidar/
+/ipad-remote-collaboration/
+/ipad-collaboration-top-actions/
 /robot-soft-limits/
 /ipad-viewport-input-fix.[zZ][iI][pP]
 /ipad-viewport-framing.[zZ][iI][pP]
@@ -232,6 +237,8 @@ playwright/.auth/
 /ipad-pose-button-layout.[zZ][iI][pP]
 /ipad-pose-orientation.[zZ][iI][pP]
 /ipad-non-lidar.[zZ][iI][pP]
+/ipad-remote-collaboration.[zZ][iI][pP]
+/ipad-collaboration-top-actions.[zZ][iI][pP]
 /robot-soft-limits.[zZ][iI][pP]
 # Grouped topbar/cascading-menu captures and packed review copies from /tmp.
 # Keep the same prefixes in source artwork and nested fixtures trackable.

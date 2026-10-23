@@ -295,7 +295,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
       <section className="ipad-screen-dialog" role="dialog" aria-modal="true" aria-labelledby="ipad-screen-title" ref={dialogRef} tabIndex={-1}>
         <header><span className="ipad-screen-mark"><Monitor size={24}/></span><div><small>IPAD COLLABORATION</small><h2 id="ipad-screen-title">画面协作</h2></div>
           <button type="button" onClick={onClose} aria-label="关闭画面协作窗口"><X size={18}/></button></header>
-        <p className="ipad-screen-intro">在 iPad 上自由切换相机画面与关节控制，边看 3D 姿态边拖动关节，两端同步更新。</p>
+        <p className="ipad-screen-intro">与 iPad 协作当前浏览器中的工程，无需先同步工程。可切换相机画面与关节控制，记录姿态保存在本页当前任务中。</p>
         <div className="ipad-screen-pair" aria-label="共享画面内容"><div><i/>左臂相机<small>ZIVID 2 M70</small></div><div><i/>右臂相机<small>ZIVID 2 M70</small></div></div>
         {!canStream && <p className="ipad-screen-notice">请先打开示教工程，加载带左右臂末端相机的机器人。</p>}
         <div className="ipad-screen-methods" role="tablist" aria-label="协作连接方式">
@@ -318,13 +318,13 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
                 onCopy={() => navigator.clipboard.writeText(session.pairingCode).then(() => setCopied(true)).catch(() => setError('复制失败，请手动输入配对码。'))}/>
               {method === 'wifi' && <button type="button" onClick={renewPairing} disabled={busy}><RefreshCw size={14}/>更新配对码</button>}
             </> : <p>{method === 'wifi' ? '生成配对码后，在 iPad 首页选择「画面协作」，填写电脑地址并输入配对码。' : busy ? '正在生成二维码…' : '使用 iPad 上 Atlas App 首页的「扫码配对」扫描二维码即可连接。'}</p>}
-            <label className="ipad-screen-address">电脑局域网地址
-              <select aria-label="协作电脑地址" value={address} disabled={busy} onChange={(event) => { setAddress(event.target.value); setCopied(false); }}>
+            <label className="ipad-screen-address">协作连接地址
+              <select aria-label="协作连接地址" value={address} disabled={busy} onChange={(event) => { setAddress(event.target.value); setCopied(false); }}>
                 {!address && <option value="">未找到局域网地址</option>}
                 {(capabilities?.addresses || []).map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </label>
-            <p className="ipad-screen-footnote">{address ? '电脑与 iPad 需在同一局域网；Windows 使用扫码或 Wi-Fi，Mac 还可使用数据线。' : '请先连接局域网，再重新打开此窗口。'}</p>
+            <p className="ipad-screen-footnote">{address ? '电脑与 iPad 需能访问上方地址。其他电脑访问本服务时可扫码或 Wi-Fi 配对；数据线仅限服务器本机使用。' : '请先连接局域网，再重新打开此窗口。'}</p>
           </div>}
         {error && <p className="ipad-screen-error" role="alert">{error}</p>}
         <footer><small>共享当前工程的相机仿真画面</small><div className="ipad-screen-actions">{session && (deviceConnected || method !== 'qr')
