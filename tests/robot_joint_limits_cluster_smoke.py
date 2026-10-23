@@ -45,5 +45,5 @@ for ratio in [0.8, 0.5, 1.0, 0.01, None, float('nan'), -1, 2]:
         joint = configured.movable[name]
         assert math.isclose(joint.lower, lower, abs_tol=1e-10), (ratio, name)
         assert math.isclose(joint.upper, upper, abs_tol=1e-10), (ratio, name)
-assert module.ALGORITHM_VERSION == '1.1.0'
+assert module.ALGORITHM_VERSION == '1.2.0'
 print('PASS offline URDF parser: default/custom ratios and invalid settings; 14 arm limits; body/head unchanged')

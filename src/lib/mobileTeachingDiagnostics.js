@@ -32,6 +32,9 @@ export function formatMobileConstraintValue(value, limit, scale = 1) {
 export function mobileSolutionFailureReasons(solution, options) {
   if (!solution || solution.feasible || solution.skipped) return [];
   const reasons = [];
+  for (const violation of solution.jointCouplingViolations || []) {
+    reasons.push(`${violation.side === 'left' ? '左臂' : '右臂'}关节6–7角度耦合超限：要求 |J6 + J7| < 1.8 rad，请检查关节锁定或起始姿态`);
+  }
   for (const [key, axes, label, unit, scale] of MOBILE_TOLERANCE_GROUPS) {
     const errors = solution[key === 'positionTolerance' ? 'positionError' : 'rotationError'];
     const exceeded = axes.filter((axis) => Number.isFinite(errors?.[axis]) && Number.isFinite(options[key]?.[axis])

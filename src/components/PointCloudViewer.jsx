@@ -1,3 +1,4 @@
+import { configureRobotJointCoupling, getRobotJointCouplingPairs, robotJointCouplingViolations } from '../lib/robotJointCoupling.js';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createIPadCaptureLayer, createMobilePosePreview, disposeIPadCaptureLayer, mobileSamplePosition } from '../lib/ipadCaptureDisplay.js';
@@ -42,7 +43,7 @@ import { applyScreenViewportGesture } from '../lib/ipadScreenViewport.js';
 import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
-import { RobotJointLimitContext } from './RobotJointLimitContext.js';
+import { RobotJointCouplingContext, RobotJointLimitContext } from './RobotJointLimitContext.js';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
 import {
   createUniformMeshIndex,
@@ -1544,8 +1545,11 @@ export default function PointCloudViewer({
   const robotPoseRef = useRef(normalizeRobotPose(robotPose));
   const robotJointValuesRef = useRef(normalizeRobotJointValues(robotJointValues));
   const robotArmSoftLimitRatio = useContext(RobotJointLimitContext);
+  const robotArmJointCouplingEnabled = useContext(RobotJointCouplingContext);
   const robotArmSoftLimitRatioRef = useRef(robotArmSoftLimitRatio);
   robotArmSoftLimitRatioRef.current = robotArmSoftLimitRatio;
+  const robotArmJointCouplingEnabledRef = useRef(robotArmJointCouplingEnabled);
+  robotArmJointCouplingEnabledRef.current = robotArmJointCouplingEnabled;
   const lockedRobotJointNamesRef = useRef(normalizeRobotJointLocks(lockedRobotJointNames));
   const robotControlEnabledRef = useRef(Boolean(robotControlEnabled));
   const robotHeightLockedRef = useRef(Boolean(robotHeightLocked));
@@ -1871,6 +1875,7 @@ export default function PointCloudViewer({
       return {
         version: 1,
         status: 'no-neighbors',
+        armJointCouplingEnabled: robotArmJointCouplingEnabledRef.current,
         taskId: task.id,
         analyzedAt: new Date().toISOString(),
         distanceThreshold,
@@ -2013,7 +2018,8 @@ export default function PointCloudViewer({
             const feasible = errors.length === record.targets.length
               && errors.length > 0
               && positionError <= positionTolerance
-              && rotationError <= rotationTolerance;
+              && rotationError <= rotationTolerance
+              && !robotJointCouplingViolations(getRobotJointCouplingPairs(planningRobot)).length;
             plannedPoses.push({
               poseId: record.poseId,
               poseName: record.poseName,
@@ -2078,7 +2084,7 @@ export default function PointCloudViewer({
           nearbyPairCount: cluster.nearbyPairCount,
           candidateCount: candidates.length,
           feasible,
-          reason: feasible ? '' : '没有候选底盘位姿能让全部相机姿态落入当前容差',
+          reason: feasible ? '' : '没有候选底盘位姿能同时满足全部相机姿态容差与关节约束',
           candidate: bestCandidate
             ? {
                 id: bestCandidate.id,
@@ -2108,6 +2114,7 @@ export default function PointCloudViewer({
       taskId: task.id,
       analyzedAt: new Date().toISOString(),
       method: 'xy-single-link+common-base-dual-optical-dls',
+      armJointCouplingEnabled: planningRobot.userData.armJointCouplingEnabled !== false,
       distanceThreshold,
       positionTolerance,
       rotationTolerance,
@@ -2958,11 +2965,12 @@ export default function PointCloudViewer({
     clearEndEffectorLocks();
     clearRobotDragHistory();
     cameraIkReferencesRef.current = { left: null, right: null };
+    configureRobotJointCoupling(robot, robotArmJointCouplingEnabled);
     const movableJoints = configureRobotArmSoftLimits(robot, robotArmSoftLimitRatio);
     onRobotLoadStateRef.current?.({ ...robotLoadStateRef.current, movableJoints });
     reportRobotJointValues(true);
     reportZividCameraPoses(true);
-  }, [robotArmSoftLimitRatio]);
+  }, [robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
 
   useLayoutEffect(() => {
     const changed = !sameNumericValues(normalizeRobotJointValues(robotJointValues), robotJointValuesRef.current);
@@ -5576,6 +5584,7 @@ export default function PointCloudViewer({
           return;
         }
         loadedRobot = robot;
+        configureRobotJointCoupling(robot, robotArmJointCouplingEnabledRef.current);
         configureRobotArmSoftLimits(robot, robotArmSoftLimitRatioRef.current);
         layer.add(robot);
         loadedRobotRef.current = robot;
@@ -5777,7 +5786,7 @@ export default function PointCloudViewer({
         writeRobotParkingGhostHiddenDataset(canvas);
       }
     };
-  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio]);
+  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
 
   useEffect(() => {
     if (robotLayerRef.current) robotLayerRef.current.visible = showRobot;

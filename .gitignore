@@ -38,6 +38,7 @@ node_modules/
 # helper bundle, extracted package checks, browser captures and native test results.
 # Adjustable joint-limit checks use build/robot-soft-limits/ for menu captures,
 # collaboration credentials and simulated device command/state files.
+# Coupled-wrist UI checks use build/robot-joint-coupling/ for browser captures.
 # Mac/iPad realtime checks use build/ipad-realtime-*/ and ipad/build/realtime-testing/;
 # performance samples, device/signing settings, captures and Python environments stay local.
 dist/
@@ -267,6 +268,19 @@ playwright/.auth/
 /robot-soft-limits-*.[zZ][iI][pP]
 /tests/robot-soft-limits.[zZ][iI][pP]
 /tests/robot-soft-limits-*.[zZ][iI][pP]
+# Coupled-wrist validation copies and per-run bundles exported from build/.
+# Limit these to root/tests output paths; keep solver sources, maintained
+# robot_joint_coupling_* tests, artwork and nested regression fixtures visible.
+/robot-joint-coupling/
+/tests/robot-joint-coupling/
+/robot-joint-coupling-*/
+/tests/robot-joint-coupling-*/
+/robot-joint-coupling.[zZ][iI][pP]
+/tests/robot-joint-coupling.[zZ][iI][pP]
+/robot-joint-coupling-*.[zZ][iI][pP]
+/tests/robot-joint-coupling-*.[zZ][iI][pP]
+/robot-joint-coupling-*.png
+/tests/robot-joint-coupling-*.png
 # Interactive IK experiments and baseline snapshots copied from /tmp.
 # Keep maintained end_effector_* tests, solver sources and nested fixtures tracked.
 /atlas-ik-*/

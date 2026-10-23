@@ -11,12 +11,13 @@ import {
 import { sha256Bytes } from './hash.js';
 import { resolveRobotResourceUrl } from './robotLoader.js';
 import { normalizeArmSoftLimitRatio } from './robotJointLimits.js';
+import { normalizeArmJointCouplingEnabled } from './robotJointCoupling.js';
 
 export const PARKING_MERGE_SERVER_JOB_FORMAT = 'atlas-parking-merge-server-job';
 export const PARKING_MERGE_SERVER_RESULT_FORMAT = 'atlas-parking-merge-server-result';
 export const PARKING_MERGE_SERVER_ARCHIVE_VERSION = 1;
 export const PARKING_MERGE_SERVER_ALGORITHM = 'atlas-common-parking-dls-environment';
-export const PARKING_MERGE_SERVER_ALGORITHM_VERSION = '1.1.0';
+export const PARKING_MERGE_SERVER_ALGORITHM_VERSION = '1.2.0';
 
 const MANIFEST_PATH = 'manifest.json';
 const TASK_PATH = 'input/task.json';
@@ -398,6 +399,7 @@ const triggerDownload = (blob, filename) => {
 
 const defaultServerConfig = (overrides = {}) => ({
   armSoftLimitRatio: normalizeArmSoftLimitRatio(overrides.armSoftLimitRatio),
+  armJointCouplingEnabled: normalizeArmJointCouplingEnabled(overrides.armJointCouplingEnabled),
   distanceThreshold: finite(overrides.distanceThreshold, DEFAULT_PARKING_CLUSTER_DISTANCE),
   positionTolerance: finite(overrides.positionTolerance, DEFAULT_PARKING_MERGE_XYZ_TOLERANCE),
   rotationTolerance: finite(overrides.rotationTolerance, DEFAULT_PARKING_MERGE_RPY_TOLERANCE),
@@ -659,6 +661,9 @@ export async function readParkingMergeServerResult(file, context, onProgress) {
   }
   if (String(manifest.binding?.robot?.id || '') !== String(robot?.id || robot?.relativePath || '')) {
     throw new Error('结果绑定的机器人模型与当前机器人不匹配');
+  }
+  if (analysis.armJointCouplingEnabled !== normalizeArmJointCouplingEnabled(context?.armJointCouplingEnabled)) {
+    throw new Error('关节6–7角度耦合设置与 Server 结果不一致，请重新导出计算包');
   }
   onProgress?.({ phase: '校验机器人资源', detail: '正在核对 URDF 与碰撞网格摘要' });
   const robotBundle = await collectParkingMergeRobotResources(robot, onProgress);

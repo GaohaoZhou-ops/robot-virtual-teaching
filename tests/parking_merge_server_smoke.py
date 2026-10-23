@@ -15,6 +15,7 @@ from viewer_tools_helpers import viewer_tool
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
 CHROMIUM_EXECUTABLE = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+COUPLING_ENABLED = os.environ.get("JOINT_COUPLING_ENABLED", "true") != "false"
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -72,6 +73,12 @@ def run():
             "document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'",
             timeout=240_000,
         )
+        if not COUPLING_ENABLED:
+            page.locator('[data-workbench-menu-trigger="robot"]').click()
+            toggle = page.get_by_role('switch', name='关节6–7角度耦合', exact=True)
+            toggle.click()
+            assert toggle.get_attribute('aria-checked') == 'false'
+            toggle.press('Escape')
 
         page.get_by_role("tab", name="示教").click()
         page.get_by_role("button", name="新建示教任务", exact=True).click()
@@ -135,13 +142,14 @@ def run():
             config = json.loads(archive.read("input/config.json"))
             assert manifest["format"] == "atlas-parking-merge-server-job"
             assert manifest["archiveVersion"] == 1
-            assert manifest["algorithm"]["version"] == "1.0.0"
+            assert manifest["algorithm"]["version"] == "1.2.0"
             assert manifest["binding"]["map"]["sourceHash"]
             assert manifest["binding"]["robot"]["resourceDigest"]
             assert manifest["binding"]["task"]["digest"]
             assert task["name"] == "Server 合并验证"
             assert len(task["parkingPoints"]) == 2
             assert config["environmentCollision"]["enabled"] is True
+            assert config["armJointCouplingEnabled"] is COUPLING_ENABLED
             assert "environment/positions.f32le" in names
             assert "scripts/compute_parking_merge.py" in names
             assert "run_cluster.sh" in names
@@ -168,6 +176,7 @@ def run():
             "distanceThreshold": 0.35,
             "positionTolerance": 0.05,
             "rotationTolerance": 5,
+            "armJointCouplingEnabled": COUPLING_ENABLED,
             "clusters": [],
             "nearbyPairs": [],
             "isolatedParkingPointIds": [item["id"] for item in task["parkingPoints"]],
@@ -176,13 +185,19 @@ def run():
         temporary = Path(tempfile.mkdtemp(prefix="atlas-server-result-"))
         mismatch_path = temporary / "wrong-map-result.zip"
         valid_path = temporary / "valid-result.zip"
+        wrong_coupling_path = temporary / "wrong-coupling-result.zip"
         result_archive(mismatch_path, manifest, analysis, map_hash="wrong-map-sha256")
+        result_archive(wrong_coupling_path, manifest, {**analysis, 'armJointCouplingEnabled': not COUPLING_ENABLED})
         result_archive(valid_path, manifest, analysis)
 
         result_input = dialog.locator('input[type="file"]')
         result_input.set_input_files(str(mismatch_path))
         dialog.get_by_text("结果已拒绝", exact=True).wait_for()
         assert "地图 SHA-256" in dialog.get_by_role("status").inner_text()
+
+        result_input.set_input_files(str(wrong_coupling_path))
+        dialog.get_by_text("结果已拒绝", exact=True).wait_for()
+        assert "关节6–7角度耦合设置" in dialog.get_by_role("status").inner_text()
 
         result_input.set_input_files(str(valid_path))
         dialog.wait_for(state="detached", timeout=240_000)

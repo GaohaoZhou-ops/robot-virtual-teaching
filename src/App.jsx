@@ -67,9 +67,10 @@ import IPadScreenCollaboration from './components/IPadScreenCollaboration.jsx';
 import { screenPoseCaptureState } from './lib/ipadScreenControl.js';
 import { analyzeParkingPointDrift } from './lib/teachingParkingDrift.js';
 import WorkbenchToolbar from './components/WorkbenchToolbar.jsx';
-import RobotJointLimitSettings from './components/RobotJointLimitSettings.jsx';
-import { RobotJointLimitContext } from './components/RobotJointLimitContext.js';
+import RobotJointLimitSettings, { RobotJointCouplingSettings } from './components/RobotJointLimitSettings.jsx';
+import { RobotJointCouplingContext, RobotJointLimitContext } from './components/RobotJointLimitContext.js';
 import { ARM_SOFT_LIMIT_RATIO, normalizeArmSoftLimitRatio } from './lib/robotJointLimits.js';
+import { normalizeArmJointCouplingEnabled } from './lib/robotJointCoupling.js';
 import MobileTeachingSolveDialog from './components/MobileTeachingSolveDialog.jsx';
 import MobileTeachingComputeDock from './components/MobileTeachingComputeDock.jsx';
 import { buildMobileSolvedTask, MOBILE_SOLVE_VERSION, validateMobileSolveOptions } from './lib/mobileTeachingSolver.js';
@@ -621,6 +622,7 @@ export default function App() {
   const [robotPose, setRobotPose] = useState(() => normalizeRobotPose(null));
   const [robotJointValues, setRobotJointValues] = useState({});
   const [robotArmSoftLimitRatio, setRobotArmSoftLimitRatio] = useState(ARM_SOFT_LIMIT_RATIO);
+  const [robotArmJointCouplingEnabled, setRobotArmJointCouplingEnabled] = useState(true);
   const [lockedRobotJointNames, setLockedRobotJointNames] = useState([]);
   const [ignoredRobotCollisionJointNames, setIgnoredRobotCollisionJointNames] = useState([]);
   const [robotControlEnabled, setRobotControlEnabled] = useState(false);
@@ -832,6 +834,7 @@ export default function App() {
     lockedRobotJointNames,
     ignoredRobotCollisionJointNames,
     robotArmSoftLimitRatio,
+    robotArmJointCouplingEnabled,
     robotHeightLocked,
     teachingTasks,
     activeTeachingTaskId,
@@ -845,13 +848,14 @@ export default function App() {
     const task = teachingTasks.find((item) => item.id === run.taskId);
     if (run.map !== mapData || run.robot !== selectedRobot || run.workspaceId !== sessionIdRef.current
       || run.armSoftLimitRatio !== robotArmSoftLimitRatio
+      || run.armJointCouplingEnabled !== robotArmJointCouplingEnabled
       || run.sourceCapture !== task?.mobileCapture || run.sourceTransform !== JSON.stringify(task?.mobileTransform)) {
       mobileTeachingRunRef.current = null;
       run.controller.abort();
       setMobileComputation(null);
       setMobileSolveTaskId(null);
     }
-  }, [mapData, selectedRobot, teachingTasks, teachingSpaceMode, robotArmSoftLimitRatio]);
+  }, [mapData, selectedRobot, teachingTasks, teachingSpaceMode, robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
 
   useEffect(() => () => {
     mobileTeachingRunRef.current?.controller.abort();
@@ -1086,6 +1090,7 @@ export default function App() {
           lockedRobotJointNames: current.lockedRobotJointNames,
           ignoredRobotCollisionJointNames: current.ignoredRobotCollisionJointNames,
           robotArmSoftLimitRatio: current.robotArmSoftLimitRatio,
+          robotArmJointCouplingEnabled: current.robotArmJointCouplingEnabled,
           robotHeightLocked: current.robotHeightLocked,
           teachingTasks: current.teachingTasks,
           jointPoses: current.jointPoses,
@@ -1135,6 +1140,7 @@ export default function App() {
               lockedJoints: current.lockedRobotJointNames,
               collisionIgnoredJoints: current.ignoredRobotCollisionJointNames,
               armSoftLimitRatio: current.robotArmSoftLimitRatio,
+              armJointCouplingEnabled: current.robotArmJointCouplingEnabled,
               heightLocked: current.robotHeightLocked,
             }
           : null,
@@ -1379,6 +1385,7 @@ export default function App() {
         setLockedRobotJointNames([]);
         setIgnoredRobotCollisionJointNames([]);
         setRobotArmSoftLimitRatio(ARM_SOFT_LIMIT_RATIO);
+        setRobotArmJointCouplingEnabled(true);
         setRobotControlEnabled(false);
         setRobotHeightLocked(false);
         setRobotCollisionProtectionEnabled(true);
@@ -1654,6 +1661,8 @@ export default function App() {
               ?? snapshot?.ui?.selectedRobot?.collisionIgnoredJoints) : []);
           setRobotArmSoftLimitRatio(normalizeArmSoftLimitRatio(restoredRobot
             ? project?.robot?.armSoftLimitRatio ?? snapshot?.ui?.selectedRobot?.armSoftLimitRatio : undefined));
+          setRobotArmJointCouplingEnabled(normalizeArmJointCouplingEnabled(restoredRobot
+            ? project?.robot?.armJointCouplingEnabled ?? snapshot?.ui?.selectedRobot?.armJointCouplingEnabled : undefined));
           setRobotControlEnabled(false);
           setRobotLoadState({ status: restoredRobot ? 'pending' : 'idle' });
           restored = restored || Boolean(restoredRobot);
@@ -1884,6 +1893,7 @@ export default function App() {
           setLockedRobotJointNames([]);
           setIgnoredRobotCollisionJointNames([]);
           setRobotArmSoftLimitRatio(ARM_SOFT_LIMIT_RATIO);
+          setRobotArmJointCouplingEnabled(true);
           setRobotControlEnabled(false);
           setRobotHeightLocked(false);
           setTeachingTasks([]);
@@ -2046,6 +2056,7 @@ export default function App() {
     lockedRobotJointNames,
     ignoredRobotCollisionJointNames,
     robotArmSoftLimitRatio,
+    robotArmJointCouplingEnabled,
     robotHeightLocked,
     teachingTasks,
     teachingSpaceMode,
@@ -2426,6 +2437,7 @@ export default function App() {
         waypoints: [], edges: [],
         robot: current.selectedRobot, robotPose: normalizeRobotPose(null), robotJointValues: {},
         robotArmSoftLimitRatio: current.robotArmSoftLimitRatio,
+        robotArmJointCouplingEnabled: current.robotArmJointCouplingEnabled,
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
         placedObjectColorMode: current.placedObjectColorMode,
         showWaypoints3D: syncRoute || current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
@@ -2572,6 +2584,7 @@ export default function App() {
       const importedIgnoredCollisionJoints = importedRobot
         ? normalizeIgnoredCollisionJoints(project.robot?.collisionIgnoredJoints) : [];
       const importedArmSoftLimitRatio = normalizeArmSoftLimitRatio(project.robot?.armSoftLimitRatio);
+      const importedArmJointCouplingEnabled = normalizeArmJointCouplingEnabled(project.robot?.armJointCouplingEnabled);
       const importedRobotHeightLocked = Boolean(
         importedRobot && project.robot?.heightLocked,
       );
@@ -2591,6 +2604,7 @@ export default function App() {
       setLockedRobotJointNames(importedLockedJoints);
       setIgnoredRobotCollisionJointNames(importedIgnoredCollisionJoints);
       setRobotArmSoftLimitRatio(importedArmSoftLimitRatio);
+      setRobotArmJointCouplingEnabled(importedArmJointCouplingEnabled);
       setRobotHeightLocked(importedRobotHeightLocked);
       setRobotLoadState({ status: importedRobot ? 'pending' : 'idle' });
       let effectiveMap = importedTeachingSpaceMode === teachingSpaceMode ? mapData : null;
@@ -2769,6 +2783,7 @@ export default function App() {
             lockedRobotJointNames: importedLockedJoints,
             ignoredRobotCollisionJointNames: importedIgnoredCollisionJoints,
             robotArmSoftLimitRatio: importedArmSoftLimitRatio,
+            robotArmJointCouplingEnabled: importedArmJointCouplingEnabled,
             robotHeightLocked: importedRobotHeightLocked,
             teachingTasks: project.teachingTasks,
             jointPoses: project.jointPoses,
@@ -2811,6 +2826,7 @@ export default function App() {
                   lockedJoints: importedLockedJoints,
                   collisionIgnoredJoints: importedIgnoredCollisionJoints,
                   armSoftLimitRatio: importedArmSoftLimitRatio,
+                  armJointCouplingEnabled: importedArmJointCouplingEnabled,
                   heightLocked: importedRobotHeightLocked,
                 }
               : null,
@@ -4018,6 +4034,10 @@ export default function App() {
         notify('没有可执行的停车点合并方案', 'warning');
         return { success: false, mergedClusterCount: 0 };
       }
+      if (analysis.armJointCouplingEnabled !== robotArmJointCouplingEnabled) {
+        notify('关节6–7角度耦合设置已变化，请重新分析停车点合并方案', 'warning');
+        return { success: false, mergedClusterCount: 0 };
+      }
 
       const timestamp = new Date().toISOString();
       let parkingPoints = [...(task.parkingPoints || [])];
@@ -4173,7 +4193,7 @@ export default function App() {
         retainedParkingPointId: firstRetainedParkingPointId,
       };
     },
-    [coordinateFrame, notify, teachingTasks],
+    [coordinateFrame, notify, teachingTasks, robotArmJointCouplingEnabled],
   );
 
   const updateRobotJointValue = useCallback(
@@ -4326,6 +4346,7 @@ export default function App() {
     lockedRobotJointNames,
     ignoredRobotCollisionJointNames,
     robotArmSoftLimitRatio,
+    robotArmJointCouplingEnabled,
     robotHeightLocked,
     teachingTasks,
     jointPoses,
@@ -4694,6 +4715,7 @@ export default function App() {
       setLockedRobotJointNames([]);
       setIgnoredRobotCollisionJointNames([]);
       setRobotArmSoftLimitRatio(ARM_SOFT_LIMIT_RATIO);
+      setRobotArmJointCouplingEnabled(true);
       setRobotControlEnabled(false);
       setRobotHeightLocked(false);
       setRobotCollisionProtectionEnabled(true);
@@ -6030,6 +6052,9 @@ export default function App() {
       || report.captureId !== task.mobileCapture.id || task.mobileSolve?.computedAt !== report.computedAt)) {
       throw new Error('机器人或采样数据已变化，请重新计算');
     }
+    if (report && report.armJointCouplingEnabled !== current.robotArmJointCouplingEnabled) {
+      throw new Error('关节6–7角度耦合设置与该报告不一致，请重新计算');
+    }
     return { current, task };
   };
 
@@ -6050,6 +6075,7 @@ export default function App() {
       controller: new AbortController(), status: 'running', controls: null, previews: [],
       map: current.mapData, robot: current.selectedRobot, workspaceId: sessionIdRef.current,
       armSoftLimitRatio: current.robotArmSoftLimitRatio,
+      armJointCouplingEnabled: current.robotArmJointCouplingEnabled,
       sourceCapture: task.mobileCapture, sourceTransform: JSON.stringify(task.mobileTransform) };
     mobileTeachingRunRef.current = run;
     const isCurrent = () => mobileTeachingRunRef.current === run && !run.controller.signal.aborted;
@@ -6427,6 +6453,7 @@ export default function App() {
   };
   return (
     <RobotJointLimitContext.Provider value={robotArmSoftLimitRatio}>
+    <RobotJointCouplingContext.Provider value={robotArmJointCouplingEnabled}>
     <input ref={mapInputRef} className="visually-hidden" type="file" accept=".ply" onChange={handleMapFile} />
     <input ref={abxTeachingInputRef} className="visually-hidden" type="file"
       accept=".zip,.abxteach.ndjson,.ndjson" aria-label="机器人示教文件"
@@ -6636,6 +6663,14 @@ export default function App() {
                       : teachingCaptureState.status === 'capturing' ? '采集完成后可调整关节软限位。'
                         : ['playing', 'paused'].includes(teachingPlayback.status) ? '停止轨迹播放后可调整关节软限位。'
                           : mobileComputation ? '结束示教计算后可调整关节软限位。' : ''} />
+                <RobotJointCouplingSettings enabled={robotArmJointCouplingEnabled} onChange={setRobotArmJointCouplingEnabled}
+                  disabledReason={robotLoadState.status !== 'loaded' ? '加载机器人后可调整关节6–7角度耦合约束。'
+                    : !['left', 'right'].some((side) => [6, 7].every((index) => robotLoadState.movableJoints?.some(
+                      (joint) => new RegExp(`^${side}[_-]J${index}$`, 'i').test(joint.name)
+                        && ['revolute', 'continuous'].includes(joint.type)))) ? '当前模型没有成对的 J6、J7 旋转关节。'
+                      : teachingCaptureState.status === 'capturing' ? '采集完成后可调整耦合约束。'
+                        : ['playing', 'paused'].includes(teachingPlayback.status) ? '停止轨迹播放后可调整耦合约束。'
+                          : mobileComputation ? '结束示教计算后可调整耦合约束。' : ''} />
                 <section className="workbench-menu-section robot-presets-list">
                   <p>预设姿态{robotPresets.length > 0 ? ` · ${robotPresets.length}` : ''}</p>
                   {robotPresets.map((pose) => <button key={pose.id} type="button" className="action-button"
@@ -7342,6 +7377,7 @@ export default function App() {
     />}
     {cacheActionDialog && <WorkspaceCacheDialog state={cacheActionDialog} onConfirm={confirmCacheAction}
       onClose={() => { if (!independentSwitchBusyRef.current) setCacheActionDialog(null); }} />}
+    </RobotJointCouplingContext.Provider>
     </RobotJointLimitContext.Provider>
   );
 }
