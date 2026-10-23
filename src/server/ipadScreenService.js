@@ -6,6 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { SCREEN_CONTROL_LIMIT, validScreenJointState, screenJointCommand, screenPoseCaptureCommand, screenViewportCommand } from '../lib/ipadScreenControl.js';
 import { ipadServerIdentity, lanAddresses, randomPairingCode, pairingQRCode } from './ipadPairing.js';
 import { createScreenLANTransport } from './ipadScreenLAN.js';
+import { ipadUSBBridgePackage } from './ipadUSBBridgePackage.js';
 
 export const SCREEN_PROTOCOL = 'atlas-ipad-screen/1';
 export const MAX_SCREEN_FRAME = 2 * 1024 * 1024;
@@ -262,11 +263,17 @@ export function createIPadScreenService({ transport, supported = process.platfor
         return json(res, 200, { protocol: SCREEN_PROTOCOL, id: current.id, serverId, deviceToken: current.deviceToken });
       }
       checkWorkbenchRequest(req);
+      if (route === '/__atlas/ipad-screen/usb-helper' && req.method === 'GET') {
+        const archive = await ipadUSBBridgePackage();
+        res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': archive.length,
+          'Content-Disposition': 'attachment; filename="Atlas-iPad-USB.zip"', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(archive);
+      }
       if (route === '/__atlas/ipad-screen/info' && req.method === 'GET') {
         const addresses = [...getAddresses(req.socket.localPort)];
         addresses.sort((a, b) => Number(new URL(b).host === req.headers.host) - Number(new URL(a).host === req.headers.host));
         return json(res, 200, { protocol: SCREEN_PROTOCOL, serverId, serverName, usbSupported: supported && isLocalRequest(req),
-          wirelessSupported: true, addresses });
+          wirelessSupported: true, usbBridgeSupported: true, addresses });
       }
       if (route === '/__atlas/ipad-screen/devices' && req.method === 'GET') {
         return json(res, 200, supported && isLocalRequest(req) ? await discover()
@@ -284,7 +291,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
         }
         if (body.mode && body.mode !== 'usb') fail(400, '连接方式无效');
         checkLocalRequest(req);
-        if (!supported) fail(503, 'Windows 请使用扫码或 Wi-Fi 配对');
+        if (!supported) fail(503, '请使用本机数据线连接助手，或扫码 / Wi-Fi 配对');
         if (!/^[a-zA-Z0-9-]{8,80}$/.test(body.deviceId || '')) fail(400, '设备参数无效');
         // Reserve before the first asynchronous device operation (two browser tabs).
         if (usbBusy()) fail(409, '已有有线画面协作，请先结束当前有线协作');

@@ -4,6 +4,7 @@ import { Cable, CheckCircle2, LoaderCircle, Monitor, QrCode, RefreshCw, Square, 
 import ZividCameraPanel from './ZividCameraPanel.jsx';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
 import { screenJointState, screenJointCommand, screenPoseCaptureCommand, screenViewportCommand } from '../lib/ipadScreenControl.js';
+import { connectIPadUSBBridge } from '../lib/ipadUSBBridge.js';
 import './IPadScreenCollaboration.css';
 
 const api = '/__atlas/ipad-screen';
@@ -13,7 +14,8 @@ async function request(route, options = {}) {
   if (!response.ok) throw new Error(value.error || '画面协作连接失败');
   return value;
 }
-const endSession = (session) => session && request(`/session/${session.id}`, {
+const sessionRequest = (session, route, options) => session?.bridge ? session.bridge.request(route, options) : request(route, options);
+const endSession = (session) => session && sessionRequest(session, `/session/${session.id}`, {
   method: 'DELETE', headers: { Authorization: `Bearer ${session.token}` }, keepalive: true,
 }).catch(() => {});
 const jpeg = (canvas) => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('相机画面编码失败')), 'image/jpeg', 0.8));
@@ -34,6 +36,9 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
   const [frames, setFrames] = useState(0);
   const [remotePage, setRemotePage] = useState('cameras');
   const [capabilities, setCapabilities] = useState(null);
+  const [bridgeReady, setBridgeReady] = useState(false);
+  const bridgeRef = useRef(null);
+  const needsBridge = Boolean(capabilities?.usbBridgeSupported && !capabilities.usbSupported);
   const [method, setMethod] = useState(null);
   const methodRef = useRef(null); methodRef.current = method;
   const [address, setAddress] = useState('');
@@ -57,7 +62,11 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     mountedRef.current = true;
     const leaving = () => { void endSession(sessionRef.current); };
     window.addEventListener('pagehide', leaving);
-    return () => { mountedRef.current = false; operationRef.current += 1; leaving(); window.removeEventListener('pagehide', leaving); };
+    return () => {
+      mountedRef.current = false; operationRef.current += 1;
+      void Promise.resolve(endSession(sessionRef.current)).finally(() => { bridgeRef.current?.close(); bridgeRef.current = null; });
+      window.removeEventListener('pagehide', leaving);
+    };
   }, []);
 
   const start = async (deviceId) => {
@@ -66,7 +75,10 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     const operation = ++operationRef.current;
     setBusy(true); setError(''); setMessage('正在连接设备…');
     try {
-      const current = await request('/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
+      const bridge = needsBridge ? bridgeRef.current : null;
+      if (needsBridge && !bridge) throw new Error('请先连接本机助手。');
+      const current = await (bridge ? bridge.request : request)('/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) });
+      if (bridge) current.bridge = bridge;
       if (!mountedRef.current || operation !== operationRef.current) { void endSession(current); return; }
       cache.current = { left: null, right: null }; sessionRef.current = current;
       setSession(current); setDeviceConnected(true); setFrames(0); setMessage('正在准备左右臂画面…');
@@ -74,9 +86,10 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     finally { startingRef.current = false; if (mountedRef.current && operation === operationRef.current) setBusy(false); }
   };
   const refresh = async (autoStart = false) => {
+    if (needsBridge && !bridgeRef.current) { setDevices([]); setSelected(''); setMessage(''); return; }
     setChecking(true); setError('');
     try {
-      const value = await request('/devices');
+      const value = await (needsBridge ? bridgeRef.current.request : request)('/devices');
       if (!mountedRef.current) return;
       setDevices(value.devices); setMessage(value.message || (value.devices.length ? '' : '用数据线连接并解锁 iPad / iPhone，在设备上打开 Atlas App。'));
       const ready = value.devices.filter((device) => device.ready);
@@ -86,15 +99,31 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     } catch (failure) { if (mountedRef.current) setError(failure.message); }
     finally { if (mountedRef.current) setChecking(false); }
   };
+  const connectBridge = async () => {
+    setBusy(true); setError('');
+    try {
+      const bridge = await connectIPadUSBBridge((reason) => {
+        bridgeRef.current = null;
+        if (!mountedRef.current) return;
+        setBridgeReady(false); setDevices([]); setSelected('');
+        if (sessionRef.current?.bridge) stopRef.current();
+        setError(reason);
+      });
+      if (!mountedRef.current) { bridge.close(); return; }
+      bridgeRef.current = bridge; setBridgeReady(true);
+      await refresh(true);
+    } catch (failure) { if (mountedRef.current) setError(failure.message); }
+    finally { if (mountedRef.current) setBusy(false); }
+  };
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     request('/info').then((info) => {
       if (cancelled) return;
       setCapabilities(info); setAddress((value) => info.addresses.includes(value) ? value : info.addresses[0] || '');
-      const next = methodRef.current && (methodRef.current !== 'usb' || info.usbSupported) ? methodRef.current : info.usbSupported ? 'usb' : 'qr';
+      const next = methodRef.current && (methodRef.current !== 'usb' || info.usbSupported || info.usbBridgeSupported) ? methodRef.current : info.usbSupported ? 'usb' : 'qr';
       methodRef.current = next; setMethod(next);
-      if (next === 'usb' && !sessionRef.current) void refresh(true);
+      if (next === 'usb' && !sessionRef.current && (info.usbSupported || bridgeRef.current)) void refresh(true);
     }).catch((failure) => { if (!cancelled) setError(failure.message); });
     return () => { cancelled = true; };
   }, [open, canStream]);
@@ -168,7 +197,7 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
     const controller = new AbortController(); let waitingSince = performance.now();
     const url = new URL(`${api}/session/${session.id}/events`, window.location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const connection = new WebSocket(url);
+    const connection = session.bridge ? session.bridge.events(session) : new WebSocket(url);
     const fail = (message) => {
       if (cancelled) return;
       cancelled = true; clearTimeout(timer); controller.abort();
@@ -253,14 +282,14 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
           if (cancelled) return;
           const workspaceHeader = new ArrayBuffer(8), workspaceView = new DataView(workspaceHeader);
           workspaceView.setUint32(0, state.size); workspaceView.setUint32(4, picture.size);
-          await request(`/session/${session.id}/workspace`, { method: 'PUT', signal: controller.signal,
+          await sessionRequest(session, `/session/${session.id}/workspace`, { method: 'PUT', signal: controller.signal,
             headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' },
             body: new Blob([workspaceHeader, state, picture]) });
           const blobs = await Promise.all([jpeg(cache.current.left), jpeg(cache.current.right)]);
           if (cancelled) return;
           const header = new ArrayBuffer(8), view = new DataView(header);
           view.setUint32(0, blobs[0].size); view.setUint32(4, blobs[1].size);
-          await request(`/session/${session.id}/frame`, { method: 'PUT', signal: controller.signal,
+          await sessionRequest(session, `/session/${session.id}/frame`, { method: 'PUT', signal: controller.signal,
             headers: { Authorization: `Bearer ${session.token}`, 'Content-Type': 'application/octet-stream' }, body: new Blob([header, ...blobs]) });
           if (!cancelled) { sent += 1; setFrames(sent); }
         }
@@ -299,13 +328,20 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
         <div className="ipad-screen-pair" aria-label="共享画面内容"><div><i/>左臂相机<small>ZIVID 2 M70</small></div><div><i/>右臂相机<small>ZIVID 2 M70</small></div></div>
         {!canStream && <p className="ipad-screen-notice">请先打开示教工程，加载带左右臂末端相机的机器人。</p>}
         <div className="ipad-screen-methods" role="tablist" aria-label="协作连接方式">
-          {[['qr', '扫码', QrCode], ['wifi', 'Wi-Fi', Wifi], ...(capabilities?.usbSupported ? [['usb', '数据线', Cable]] : [])].map(([id, label, Icon]) =>
+          {[['qr', '扫码', QrCode], ['wifi', 'Wi-Fi', Wifi], ...(capabilities?.usbSupported || capabilities?.usbBridgeSupported ? [['usb', '数据线', Cable]] : [])].map(([id, label, Icon]) =>
             <button key={id} type="button" role="tab" aria-selected={method === id} disabled={deviceConnected || busy || !capabilities}
               onClick={() => selectMethod(id)}><Icon size={15}/>{label}</button>)}
         </div>
         {session && deviceConnected ? <div className="ipad-screen-connection"><CheckCircle2 size={20}/><div><strong>{session.deviceName}</strong><span>{frames ? '正在共享双臂画面' : '正在准备左右臂画面…'}</span></div><span className="ipad-screen-live">{session.mode === 'wifi' ? 'Wi-Fi' : 'USB'}</span></div>
           : method === 'usb' ? <div className="ipad-screen-devices">
-            <div className="ipad-screen-device-heading"><span><Cable size={16}/>数据线连接</span><button type="button" disabled={checking || busy} onClick={() => refresh()}><RefreshCw size={14} className={checking ? 'is-spinning' : ''}/>刷新设备</button></div>
+            <div className="ipad-screen-device-heading"><span><Cable size={16}/>数据线连接{bridgeReady ? ' · 本机助手已连接' : ''}</span><button type="button" disabled={checking || busy || needsBridge && !bridgeReady} onClick={() => refresh()}><RefreshCw size={14} className={checking ? 'is-spinning' : ''}/>刷新设备</button></div>
+            {needsBridge && !bridgeReady && <div className="ipad-screen-helper">
+              <p>在这台电脑上运行连接助手，即可通过数据线协作当前工程，无需同步工程。</p>
+              <ol><li>首次使用：安装 Python 3.9 或以上；Windows 还需安装并打开“Apple 设备”App。</li>
+                <li><a href={`${api}/usb-helper`} download="Atlas-iPad-USB.zip">下载数据线连接助手</a>，解压后在 Windows 双击 <code>start-windows.cmd</code>。</li>
+                <li>连接并解锁 iPad，信任电脑并打开 Atlas App，再点击下方“连接本机助手”。</li></ol>
+              <p>连接窗口打开后点击“允许连接此工作台”，随后可最小化。Mac 远端工作台也可运行助手内的 Python 脚本。</p>
+            </div>}
             {devices.length > 0 && <select aria-label="画面协作设备" value={selected} disabled={busy} onChange={(event) => setSelected(event.target.value)}>
               <option value="">选择已连接的设备</option>{devices.map((device) => <option key={device.id} value={device.id} disabled={!device.ready}>{device.name}{!device.ready ? ` · ${device.message}` : ''}</option>)}
             </select>}
@@ -324,15 +360,15 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
                 {(capabilities?.addresses || []).map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </label>
-            <p className="ipad-screen-footnote">{address ? '电脑与 iPad 需能访问上方地址。其他电脑访问本服务时可扫码或 Wi-Fi 配对；数据线仅限服务器本机使用。' : '请先连接局域网，再重新打开此窗口。'}</p>
+            <p className="ipad-screen-footnote">{address ? '电脑与 iPad 需能访问上方地址。Windows 与 Mac 均可扫码、Wi-Fi 或数据线协作；远端电脑使用数据线时需运行本机助手。' : '请先连接局域网，再重新打开此窗口。'}</p>
           </div>}
         {error && <p className="ipad-screen-error" role="alert">{error}</p>}
         <footer><small>共享当前工程的相机仿真画面</small><div className="ipad-screen-actions">{session && (deviceConnected || method !== 'qr')
           ? <button type="button" className="ipad-screen-primary" onClick={stop}><Square size={14}/>{deviceConnected ? '结束协作' : '取消配对'}</button>
           : <>{session && <button type="button" onClick={stop} disabled={busy}><Square size={14}/>取消配对</button>}
-            <button type="button" className="ipad-screen-primary" disabled={!canStream || !capabilities || busy || (method === 'usb' ? !selected || checking : !address)}
-              onClick={() => method === 'usb' ? start(selected) : session ? renewPairing() : startWireless()}>{busy ? <LoaderCircle size={15} className="is-spinning"/> : method === 'qr' ? <RefreshCw size={15}/> : <Monitor size={15}/>}
-              {method === 'usb' ? '开始协作' : method === 'wifi' ? '生成配对码' : '重新生成二维码'}</button></>}
+            <button type="button" className="ipad-screen-primary" disabled={!canStream || !capabilities || busy || (method === 'usb' ? checking || (!(needsBridge && !bridgeReady) && !selected) : !address)}
+              onClick={() => method === 'usb' ? needsBridge && !bridgeReady ? connectBridge() : start(selected) : session ? renewPairing() : startWireless()}>{busy ? <LoaderCircle size={15} className="is-spinning"/> : method === 'qr' ? <RefreshCw size={15}/> : <Monitor size={15}/>}
+              {method === 'usb' ? needsBridge && !bridgeReady ? '连接本机助手' : '开始协作' : method === 'wifi' ? '生成配对码' : '重新生成二维码'}</button></>}
         </div></footer>
         {session && <p className="ipad-screen-footnote">关闭此窗口、切换电脑窗口或标签页后仍保持协作；结束协作可在电脑或 iPad 上操作。</p>}
       </section>

@@ -34,6 +34,8 @@ node_modules/
 # Independent-browser collaboration and iPad top-action checks use
 # build/{ipad-remote-collaboration,ipad-collaboration-top-actions}/; pairing
 # credentials, exported projects, native test plans and screenshots stay local.
+# Windows USB companion checks use build/ipad-windows-usb/ for the downloadable
+# helper bundle, extracted package checks, browser captures and native test results.
 dist/
 build/
 out/
@@ -240,6 +242,12 @@ playwright/.auth/
 /ipad-remote-collaboration.[zZ][iI][pP]
 /ipad-collaboration-top-actions.[zZ][iI][pP]
 /robot-soft-limits.[zZ][iI][pP]
+# Standalone Windows USB validation exports and downloaded/extracted helper copies.
+# Keep the helper source in src/usbBridge/ and nested regression fixtures visible.
+/ipad-windows-usb/
+/ipad-windows-usb.[zZ][iI][pP]
+/Atlas-iPad-USB/
+/Atlas-iPad-USB.[zZ][iI][pP]
 # Grouped topbar/cascading-menu captures and packed review copies from /tmp.
 # Keep the same prefixes in source artwork and nested fixtures trackable.
 /atlas-toolbar-*/

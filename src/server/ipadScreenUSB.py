@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""USB-only app TCP transport using macOS usbmuxd. JSON lines on stdio.
+"""USB-only app TCP transport using Apple's local device service. JSON lines on stdio.
 
 No network fallback, external package, local TCP proxy, or image files. The
 usbmux framing follows libimobiledevice/libusbmuxd's public plist protocol.
@@ -14,6 +14,7 @@ import sys
 
 PORT = 21991
 MAX_FRAME = 2 * 1024 * 1024
+WINDOWS_MUX_ADDRESS = ('127.0.0.1', 27015)
 
 
 def read_exact(sock, length):
@@ -27,10 +28,16 @@ def read_exact(sock, length):
 
 
 def mux(message):
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    windows = sys.platform == 'win32'
+    sock = socket.socket(socket.AF_INET if windows else socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(2)
     try:
-        sock.connect('/var/run/usbmuxd')
+        try:
+            sock.connect(WINDOWS_MUX_ADDRESS if windows else '/var/run/usbmuxd')
+        except OSError as error:
+            if windows:
+                raise ConnectionError('无法连接 Apple 设备服务。请安装并打开 Windows「Apple 设备」App（或含 Apple Mobile Device Support 的 iTunes），确认能识别已信任的 iPad，然后重试。') from error
+            raise
         payload = plistlib.dumps({'ClientVersionString': 'AtlasScreen/1', 'ProgName': 'AtlasTeaching',
                                    'kLibUSBMuxVersion': 3, **message})
         sock.sendall(struct.pack('<IIII', len(payload) + 16, 1, 8, 1) + payload)

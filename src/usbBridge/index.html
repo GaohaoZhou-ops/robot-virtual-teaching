@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="atlas-bridge" content="__BRIDGE_SECRET__">
+  <title>Atlas 数据线连接助手</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: #0a171d; color: #e2edf0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; }
+    main { max-width: 560px; margin: 0 auto; }
+    .eyebrow { color: #86a3ad; letter-spacing: .14em; font-size: 11px; }
+    h1 { font-size: 25px; margin: 12px 0 22px; }
+    .card { padding: 22px; background: #102027; border: 1px solid #334951; border-radius: 16px; }
+    p { color: #a5bbc3; font-size: 14px; line-height: 1.8; margin: 0 0 16px; }
+    #source { display: block; color: #8de8ee; font: 13px ui-monospace, monospace; overflow-wrap: anywhere; margin: 10px 0 22px; }
+    button { padding: 12px 20px; border: 1px solid transparent; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; background: #60d7df; color: #092027; }
+    button:focus-visible { outline: 2px solid #e2edf0; outline-offset: 4px; }
+    button:disabled { opacity: .5; cursor: default; }
+    #disconnect { color: #e2edf0; background: #ffffff08; border-color: #50687366; }
+    #status { color: #8de8ee; margin: 20px 0 0; }
+    .hint { margin-top: 22px; color: #86a3ad; font-size: 12px; }
+    [hidden] { display: none; }
+  </style>
+  <script src="/client.js" defer></script>
+</head>
+<body><main>
+  <span class="eyebrow">ATLAS · USB</span>
+  <h1>数据线连接助手</h1>
+  <section class="card">
+    <p>允许下方工作台使用连接在这台电脑上的 iPad：</p>
+    <strong id="source">等待工作台连接</strong>
+    <button id="allow" disabled>允许连接此工作台</button>
+    <button id="disconnect" hidden>断开助手</button>
+    <p id="status" role="status">请从工作台的“画面协作 → 数据线”打开本窗口。</p>
+  </section>
+  <p class="hint">连接后可返回工作台或最小化本窗口。请保持本窗口和助手程序运行；关闭窗口会结束数据线协作。</p>
+</main></body>
+</html>

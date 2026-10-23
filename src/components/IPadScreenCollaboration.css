@@ -31,6 +31,11 @@
 .ipad-screen-device-heading > span { display: flex; align-items: center; gap: 8px; }
 .ipad-screen-devices select { width: 100%; border: 1px solid #415962; border-radius: 8px; background: #0a171d; color: #e2edf0; padding: 10px; }
 .ipad-screen-devices p { color: #9db3bc; line-height: 1.7; }
+.ipad-screen-helper { padding: 4px 16px; background: #071014; border: 1px solid #2d434d; border-radius: 10px; }
+.ipad-screen-helper ol { padding-left: 20px; color: #bdd0d7; line-height: 1.8; }
+.ipad-screen-helper li + li { margin-top: 8px; }
+.ipad-screen-helper a { color: #8de8ee; text-underline-offset: 3px; }
+.ipad-screen-helper code { overflow-wrap: anywhere; }
 .ipad-screen-connection { display: flex; align-items: center; gap: 12px; color: #60d7df; padding: 18px 0; }
 .ipad-screen-connection div { display: grid; gap: 7px; }
 .ipad-screen-connection strong { color: #e2edf0; }

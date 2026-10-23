@@ -1,6 +1,7 @@
 """Record real teaching poses through collaboration; optionally exercise an iPad.
 
 Use ATLAS_SCREEN_CAPTURE_LIVE=1 alongside testLiveScreenPoseCapture for USB UI.
+Add ATLAS_SCREEN_BRIDGE=1 and use a LAN BASE_URL to exercise the localhost helper.
 The default uses the real LAN transport with a small protocol peer.
 """
 import json
@@ -18,7 +19,8 @@ from ipad_screen_ui_smoke import native_status
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:21992')
 LIVE = os.environ.get('ATLAS_SCREEN_CAPTURE_LIVE') == '1'
-OUTPUT = ROOT / 'build/screen-capture-validation' / ('live' if LIVE else 'lan')
+BRIDGE = os.environ.get('ATLAS_SCREEN_BRIDGE') == '1'
+OUTPUT = ROOT / 'build/screen-capture-validation' / ('bridge-live' if BRIDGE else 'live' if LIVE else 'lan')
 DEVICE = os.environ.get('ATLAS_SCREEN_DEVICE_ID', '00008027-001910CE0184402E')
 PEER = r'''
 import { WebSocket } from 'ws';
@@ -55,7 +57,10 @@ def run():
         page = browser.new_page(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
         page.set_default_timeout(90000)
         errors = []
+        remote_frames = []
         page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('request', lambda r: remote_frames.append(r.url) if '/ipad-screen/session/' in r.url
+                and r.url.endswith(('/frame', '/workspace')) else None)
         if not LIVE:
             def windows_info(route):
                 response = route.fetch(); info = response.json(); info['usbSupported'] = False
@@ -92,7 +97,7 @@ def run():
             topbar_action(page, name='加载机器人', exact=True).click()
             page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70').click()
             page.wait_for_function("document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'")
-            if LIVE:
+            if LIVE and not BRIDGE:
                 deadline = time.monotonic() + 150
                 while True:
                     devices = page.request.get(BASE + '/__atlas/ipad-screen/devices').json()['devices']
@@ -109,6 +114,13 @@ def run():
                 (OUTPUT / 'peer.json').write_text(json.dumps({'base': BASE, 'ticket': ticket, 'credential': credential}))
                 peer = subprocess.Popen(['node', '--input-type=module', '-e', PEER, str(OUTPUT)], cwd=ROOT)
             dialog = page.get_by_role('dialog', name='画面协作', exact=True)
+            if BRIDGE:
+                assert LIVE, 'The companion capture fixture requires a physical iPad'
+                dialog.get_by_role('tab', name='数据线', exact=True).click()
+                with page.expect_popup() as opened:
+                    dialog.get_by_role('button', name='连接本机助手', exact=True).click()
+                helper = opened.value
+                helper.get_by_role('button', name='允许连接此工作台').click()
             expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible(timeout=90000)
             dialog.get_by_role('button', name='关闭画面协作窗口', exact=True).click()
             if LIVE:
@@ -190,6 +202,8 @@ def run():
                 if not LIVE: assert pose['fullBodyJoints']['values']['left_J1'] == 24
             (OUTPUT / 'saved-poses.json').write_text(json.dumps(poses, ensure_ascii=False, indent=2))
             assert not errors, errors
+            if BRIDGE:
+                assert not remote_frames, 'The live USB companion must not send images to the Mac workbench server'
             print('PASS two recorded poses preserve all 24 joints and both camera snapshots; no duplicates or implicit task/parking creation', flush=True)
         finally:
             browser.close()
