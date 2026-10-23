@@ -145,6 +145,14 @@ final class ScreenCollaboration: ObservableObject {
     var canNavigateViewport: Bool {
         active && page == "joints" && !controlsStale && viewport != nil && workspace?.viewportControl?.enabled == true
     }
+    var viewportUnavailableReason: String? {
+        guard active, workspace != nil, viewport != nil else { return "正在同步三维画面…" }
+        if controlsStale { return "显示最近姿态 · 等待电脑更新" }
+        guard let control = workspace?.viewportControl else {
+            return "电脑页面版本较旧，请刷新工作台后重新连接协作。"
+        }
+        return control.enabled ? nil : "电脑三维视图暂不可操作，请在电脑端检查三维窗口。"
+    }
 
     func navigateViewport(kind: String, dx: Double = 0, dy: Double = 0, zoom: Double = 0) {
         guard canNavigateViewport, ["rotate", "pan", "zoom"].contains(kind),
@@ -380,6 +388,9 @@ final class ScreenCollaboration: ObservableObject {
                      "controlPage": page, "connectionKind": connectionKind, "jointCount": workspace?.joints.count ?? 0, "viewportFrames": viewportFrames,
                      "jointValues": Dictionary(uniqueKeysWithValues: (workspace?.joints ?? []).map { ($0.name, $0.value) }),
                      "controlAck": workspace?.ack ?? 0, "pendingControls": pending.count,
+                     "controlsStale": controlsStale, "viewportEnabled": workspace?.viewportControl?.enabled ?? false,
+                     "viewportSupported": workspace?.viewportControl != nil,
+                     "canNavigateViewport": canNavigateViewport, "viewportSequence": viewportSequence,
                      "viewportAck": workspace?.viewportControl?.ack ?? 0, "pendingViewport": pendingViewport.count,
                      "captureTaskId": workspace?.capture?.taskId ?? "", "captureParkingPointId": workspace?.capture?.parkingPointId ?? "",
                      "capturePending": awaitingCapture, "captureMessage": captureMessage, "captureNotice": captureNotice ?? "",
@@ -499,22 +510,11 @@ private struct ScreenCollaborationView: View {
     var body: some View {
         GeometryReader { viewport in
             let landscape = viewport.size.width > viewport.size.height
+            let padding: CGFloat = TeachingDevice.isPhone ? 16 : 24
+            // The system's bottom safe area is part of the outer margin.
+            let bottomPadding = max(0, padding - viewport.safeAreaInsets.bottom)
             VStack(spacing: 16) {
-                HStack(spacing: 12) {
-                    Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("画面协作").font(.headline)
-                        Text("\(screen.connectionKind) 已连接 · \(screen.page == "joints" ? "关节与姿态同步" : screen.stale ? "等待画面更新" : "末端相机仿真画面")")
-                            .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
-                    }
-                    Spacer()
-                    Button("结束协作", systemImage: "xmark", action: screen.finish)
-                        .buttonStyle(.bordered).accessibilityIdentifier("screen-collaboration-stop")
-                }
-                Picker("协作子页", selection: $screen.page) {
-                    Text("相机画面").tag("cameras")
-                    Text("关节控制").tag("joints")
-                }.pickerStyle(.segmented).accessibilityIdentifier("screen-page-tabs")
+                header(width: viewport.size.width - padding * 2)
                 if screen.page == "joints" {
                     ScreenJointWorkspace(screen: screen, landscape: landscape, height: viewport.size.height)
                 } else {
@@ -530,13 +530,47 @@ private struct ScreenCollaborationView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 }
                 ScreenPoseCaptureBar(screen: screen)
-            }.padding(TeachingDevice.isPhone ? 16 : 24)
+            }.padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
         }.accessibilityElement(children: .contain).accessibilityIdentifier("screen-collaboration-view")
             .alert("无法记录姿态", isPresented: Binding(get: { screen.captureNotice != nil }, set: { if !$0 { screen.captureNotice = nil } })) {
                 Button("知道了", role: .cancel) { screen.captureNotice = nil }
             } message: { Text(screen.captureNotice ?? "") }
+    }
+    @ViewBuilder private func header(width: CGFloat) -> some View {
+        if width >= 560 {
+            let pickerWidth = min(280, width - 320)
+            let sideWidth = (width - pickerWidth - 32) / 2
+            HStack(spacing: 16) {
+                connectionTitle.frame(width: sideWidth, alignment: .leading)
+                pagePicker(width: pickerWidth)
+                stopButton.frame(width: sideWidth, alignment: .trailing)
+            }
+        } else {
+            // Keep all controls reachable in a narrow split-screen or phone window.
+            VStack(spacing: 12) {
+                HStack(spacing: 12) { connectionTitle; Spacer(); stopButton }
+                pagePicker(width: min(280, width))
+            }
+        }
+    }
+    private var connectionTitle: some View {
+        HStack(spacing: 12) {
+            Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("画面协作").font(.headline)
+                Text("\(screen.connectionKind) 已连接 · \(screen.page == "joints" ? "关节与姿态同步" : screen.stale ? "等待画面更新" : "末端相机仿真画面")")
+                    .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
+            }.lineLimit(1)
+        }
+    }
+    private var stopButton: some View {
+        Button("结束协作", systemImage: "xmark", action: screen.finish)
+            .buttonStyle(.bordered).accessibilityIdentifier("screen-collaboration-stop")
+    }
+    private func pagePicker(width: CGFloat) -> some View {
+        ScreenCollaborationPagePicker(selection: $screen.page).frame(width: width, height: 44)
     }
     private func camera(_ image: UIImage?, side: String, title: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -570,6 +604,35 @@ private struct ScreenCollaborationView: View {
     }
 }
 
+// Give the native segments a full 44-point touch surface without scaling their text.
+private struct ScreenCollaborationPagePicker: UIViewRepresentable {
+    @Binding var selection: String
+    func makeCoordinator() -> Coordinator { Coordinator(selection: $selection) }
+    func makeUIView(context: Context) -> UISegmentedControl {
+        let control = UISegmentedControl(items: ["相机画面", "关节控制"])
+        control.accessibilityIdentifier = "screen-page-tabs"
+        control.accessibilityLabel = "协作子页"
+        control.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .valueChanged)
+        return control
+    }
+    func updateUIView(_ control: UISegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        control.selectedSegmentIndex = selection == "joints" ? 1 : 0
+        control.setTitleTextAttributes([.font: UIFont.preferredFont(forTextStyle: .subheadline)], for: .normal)
+    }
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 280, height: 44)
+    }
+    final class Coordinator: NSObject {
+        var selection: Binding<String>
+        init(selection: Binding<String>) { self.selection = selection }
+        @objc func changed(_ control: UISegmentedControl) {
+            guard control.selectedSegmentIndex == 0 || control.selectedSegmentIndex == 1 else { return }
+            selection.wrappedValue = control.selectedSegmentIndex == 1 ? "joints" : "cameras"
+        }
+    }
+}
+
 private struct ScreenPoseCaptureBar: View {
     @ObservedObject var screen: ScreenCollaboration
     private var destination: String {
@@ -577,7 +640,7 @@ private struct ScreenPoseCaptureBar: View {
         return "\(capture.taskName) / \(capture.parkingPointName.isEmpty ? "未选择停车点" : capture.parkingPointName)"
     }
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(alignment: .bottom, spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(destination).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     .accessibilityIdentifier("screen-capture-destination")
@@ -624,8 +687,10 @@ private struct ScreenJointWorkspace: View {
                     }
                     ScreenViewportGestures(screen: screen)
                 }.clipShape(RoundedRectangle(cornerRadius: 12)).frame(maxWidth: .infinity, maxHeight: .infinity)
-                Text(screen.controlsStale ? "显示最近姿态 · 等待电脑更新" : "单指旋转 · 双指开合缩放 · 双指拖动平移")
-                    .font(.caption).foregroundStyle(screen.controlsStale ? .orange : .secondary)
+                if let reason = screen.viewportUnavailableReason {
+                    Text(reason).font(.caption).foregroundStyle(.orange)
+                        .accessibilityIdentifier("screen-viewport-status")
+                }
             }.padding(16)
                 .frame(maxWidth: .infinity, maxHeight: landscape ? .infinity : height * 0.34)
                 .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
@@ -709,10 +774,7 @@ private struct ScreenJointEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(screen.workspace?.robotName ?? "机器人").font(.headline).lineLimit(1)
-                    Text("全关节控制 · \(screen.workspace?.joints.count ?? 0) 个关节").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(screen.workspace?.robotName ?? "机器人").font(.headline).lineLimit(1)
                 Spacer()
                 Text(screen.awaitingControl ? "同步中…" : "双向同步").font(.caption)
                     .foregroundStyle(screen.awaitingControl ? .orange : screenAccent)

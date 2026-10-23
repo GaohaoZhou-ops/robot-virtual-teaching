@@ -1,4 +1,5 @@
 import { applyRobotJointValues, readRobotJointValues } from './robotLoader.js';
+import { getRobotJointLimits } from './robotJointLimits.js';
 import { presetMatchesRobot } from './robotJointPresets.js';
 import { MOBILE_TORSO_PITCH_JOINTS } from './mobileTeachingChest.js';
 
@@ -66,7 +67,7 @@ export function applyMobileReferencePose(robot, reference, locked) {
       throw new Error(`参考姿态包含不兼容的关节：${name}`);
     }
     const internal = type === 'prismatic' || normalized.joints.angularUnit === 'radian' ? value : value * Math.PI / 180;
-    const { lower = -Infinity, upper = Infinity } = joint.userData.jointLimit || {};
+    const { lower, upper } = getRobotJointLimits(joint);
     if (!Number.isFinite(internal) || internal < lower - 1e-8 || internal > upper + 1e-8) {
       throw new Error(`参考姿态超出关节限位：${name}`);
     }

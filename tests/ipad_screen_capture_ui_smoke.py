@@ -37,8 +37,9 @@ socket.on('message', data => {
   }
   let command = {}; try { command = JSON.parse(readFileSync(folder + '/command.json')); } catch {}
   const captureRequest = command.capture && { ...command.capture, ageMs: Date.now() - command.created };
+  const commands = (command.commands || []).map(c => ({ ...c, ageMs: Date.now() - command.created }));
   const viewportCommands = (command.viewportCommands || []).map(c => ({ ...c, ageMs: Date.now() - command.created }));
-  socket.send(JSON.stringify({ requestId, status: 200, body: { page: command.page || 'cameras', commands: [], captureRequest, viewportCommands } }));
+  socket.send(JSON.stringify({ requestId, status: 200, body: { page: command.page || 'cameras', commands, captureRequest, viewportCommands } }));
 });
 '''
 

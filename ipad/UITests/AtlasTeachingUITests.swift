@@ -15,6 +15,7 @@ final class AtlasTeachingUITests: XCTestCase {
             app.launch()
             let purpose = app.segmentedControls["library-pairing-purpose"]
             XCTAssertTrue(purpose.waitForExistence(timeout: 20)); purpose.buttons["画面协作"].tap()
+            app.buttons["screen-pairing-wireless"].tap()
             if environment["ATLAS_SCREEN_SCAN_UI"] == "1" {
                 app.buttons["scan-pairing-code"].tap()
                 XCTAssertTrue(app.buttons["cancel-pairing-scan"].waitForExistence(timeout: 10))
@@ -36,7 +37,9 @@ final class AtlasTeachingUITests: XCTestCase {
             throw XCTSkip("Run with the desktop viewport gesture fixture")
         }
         continueAfterFailure = false
-        let app = XCUIApplication(); app.launch()
+        let app = XCUIApplication()
+        if ProcessInfo.processInfo.environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
+        else { app.launch() }
         XCTAssertTrue(app.buttons["screen-collaboration-stop"].waitForExistence(timeout: 180))
         XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -2444,7 +2447,7 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(count.label, "1 个 Pose")
         capture.tap(); XCTAssertTrue(alert.waitForExistence(timeout: 5))
         XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "小于 10 cm")).firstMatch.exists)
-        XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "角差小于 5°")).firstMatch.exists)
+        XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "角差小于 1°")).firstMatch.exists)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "Nearby Pose position and orientation confirmation"; screenshot.lifetime = .keepAlways; add(screenshot)
         alert.buttons["取消"].tap()
@@ -2488,14 +2491,17 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(saved.count, 1)
         let axes: [SIMD3<Float>] = [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1)]
         for axis in axes {
-            rotation = rotation * simd_quatf(angle: 10 * .pi / 180, axis: axis)
+            rotation = rotation * simd_quatf(angle: 1 * .pi / 180, axis: axis)
             let turned = sample()
             XCTAssertNil(NearbyPoseConfirmation(sample: turned, previousSample: saved.last),
-                "a new view at the same camera center records directly, including optical roll")
+                "a 1-degree view change at the same camera center records directly, including optical roll")
             ar.recordKeyframe(turned)
         }
         XCTAssertEqual(saved.count, 4)
         XCTAssertTrue(saved.allSatisfy { $0.cameraPose.position.simd == .zero })
+        let restored = try JSONDecoder().decode([TeachingSample].self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(Set(restored.compactMap { TeachingCoveragePose($0.cameraPose) }).count, 4,
+            "saving and coverage calculation retain each orientation at the same position")
         let markers = try XCTUnwrap(ar.view.scene.rootNode.childNode(withName: "recorded-pose-markers", recursively: true))
         XCTAssertEqual(markers.childNodes.count, 4, "each distinct orientation keeps its own recorded Pose")
         let duplicate = try XCTUnwrap(NearbyPoseConfirmation(sample: sample(), previousSample: saved.last))
@@ -3432,7 +3438,8 @@ final class AtlasTeachingUITests: XCTestCase {
     func testLibraryFillsWindowAndAdaptsToRotation() {
         continueAfterFailure = false
         let app = XCUIApplication()
-        app.launch()
+        if ProcessInfo.processInfo.environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
+        else { app.launch() }
         XCTAssertTrue(app.textFields["server-address-octet-0"].waitForExistence(timeout: 15))
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
@@ -3472,6 +3479,29 @@ final class AtlasTeachingUITests: XCTestCase {
             let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             screenshot.name = orientation.isLandscape ? "Full-width library landscape" : "Full-width library portrait"
             screenshot.lifetime = .keepAlways; add(screenshot)
+            let purpose = app.segmentedControls["library-pairing-purpose"]
+            purpose.buttons["画面协作"].tap()
+            let waiting = app.staticTexts["screen-pairing-status"]
+            XCTAssertTrue(waiting.waitForExistence(timeout: 5))
+            XCTAssertTrue(waiting.label.contains("等待电脑端发起协作"))
+            XCTAssertFalse(app.staticTexts["方式一"].exists)
+            XCTAssertFalse(app.otherElements["usb-receiving-panel"].exists)
+            XCTAssertFalse(app.otherElements["model-transfer-progress"].exists)
+            XCTAssertFalse(app.textFields["server-address-octet-0"].exists)
+            let waitingScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            waitingScreenshot.name = "Collaboration invitation guidance - \(orientation.rawValue)"
+            waitingScreenshot.lifetime = .keepAlways; add(waitingScreenshot)
+            let wireless = app.buttons["screen-pairing-wireless"]
+            wireless.tap()
+            XCTAssertTrue(scan.waitForExistence(timeout: 5))
+            XCTAssertTrue(app.textFields["server-address-octet-0"].exists)
+            XCTAssertTrue(app.buttons["discover-services"].exists)
+            wireless.tap()
+            XCTAssertFalse(scan.exists)
+            purpose.buttons["接收物体"].tap()
+            XCTAssertTrue(app.textFields["server-address-octet-0"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.otherElements["usb-receiving-panel"].exists)
+            XCTAssertFalse(waiting.exists)
         }
         XCUIDevice.shared.orientation = .landscapeLeft
     }

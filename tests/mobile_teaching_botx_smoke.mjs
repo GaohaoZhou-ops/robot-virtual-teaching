@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
 import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
 import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
+import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
 import { solveMobileTeaching, buildMobileSolvedTask, mobileSampleTarget, measureMobileTarget, mobileMotionGroups } from '../src/lib/mobileTeachingSolver.js';
 import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
 import { normalizeTeachingTasks } from '../src/lib/io.js';
@@ -51,8 +52,13 @@ for (const row of report.rows) {
     if (side === row.selectedSide) clearances.push(checked.armBodyClearance.minimum);
     fk.traverse((node) => {
       if (!['revolute', 'prismatic'].includes(node.userData.jointType)) return;
-      const { jointValue, jointLimit } = node.userData;
+      const { jointValue } = node.userData;
+      const jointLimit = getRobotJointLimits(node);
       assert.ok(jointValue >= jointLimit.lower - 1e-9 && jointValue <= jointLimit.upper + 1e-9);
+      const solvedValue = node.userData.jointType === 'prismatic' ? solution.jointValues[node.name]
+        : THREE.MathUtils.degToRad(solution.jointValues[node.name]);
+      assert.ok(solvedValue >= jointLimit.lower - 1e-9 && solvedValue <= jointLimit.upper + 1e-9,
+        `${row.name} ${node.name}: the saved solver result must obey the operating limits before FK clamping`);
     });
   }
 }

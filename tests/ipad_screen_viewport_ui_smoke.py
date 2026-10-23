@@ -24,6 +24,21 @@ def run():
             args=['--use-angle=metal', '--enable-gpu'])
         page = browser.new_page(viewport={'width': 1440, 'height': 1000})
         page.set_default_timeout(90000)
+        page.add_init_script('''(() => {
+            const original = window.fetch;
+            window.fetch = async (url, options) => {
+                if (String(url).endsWith('/workspace') && options?.body instanceof Blob) {
+                    const bytes = await options.body.arrayBuffer(), header = new DataView(bytes);
+                    if (header.getUint32(4)) {
+                        const image = await createImageBitmap(new Blob([bytes.slice(8 + header.getUint32(0))], {type: 'image/jpeg'}));
+                        window.__sharedViewportFrame = {width: image.width, height: image.height,
+                            count: (window.__sharedViewportFrame?.count || 0) + 1};
+                        image.close();
+                    }
+                }
+                return original(url, options);
+            };
+        })()''')
         errors, motions = [], []
         page.on('pageerror', lambda error: errors.append(str(error)))
         def socket_opened(socket):
@@ -89,6 +104,15 @@ def run():
             expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible()
             dialog.get_by_role('button', name='关闭画面协作窗口', exact=True).click()
             canvas = page.locator('.three-canvas')
+            def check_frame_aspect(after=0):
+                page.wait_for_function('''(after) => {
+                    const frame = window.__sharedViewportFrame, source = document.querySelector('.three-canvas');
+                    return frame && frame.count > after && source?.height
+                        && Math.abs(frame.width - frame.height * source.width / source.height) <= 2
+                        && frame.width <= 960 && frame.height <= 600
+                        && (frame.width === 960 || frame.height === 600);
+                }''', arg=after)
+            check_frame_aspect()
             robot = [canvas.get_attribute('data-robot-' + key) for key in ['x', 'y', 'z', 'yaw', 'joint-values']]
             initial = canvas.get_attribute('data-view-signature')
             if LIVE:
@@ -137,6 +161,11 @@ def run():
                         window.requestAnimationFrame = window.__viewportRAF; delete document.hidden;
                         document.dispatchEvent(new Event('visibilitychange'));
                     }''')
+                for width, height in [(1100, 900), (1700, 800), (1440, 1000)]:
+                    frames = page.evaluate('window.__sharedViewportFrame.count')
+                    page.set_viewport_size({'width': width, 'height': height})
+                    check_frame_aspect(after=frames + 2)
+                print('PASS shared JPEG keeps the source aspect and resolution across window resizing', flush=True)
                 page.screenshot(path=str(OUTPUT / 'navigated-workbench.png'))
                 page.get_by_role('button', name='结束画面协作', exact=True).click()
                 print('PASS LAN rotation, pinch ratio, pan, replay/expiry and background image updates', flush=True)

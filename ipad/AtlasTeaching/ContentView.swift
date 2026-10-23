@@ -49,6 +49,7 @@ struct ContentView: View {
     @EnvironmentObject private var session: TeachingSession
     @EnvironmentObject private var screen: ScreenCollaboration
     @State private var collaboration = false
+    @State private var collaborationWirelessExpanded = false
     private var pairingBusy: Bool { session.busy || screen.connecting }
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var discovery = LANServiceDiscovery()
@@ -161,6 +162,7 @@ struct ContentView: View {
             else { discovery.stop() }
         }
         .onChange(of: session.serverAddress) { _, _ in discovery.resetProbe() }
+        .onChange(of: collaboration) { _, _ in collaborationWirelessExpanded = false }
     }
     private func handleLibraryTap(at location: CGPoint) {
         guard !pairingBusy else { return }
@@ -263,7 +265,59 @@ struct ContentView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-pairing-panel")
     }
-    private var pairingContents: some View {
+    @ViewBuilder private var pairingContents: some View {
+        if collaboration { collaborationPairingContents }
+        else { modelPairingContents }
+    }
+    private var collaborationPairingContents: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label(screen.connecting ? "正在连接画面协作…" : "等待电脑端发起协作", systemImage: "display")
+                .font(.headline).foregroundStyle(accent)
+                .accessibilityIdentifier("screen-pairing-status")
+            Text("在电脑端打开「设备 → iPad / iPhone → 画面协作」，选择连接方式。")
+                .font(.callout).foregroundStyle(.secondary)
+            if screen.connecting {
+                HStack {
+                    ProgressView("连接成功后将自动进入协作页面")
+                    Spacer(minLength: 8)
+                    Button("取消", action: screen.finish)
+                }.font(.callout)
+            } else {
+                Text("数据线连接：保持此 App 打开，在 Mac 端点击「开始协作」即可。")
+                    .font(.callout).foregroundStyle(.secondary)
+                Text("扫码或 Wi-Fi：先在电脑端生成二维码或配对码，再展开下方入口完成连接。Windows 请使用这两种方式。")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            if !screen.connectionError.isEmpty {
+                Text(screen.connectionError).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+            }
+            Divider()
+            Button {
+                collaborationWirelessExpanded.toggle()
+                if collaborationWirelessExpanded { searchConfiguredServer() }
+            } label: {
+                HStack {
+                    Text("扫码 / Wi-Fi 连接")
+                    Spacer()
+                    Image(systemName: collaborationWirelessExpanded ? "chevron.up" : "chevron.down")
+                }.font(.body).padding(.vertical, 10).contentShape(Rectangle())
+            }.buttonStyle(.plain).foregroundStyle(accent).disabled(pairingBusy)
+                .accessibilityValue(collaborationWirelessExpanded ? "已展开" : "已收起")
+                .accessibilityIdentifier("screen-pairing-wireless")
+            if collaborationWirelessExpanded {
+                scanPairingButton
+                Text("Wi-Fi 连接").font(.headline)
+                LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(pairingBusy)
+                discoveryPanel
+            }
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    private var scanPairingButton: some View {
+        Button(action: beginScanning) {
+            pairingActionLabel("扫码配对", systemImage: "qrcode.viewfinder")
+        }.buttonStyle(.bordered).disabled(pairingBusy).accessibilityIdentifier("scan-pairing-code")
+    }
+    private var modelPairingContents: some View {
         VStack(alignment: .leading, spacing: 12) {
             if let progress = session.transferProgress { modelTransferProgress(progress) }
             if TeachingDevice.isPhone {
@@ -276,10 +330,7 @@ struct ContentView: View {
             }
             if !TeachingDevice.isPhone || phonePairingMethod == 0 {
             pairingMethodHeader("方式一", title: "扫码配对", symbol: "qrcode")
-            Button(action: beginScanning) {
-                pairingActionLabel("扫码配对", systemImage: "qrcode.viewfinder")
-            }.buttonStyle(.bordered)
-                .disabled(pairingBusy).accessibilityIdentifier("scan-pairing-code")
+            scanPairingButton
             }
             if !TeachingDevice.isPhone { Divider().padding(.vertical, 4) }
             if !TeachingDevice.isPhone || phonePairingMethod == 1 {
@@ -289,18 +340,7 @@ struct ContentView: View {
             }
             if !TeachingDevice.isPhone { Divider().padding(.vertical, 4) }
             if !TeachingDevice.isPhone || phonePairingMethod == 2 {
-                if collaboration {
-                    Label("Mac 数据线协作：保持 App 打开，在电脑上选择「画面协作 → 数据线」。", systemImage: "cable.connector")
-                        .font(.caption).foregroundStyle(.secondary)
-                } else { usbReceivingPanel }
-            }
-            if collaboration {
-                Text("电脑与 iPad 连接同一局域网。在电脑的画面协作窗口选择扫码或 Wi-Fi；Windows 使用这两种方式。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if screen.connecting {
-                    HStack { ProgressView("正在连接画面协作…"); Spacer(); Button("取消", action: screen.finish) }
-                }
-                if !screen.connectionError.isEmpty { Text(screen.connectionError).font(.callout).foregroundStyle(.orange) }
+                usbReceivingPanel
             }
             if session.busy && session.transferProgress == nil { ProgressView() }
             if !session.error.isEmpty { Text(session.error).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
@@ -1686,8 +1726,8 @@ struct TeachingView: View {
                 }
                 ProgressView(value: coverage.coveredFraction ?? 0, total: 1).tint(.mint)
                     .accessibilityLabel(coverage.coverageTitle).accessibilityIdentifier("teaching-coverage-bar")
-                if coverage.preparing || coverage.coveredFraction == nil {
-                    Text(coverage.preparing ? "正在更新覆盖率…" : "模型没有可估算的有效表面")
+                if !coverage.preparing && coverage.coveredFraction == nil {
+                    Text("模型没有可估算的有效表面")
                         .font(.caption2).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }.padding(.top, additionalRowSpacing).padding(.bottom, 4)
@@ -1703,7 +1743,7 @@ struct TeachingView: View {
                 }
             }
             if !coverage.error.isEmpty || (coverage.enabled &&
-                (coverage.preparing || coverage.poseCount == 0 || coverage.hasCoverageWarning)) {
+                (coverage.poseCount == 0 || coverage.hasCoverageWarning)) {
                 HStack(spacing: 6) {
                     Text(coverage.status).font(.caption)
                         .foregroundStyle(coverage.error.isEmpty && !coverage.hasCoverageWarning ? Color.secondary : .orange)

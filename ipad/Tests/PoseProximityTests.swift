@@ -22,16 +22,16 @@ import simd
         let diagonal = NearbyPoseConfirmation(sample: sample(SIMD3(0.03, -0.04, 0)), previousSample: previous)!
         precondition(abs(diagonal.distanceMeters - 0.05) < 0.000001)
         precondition(diagonal.message.contains("5.0 cm") && diagonal.message.contains("10 cm"), "convert meters to cm for the alert")
-        precondition(diagonal.angleDegrees == 0 && diagonal.message.contains("0.0°") && diagonal.message.contains("5°"))
+        precondition(diagonal.angleDegrees == 0 && diagonal.message.contains("0.0°") && diagonal.message.contains("1°"))
 
         let axes: [SIMD3<Float>] = [SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1), simd_normalize(SIMD3(1, 2, 3))]
         for axis in axes {
-            for degrees: Float in [0, 1, 4.99, 5, 5.01, 10, 90, 180] {
+            for degrees: Float in [0, 0.1, 0.99, 1, 1.01, 2, 4.99, 5, 10, 90, 180] {
                 let rotation = simd_quatf(angle: degrees * .pi / 180, axis: axis)
                 for distance: Float in [0, 0.05, 0.099, 0.1] {
                     let next = sample(SIMD3(distance, 0, 0), rotation: rotation)
                     let nearby = NearbyPoseConfirmation(sample: next, previousSample: previous)
-                    precondition((nearby != nil) == (distance < 0.1 && degrees < 5),
+                    precondition((nearby != nil) == (distance < 0.1 && degrees < 1),
                         "remind only if BOTH translation and full yaw/pitch/roll rotation are close")
                     if let nearby { precondition(abs(nearby.angleDegrees - Double(degrees)) < 0.0001) }
                 }
@@ -39,9 +39,9 @@ import simd
         }
         let tilted = simd_quatf(angle: 1.2, axis: simd_normalize(SIMD3<Float>(1, -2, 3)))
         let tiltedPrevious = sample(.zero, rotation: tilted)
-        for degrees: Float in [4.99, 5, 5.01, 25] {
+        for degrees: Float in [0.99, 1, 1.01, 2, 5, 25] {
             let turned = sample(.zero, rotation: tilted * simd_quatf(angle: degrees * .pi / 180, axis: axes[3]))
-            precondition((NearbyPoseConfirmation(sample: turned, previousSample: tiltedPrevious) != nil) == (degrees < 5),
+            precondition((NearbyPoseConfirmation(sample: turned, previousSample: tiltedPrevious) != nil) == (degrees < 1),
                 "the angular threshold also works from a non-identity camera orientation")
         }
         var equivalent = tiltedPrevious
@@ -50,15 +50,15 @@ import simd
         equivalent.cameraPose.quaternion.z = -q.z * 2; equivalent.cameraPose.quaternion.w = -q.w * 2
         precondition(NearbyPoseConfirmation(sample: equivalent, previousSample: tiltedPrevious)!.angleDegrees < 0.0001,
             "quaternion sign and normalization cannot turn an identical view into a different Pose")
-        let nearWrap = sample(.zero, rotation: simd_quatf(angle: 179 * .pi / 180, axis: axes[2]))
-        let wrapped = sample(.zero, rotation: simd_quatf(angle: -179 * .pi / 180, axis: axes[2]))
-        precondition(abs(NearbyPoseConfirmation(sample: wrapped, previousSample: nearWrap)!.angleDegrees - 2) < 0.0001,
-            "crossing the angle wrap is a 2-degree turn, not 358 degrees")
+        let nearWrap = sample(.zero, rotation: simd_quatf(angle: 179.75 * .pi / 180, axis: axes[2]))
+        let wrapped = sample(.zero, rotation: simd_quatf(angle: -179.75 * .pi / 180, axis: axes[2]))
+        precondition(abs(NearbyPoseConfirmation(sample: wrapped, previousSample: nearWrap)!.angleDegrees - 0.5) < 0.0001,
+            "crossing the angle wrap is a 0.5-degree turn, not 359.5 degrees")
         let widerWrap = sample(.zero, rotation: simd_quatf(angle: -170 * .pi / 180, axis: axes[2]))
         precondition(NearbyPoseConfirmation(sample: widerWrap, previousSample: nearWrap) == nil)
 
         var captured = sample(SIMD3(0.01, 0, 0), segment: "recalibrated-segment")
-        captured.cameraPose.quaternion = Rotation4(simd_quatf(angle: 2 * .pi / 180, axis: SIMD3(0, 0, 1)))
+        captured.cameraPose.quaternion = Rotation4(simd_quatf(angle: 0.5 * .pi / 180, axis: SIMD3(0, 0, 1)))
         captured.surfacePoint = Point3(SIMD3(1, 2, 3))
         captured.previewCameraTransform = matrix_identity_float4x4.elements
         captured.previewProjection = matrix_identity_float4x4.elements
@@ -90,6 +90,6 @@ import simd
         }
         var zeroRotation = previous; zeroRotation.cameraPose.quaternion.w = 0
         precondition(NearbyPoseConfirmation(sample: zeroRotation, previousSample: previous) == nil)
-        print("Pose proximity: combined 10 cm / 5 degree thresholds, same-position yaw/pitch/roll, quaternion sign/normalization/wrap, recalibration, frozen capture, deletion and reopened drafts passed.")
+        print("Pose proximity: combined 10 cm / 1 degree thresholds, same-position yaw/pitch/roll, quaternion sign/normalization/wrap, recalibration, frozen capture, deletion and reopened drafts passed.")
     }
 }
