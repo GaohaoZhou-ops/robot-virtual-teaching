@@ -33,6 +33,22 @@ enum ModelTransferProgress {
 
 @MainActor
 final class TeachingSession: ObservableObject {
+    static var supportsLocalTeaching: Bool {
+        #if os(iOS) && !targetEnvironment(simulator)
+        return ARController.supported
+        #else
+        // Keep simulator model previews and the separate visionOS workflow available.
+        return true
+        #endif
+    }
+    static let localTeachingUnavailableMessage = "此设备不支持 LiDAR，本机虚拟示教不可用。请使用画面协作。"
+    private func requireLocalTeaching() -> Bool {
+        guard Self.supportsLocalTeaching else {
+            error = Self.localTeachingUnavailableMessage
+            return false
+        }
+        return true
+    }
     @Published var projects: [LocalProject] = []
     @Published var current: LocalProject?
     @Published var busy = false
@@ -62,6 +78,7 @@ final class TeachingSession: ObservableObject {
     }
     #if os(iOS)
     func receiveUSB(_ transfer: USBModelTransfer, from inbox: USBModelInbox) async {
+        guard requireLocalTeaching() else { return }
         guard !busy, current == nil else { return }
         busy = true; error = ""; transferProgress = .validating
         defer { busy = false; transferProgress = nil }
@@ -107,6 +124,7 @@ final class TeachingSession: ObservableObject {
     }
     #endif
     func pair(qr: PairingQRCode? = nil, confirmNewModel: Bool = false) async {
+        guard requireLocalTeaching() else { return }
         guard !busy else { return }; busy = true; error = ""
         modelTransferID = UUID(); transferProgress = .pairing
         defer { busy = false; transferProgress = nil; modelTransferID = nil }
@@ -182,6 +200,7 @@ final class TeachingSession: ObservableObject {
         }
     }
     func syncPendingModel() async {
+        guard requireLocalTeaching() else { return }
         guard !busy, let pending = pendingModel else { return }
         busy = true; error = ""; status = "正在同步模型…"; modelTransferID = UUID()
         defer { busy = false; transferProgress = nil; modelTransferID = nil }
@@ -191,6 +210,7 @@ final class TeachingSession: ObservableObject {
         } catch { self.error = "模型同步失败，可重试：\(error.localizedDescription)"; status = "等待重试同步模型" }
     }
     func open(_ project: LocalProject) async {
+        guard requireLocalTeaching() else { return }
         guard !busy else { return }; busy = true; error = ""; openingProjectID = project.id
         defer { busy = false; openingProjectID = nil }
         do {
@@ -209,6 +229,7 @@ final class TeachingSession: ObservableObject {
         } catch { self.error = error.localizedDescription }
     }
     func continueTeaching() async {
+        guard requireLocalTeaching() else { return }
         guard !busy, let project = current, project.result.completedAt != nil else { return }
         busy = true; error = ""; status = "正在保留已有 Pose 并创建补录草稿…"
         defer { busy = false }

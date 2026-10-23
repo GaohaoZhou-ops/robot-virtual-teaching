@@ -28,8 +28,48 @@ final class AtlasTeachingUITests: XCTestCase {
             let stop = app.buttons["screen-collaboration-stop"]
             XCTAssertTrue(stop.waitForExistence(timeout: 20), app.debugDescription)
             XCTAssertTrue(app.staticTexts["Wi-Fi 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 30))
-        } else { app.launch() }
+        } else if environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
+        else { app.launch() }
         return app
+    }
+
+    func testNonLiDARDeviceKeepsTeachingLockedAndCollaborationAvailable() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_NON_LIDAR_LIVE"] == "1" else {
+            throw XCTSkip("Run on a physical iPad or iPhone without LiDAR")
+        }
+        continueAfterFailure = false
+        XCTAssertFalse(ARController.supported)
+
+        let app = XCUIApplication()
+        if ProcessInfo.processInfo.environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
+        else { app.launch() }
+        let purpose = app.segmentedControls["library-pairing-purpose"]
+        XCTAssertTrue(purpose.waitForExistence(timeout: 20))
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            XCTAssertTrue(app.staticTexts["local-teaching-availability"].exists)
+            XCTAssertTrue(app.otherElements["library-projects-panel"].exists)
+            XCTAssertTrue(app.staticTexts["local-teaching-locked"].exists)
+            XCTAssertFalse(purpose.buttons["接收物体"].isEnabled)
+            XCTAssertTrue(purpose.buttons["画面协作"].isEnabled)
+            // A physical tap must not open model reception, even with the entry visible.
+            purpose.buttons["接收物体"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(app.staticTexts["screen-pairing-status"].exists)
+            XCTAssertFalse(app.otherElements["usb-receiving-panel"].exists)
+            XCTAssertFalse(app.buttons["capture-pose"].exists)
+            let wireless = app.buttons["screen-pairing-wireless"]
+            XCTAssertTrue(wireless.isEnabled)
+            wireless.tap()
+            XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["scan-pairing-code"].isEnabled)
+            XCTAssertTrue(app.textFields["server-address-octet-0"].exists)
+            XCTAssertTrue(app.buttons["discover-services"].isEnabled)
+            wireless.tap()
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Non-LiDAR collaboration welcome - \(orientation.rawValue)"
+            shot.lifetime = .keepAlways; add(shot)
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
     }
 
     func testLiveScreenViewportGestures() throws {
