@@ -1,0 +1,61 @@
+.robot-joint-limit-settings { padding: 10px; }
+.workbench-menu-section.robot-joint-limit-settings { padding-top: 12px; padding-bottom: 10px; }
+
+.robot-joint-limit-settings__heading,
+.robot-joint-limit-settings__heading > span,
+.robot-joint-limit-settings__heading > button,
+.robot-joint-limit-settings__controls { display: flex; align-items: center; }
+
+.robot-joint-limit-settings__heading { justify-content: space-between; gap: 8px; }
+.robot-joint-limit-settings__heading > span { gap: 8px; color: #c5d5d1; font-size: 12px; }
+.robot-joint-limit-settings__heading > span > svg { color: #7fa9a6; }
+.robot-joint-limit-settings__heading > button {
+  gap: 4px;
+  padding: 4px 0 4px 6px;
+  border: 0;
+  border-radius: 2px;
+  color: #8eb7b4;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.robot-joint-limit-settings__heading > button:hover:not(:disabled) { color: var(--cyan); }
+.robot-joint-limit-settings__heading > button:disabled { opacity: 0.4; cursor: default; }
+.robot-joint-limit-settings__controls { gap: 12px; margin-top: 10px; }
+.robot-joint-limit-settings__controls > input { flex: 1; min-width: 0; margin: 0; accent-color: var(--cyan); cursor: pointer; }
+.robot-joint-limit-settings__value {
+  display: flex;
+  align-items: center;
+  flex: 0 0 75px;
+  height: 30px;
+  padding-right: 7px;
+  border: 1px solid #365451;
+  border-radius: 3px;
+  background: #071317;
+  color: #8ca9a4;
+  font-size: 11px;
+}
+.robot-joint-limit-settings__value:focus-within { border-color: var(--cyan); }
+.robot-joint-limit-settings__value > input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 2px 4px 7px;
+  border: 0;
+  outline: none;
+  color: #dcf8f3;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.robot-joint-limit-settings input:disabled { opacity: 0.45; cursor: default; }
+.robot-joint-limit-settings button:focus-visible,
+.robot-joint-limit-settings input[type="range"]:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
+.robot-joint-limit-settings > p.robot-joint-limit-settings__description {
+  margin: 9px 0 0;
+  color: #78918f;
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: 0;
+}

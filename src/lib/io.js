@@ -1,6 +1,7 @@
 import { calculatePathDistances } from './pathMetrics.js';
 import { normalizeRobotJointLocks } from './robotJointLocks.js';
 import { normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
+import { normalizeArmSoftLimitRatio } from './robotJointLimits.js';
 import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult, withoutDesktopPoseReferences } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
@@ -662,6 +663,7 @@ export function normalizeProject(payload) {
           rawRobot.lockedJoints ?? rawRobot.jointLocks ?? rawRobot.lockedJointNames,
         ),
         collisionIgnoredJoints: normalizeIgnoredCollisionJoints(rawRobot.collisionIgnoredJoints),
+        armSoftLimitRatio: normalizeArmSoftLimitRatio(rawRobot.armSoftLimitRatio),
         heightLocked: booleanOr(
           rawRobot.heightLocked ?? rawRobot.lockHeight ?? rawRobot.zLocked,
           false,
@@ -774,6 +776,7 @@ export function buildExport({
   robotJointValues,
   lockedRobotJointNames = [],
   ignoredRobotCollisionJointNames = [],
+  robotArmSoftLimitRatio = robot?.armSoftLimitRatio,
   robotHeightLocked = false,
   teachingTasks = [],
   jointPoses = [],
@@ -891,6 +894,7 @@ export function buildExport({
           ),
           lockedJoints: normalizeRobotJointLocks(lockedRobotJointNames),
           collisionIgnoredJoints: normalizeIgnoredCollisionJoints(ignoredRobotCollisionJointNames),
+          armSoftLimitRatio: normalizeArmSoftLimitRatio(robotArmSoftLimitRatio),
           heightLocked: robotHeightLocked === true,
           origin: {
             position: {

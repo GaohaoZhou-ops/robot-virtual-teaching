@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { ARM_SOFT_LIMIT_RATIO, getRobotJointLimits } from './robotJointLimits.js';
+import { getRobotJointLimits, normalizeArmSoftLimitRatio } from './robotJointLimits.js';
 
 const ROBOT_FILE_PREFIX = '/__atlas/robot-files/';
 const SUPPORTED_FORMATS = new Set(['urdf', 'glb', 'gltf', 'stl']);
@@ -748,22 +748,7 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
     const joint = name ? robot.getObjectByName(name) : null;
     const type = joint?.userData?.jointType;
     if (!joint || !['revolute', 'continuous', 'prismatic'].includes(type)) return [];
-    const limit = getRobotJointLimits(joint);
-    const convertLimit = (value) => {
-      if (!Number.isFinite(value)) return null;
-      return type === 'prismatic' ? value : THREE.MathUtils.radToDeg(value);
-    };
-    return [{
-      name,
-      type,
-      unit: type === 'prismatic' ? 'meter' : 'degree',
-      lower: convertLimit(limit.lower),
-      upper: convertLimit(limit.upper),
-      hardLower: convertLimit(limit.hardLower),
-      hardUpper: convertLimit(limit.hardUpper),
-      softLimitRatio: limit.softLimited ? ARM_SOFT_LIMIT_RATIO : null,
-      axis: [...(joint.userData.jointAxis || [0, 0, 1])],
-    }];
+    return [robotJointDefinition(joint)];
   });
 
   robot.userData.robot = {
@@ -878,6 +863,43 @@ export async function loadRobotModel(value, options = {}) {
 }
 
 const movableJointTypes = new Set(['revolute', 'continuous', 'prismatic']);
+
+const robotJointDefinition = (joint) => {
+  const type = joint.userData.jointType;
+  const limit = getRobotJointLimits(joint);
+  const convert = (value) => Number.isFinite(value)
+    ? (type === 'prismatic' ? value : THREE.MathUtils.radToDeg(value)) : null;
+  return {
+    name: joint.name, type, unit: type === 'prismatic' ? 'meter' : 'degree',
+    lower: convert(limit.lower), upper: convert(limit.upper),
+    hardLower: convert(limit.hardLower), hardUpper: convert(limit.hardUpper),
+    softLimitRatio: limit.softLimitRatio,
+    axis: [...(joint.userData.jointAxis || [0, 0, 1])],
+  };
+};
+
+// Update the live model without reloading meshes or modifying URDF hard limits.
+// Store the ratio on each arm joint so clones and worker snapshots are independent.
+export function configureRobotArmSoftLimits(robot, ratio) {
+  const normalized = normalizeArmSoftLimitRatio(ratio);
+  const definitions = new Map();
+  robot.traverse((joint) => {
+    if (!movableJointTypes.has(joint.userData?.jointType)) return;
+    if (getRobotJointLimits(joint).softLimited) {
+      joint.userData.armSoftLimitRatio = normalized;
+      setRobotJointValue(joint, joint.userData.jointValue);
+    }
+    definitions.set(joint.name, robotJointDefinition(joint));
+  });
+  const metadata = robot.userData.robot;
+  // Preserve the joint order used by existing panels and shared device controls.
+  const movableJoints = metadata?.movableJoints
+    ? metadata.movableJoints.map((joint) => definitions.get(joint.name) || joint)
+    : [...definitions.values()];
+  if (metadata) metadata.movableJoints = movableJoints;
+  robot.updateMatrixWorld(true);
+  return movableJoints;
+}
 
 export const setRobotJointValue = (joint, rawValue) => {
   if (!joint || !movableJointTypes.has(joint.userData?.jointType)) return 0;

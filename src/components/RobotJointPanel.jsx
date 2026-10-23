@@ -14,6 +14,7 @@ import {
   isRobotBodyJoint,
   normalizeRobotJointLocks,
 } from '../lib/robotJointLocks.js';
+import { armSoftLimitPercent } from '../lib/robotJointLimits.js';
 
 const GROUPS = [
   { id: 'chassis', label: '底盘轮组', test: (name) => /wheel/i.test(name) },
@@ -87,7 +88,7 @@ function JointValueRow({ joint, value, locked, onChange, onToggleLock }) {
     >
       <div className="joint-value-row__name">
         <strong title={joint.softLimitRatio
-          ? `${joint.name} · 软限位 ${formatValue(explicitLower, prismatic)} ～ ${formatValue(explicitUpper, prismatic)} ${unit}（硬限位中间 95%）`
+          ? `${joint.name} · 软限位 ${formatValue(explicitLower, prismatic)} ～ ${formatValue(explicitUpper, prismatic)} ${unit}（硬限位中间 ${armSoftLimitPercent(joint.softLimitRatio)}%）`
           : joint.name}>{joint.name}</strong>
         <small>{String(joint.type || 'joint').toUpperCase()}</small>
       </div>

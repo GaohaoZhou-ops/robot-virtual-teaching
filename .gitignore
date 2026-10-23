@@ -36,6 +36,8 @@ node_modules/
 # credentials, exported projects, native test plans and screenshots stay local.
 # Windows USB companion checks use build/ipad-windows-usb/ for the downloadable
 # helper bundle, extracted package checks, browser captures and native test results.
+# Adjustable joint-limit checks use build/robot-soft-limits/ for menu captures,
+# collaboration credentials and simulated device command/state files.
 dist/
 build/
 out/
@@ -242,6 +244,18 @@ playwright/.auth/
 /ipad-remote-collaboration.[zZ][iI][pP]
 /ipad-collaboration-top-actions.[zZ][iI][pP]
 /robot-soft-limits.[zZ][iI][pP]
+# Soft-limit review copies and temporary Python test environments copied from /tmp.
+# Scope these to output roots; source artwork and nested regression fixtures stay visible.
+/robot-soft-limit-*.png
+/tests/robot-soft-limit-*.png
+/robot-soft-limit-tests/
+/tests/robot-soft-limit-tests/
+/tests/robot-soft-limits/
+/robot-soft-limits-*/
+/tests/robot-soft-limits-*/
+/robot-soft-limits-*.[zZ][iI][pP]
+/tests/robot-soft-limits.[zZ][iI][pP]
+/tests/robot-soft-limits-*.[zZ][iI][pP]
 # Standalone Windows USB validation exports and downloaded/extracted helper copies.
 # Keep the helper source in src/usbBridge/ and nested regression fixtures visible.
 /ipad-windows-usb/

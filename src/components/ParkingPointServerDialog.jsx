@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { RobotJointLimitContext } from './RobotJointLimitContext.js';
 import { createPortal } from 'react-dom';
 import {
   Box,
@@ -52,6 +53,7 @@ export default function ParkingPointServerDialog({
   onImported,
 }) {
   const inputRef = useRef(null);
+  const armSoftLimitRatio = useContext(RobotJointLimitContext);
   const [status, setStatus] = useState(initialStatus);
   const [lastPackage, setLastPackage] = useState(null);
   const [parameters, setParameters] = useState({
@@ -93,7 +95,7 @@ export default function ParkingPointServerDialog({
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const filename = `parking-merge-server-${safeFileSegment(task.id)}-${stamp}.zip`;
       const archive = await downloadParkingMergeServerArchive(
-        { task, mapData, robot, parameters, onProgress },
+        { task, mapData, robot, parameters: { ...parameters, armSoftLimitRatio }, onProgress },
         filename,
       );
       setLastPackage({

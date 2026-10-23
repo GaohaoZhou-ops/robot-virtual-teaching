@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { RobotJointLimitContext } from './RobotJointLimitContext.js';
 import * as THREE from 'three';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 import {
@@ -12,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
   applyRobotJointValues,
+  configureRobotArmSoftLimits,
   disposeRobotModel,
   getRobotEndEffector,
   loadRobotModel,
@@ -94,6 +96,7 @@ export default function TeachingPoseRobotPreview({
   variant = 'teaching',
 }) {
   const viewportRef = useRef(null);
+  const robotArmSoftLimitRatio = useContext(RobotJointLimitContext);
   const canvasRef = useRef(null);
   const sceneContextRef = useRef(null);
   const robotRef = useRef(null);
@@ -339,6 +342,7 @@ export default function TeachingPoseRobotPreview({
     const loadedRobot = robotRef.current;
     const canvas = canvasRef.current;
     if (!loadedRobot || !canvas) return;
+    configureRobotArmSoftLimits(loadedRobot, robotArmSoftLimitRatio);
     loadedRobot.visible = Boolean(pose);
     if (!pose) {
       canvas.dataset.appliedJointValues = '{}';
@@ -409,6 +413,7 @@ export default function TeachingPoseRobotPreview({
     isPresetPreview,
     jointValues,
     modelRevision,
+    robotArmSoftLimitRatio,
     pose,
     recordedPose,
   ]);

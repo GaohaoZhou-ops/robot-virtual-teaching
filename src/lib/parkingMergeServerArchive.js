@@ -10,6 +10,7 @@ import {
 } from './parkingPointMerge.js';
 import { sha256Bytes } from './hash.js';
 import { resolveRobotResourceUrl } from './robotLoader.js';
+import { normalizeArmSoftLimitRatio } from './robotJointLimits.js';
 
 export const PARKING_MERGE_SERVER_JOB_FORMAT = 'atlas-parking-merge-server-job';
 export const PARKING_MERGE_SERVER_RESULT_FORMAT = 'atlas-parking-merge-server-result';
@@ -396,6 +397,7 @@ const triggerDownload = (blob, filename) => {
 };
 
 const defaultServerConfig = (overrides = {}) => ({
+  armSoftLimitRatio: normalizeArmSoftLimitRatio(overrides.armSoftLimitRatio),
   distanceThreshold: finite(overrides.distanceThreshold, DEFAULT_PARKING_CLUSTER_DISTANCE),
   positionTolerance: finite(overrides.positionTolerance, DEFAULT_PARKING_MERGE_XYZ_TOLERANCE),
   rotationTolerance: finite(overrides.rotationTolerance, DEFAULT_PARKING_MERGE_RPY_TOLERANCE),

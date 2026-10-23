@@ -34,7 +34,7 @@ export function serializeMobileTeachingRobot(robot, { includeCollision = false }
   });
   const serialize = (node) => ({
     name: node.name, position: node.position.toArray(), quaternion: node.quaternion.toArray(), scale: node.scale.toArray(),
-    userData: { ...Object.fromEntries(['urdfType', 'jointType', 'jointAxis', 'jointLimit', 'restPosition', 'restQuaternion', 'jointValue']
+    userData: { ...Object.fromEntries(['urdfType', 'jointType', 'jointAxis', 'jointLimit', 'armSoftLimitRatio', 'restPosition', 'restQuaternion', 'jointValue']
       .filter((key) => node.userData[key] !== undefined).map((key) => [key, node.userData[key]])),
     ...(includeCollision && (collision.has(node) || node.userData.mobileCollision)
       ? { mobileCollision: collision.get(node) || node.userData.mobileCollision } : {}) },

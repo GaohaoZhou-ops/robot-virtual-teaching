@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createIPadCaptureLayer, createMobilePosePreview, disposeIPadCaptureLayer, mobileSamplePosition } from '../lib/ipadCaptureDisplay.js';
 import { solveMobileTeachingInWorker } from '../lib/mobileTeachingWorker.js';
@@ -42,6 +42,7 @@ import { applyScreenViewportGesture } from '../lib/ipadScreenViewport.js';
 import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
+import { RobotJointLimitContext } from './RobotJointLimitContext.js';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
 import {
   createUniformMeshIndex,
@@ -58,6 +59,7 @@ import {
 } from '../lib/parkingPointMerge.js';
 import {
   applyRobotJointValues,
+  configureRobotArmSoftLimits,
   disposeRobotModel,
   getRobotEndEffector,
   loadRobotModel,
@@ -1174,6 +1176,7 @@ const copyRobotJointMetadata = (source, clone) => {
     clone.userData.jointType = source.userData.jointType;
     clone.userData.jointAxis = [...(source.userData.jointAxis || [0, 0, 1])];
     clone.userData.jointLimit = { ...(source.userData.jointLimit || {}) };
+    clone.userData.armSoftLimitRatio = source.userData.armSoftLimitRatio;
     clone.userData.restPosition = [...(source.userData.restPosition || source.position.toArray())];
     clone.userData.restQuaternion = [
       ...(source.userData.restQuaternion || source.quaternion.toArray()),
@@ -1694,6 +1697,9 @@ export default function PointCloudViewer({
   const lastZividCameraPoseSignatureRef = useRef('');
   const robotPoseRef = useRef(normalizeRobotPose(robotPose));
   const robotJointValuesRef = useRef(normalizeRobotJointValues(robotJointValues));
+  const robotArmSoftLimitRatio = useContext(RobotJointLimitContext);
+  const robotArmSoftLimitRatioRef = useRef(robotArmSoftLimitRatio);
+  robotArmSoftLimitRatioRef.current = robotArmSoftLimitRatio;
   const lockedRobotJointNamesRef = useRef(normalizeRobotJointLocks(lockedRobotJointNames));
   const robotControlEnabledRef = useRef(Boolean(robotControlEnabled));
   const robotHeightLockedRef = useRef(Boolean(robotHeightLocked));
@@ -3082,6 +3088,18 @@ export default function PointCloudViewer({
     writeRobotPoseDataset(canvas, nextPose);
     updateRobotParkingGhostGuide(robotParkingGhostVisualRef.current, nextPose, canvas);
   }, [mapData?.geometry, robotPose]);
+
+  useLayoutEffect(() => {
+    const robot = loadedRobotRef.current;
+    if (!robot || robotLoadStateRef.current?.status !== 'loaded') return;
+    endEffectorInteractionRef.current?.exit?.();
+    clearEndEffectorLocks();
+    clearRobotDragHistory();
+    const movableJoints = configureRobotArmSoftLimits(robot, robotArmSoftLimitRatio);
+    onRobotLoadStateRef.current?.({ ...robotLoadStateRef.current, movableJoints });
+    reportRobotJointValues(true);
+    reportZividCameraPoses(true);
+  }, [robotArmSoftLimitRatio]);
 
   useLayoutEffect(() => {
     const changed = !sameNumericValues(normalizeRobotJointValues(robotJointValues), robotJointValuesRef.current);
@@ -5668,6 +5686,7 @@ export default function PointCloudViewer({
           return;
         }
         loadedRobot = robot;
+        configureRobotArmSoftLimits(robot, robotArmSoftLimitRatioRef.current);
         layer.add(robot);
         loadedRobotRef.current = robot;
         applyRobotPose(layer, robotPoseRef.current);
@@ -5868,7 +5887,7 @@ export default function PointCloudViewer({
         writeRobotParkingGhostHiddenDataset(canvas);
       }
     };
-  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost]);
+  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio]);
 
   useEffect(() => {
     if (robotLayerRef.current) robotLayerRef.current.visible = showRobot;

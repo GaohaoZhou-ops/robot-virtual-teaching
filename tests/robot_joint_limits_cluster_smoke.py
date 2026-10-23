@@ -30,5 +30,20 @@ for node in ET.parse(urdf).findall('joint'):
     assert math.isclose(joint.clamp(-999), lower, abs_tol=1e-10), name
     assert math.isclose(joint.clamp(999), upper, abs_tol=1e-10), name
 assert count == 14
+for ratio in [0.8, 0.5, 1.0, 0.01, None, float('nan'), -1, 2]:
+    with patch.object(module.RobotModel, '_read_collision_proxies', return_value=[]):
+        configured = module.RobotModel(urdf, ROOT, arm_soft_limit_ratio=ratio)
+    expected_ratio = 0.95 if ratio is None or not math.isfinite(ratio) else max(0.01, min(1, ratio))
+    for node in ET.parse(urdf).findall('joint'):
+        name = node.get('name')
+        if name not in configured.movable or node.find('limit') is None:
+            continue
+        lower, upper = [float(node.find('limit').get(key)) for key in ['lower', 'upper']]
+        if name.startswith(('left_J', 'right_J')):
+            margin = (upper - lower) * (1 - expected_ratio) / 2
+            lower, upper = lower + margin, upper - margin
+        joint = configured.movable[name]
+        assert math.isclose(joint.lower, lower, abs_tol=1e-10), (ratio, name)
+        assert math.isclose(joint.upper, upper, abs_tol=1e-10), (ratio, name)
 assert module.ALGORITHM_VERSION == '1.1.0'
-print('PASS offline URDF parser and solver clamps: 14 arm soft limits; body/head unchanged')
+print('PASS offline URDF parser: default/custom ratios and invalid settings; 14 arm limits; body/head unchanged')
