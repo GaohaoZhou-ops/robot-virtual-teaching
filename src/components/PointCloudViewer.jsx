@@ -71,6 +71,7 @@ import {
   setRobotJointValue,
 } from '../lib/robotLoader.js';
 import { normalizeRobotJointLocks } from '../lib/robotJointLocks.js';
+import { solveEndEffectorIk } from '../lib/robotEndEffectorIk.js';
 import {
   collectTeachingVisionCoverageFrames,
   createTeachingSurfaceProjectionOverlay,
@@ -188,9 +189,6 @@ const ZIVID_CAMERA_POSE_REPORT_INTERVAL = 70;
 const CHASSIS_CONTROL_AXIS_SCREEN_LENGTH = 72;
 const COLLISION_INDEX_CELL_SIZE = 0.12;
 const END_EFFECTOR_SCREEN_DIAMETER = 58;
-const IK_ORIENTATION_SCALE = 0.24;
-const IK_DAMPING = 0.045;
-const IK_MAX_ITERATIONS = 28;
 const ROBOT_CONTROL_CODES = new Set([
   'KeyW',
   'KeyA',
@@ -498,6 +496,7 @@ const cloneEndEffectorLocks = (locks) => Object.fromEntries(
   Object.entries(locks).map(([side, lock]) => [side, !lock ? null : {
     ...lock,
     ...(lock.type === 'body' ? { jointValues: new Map(lock.jointValues) } : {
+      referenceJointValues: lock.referenceJointValues && { ...lock.referenceJointValues },
       pose: normalizeRobotPose(lock.pose),
       targetPosition: lock.targetPosition.clone(),
       targetQuaternion: lock.targetQuaternion.clone(),
@@ -659,159 +658,6 @@ const applyPoseToWorldTarget = (target, value) => {
   );
   target.updateMatrixWorld(true);
   return pose;
-};
-
-const rotationErrorVector = (targetQuaternion, currentQuaternion) => {
-  const error = targetQuaternion
-    .clone()
-    .multiply(currentQuaternion.clone().invert())
-    .normalize();
-  if (error.w < 0) error.set(-error.x, -error.y, -error.z, -error.w);
-  const sinHalf = Math.hypot(error.x, error.y, error.z);
-  if (sinHalf < 1e-10) return new THREE.Vector3();
-  const angle = 2 * Math.atan2(sinHalf, THREE.MathUtils.clamp(error.w, -1, 1));
-  return new THREE.Vector3(error.x, error.y, error.z).multiplyScalar(angle / sinHalf);
-};
-
-const solveDenseSystem = (matrix, vector) => {
-  const size = vector.length;
-  const rows = matrix.map((row, index) => [...row, vector[index]]);
-  for (let column = 0; column < size; column += 1) {
-    let pivot = column;
-    for (let row = column + 1; row < size; row += 1) {
-      if (Math.abs(rows[row][column]) > Math.abs(rows[pivot][column])) pivot = row;
-    }
-    if (Math.abs(rows[pivot][column]) < 1e-12) return null;
-    [rows[column], rows[pivot]] = [rows[pivot], rows[column]];
-    const divisor = rows[column][column];
-    for (let index = column; index <= size; index += 1) rows[column][index] /= divisor;
-    for (let row = 0; row < size; row += 1) {
-      if (row === column) continue;
-      const factor = rows[row][column];
-      if (Math.abs(factor) < 1e-16) continue;
-      for (let index = column; index <= size; index += 1) {
-        rows[row][index] -= factor * rows[column][index];
-      }
-    }
-  }
-  return rows.map((row) => row[size]);
-};
-
-const solveEndEffectorIk = (
-  controller,
-  targetPosition,
-  targetQuaternion,
-  excludedJoints = new Set(),
-) => {
-  if (!controller?.frame || !controller.joints?.length) return null;
-  const { robot, frame } = controller;
-  const joints = controller.joints.filter((joint) => !excludedJoints.has(joint));
-  const currentPosition = new THREE.Vector3();
-  const currentQuaternion = new THREE.Quaternion();
-  const jointPosition = new THREE.Vector3();
-  const jointQuaternion = new THREE.Quaternion();
-  const axis = new THREE.Vector3();
-  const radiusVector = new THREE.Vector3();
-  const positionDerivative = new THREE.Vector3();
-  let positionError = Number.POSITIVE_INFINITY;
-  let rotationError = Number.POSITIVE_INFINITY;
-
-  if (!joints.length) {
-    robot.updateMatrixWorld(true);
-    frame.getWorldPosition(currentPosition);
-    frame.getWorldQuaternion(currentQuaternion);
-    positionError = currentPosition.distanceTo(targetPosition);
-    rotationError = rotationErrorVector(targetQuaternion, currentQuaternion).length();
-    return {
-      actualPose: poseFromWorldObject(frame),
-      positionError,
-      rotationError: THREE.MathUtils.radToDeg(rotationError),
-      status: 'limited',
-      frozenJointCount: controller.joints.length,
-    };
-  }
-
-  for (let iteration = 0; iteration < IK_MAX_ITERATIONS; iteration += 1) {
-    robot.updateMatrixWorld(true);
-    frame.getWorldPosition(currentPosition);
-    frame.getWorldQuaternion(currentQuaternion);
-    const positionDelta = targetPosition.clone().sub(currentPosition);
-    const rotationDelta = rotationErrorVector(targetQuaternion, currentQuaternion);
-    positionError = positionDelta.length();
-    rotationError = rotationDelta.length();
-    if (positionError < 0.00045 && rotationError < THREE.MathUtils.degToRad(0.18)) break;
-
-    const jacobian = Array.from({ length: 6 }, () => Array(joints.length).fill(0));
-    joints.forEach((joint, index) => {
-      joint.getWorldPosition(jointPosition);
-      joint.getWorldQuaternion(jointQuaternion);
-      axis.fromArray(joint.userData.jointAxis || [0, 0, 1]);
-      axis.applyQuaternion(jointQuaternion).normalize();
-      if (joint.userData.jointType === 'prismatic') {
-        positionDerivative.copy(axis);
-        jacobian[3][index] = 0;
-        jacobian[4][index] = 0;
-        jacobian[5][index] = 0;
-      } else {
-        radiusVector.copy(currentPosition).sub(jointPosition);
-        positionDerivative.crossVectors(axis, radiusVector);
-        jacobian[3][index] = axis.x * IK_ORIENTATION_SCALE;
-        jacobian[4][index] = axis.y * IK_ORIENTATION_SCALE;
-        jacobian[5][index] = axis.z * IK_ORIENTATION_SCALE;
-      }
-      jacobian[0][index] = positionDerivative.x;
-      jacobian[1][index] = positionDerivative.y;
-      jacobian[2][index] = positionDerivative.z;
-    });
-
-    const errorVector = [
-      positionDelta.x,
-      positionDelta.y,
-      positionDelta.z,
-      rotationDelta.x * IK_ORIENTATION_SCALE,
-      rotationDelta.y * IK_ORIENTATION_SCALE,
-      rotationDelta.z * IK_ORIENTATION_SCALE,
-    ];
-    const normalMatrix = Array.from({ length: 6 }, (_, row) =>
-      Array.from({ length: 6 }, (_, column) => {
-        let value = row === column ? IK_DAMPING ** 2 : 0;
-        for (let joint = 0; joint < joints.length; joint += 1) {
-          value += jacobian[row][joint] * jacobian[column][joint];
-        }
-        return value;
-      }),
-    );
-    const resolvedError = solveDenseSystem(normalMatrix, errorVector);
-    if (!resolvedError) break;
-
-    let largestStep = 0;
-    joints.forEach((joint, index) => {
-      let step = 0;
-      for (let axisIndex = 0; axisIndex < 6; axisIndex += 1) {
-        step += jacobian[axisIndex][index] * resolvedError[axisIndex];
-      }
-      step = THREE.MathUtils.clamp(step * 0.76, -0.13, 0.13);
-      largestStep = Math.max(largestStep, Math.abs(step));
-      setRobotJointValue(joint, (Number(joint.userData.jointValue) || 0) + step);
-    });
-    if (largestStep < 1e-7) break;
-  }
-
-  robot.updateMatrixWorld(true);
-  frame.getWorldPosition(currentPosition);
-  frame.getWorldQuaternion(currentQuaternion);
-  positionError = currentPosition.distanceTo(targetPosition);
-  rotationError = rotationErrorVector(targetQuaternion, currentQuaternion).length();
-  return {
-    actualPose: poseFromWorldObject(frame),
-    positionError,
-    rotationError: THREE.MathUtils.radToDeg(rotationError),
-    status:
-      positionError < 0.006 && rotationError < THREE.MathUtils.degToRad(2)
-        ? 'tracking'
-        : 'limited',
-    frozenJointCount: controller.joints.length - joints.length,
-  };
 };
 
 const createEndEffectorSpaceBall = () => {
@@ -1711,6 +1557,7 @@ export default function PointCloudViewer({
   const appliedInitialViewRef = useRef(null);
   const appliedResetRevisionRef = useRef(0);
   const appliedCameraTeachingRevisionRef = useRef(0);
+  const cameraIkReferencesRef = useRef({ left: null, right: null });
   const [interactionMode, setInteractionMode] = useState('rotate');
   const [shiftPanArmed, setShiftPanArmed] = useState(false);
   const [chassisDragMode, setChassisDragMode] = useState(false);
@@ -2377,6 +2224,8 @@ export default function PointCloudViewer({
     canvas.dataset.endEffectorPositionError = result.positionError.toExponential(5);
     canvas.dataset.endEffectorRotationError = result.rotationError.toFixed(4);
     canvas.dataset.endEffectorFrozenJointCount = String(result.frozenJointCount || 0);
+    canvas.dataset.endEffectorIkIterations = String(result.iterations || 0);
+    canvas.dataset.endEffectorIkSolveMs = (result.solveMs || 0).toFixed(3);
     canvas.dataset.endEffectorTargetX = pose.position.x.toFixed(6);
     canvas.dataset.endEffectorTargetY = pose.position.y.toFixed(6);
     canvas.dataset.endEffectorTargetZ = pose.position.z.toFixed(6);
@@ -2409,6 +2258,7 @@ export default function PointCloudViewer({
         lock.targetPosition,
         lock.targetQuaternion,
         frozenJoints,
+        { referenceJointValues: lock.referenceJointValues },
       );
       if (!result) return;
       lock.lastResult = result;
@@ -2590,6 +2440,7 @@ export default function PointCloudViewer({
       targetPosition,
       targetQuaternion,
       frozenJoints,
+      { referenceJointValues: active.referenceJointValues },
     );
     if (!result) return null;
     const pose = poseFromWorldObject(target);
@@ -2611,6 +2462,7 @@ export default function PointCloudViewer({
     const target = endEffectorTargetRef.current;
     const canvas = controlsRef.current?.domElement;
     if (!controller || !transform || !target) return false;
+    cameraIkReferencesRef.current = { left: null, right: null };
     const previous = endEffectorControlRef.current;
     // Repeatedly selecting the same part must keep the original cancellation point.
     const initialState = previous?.side === side ? previous.initialState : {
@@ -2647,6 +2499,8 @@ export default function PointCloudViewer({
     endEffectorControlRef.current = {
       side,
       initialState,
+      referenceJointValues: previous?.side === side && previous.referenceJointValues
+        ? previous.referenceJointValues : readRobotJointValues(controller.robot),
       mode: isTorso ? 'height' : 'translate',
       controller,
       pose,
@@ -2747,6 +2601,8 @@ export default function PointCloudViewer({
     });
     applyRobotJointValues(active.controller.robot, values);
     robotJointValuesRef.current = readRobotJointValues(active.controller.robot);
+    active.referenceJointValues = { ...robotJointValuesRef.current };
+    cameraIkReferencesRef.current = { left: null, right: null };
     const pose = poseFromWorldObject(active.controller.frame);
     applyPoseToWorldTarget(endEffectorTargetRef.current, pose);
     active.pose = pose;
@@ -2788,6 +2644,7 @@ export default function PointCloudViewer({
       active.status = 'tracking';
       active.positionError = 0;
       active.rotationError = 0;
+      active.referenceJointValues = readRobotJointValues(active.controller.robot);
       setEndEffectorControl(endEffectorPanelState(active));
       syncEndEffectorLockState(active.side);
       if (canvas) {
@@ -2830,6 +2687,7 @@ export default function PointCloudViewer({
       : {
         type: 'map',
         side: active.side,
+        referenceJointValues: readRobotJointValues(active.controller.robot),
         pose,
         targetPosition: worldPosition.clone(),
         targetQuaternion: worldQuaternion.clone(),
@@ -2902,6 +2760,7 @@ export default function PointCloudViewer({
       locks: cloneEndEffectorLocks(lockedEndEffectorsRef.current),
       control: active && {
         side: active.side,
+        referenceJointValues: active.referenceJointValues && { ...active.referenceJointValues },
         pose: normalizeRobotPose(active.pose),
         status: active.status,
         positionError: active.positionError,
@@ -2991,6 +2850,7 @@ export default function PointCloudViewer({
         active.status = lock?.type === 'body' ? 'locked' : saved?.status || 'tracking';
         active.positionError = saved?.positionError || 0;
         active.rotationError = saved?.rotationError || 0;
+        active.referenceJointValues = { ...(saved?.referenceJointValues || snapshot.joints) };
         applyPoseToWorldTarget(target, active.pose);
         if (active.side === 'torso') {
           active.torsoPose = readRobotTorsoPose(active.controller);
@@ -3012,6 +2872,7 @@ export default function PointCloudViewer({
       // Restore saved joint angles exactly; another IK solve could choose a
       // different posture for the same target, especially near a joint limit.
       onRobotPoseChangeRef.current?.(normalizeRobotPose(snapshot.pose));
+      cameraIkReferencesRef.current = { left: null, right: null };
       reportRobotJointValues(true);
       reportZividCameraPoses(true);
       if (canvas) {
@@ -3048,6 +2909,7 @@ export default function PointCloudViewer({
       lockedEndEffectorsRef.current = cloneEndEffectorLocks(snapshot.locks);
       robotPoseRef.current = applyRobotPose(robotLayerRef.current, snapshot.pose);
       applyRobotJointStateToScene(snapshot.joints, 'end-effector-cancel');
+      cameraIkReferencesRef.current = { left: null, right: null };
       const canvas = controlsRef.current?.domElement;
       writeRobotPoseDataset(canvas, robotPoseRef.current);
       updateRobotParkingGhostGuide(robotParkingGhostVisualRef.current, snapshot.pose, canvas);
@@ -3095,6 +2957,7 @@ export default function PointCloudViewer({
     endEffectorInteractionRef.current?.exit?.();
     clearEndEffectorLocks();
     clearRobotDragHistory();
+    cameraIkReferencesRef.current = { left: null, right: null };
     const movableJoints = configureRobotArmSoftLimits(robot, robotArmSoftLimitRatio);
     onRobotLoadStateRef.current?.({ ...robotLoadStateRef.current, movableJoints });
     reportRobotJointValues(true);
@@ -3114,6 +2977,28 @@ export default function PointCloudViewer({
       }
       reportZividCameraPoses(true);
       const active = endEffectorControlRef.current;
+      if (changed) {
+        cameraIkReferencesRef.current = { left: null, right: null };
+        Object.values(lockedEndEffectorsRef.current).forEach((lock) => {
+          if (lock?.type === 'map') lock.referenceJointValues = { ...appliedValues };
+        });
+        if (active && active.side !== 'torso') {
+          // Sliders, presets and playback are explicit posture edits. Rebase
+          // the preference, and keep a free gizmo on the newly edited tool.
+          active.referenceJointValues = { ...appliedValues };
+          if (!lockedEndEffectorsRef.current[active.side]) {
+            active.pose = poseFromWorldObject(active.controller.frame);
+            active.status = 'tracking';
+            active.positionError = 0;
+            active.rotationError = 0;
+            applyPoseToWorldTarget(endEffectorTargetRef.current, active.pose);
+            setEndEffectorControl(endEffectorPanelState(active));
+            writeActiveEndEffectorDataset(controlsRef.current?.domElement, active, {
+              ...active, actualPose: active.pose,
+            }, active.pose);
+          }
+        }
+      }
       if (changed && active?.side === 'torso') {
         active.torsoPose = readRobotTorsoPose(active.controller);
         active.referenceForward = active.torsoPose.forward;
@@ -3241,11 +3126,16 @@ export default function PointCloudViewer({
     }
 
     const frozenJoints = restoreLockedEndEffectorJoints(side);
+    const previousReference = cameraIkReferencesRef.current[side];
+    if (previousReference?.robot !== robot) {
+      cameraIkReferencesRef.current[side] = { robot, joints: readRobotJointValues(robot) };
+    }
     const result = solveEndEffectorIk(
       { ...armController, frame: opticalFrame },
       targetPosition,
       targetQuaternion,
       frozenJoints,
+      { referenceJointValues: cameraIkReferencesRef.current[side].joints },
     );
     if (!result) {
       publishFailure('相机位姿逆解失败');

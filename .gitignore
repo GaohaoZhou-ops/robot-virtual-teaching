@@ -256,6 +256,24 @@ playwright/.auth/
 /robot-soft-limits-*.[zZ][iI][pP]
 /tests/robot-soft-limits.[zZ][iI][pP]
 /tests/robot-soft-limits-*.[zZ][iI][pP]
+# Interactive IK experiments and baseline snapshots copied from /tmp.
+# Keep maintained end_effector_* tests, solver sources and nested fixtures tracked.
+/atlas-ik-*/
+/tests/atlas-ik-*/
+/atlas-ik-*.mjs
+/tests/atlas-ik-*.mjs
+/atlas-ik-*.py
+/tests/atlas-ik-*.py
+/atlas-ik-*.json
+/tests/atlas-ik-*.json
+/atlas-ik-*.[zZ][iI][pP]
+/tests/atlas-ik-*.[zZ][iI][pP]
+/atlas-legacy-end-effector-ik.txt
+/tests/atlas-legacy-end-effector-ik.txt
+/atlas-debug-joint-control.py
+/tests/atlas-debug-joint-control.py
+/atlas-run-ui.py
+/tests/atlas-run-ui.py
 # Standalone Windows USB validation exports and downloaded/extracted helper copies.
 # Keep the helper source in src/usbBridge/ and nested regression fixtures visible.
 /ipad-windows-usb/
