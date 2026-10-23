@@ -29,6 +29,8 @@ node_modules/
 # Pose capture and viewport gesture checks use build/screen-{capture,viewport}-validation/;
 # peer.json, state.json, command.json, saved poses and native captures stay local.
 # Menu review captures and preview bundles use build/{menu-review,menu-validation}/.
+# Teaching popup checks and typography reviews use build/teaching-pose-popup-validation/
+# and build/teaching-tree-type-review/, including browser captures and local runners.
 dist/
 build/
 out/
@@ -246,6 +248,12 @@ playwright/.auth/
 /tests/atlas-record-button-*/
 /atlas-record-button-*.[zZ][iI][pP]
 /tests/atlas-record-button-*.[zZ][iI][pP]
+# Standalone copies of teaching popup/typography review output and ZIP archives.
+# Scope to root exports so same-named nested source assets and fixtures stay visible.
+/teaching-pose-popup-validation/
+/teaching-tree-type-review/
+/teaching-pose-popup-validation.[zZ][iI][pP]
+/teaching-tree-type-review.[zZ][iI][pP]
 # Parking/pose shortcut review workspaces and generated project archives.
 # Restrict these to local output roots so test runners and fixtures stay visible.
 /atlas-view-parking-*/

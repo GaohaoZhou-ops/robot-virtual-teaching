@@ -10468,10 +10468,6 @@ input[type="number"]::-webkit-inner-spin-button {
 .mobile-pose-detail p { line-height: 1.7; margin: 8px 0; overflow-wrap: anywhere; white-space: pre-line; }
 .mobile-pose-position { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; font: 9px Menlo, monospace; }
 .mobile-pose-position b { color: var(--text); font-weight: 400; }
-.mobile-pose-list .teaching-capture-tree__pose-item { min-height: 32px; }
-.mobile-pose-list .teaching-capture-tree__pose-item > span { font-size: 10px; }
-.mobile-pose-list .teaching-capture-tree__pose-item > small,
-.mobile-pose-list .teaching-capture-tree__pose-item > i { font-size: 8px; }
 .teaching-capture-tree__actions > .teaching-mobile-solve-action { font-size: 10px; min-height: 29px; }
 .mobile-pose-pages { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 6px; color: var(--muted); font-size: 10px; }
 .mobile-pose-detail button,
@@ -10512,7 +10508,7 @@ input[type="number"]::-webkit-inner-spin-button {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 40px;
+  min-height: 44px;
   padding: 6px 7px 6px 9px;
   border-bottom: 1px solid rgba(137, 177, 179, 0.1);
   background: linear-gradient(90deg, rgba(89, 219, 232, 0.06), transparent 68%);
@@ -10533,15 +10529,16 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .teaching-capture-tree-card > header small {
-  color: #47787c;
-  font: 5px "SFMono-Regular", Menlo, monospace;
+  color: #72989b;
+  font: 9px/1.3 "SFMono-Regular", Menlo, monospace;
   letter-spacing: 0.08em;
 }
 
 .teaching-capture-tree-card > header strong {
   margin-top: 2px;
   color: #b9cecb;
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.5;
   font-weight: 580;
 }
 
@@ -10559,12 +10556,12 @@ input[type="number"]::-webkit-inner-spin-button {
   justify-content: center;
   gap: 4px;
   flex: 0 0 auto;
-  height: 27px;
+  height: 30px;
   padding: 0 6px;
   border: 1px solid rgba(89, 219, 232, 0.26);
   color: #80cbd1;
   background: rgba(89, 219, 232, 0.065);
-  font-size: 7px;
+  font-size: 10px;
   white-space: nowrap;
   cursor: pointer;
 }
@@ -10604,7 +10601,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .teaching-capture-tree__task {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
-  min-height: 34px;
+  min-height: 42px;
   border-left: 2px solid transparent;
 }
 
@@ -10620,7 +10617,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .teaching-capture-tree__expander {
   display: grid;
   width: 24px;
-  min-height: 32px;
+  min-height: 40px;
   padding: 0;
   place-items: center;
   border: 0;
@@ -10654,7 +10651,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .teaching-capture-tree__label strong {
   overflow: hidden;
   color: #9fb3b0;
-  font-size: 7px;
+  font-size: 12px;
+  line-height: 1.45;
   font-weight: 560;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10666,8 +10664,8 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-capture-tree__label small {
   margin-top: 2px;
-  color: #4e6667;
-  font: 5px "SFMono-Regular", Menlo, monospace;
+  color: #829b9a;
+  font: 10px/1.4 "SFMono-Regular", Menlo, monospace;
 }
 
 .teaching-capture-tree__parking-group {
@@ -10683,7 +10681,7 @@ input[type="number"]::-webkit-inner-spin-button {
   align-items: center;
   gap: 5px;
   width: 100%;
-  min-height: 30px;
+  min-height: 34px;
   padding: 0 8px 0 0;
   border: 0;
   border-left: 2px solid transparent;
@@ -10730,8 +10728,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .teaching-capture-tree__parking > i {
-  color: #477779;
-  font: normal 5px "SFMono-Regular", Menlo, monospace;
+  color: #7c9fa1;
+  font: normal 10px "SFMono-Regular", Menlo, monospace;
   text-align: center;
 }
 
@@ -10739,14 +10737,15 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-capture-tree__parking > span {
   overflow: hidden;
-  font-size: 7px;
+  font-size: 12px;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .teaching-capture-tree__parking > small {
-  color: #48605f;
-  font: 5px "SFMono-Regular", Menlo, monospace;
+  color: #829b98;
+  font: 10px "SFMono-Regular", Menlo, monospace;
   white-space: nowrap;
 }
 
@@ -10763,7 +10762,7 @@ input[type="number"]::-webkit-inner-spin-button {
   align-items: center;
   gap: 5px;
   width: 100%;
-  min-height: 29px;
+  min-height: 32px;
   padding: 0 8px 0 0;
   border: 0;
   border-left: 2px solid transparent;
@@ -10798,8 +10797,8 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .teaching-capture-tree__pose-item > i {
-  color: #52797b;
-  font: normal 5px "SFMono-Regular", Menlo, monospace;
+  color: #7c9fa1;
+  font: normal 10px "SFMono-Regular", Menlo, monospace;
   text-align: center;
 }
 
@@ -10807,14 +10806,15 @@ input[type="number"]::-webkit-inner-spin-button {
 
 .teaching-capture-tree__pose-item > span {
   overflow: hidden;
-  font-size: 7px;
+  font-size: 12px;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .teaching-capture-tree__pose-item > small {
-  color: #52716e;
-  font-size: 5px;
+  color: #829b98;
+  font-size: 10px;
   white-space: nowrap;
 }
 
@@ -10828,16 +10828,17 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .teaching-capture-tree__empty {
-  min-height: 29px;
+  min-height: 34px;
   padding: 9px 8px 7px 29px;
-  color: #43595a;
-  font-size: 6px;
+  color: #829b9a;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .teaching-capture-tree__pose {
   display: grid;
   flex: 0 0 auto;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.4fr);
   gap: 1px;
   padding: 1px 7px 7px;
   background: rgba(89, 219, 232, 0.08);
@@ -10848,9 +10849,9 @@ input[type="number"]::-webkit-inner-spin-button {
   min-width: 0;
   padding: 5px 4px;
   overflow: hidden;
-  color: #557a7c;
+  color: #7c9fa1;
   background: rgba(4, 14, 17, 0.95);
-  font: 5px "SFMono-Regular", Menlo, monospace;
+  font: 10px/1.4 "SFMono-Regular", Menlo, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
