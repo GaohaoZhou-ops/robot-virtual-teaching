@@ -38,14 +38,14 @@ export default function IPadPairingQRCode({ device = 'ipad', mode = 'qr', purpos
   if (wifi) return <div className="ipad-wifi-pairing" data-ipad-status={ticket.status}>
     <span className="ipad-sync-illustration"><Wifi size={30} strokeWidth={1.5}/></span>
     <h3>{ticket.status === 'paired' ? '设备已连接，等待同步' : '在设备上输入配对码'}</h3>
-    <p>{screen ? '在 iPad 首页选择「画面协作」，填写下方电脑地址，搜索服务器后输入配对码。'
+    <p>{screen ? '在 iPad 首页选择「画面协作」，填写下方连接地址，搜索服务器后输入配对码。'
       : ticket.status === 'paired' ? '在「同步数据 → Wi-Fi」确认下方地址，然后上传。' : '连接同一 Wi-Fi，在设备首页选择「Wi-Fi」，找到这台 Mac。'}</p>
     <div className={`ipad-wifi-code${expired || disabled ? ' is-unavailable' : ''}`}>
       <strong className="ipad-code" aria-label={`配对码 ${ticket.pairingCode}`}>{ticket.pairingCode.split('').map((character, index) => <span key={index}>{character}</span>)}</strong>
       <button aria-label="复制配对码" disabled={disabled || expired || !address} onClick={onCopy}>{copied ? <Check size={17}/> : <Copy size={17}/>}</button>
     </div>
     <small>{expired ? '配对码已过期，请点击「更新配对码」。' : !address ? '请连接局域网后重试。' : disabled ? '正在更新配对信息…' : `有效期至 ${new Date(ticket.pairingExpiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · 仅限一台设备`}</small>
-    <p className="ipad-wifi-pairing__hint">{screen ? 'Windows 与 Mac 均支持，电脑与 iPad 需在同一局域网。'
+    <p className="ipad-wifi-pairing__hint">{screen ? '连接本页当前工程，无需先同步工程。Windows 与 Mac 均支持。'
       : ticket.status === 'paired' ? '保持此窗口打开，完成后即可接收 Pose。' : '首次配对接收物体；已配对的示教可直接同步。'}</p>
   </div>;
   return <div className="ipad-qr" data-ipad-status={ticket.status}>

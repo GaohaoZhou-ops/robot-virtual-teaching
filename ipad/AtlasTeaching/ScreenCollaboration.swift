@@ -518,9 +518,13 @@ private struct ScreenCollaborationView: View {
                 if screen.page == "joints" {
                     ScreenJointWorkspace(screen: screen, landscape: landscape, height: viewport.size.height)
                 } else {
-                Picker("相机画面", selection: $selection) {
-                    Text("双臂").tag("both"); Text("左臂").tag("left"); Text("右臂").tag("right")
-                }.pickerStyle(.segmented).accessibilityIdentifier("screen-collaboration-selection")
+                HStack(spacing: 16) {
+                    Picker("相机画面", selection: $selection) {
+                        Text("双臂").tag("both"); Text("左臂").tag("left"); Text("右臂").tag("right")
+                    }.pickerStyle(.segmented).accessibilityIdentifier("screen-collaboration-selection")
+                        .frame(maxWidth: screen.captureMessage.isEmpty ? .infinity : 320)
+                    if !screen.captureMessage.isEmpty { ScreenCaptureStatus(screen: screen) }
+                }
                 let layout = landscape ? AnyLayout(HStackLayout(spacing: 16)) : AnyLayout(VStackLayout(spacing: 16))
                 layout {
                     if selection != "right" { camera(screen.left, side: "left", title: "左臂", color: screenAccent) }
@@ -529,7 +533,6 @@ private struct ScreenCollaborationView: View {
                 Text(selection == "both" ? "轻点画面，放大查看单臂" : "轻点画面，返回双臂视图")
                     .font(.caption).foregroundStyle(.secondary)
                 }
-                ScreenPoseCaptureBar(screen: screen)
             }.padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
@@ -539,35 +542,43 @@ private struct ScreenCollaborationView: View {
             } message: { Text(screen.captureNotice ?? "") }
     }
     @ViewBuilder private func header(width: CGFloat) -> some View {
-        if width >= 560 {
-            let pickerWidth = min(280, width - 320)
+        if width >= 680 {
+            let pickerWidth = min(280, width - 480)
             let sideWidth = (width - pickerWidth - 32) / 2
             HStack(spacing: 16) {
                 connectionTitle.frame(width: sideWidth, alignment: .leading)
                 pagePicker(width: pickerWidth)
-                stopButton.frame(width: sideWidth, alignment: .trailing)
+                ScreenPoseCaptureButton(screen: screen).frame(width: sideWidth, alignment: .trailing)
             }
         } else {
             // Keep all controls reachable in a narrow split-screen or phone window.
             VStack(spacing: 12) {
-                HStack(spacing: 12) { connectionTitle; Spacer(); stopButton }
+                HStack(spacing: 12) {
+                    connectionTitle
+                    Spacer(minLength: 8)
+                    ScreenPoseCaptureButton(screen: screen)
+                }
                 pagePicker(width: min(280, width))
             }
         }
     }
     private var connectionTitle: some View {
-        HStack(spacing: 12) {
-            Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("画面协作").font(.headline)
-                Text("\(screen.connectionKind) 已连接 · \(screen.page == "joints" ? "关节与姿态同步" : screen.stale ? "等待画面更新" : "末端相机仿真画面")")
-                    .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
-            }.lineLimit(1)
-        }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
+                    Text("画面协作").font(.headline).accessibilityIdentifier("screen-collaboration-title")
+                }
+                stopButton
+            }
+            Text("\(screen.connectionKind) 已连接 · \(screen.page == "joints" ? "关节与姿态同步" : screen.stale ? "等待画面更新" : "末端相机仿真画面")")
+                .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
+        }.lineLimit(1)
     }
     private var stopButton: some View {
         Button("结束协作", systemImage: "xmark", action: screen.finish)
-            .buttonStyle(.bordered).accessibilityIdentifier("screen-collaboration-stop")
+            .font(.subheadline).buttonStyle(.bordered).controlSize(.small)
+            .accessibilityIdentifier("screen-collaboration-stop")
     }
     private func pagePicker(width: CGFloat) -> some View {
         ScreenCollaborationPagePicker(selection: $screen.page).frame(width: width, height: 44)
@@ -633,33 +644,33 @@ private struct ScreenCollaborationPagePicker: UIViewRepresentable {
     }
 }
 
-private struct ScreenPoseCaptureBar: View {
+private struct ScreenPoseCaptureButton: View {
     @ObservedObject var screen: ScreenCollaboration
     private var destination: String {
         guard let capture = screen.workspace?.capture, !capture.taskName.isEmpty else { return "保存到网页端当前任务与停车点" }
         return "\(capture.taskName) / \(capture.parkingPointName.isEmpty ? "未选择停车点" : capture.parkingPointName)"
     }
     var body: some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(destination).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                    .accessibilityIdentifier("screen-capture-destination")
-                if !screen.captureMessage.isEmpty {
-                    Text(screen.captureMessage).font(.callout).foregroundStyle(screenAccent).lineLimit(2)
-                        .accessibilityIdentifier("screen-capture-status")
-                }
-            }
-            Spacer(minLength: 0)
-            Button(action: screen.recordPose) {
-                HStack(spacing: 8) {
-                    if screen.awaitingCapture { ProgressView().tint(.black) }
-                    else { Image(systemName: "square.and.arrow.down") }
-                    Text(screen.awaitingCapture ? "正在记录…" : "记录姿态").fontWeight(.semibold)
-                }
-            }.buttonStyle(.borderedProminent).tint(screenAccent).foregroundStyle(.black).controlSize(.large)
-                .disabled(screen.awaitingCapture || screen.awaitingControl)
-                .accessibilityIdentifier("screen-record-pose")
-        }.padding(.top, 4)
+        Button(action: screen.recordPose) {
+            HStack(spacing: 8) {
+                if screen.awaitingCapture { ProgressView().tint(.black) }
+                else { Image(systemName: "square.and.arrow.down") }
+                Text(screen.awaitingCapture ? "正在记录…" : "记录姿态").fontWeight(.semibold)
+            }.frame(minHeight: 24)
+        }.buttonStyle(.borderedProminent).tint(screenAccent).foregroundStyle(.black).controlSize(.large)
+            .fixedSize(horizontal: true, vertical: true)
+            .disabled(screen.awaitingCapture || screen.awaitingControl)
+            .accessibilityIdentifier("screen-record-pose")
+            .accessibilityValue(destination)
+    }
+}
+
+private struct ScreenCaptureStatus: View {
+    @ObservedObject var screen: ScreenCollaboration
+    var body: some View {
+        Text(screen.captureMessage).font(.callout).foregroundStyle(screenAccent).lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("screen-capture-status")
     }
 }
 
@@ -671,10 +682,21 @@ private struct ScreenJointWorkspace: View {
         let layout = landscape ? AnyLayout(HStackLayout(alignment: .top, spacing: 18)) : AnyLayout(VStackLayout(spacing: 14))
         layout {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label("3D 姿态", systemImage: "cube.transparent").font(.headline)
-                    Spacer()
-                    Text("与电脑同步").font(.caption).foregroundStyle(screenAccent)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Label("3D 姿态", systemImage: "cube.transparent").font(.headline).fixedSize()
+                        .accessibilityIdentifier("screen-viewport-title")
+                    if !screen.captureMessage.isEmpty || screen.viewportUnavailableReason != nil {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if !screen.captureMessage.isEmpty { ScreenCaptureStatus(screen: screen) }
+                            if let reason = screen.viewportUnavailableReason {
+                                Text(reason).font(.caption).foregroundStyle(.orange)
+                                    .accessibilityIdentifier("screen-viewport-status")
+                            }
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Spacer()
+                        Text("与电脑同步").font(.caption).foregroundStyle(screenAccent)
+                    }
                 }
                 ZStack {
                     Color.black.opacity(0.35)
@@ -687,13 +709,10 @@ private struct ScreenJointWorkspace: View {
                     }
                     ScreenViewportGestures(screen: screen)
                 }.clipShape(RoundedRectangle(cornerRadius: 12)).frame(maxWidth: .infinity, maxHeight: .infinity)
-                if let reason = screen.viewportUnavailableReason {
-                    Text(reason).font(.caption).foregroundStyle(.orange)
-                        .accessibilityIdentifier("screen-viewport-status")
-                }
             }.padding(16)
                 .frame(maxWidth: .infinity, maxHeight: landscape ? .infinity : height * 0.34)
                 .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
+                .accessibilityElement(children: .contain).accessibilityIdentifier("screen-viewport-panel")
             ScreenJointEditor(screen: screen)
                 .frame(width: landscape ? (TeachingDevice.isPhone ? 320 : 380) : nil)
                 .frame(maxWidth: landscape ? nil : .infinity, maxHeight: .infinity)

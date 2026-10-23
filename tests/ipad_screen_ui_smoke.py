@@ -119,7 +119,7 @@ def run():
             expect(dialog.get_by_label('配对码 ' + ticket['pairingCode'], exact=True)).to_be_visible()
             assert sessions == [201], 'switching QR/Wi-Fi must preserve the pending pairing'
             page.screenshot(path=str(output / 'desktop-wifi.png'))
-            ticket['address'] = dialog.get_by_label('协作电脑地址').input_value()
+            ticket['address'] = dialog.get_by_label('协作连接地址').input_value()
             (output / 'pairing.json').write_text(json.dumps(ticket))
             print('WIRELESS_PAIRING_READY ' + str(output / 'pairing.json'), flush=True)
         try:
@@ -196,8 +196,11 @@ def run():
                 assert retained['active'] and retained['stale'], f'iPad must wait for frames without ending: {retained}'
                 assert retained['receivedFrames'] == paused['receivedFrames'], 'heartbeat must not replace the retained camera frames'
                 assert retained['width'] == 960 and retained['height'] == 600, retained
-                devices = page.request.get(BASE + '/__atlas/ipad-screen/devices').json()['devices']
-                assert any(device.get('active') for device in devices), f'suspended workbench lost USB session: {devices}'
+                if wireless:
+                    assert retained['connectionKind'] == 'Wi-Fi', retained
+                else:
+                    devices = page.request.get(BASE + '/__atlas/ipad-screen/devices').json()['devices']
+                    assert any(device.get('active') for device in devices), f'suspended workbench lost USB session: {devices}'
             finally:
                 client.send('Debugger.resume')
                 client.send('Debugger.disable')
