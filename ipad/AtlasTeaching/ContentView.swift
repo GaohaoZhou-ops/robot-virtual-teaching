@@ -48,7 +48,7 @@ private struct PoseOriginLegend: View {
 struct ContentView: View {
     @EnvironmentObject private var session: TeachingSession
     @EnvironmentObject private var screen: ScreenCollaboration
-    @State private var collaboration = false
+    @State private var collaboration = !TeachingSession.supportsLocalTeaching
     @State private var collaborationWirelessExpanded = false
     private var pairingBusy: Bool { session.busy || screen.connecting }
     @Environment(\.scenePhase) private var scenePhase
@@ -67,7 +67,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { viewport in
         Group {
-            if let project = session.current, let geometry = session.geometry {
+            if TeachingSession.supportsLocalTeaching, let project = session.current, let geometry = session.geometry {
                 TeachingView(projectID: project.id, geometry: geometry, bottomSafeArea: viewport.safeAreaInsets.bottom)
             } else { library(bottomSafeArea: viewport.safeAreaInsets.bottom) }
         }.frame(width: viewport.size.width, height: viewport.size.height)
@@ -87,8 +87,9 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         libraryHeader
                         if !ARController.supported {
-                            Label("当前设备可接收、查看物体和已有 Pose；AR 示教需要配备 LiDAR 的真机。", systemImage: "info.circle")
+                            Label(localTeachingNotice, systemImage: "info.circle")
                                 .font(.caption).foregroundStyle(.orange)
+                                .accessibilityIdentifier("local-teaching-availability")
                         }
                         pairingPanel
                         localProjectsPanel
@@ -100,9 +101,10 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     libraryHeader
                     if !ARController.supported {
-                        Label("空间定位需要配备 LiDAR 的 iPhone Pro 或 iPad Pro 真机。当前设备可接收、查看物体和已有 Pose。", systemImage: "info.circle")
+                        Label(localTeachingNotice, systemImage: "info.circle")
                             .font(.callout).foregroundStyle(.orange).padding().frame(maxWidth: .infinity, alignment: .leading)
                             .background(.orange.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityIdentifier("local-teaching-availability")
                     }
                 }
                 .fixedSize(horizontal: false, vertical: true)
@@ -165,7 +167,7 @@ struct ContentView: View {
         .onChange(of: collaboration) { _, _ in collaborationWirelessExpanded = false }
     }
     private func handleLibraryTap(at location: CGPoint) {
-        guard !pairingBusy else { return }
+        guard TeachingSession.supportsLocalTeaching, !pairingBusy else { return }
         // A native scroll view can consume the first button touch while settling.
         // Route a tap on its visible delete area to the same confirmation before
         // dismissing the swipe; outside taps still reach the other controls.
@@ -233,22 +235,25 @@ struct ContentView: View {
         HStack(alignment: .center, spacing: 24) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("虚拟示教").font(TeachingDevice.isPhone ? .title.weight(.medium) : .largeTitle.weight(.medium))
-                Text(TeachingDevice.isPhone ? "ATLAS / IPHONE PRO" : "ATLAS / IPAD PRO").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
+                Text(TeachingDevice.isPhone ? "ATLAS / IPHONE" : "ATLAS / IPAD").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
             }
             Spacer(minLength: 0)
             Image(systemName: TeachingDevice.isPhone ? "iphone" : "ipad.landscape").font(.system(size: TeachingDevice.isPhone ? 44 : 60, weight: .ultraLight)).foregroundStyle(accent)
                 .accessibilityHidden(true)
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
+    private var localTeachingNotice: String {
+        TeachingSession.supportsLocalTeaching
+            ? "当前设备可接收、查看物体和已有 Pose；AR 示教需要配备 LiDAR 的真机。"
+            : TeachingSession.localTeachingUnavailableMessage
+    }
     private var pairingPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("与电脑配对", systemImage: "desktopcomputer").font(.title2.weight(.medium))
-            if !TeachingDevice.isPhone {
-                Picker("配对用途", selection: $collaboration) {
-                    Text("接收物体").tag(false)
-                    Text("画面协作").tag(true)
-                }.pickerStyle(.segmented).disabled(pairingBusy)
-                    .accessibilityIdentifier("library-pairing-purpose")
+            if !TeachingDevice.isPhone || !TeachingSession.supportsLocalTeaching {
+                LibraryPairingPurposePicker(collaboration: $collaboration,
+                    localTeachingAvailable: TeachingSession.supportsLocalTeaching, busy: pairingBusy)
+                    .frame(height: 32)
             }
             Divider().padding(.vertical, 8)
             if TeachingDevice.isPhone {
@@ -517,6 +522,11 @@ struct ContentView: View {
                 Text("\(session.projects.count) 个物体").font(.caption).foregroundStyle(.secondary)
             }
             Divider()
+            if !TeachingSession.supportsLocalTeaching {
+                Label("本机虚拟示教 · 需要 LiDAR", systemImage: "lock.fill")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("local-teaching-locked")
+            }
             if TeachingDevice.isPhone {
                 localProjectContents
             } else {
@@ -530,6 +540,8 @@ struct ContentView: View {
         .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 18))
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.06)))
+        .disabled(!TeachingSession.supportsLocalTeaching)
+        .opacity(TeachingSession.supportsLocalTeaching ? 1 : 0.5)
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-projects-panel")
     }
     private var localProjectContents: some View {
@@ -581,6 +593,34 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
+}
+
+private struct LibraryPairingPurposePicker: UIViewRepresentable {
+    @Binding var collaboration: Bool
+    let localTeachingAvailable: Bool
+    let busy: Bool
+    func makeCoordinator() -> Coordinator { Coordinator(collaboration: $collaboration) }
+    func makeUIView(context: Context) -> UISegmentedControl {
+        let control = UISegmentedControl(items: ["接收物体", "画面协作"])
+        control.accessibilityIdentifier = "library-pairing-purpose"
+        control.accessibilityLabel = "配对用途"
+        control.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .valueChanged)
+        return control
+    }
+    func updateUIView(_ control: UISegmentedControl, context: Context) {
+        context.coordinator.collaboration = $collaboration
+        control.selectedSegmentIndex = collaboration ? 1 : 0
+        control.isEnabled = !busy
+        control.setEnabled(localTeachingAvailable, forSegmentAt: 0)
+    }
+    final class Coordinator: NSObject {
+        var collaboration: Binding<Bool>
+        init(collaboration: Binding<Bool>) { self.collaboration = collaboration }
+        @objc func changed(_ control: UISegmentedControl) {
+            guard control.isEnabled, control.isEnabledForSegment(at: control.selectedSegmentIndex) else { return }
+            collaboration.wrappedValue = control.selectedSegmentIndex == 1
+        }
+    }
 }
 
 private enum LocalProjectSwipeLayout {
