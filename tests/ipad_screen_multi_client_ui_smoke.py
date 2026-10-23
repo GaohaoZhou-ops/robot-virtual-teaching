@@ -59,7 +59,7 @@ def run():
                 assert created.value.status == 201
                 ticket = created.value.json()
                 dialog = page.get_by_role('dialog', name='画面协作', exact=True)
-                expect(dialog.get_by_role('tab', name='数据线')).to_have_count(0)
+                expect(dialog.get_by_role('tab', name='数据线')).to_be_visible()
                 expect(dialog.get_by_alt_text('设备配对二维码')).to_be_visible()
                 assert dialog.get_by_label('协作连接地址').input_value() == BASE
                 page.screenshot(path=str(folder / 'independent-qr.png'))

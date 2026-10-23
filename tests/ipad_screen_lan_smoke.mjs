@@ -71,6 +71,7 @@ const workspace = (ack = 0) => {
 };
 try {
   const info = await api('/info'); assert.equal(info.usbSupported, false); assert.equal(info.wirelessSupported, true);
+  assert.equal(info.usbBridgeSupported, true, 'Windows can use the local USB companion while wireless stays server-side');
   assert.deepEqual((await api('/devices')).devices, []);
   await api('/session', { method: 'POST', body: { deviceId: 'usb-device' }, status: 503 });
   await api('/session', { method: 'POST', body: null, status: 400 });

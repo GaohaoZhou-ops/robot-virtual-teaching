@@ -109,7 +109,7 @@ def run():
         dialog = page.get_by_role('dialog', name='画面协作', exact=True)
         expect(dialog).to_be_visible()
         if wireless:
-            expect(dialog.get_by_role('tab', name='数据线', exact=True)).to_have_count(0)
+            expect(dialog.get_by_role('tab', name='数据线', exact=True)).to_be_visible()
             ticket = created.value.json()
             expect(dialog.get_by_alt_text('设备配对二维码')).to_be_visible()
             expect(dialog.get_by_role('button', name='重新生成二维码', exact=True)).to_be_enabled()
