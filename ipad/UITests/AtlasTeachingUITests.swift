@@ -72,6 +72,38 @@ final class AtlasTeachingUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
     }
 
+    func testLiveScreenRealtimeUSB() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_REALTIME_LIVE"] == "1" else {
+            throw XCTSkip("Run with the Mac/iPad realtime USB benchmark")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        print("ATLAS_SCREEN_REALTIME_WAITING")
+        let stop = app.buttons["screen-collaboration-stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 180))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
+        let viewport = app.otherElements["screen-viewport-gestures"]
+        XCTAssertTrue(viewport.waitForExistence(timeout: 30))
+        XCTAssertTrue(viewport.isHittable)
+        for index in 0..<6 {
+            let start = viewport.coordinate(withNormalizedOffset: CGVector(dx: index % 2 == 0 ? 0.3 : 0.7, dy: 0.4))
+            let end = viewport.coordinate(withNormalizedOffset: CGVector(dx: index % 2 == 0 ? 0.7 : 0.3, dy: 0.6))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.05)
+        }
+        viewport.pinch(withScale: 1.5, velocity: 1)
+        viewport.pinch(withScale: 0.8, velocity: -1)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Mac USB realtime 3D viewport"; shot.lifetime = .keepAlways; add(shot)
+        app.segmentedControls["screen-page-tabs"].buttons["相机画面"].tap()
+        let left = app.descendants(matching: .any)["screen-camera-left"].firstMatch
+        XCTAssertTrue(left.waitForExistence(timeout: 10))
+        left.tap(); left.tap()
+        app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
+        XCTAssertTrue(viewport.waitForExistence(timeout: 10))
+        stop.tap(); XCTAssertTrue(stop.waitForNonExistence(timeout: 10))
+    }
+
     func testLiveScreenViewportGestures() throws {
         guard ProcessInfo.processInfo.environment["ATLAS_SCREEN_VIEWPORT_LIVE"] == "1" else {
             throw XCTSkip("Run with the desktop viewport gesture fixture")

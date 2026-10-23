@@ -38,6 +38,8 @@ node_modules/
 # helper bundle, extracted package checks, browser captures and native test results.
 # Adjustable joint-limit checks use build/robot-soft-limits/ for menu captures,
 # collaboration credentials and simulated device command/state files.
+# Mac/iPad realtime checks use build/ipad-realtime-*/ and ipad/build/realtime-testing/;
+# performance samples, device/signing settings, captures and Python environments stay local.
 dist/
 build/
 out/
@@ -216,6 +218,15 @@ playwright/.auth/
 /tests/atlas-screen-*.bin
 /ipad/atlas-screen-*.bin
 /ipad/atlas-screen-*.png
+# Standalone copies or ATLAS_SCREEN_OUTPUT overrides for Mac/iPad realtime checks.
+# Include packed captures/profiles and local test environments, scoped to output roots.
+# Keep src/ modules, maintained ipad_screen_* tests and nested fixtures trackable.
+/ipad-realtime-*/
+/tests/ipad-realtime-*/
+/ipad/ipad-realtime-*/
+/ipad-realtime-*.[zZ][iI][pP]
+/tests/ipad-realtime-*.[zZ][iI][pP]
+/ipad/ipad-realtime-*.[zZ][iI][pP]
 # Standalone copies of pose/viewport validation output and their ZIP archives.
 # Match only repository-root exports; source modules and nested fixtures stay visible.
 /screen-capture-validation/

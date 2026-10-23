@@ -117,7 +117,9 @@ final class ScreenCollaboration: ObservableObject {
     private var pendingViewport: [ScreenViewportCommand] = []
     private var viewportSequence = 0
     private var viewportSentSequence = 0
-    @Published var page = "cameras"
+    @Published var page = "cameras" {
+        didSet { if page != oldValue { publishUSBControls() } }
+    }
     @Published private(set) var connecting = false
     @Published private(set) var connectionError = ""
     @Published private(set) var connectionKind = "USB"
@@ -127,6 +129,12 @@ final class ScreenCollaboration: ObservableObject {
     private var networkGeneration = UUID()
     private var listener: NWListener?
     private var connections: [UUID: NWConnection] = [:]
+    private var connectionActivity: [UUID: Date] = [:]
+    private var usbControls: NWConnection?
+    private var usbControlsID: UUID?
+    private var usbControlsBusy = false
+    private var usbControlsDirty = false
+    private var usbControlsScheduled = false
     private var token = ""
     private var lastFrame = Date.distantPast
     private var lastContact = Date.distantPast
@@ -171,6 +179,7 @@ final class ScreenCollaboration: ObservableObject {
         } else {
             pendingViewport.append(ScreenViewportCommand(sequence: viewportSequence, kind: kind, dx: dx, dy: dy, zoom: zoom, created: Date()))
         }
+        publishUSBControls()
     }
 
     func recordPose() {
@@ -185,6 +194,7 @@ final class ScreenCollaboration: ObservableObject {
         guard !awaitingControl else { captureNotice = "关节正在同步，请稍候再记录姿态。"; return }
         captureAccepted = false; captureMessage = "正在记录姿态…"; captureNotice = nil
         pendingCapture = ScreenPoseCaptureRequest(robotId: state.robotId, taskId: capture.taskId, parkingPointId: capture.parkingPointId)
+        publishUSBControls()
     }
 
     func jointValue(_ joint: ScreenJoint) -> Double { pending[joint.name]?.value ?? joint.value }
@@ -195,6 +205,7 @@ final class ScreenCollaboration: ObservableObject {
         guard abs(jointValue(joint) - value) > 1e-8 else { return }
         sequence += 1; controlMessage = ""
         pending[joint.name] = ScreenJointCommand(sequence: sequence, name: joint.name, value: value, created: Date())
+        publishUSBControls()
     }
 
     private func expireCommands() {
@@ -228,6 +239,32 @@ final class ScreenCollaboration: ObservableObject {
         return status
     }
 
+    // Coalesce only unsent input, independently of JPEG acknowledgements. There
+    // is never more than one network send and one pending latest status.
+    private func publishUSBControls() {
+        guard active, let connection = usbControls else { return }
+        usbControlsDirty = true
+        guard !usbControlsBusy, !usbControlsScheduled else { return }
+        usbControlsScheduled = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.008) { [weak self, weak connection] in
+            guard let self, let connection, self.usbControls === connection else { return }
+            self.usbControlsScheduled = false
+            guard self.active, !self.usbControlsBusy else { return }
+            guard var bytes = try? JSONSerialization.data(withJSONObject: self.collaborationStatus()), bytes.count <= 65535 else { return }
+            bytes.append(10)
+            self.usbControlsDirty = false
+            self.usbControlsBusy = true
+            connection.send(content: bytes, completion: .contentProcessed { [weak self, weak connection] error in
+                MainActor.assumeIsolated {
+                    guard let self, let connection, self.usbControls === connection else { return }
+                    self.usbControlsBusy = false
+                    if error != nil { connection.cancel() }
+                    else if self.usbControlsDirty { self.publishUSBControls() }
+                }
+            })
+        }
+    }
+
     func connect(address: String, code: String, deviceID: String, qr: PairingQRCode? = nil) async {
         guard !active, !connecting else { return }
         connecting = true; connectionError = ""; lastContact = Date()
@@ -251,7 +288,7 @@ final class ScreenCollaboration: ObservableObject {
                             3: ("PUT", "/workspace"), 4: ("PUT", "/heartbeat"), 5: ("DELETE", "/session")]
                         guard let (method, path) = actions[data[0]] else { throw TeachingError("电脑协作请求无效") }
                         var reply: [String: Any] = [:]
-                        self.process(method: method, path: path, authorization: "Bearer \(paired.deviceToken)", body: Data(data.dropFirst(5))) {
+                        await self.process(method: method, path: path, authorization: "Bearer \(paired.deviceToken)", body: Data(data.dropFirst(5))) {
                             reply = ["requestId": id, "status": $0, "body": $1]
                         }
                         guard self.networkSocket === socket else { return }
@@ -287,12 +324,19 @@ final class ScreenCollaboration: ObservableObject {
         server.start(queue: .main)
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.active || self.connecting else { return }
-                let stale = self.left == nil || Date().timeIntervalSince(self.lastFrame) > 2.5
+                guard let self else { return }
+                for (id, lastActivity) in self.connectionActivity where id != self.usbControlsID && Date().timeIntervalSince(lastActivity) > 8 {
+                    self.connections[id]?.cancel()
+                }
+                guard self.active || self.connecting else { return }
+                let stale = self.page == "joints"
+                    ? self.viewport == nil || Date().timeIntervalSince(self.lastWorkspace) > 2.5
+                    : self.left == nil || Date().timeIntervalSince(self.lastFrame) > 2.5
                 if self.stale != stale { self.stale = stale }
                 let controlsStale = Date().timeIntervalSince(self.lastWorkspace) > 2.5
                 if self.controlsStale != controlsStale { self.controlsStale = controlsStale }
                 self.expireCommands()
+                self.publishUSBControls()
                 if Date().timeIntervalSince(self.lastContact) > 10 {
                     let wireless = self.connecting || self.connectionKind == "Wi-Fi"
                     self.finish()
@@ -316,6 +360,8 @@ final class ScreenCollaboration: ObservableObject {
         connecting = false; connectionError = ""; connectionKind = "USB"
         if active { UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled }
         active = false; stale = true; token = ""; left = nil; right = nil
+        usbControls?.cancel(); usbControls = nil; usbControlsID = nil
+        usbControlsBusy = false; usbControlsDirty = false; usbControlsScheduled = false
         workspace = nil; viewport = nil; pending = [:]; sequence = 0; viewportFrames = 0
         pendingCapture = nil; captureAccepted = false; captureMessage = ""; captureNotice = nil
         pendingViewport = []; viewportSequence = 0; viewportSentSequence = 0
@@ -326,11 +372,23 @@ final class ScreenCollaboration: ObservableObject {
     private func accept(_ connection: NWConnection) {
         guard connections.count < 4 else { connection.cancel(); return }
         let id = UUID(); connections[id] = connection
-        connection.start(queue: .main)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self, weak connection] in
-            guard let self, let connection, self.connections[id] === connection else { return }
-            self.connections.removeValue(forKey: id); connection.cancel()
+        connectionActivity[id] = Date()
+        connection.stateUpdateHandler = { [weak self, weak connection] state in
+            MainActor.assumeIsolated {
+                guard let self, let connection else { return }
+                switch state {
+                case .failed, .cancelled:
+                    self.connections.removeValue(forKey: id); self.connectionActivity.removeValue(forKey: id)
+                    if self.usbControls === connection {
+                        self.usbControls = nil; self.usbControlsID = nil
+                        self.usbControlsBusy = false; self.usbControlsDirty = false; self.usbControlsScheduled = false
+                    }
+                    connection.cancel()
+                default: break
+                }
+            }
         }
+        connection.start(queue: .main)
         receive(connection, id: id, buffer: Data())
     }
 
@@ -338,6 +396,7 @@ final class ScreenCollaboration: ObservableObject {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, complete, error in
             MainActor.assumeIsolated {
                 guard let self, self.connections[id] != nil else { return }
+                self.connectionActivity[id] = Date()
                 var bytes = buffer
                 if let data { bytes.append(data) }
                 guard bytes.count <= 2 * 1024 * 1024 + 8192 else {
@@ -362,7 +421,8 @@ final class ScreenCollaboration: ObservableObject {
                     if bytes.count >= end.upperBound + length {
                         self.handle(connection, id: id, method: String(parts[0]), path: String(parts[1]),
                                     authorization: headers["authorization"] ?? "",
-                                    body: bytes.subdata(in: end.upperBound..<(end.upperBound + length)))
+                                    body: bytes.subdata(in: end.upperBound..<(end.upperBound + length)),
+                                    keepAlive: headers["connection"]?.lowercased() == "keep-alive")
                         return
                     }
                 } else if bytes.count > 8192 {
@@ -374,17 +434,37 @@ final class ScreenCollaboration: ObservableObject {
         }
     }
 
-    private func handle(_ connection: NWConnection, id: UUID, method: String, path: String, authorization: String, body: Data) {
-        process(method: method, path: path, authorization: authorization, body: body) { status, value in
-            reply(connection, id: id, status: status, value: value)
+    private func handle(_ connection: NWConnection, id: UUID, method: String, path: String, authorization: String, body: Data, keepAlive: Bool) {
+        if method == "GET", path == "/events" {
+            guard active, connectionKind == "USB", authorization == "Bearer \(token)", body.isEmpty, usbControls == nil else {
+                reply(connection, id: id, status: 409, value: ["error": "USB 控制连接不可用"]); return
+            }
+            usbControls = connection; usbControlsID = id; usbControlsBusy = true
+            let header = Data("HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".utf8)
+            connection.send(content: header, completion: .contentProcessed { [weak self, weak connection] error in
+                MainActor.assumeIsolated {
+                    guard let self, let connection, self.usbControls === connection else { return }
+                    self.usbControlsBusy = false
+                    if error != nil { connection.cancel() } else { self.publishUSBControls() }
+                }
+            })
+            // Observe EOF even when no controls are being sent.
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, _, _ in connection.cancel() }
+            return
+        }
+        Task {
+            await process(method: method, path: path, authorization: authorization, body: body) { status, value in
+                reply(connection, id: id, status: status, value: value, keepAlive: keepAlive && method != "DELETE")
+            }
         }
     }
 
-    private func process(method: String, path: String, authorization: String, body: Data, response: (Int, [String: Any]) -> Void) {
+    private func process(method: String, path: String, authorization: String, body: Data, response: (Int, [String: Any]) -> Void) async {
         func respond(_ status: Int = 200, _ value: [String: Any]) { response(status, value) }
         if method == "GET", path == "/status" {
             respond(200, ["protocol": screenProtocol, "deviceName": UIDevice.current.name, "active": active,
                      "stale": stale, "receivedFrames": receivedFrames, "keepalive": true, "jointControl": true,
+                     "realtimeUSB": UIDevice.current.userInterfaceIdiom == .pad,
                      "controlPage": page, "connectionKind": connectionKind, "jointCount": workspace?.joints.count ?? 0, "viewportFrames": viewportFrames,
                      "jointValues": Dictionary(uniqueKeysWithValues: (workspace?.joints ?? []).map { ($0.name, $0.value) }),
                      "controlAck": workspace?.ack ?? 0, "pendingControls": pending.count,
@@ -425,11 +505,12 @@ final class ScreenCollaboration: ObservableObject {
             var image: UIImage?, imageData: Data?
             if imageSize > 0 {
                 let data = body.subdata(in: (8 + stateSize)..<body.count)
-                guard let decoded = data == viewportData ? viewport : decodeImage(data) else {
+                guard let decoded = data == viewportData ? viewport : await decodeImage(data) else {
                     respond(400, ["error": "三维画面无效"]); return
                 }
                 image = decoded; imageData = data
             }
+            guard active, authorization == "Bearer \(token)" else { respond(410, ["error": "设备已结束画面协作"]); return }
             if !pending.isEmpty {
                 if workspace?.robotId != state.robotId || !state.editable { pending = [:] }
                 else if pending.values.contains(where: { $0.sequence <= state.ack }) { pending = pending.filter { $0.value.sequence > state.ack } }
@@ -449,7 +530,9 @@ final class ScreenCollaboration: ObservableObject {
             if let image {
                 if imageData != viewportData { viewport = image; viewportData = imageData }
                 viewportFrames += 1
+                if page == "joints", stale { stale = false }
             }
+            if !pendingViewport.isEmpty || !pending.isEmpty { publishUSBControls() }
             respond(200, collaborationStatus()); return
         }
         guard method == "PUT", path == "/frame", body.count >= 16 else { respond(400, ["error": "画面请求无效"]); return }
@@ -459,10 +542,11 @@ final class ScreenCollaboration: ObservableObject {
             respond(400, ["error": "双臂画面不完整"]); return
         }
         let nextLeft = body.subdata(in: 8..<(8 + leftSize)), nextRight = body.subdata(in: (8 + leftSize)..<body.count)
-        guard let leftImage = nextLeft == leftData ? left : decodeImage(nextLeft),
-              let rightImage = nextRight == rightData ? right : decodeImage(nextRight) else {
+        guard let leftImage = nextLeft == leftData ? left : await decodeImage(nextLeft),
+              let rightImage = nextRight == rightData ? right : await decodeImage(nextRight) else {
             respond(400, ["error": "双臂画面不完整"]); return
         }
+        guard active, authorization == "Bearer \(token)" else { respond(410, ["error": "设备已结束画面协作"]); return }
         if nextLeft != leftData { left = leftImage; leftData = nextLeft }
         if nextRight != rightData { right = rightImage; rightData = nextRight }
         lastFrame = Date(); lastContact = lastFrame; if stale { stale = false }; receivedFrames += 1
@@ -470,21 +554,32 @@ final class ScreenCollaboration: ObservableObject {
         respond(200, result)
     }
 
-    private func decodeImage(_ data: Data) -> UIImage? {
-        guard data.starts(with: [0xff, 0xd8]), let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-              let width = properties[kCGImagePropertyPixelWidth] as? Int,
-              let height = properties[kCGImagePropertyPixelHeight] as? Int,
-              width > 0, height > 0, width <= 1920, height <= 1200 else { return nil }
-        return UIImage(data: data)
+    private func decodeImage(_ data: Data) async -> UIImage? {
+        await Task.detached(priority: .userInitiated) {
+            autoreleasepool {
+                guard data.starts(with: [0xff, 0xd8]), let source = CGImageSourceCreateWithData(data as CFData, nil),
+                      let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                      let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                      let height = properties[kCGImagePropertyPixelHeight] as? Int,
+                      width > 0, height > 0, width <= 1920, height <= 1200,
+                      let image = UIImage(data: data) else { return nil as UIImage? }
+                return image.preparingForDisplay()
+            }
+        }.value
     }
 
-    private func reply(_ connection: NWConnection, id: UUID, status: Int, value: [String: Any]) {
+    private func reply(_ connection: NWConnection, id: UUID, status: Int, value: [String: Any], keepAlive: Bool = false) {
         let body = (try? JSONSerialization.data(withJSONObject: value)) ?? Data("{}".utf8)
-        var bytes = Data("HTTP/1.1 \(status) Response\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\nContent-Length: \(body.count)\r\n\r\n".utf8)
+        var bytes = Data("HTTP/1.1 \(status) Response\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: \(keepAlive ? "keep-alive" : "close")\r\nContent-Length: \(body.count)\r\n\r\n".utf8)
         bytes.append(body)
-        connection.send(content: bytes, completion: .contentProcessed { [weak self] _ in
-            MainActor.assumeIsolated { self?.connections.removeValue(forKey: id); connection.cancel() }
+        connection.send(content: bytes, completion: .contentProcessed { [weak self] error in
+            MainActor.assumeIsolated {
+                guard let self else { connection.cancel(); return }
+                if keepAlive, error == nil, self.connections[id] != nil {
+                    self.connectionActivity[id] = Date()
+                    self.receive(connection, id: id, buffer: Data())
+                } else { connection.cancel() }
+            }
         })
     }
 }
