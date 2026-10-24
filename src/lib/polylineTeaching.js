@@ -121,6 +121,7 @@ export function samplePolylinePlan(plan, elapsedMs) {
   const state = samplePolylineState(segment.samples, progress);
   return { ...state, ...(state.base ? { basePose: polylineBasePose(plan.baseReference, state.base) } : {}),
     phase: segment.phase || (segment.index < 0 ? 'approach' : 'drawing'), segmentIndex: segment.index,
+    segmentProgress: progress * (segment.endFraction ?? 1),
     drawing: segment.index >= 0, done: elapsed >= plan.durationMs,
     target: new Vector3().fromArray(segment.from).lerp(new Vector3().fromArray(segment.to), progress).toArray() };
 }

@@ -44,7 +44,7 @@ node_modules/
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
 # browser/native captures, readiness markers, device reports and deployment logs.
 # The persistent web service uses build/service/; surface-polyline browser
-# captures (including sidebar, partial-path and orientation checks) use
+# captures (including sidebar, partial-path, orientation, suggestion and progress checks) use
 # test-artifacts/polyline-*/.
 dist/
 build/
@@ -222,6 +222,14 @@ playwright/.auth/
 /tests/polyline-*.[wW][eE][bB][mM]
 /polyline-*.[mM][pP]4
 /tests/polyline-*.[mM][pP]4
+# Standalone diagnostics may contain full candidate poses and execution traces.
+# Keep these named output copies local without hiding authored JSON or fixtures.
+/polyline-*-state.json
+/tests/polyline-*-state.json
+/polyline-*-trace.json
+/tests/polyline-*-trace.json
+/polyline-*-profile.json
+/tests/polyline-*-profile.json
 # USB / Wi-Fi collaboration diagnostics copied from /tmp or build/.
 # Keep reports, frame captures, review bundles and local environments scoped
 # to output locations so source files and nested regression fixtures stay visible.

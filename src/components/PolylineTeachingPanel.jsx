@@ -8,6 +8,7 @@ import { Check, MousePointer2, Pause, Play, Plus, RotateCcw, Save, Square, Trash
 import { getRobotEndEffector, readRobotJointValues } from '../lib/robotLoader.js';
 import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_BASE_DEFAULTS, POLYLINE_MAX_POINTS, polylineVertices, samplePolylinePlan, readPolylineTcp, polylineBasePose, isPolylinePlanExecutable } from '../lib/polylineTeaching.js';
 import { planPolylineInWorker } from '../lib/polylineTeachingWorker.js';
+import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, writePolylinePreview } from '../lib/polylineTeachingPreview.js';
 import { VIEWPORT_DRAG_THRESHOLD } from '../lib/viewportNavigation.js';
 import './PolylineTeachingPanel.css';
 
@@ -54,7 +55,7 @@ function PolylineNumberInput({ value, onCommit, min, max, ...props }) {
     }} />;
 }
 
-export default function PolylineTeachingPanel({ open, active, container, getContext, savedPaths, onSave, onDelete, onClose, onBusyChange, sceneRevision, openRequest, onRequestHandled }) {
+export default function PolylineTeachingPanel({ open, active, container, getContext, savedPaths, onSave, onDelete, onClose, onBusyChange, sceneRevision, openRequest, onRequestHandled, onSuggestionChange, showRobot }) {
   const [path, setPath] = useState(fresh);
   const [selected, setSelected] = useState(-1);
   const [operation, setOperation] = useState('append');
@@ -66,15 +67,18 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const [progress, setProgress] = useState(null);
   const [history, setHistory] = useState([]);
   const [previewVisible, setPreviewVisible] = useState(true);
+  const [suggestionVisible, setSuggestionVisible] = useState(true);
   const live = useRef({});
   live.current = { path, plan, status, selected, operation, getContext, open, active };
   const abortRef = useRef(null), runtimeRef = useRef(null), animationRef = useRef(null), snapshotRef = useRef(null);
   const savingRef = useRef(false);
   const autoPlayRef = useRef(false), handledOpenRequestRef = useRef(null);
   const overlayRef = useRef(null), traceRef = useRef(null), traceCountRef = useRef(0), expectedRef = useRef(null);
+  const previewRef = useRef(null), executedRef = useRef(null);
   const busy = busyStatuses.includes(status);
   const warnings = plan?.warnings || [];
   const executable = isPolylinePlanExecutable(plan);
+  const previewPlan = plan || executedRef.current?.plan;
   const toolZ = path.tcpOffset?.[2] || 0;
   const toolDirection = Math.sign(toolZ) || (path.toolAxisDirection === 1 ? 1 : -1);
   const baseOptions = { ...POLYLINE_BASE_DEFAULTS, ...path.base };
@@ -84,6 +88,8 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
 
   const clearTrace = () => {
+    executedRef.current = null;
+    previewRef.current?.update();
     traceCountRef.current = 0;
     traceRef.current?.geometry.setDrawRange(0, 0);
     setTravel({ tool: 0, base: 0 });
@@ -95,7 +101,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     setStatus('editing'); setPlan(null); setProgress(null); setMessage(text);
   };
   useEffect(() => {
-    if (!open || !active) cancel(pickingHint);
+    if (!open || !active) { cancel(pickingHint); clearTrace(); }
     return () => { abortRef.current?.abort(); cancelAnimationFrame(animationRef.current); };
   }, [open, active]);
 
@@ -120,43 +126,59 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     && sameJoints(state?.joints, readRobotJointValues(context.robot))
     && state?.matrix?.every((value, i) => Math.abs(value - context.robot.parent.matrixWorld.elements[i]) < 1e-8);
 
+  useEffect(() => {
+    onSuggestionChange?.(open && active && suggestionVisible ? plan?.suggestion || null : null);
+    return () => onSuggestionChange?.(null);
+  }, [open, active, suggestionVisible, plan?.suggestion, onSuggestionChange]);
+
+  useEffect(() => {
+    if (!open || !active || !plan?.suggestion) return undefined;
+    let frame;
+    const validate = () => {
+      if (!contextMatches(live.current.getContext())) { cancel('机器人或约束已改变，参考虚影已清除，请重新检查路径。'); return; }
+      frame = requestAnimationFrame(validate);
+    };
+    frame = requestAnimationFrame(validate);
+    return () => cancelAnimationFrame(frame);
+  }, [open, active, plan?.suggestion]);
+
   // The selected points describe the virtual TCP path. Tool offsets affect
   // the tool origin, not these world-space points. Closing the editor hides
   // the preview while preserving the points and visibility preference.
   useEffect(() => {
     const { scene, canvas } = getContext();
     if (!scene || !canvas) return undefined;
-    const vertices = polylineVertices(path), positions = [], colors = [];
-    const warningSegments = new Set((plan?.warnings || []).map((warning) => warning.segmentIndex));
-    const addPreview = (from, to, colorValue) => {
-      if (from.distanceToSquared(to) < 1e-12) return;
-      positions.push(...from.toArray(), ...to.toArray());
-      const color = new THREE.Color(colorValue);
-      colors.push(...color.toArray(), ...color.toArray());
-    };
-    if (open && active && previewVisible) vertices.slice(1).forEach((to, index) => {
-      const from = vertices[index];
-      if (plan?.partial) {
-        if (index === plan.stoppedAt.segmentIndex) {
-          const end = new THREE.Vector3().fromArray(plan.stoppedAt.position);
-          addPreview(from, end, 0x72dfb6); addPreview(end, to, 0xff796b);
-        } else addPreview(from, to, index < plan.stoppedAt.segmentIndex ? 0x72dfb6 : 0xff796b);
-      } else addPreview(from, to, plan?.issue?.segmentIndex === index ? 0xff796b : warningSegments.has(index) ? 0xf0a555 : 0x50dce6);
-    });
     let preview;
-    if (positions.length) {
-      preview = new LineSegments2(new LineSegmentsGeometry().setPositions(positions).setColors(colors),
+    if (open && active && previewVisible && path.points.length > 1) {
+      const capacity = path.points.length * 3 * 6;
+      preview = new LineSegments2(new LineSegmentsGeometry().setPositions(new Float32Array(capacity)).setColors(new Float32Array(capacity)),
         new LineMaterial({ color: 0xffffff, vertexColors: true, linewidth: 3, depthTest: false, depthWrite: false }));
       preview.name = 'polyline-tcp-preview';
-      preview.renderOrder = 50;
+      preview.geometry.attributes.instanceStart.data.setUsage(THREE.DynamicDrawUsage);
+      preview.geometry.attributes.instanceColorStart.data.setUsage(THREE.DynamicDrawUsage);
+      preview.renderOrder = 50; preview.frustumCulled = false;
       scene.add(preview);
     }
-    canvas.dataset.polylinePreviewVisible = String(Boolean(preview));
-    canvas.dataset.polylinePreviewSegments = String(positions.length / 6);
+    const update = () => {
+      const execution = executedRef.current;
+      const parts = preview ? polylinePreviewParts(path, plan || execution?.plan, execution?.sample) : [];
+      if (preview) writePolylinePreview(preview.geometry, parts);
+      canvas.dataset.polylinePreviewVisible = String(parts.length > 0);
+      canvas.dataset.polylinePreviewSegments = String(parts.length);
+      canvas.dataset.polylineCompletedMm = String(parts.filter((part) => part.completed).reduce((sum, part) => sum + part.length * 1000, 0));
+      canvas.dataset.polylineRemainingMm = String(parts.filter((part) => !part.completed).reduce((sum, part) => sum + part.length * 1000, 0));
+      canvas.dataset.polylinePreviewColors = JSON.stringify([...new Set(parts.map((part) => part.color.toString(16)))]);
+    };
+    const current = { update };
+    previewRef.current = current; update();
     return () => {
+      if (previewRef.current === current) previewRef.current = null;
       disposeLayer(preview);
       delete canvas.dataset.polylinePreviewVisible;
       delete canvas.dataset.polylinePreviewSegments;
+      delete canvas.dataset.polylineCompletedMm;
+      delete canvas.dataset.polylineRemainingMm;
+      delete canvas.dataset.polylinePreviewColors;
     };
   }, [path.points, path.closed, previewVisible, plan, open, active, sceneRevision]);
 
@@ -262,7 +284,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     listeners.forEach(([name, listener]) => eventRoot.addEventListener(name, listener, true));
     window.addEventListener('keydown', key, true);
     canvas.classList.add('is-polyline-picking');
-    const trace = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xf4c95d, depthTest: false, transparent: true, opacity: 0.95 }));
+    const trace = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: POLYLINE_EXECUTED_COLOR, depthTest: false, transparent: true, opacity: 0.95 }));
     trace.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(300000), 3));
     trace.geometry.setDrawRange(0, 0); trace.frustumCulled = false; trace.renderOrder = 52;
     scene.add(trace); traceRef.current = trace; traceCountRef.current = 0;
@@ -355,13 +377,16 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     // The recorded orientation describes the previous check, not a constraint
     // on a new plan after the user has adjusted the robot's posture.
     const withOrientation = { ...action, quaternion: controller.frame.getWorldQuaternion(new THREE.Quaternion()).toArray() };
-    setPath(withOrientation); setStatus('checking'); setPlan(null); clearTrace(); setProgress(null); setElapsed(0);
+    setPath(withOrientation); setStatus('checking'); setPlan(null); setSuggestionVisible(true); clearTrace(); setProgress(null); setElapsed(0);
     setMessage(action.base.search ? '正在搜索底盘位置，并检查预定位与完整折线路径。' : '检查到起点的移动、各条线段以及插值中的姿态。');
     snapshotRef.current = { key: contextKey(context) }; expectedRef.current = robotState(context);
     const controllerAbort = new AbortController(); abortRef.current = controllerAbort;
     try {
       const result = await planPolylineInWorker({ robot: context.robot, geometry: context.geometry, path: withOrientation,
-        lockedJointNames: context.lockedJointNames, signal: controllerAbort.signal, onProgress: setProgress });
+        lockedJointNames: context.lockedJointNames, signal: controllerAbort.signal, onProgress: (value) => {
+          setProgress(value);
+          if (value.phase === 'suggestion') setMessage('到起点的连续逆解失败，正在寻找可行参考姿态…');
+        } });
       if (controllerAbort.signal.aborted) return;
       if (!contextMatches(getContext())) { cancel('机器人或约束已改变，请重新检查。'); return; }
       const canExecute = isPolylinePlanExecutable(result);
@@ -369,10 +394,19 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       setPlan(result); setStatus(canExecute ? 'ready' : 'failed');
       setMessage(result.partial ? `最大保障：可执行 ${partialSummary(result)}，将在已检查部分的终点停止。`
         : result.complete ? `${result.warnings?.length ? `检查通过 · ${result.warnings.length} 项表面警告，可执行划线` : '检查通过'} · 最大采样误差 ${(result.maximumError * 1000).toFixed(2)} mm · ${result.checks} 次姿态检查`
-        : `${checkLocation(result.issue, withOrientation.points.length)}：${result.issue.message}`);
+        : `${checkLocation(result.issue, withOrientation.points.length)}：${result.issue.message}${result.suggestionSearch && !result.suggestion
+          ? '。在当前搜索范围内未找到通过完整路线验证的参考姿态。' : ''}`);
     } catch (error) {
       if (error.name !== 'AbortError') { setStatus('failed'); setMessage(error.message); }
     } finally { if (abortRef.current === controllerAbort) abortRef.current = null; }
+  };
+  const adoptSuggestion = () => {
+    const context = getContext(), suggestion = live.current.plan?.suggestion;
+    if (!suggestion || busyStatuses.includes(live.current.status)) return;
+    if (!contextMatches(context)) { cancel('机器人或约束已改变，请重新检查路径。'); return; }
+    // Explicit virtual repositioning, not playback of an unverified transit.
+    context.applyState({ joints: suggestion.joints, basePose: suggestion.basePose });
+    check();
   };
   const play = () => {
     const current = live.current, context = getContext();
@@ -390,6 +424,8 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       runtime.last = timestamp;
       const sample = samplePolylinePlan(runtime.plan, runtime.elapsed);
       now.applyState(sample); expectedRef.current = robotState(now);
+      executedRef.current = { plan: runtime.plan, sample };
+      previewRef.current?.update();
       const actual = readPolylineTcp(now.robot, live.current.path);
       const basePosition = now.robot.parent.getWorldPosition(new THREE.Vector3());
       runtime.toolTravel += actual.distanceTo(runtime.previousTool);
@@ -465,6 +501,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   return createPortal(<section className="polyline-teaching" data-layout="sidebar"
     aria-label="表面折线示教" data-path-id={path.id} data-status={status} data-point-count={path.points.length} data-undo-count={history.length} data-warning-count={warnings.length}
     data-plan-partial={Boolean(plan?.partial)} data-plan-executable={executable} data-planned-distance={plan?.distance || 0}
+    data-suggestion-found={Boolean(plan?.suggestion)}
     data-planned-end={plan?.stoppedAt ? JSON.stringify(plan.stoppedAt.position) : ''}
     data-elapsed-ms={elapsed} data-duration-ms={plan?.durationMs || 0} data-tool-travel-mm={travel.tool * 1000} data-base-travel-mm={travel.base * 1000}>
     <header>
@@ -479,6 +516,18 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
           <i aria-hidden="true" />显示笔尖路径预览</label>
         <span>{path.points.length < 2 ? '至少选择 2 点' : previewVisible ? '已显示' : '已隐藏'}</span>
       </div>
+      {plan?.suggestion && <div className="polyline-teaching__suggestion" role="note" aria-label="可行起始姿态建议">
+        <strong>找到可行起始姿态</strong>
+        <span>{plan.suggestion.movedBase
+          ? `建议底盘平移 ${Math.hypot(plan.suggestion.baseDelta.x, plan.suggestion.baseDelta.y).toFixed(3)} m · 转向 ${plan.suggestion.baseDelta.yaw.toFixed(1)}°`
+          : '底盘位置保持不变'}</span>
+        {plan.suggestion.orientationChange > .5 && <span>工具朝向调整 {plan.suggestion.orientationChange.toFixed(1)}°</span>}
+        <small>已验证从 P0 起的完整路线；到虚影位置的移动未规划。</small>
+        <label><input type="checkbox" checked={suggestionVisible} onChange={(event) => setSuggestionVisible(event.target.checked)} />显示参考虚影</label>
+        {!showRobot && <small>请在顶部显示设置中开启机器人模型以查看虚影。</small>}
+        <div><button type="button" disabled={!suggestionVisible || !showRobot} onClick={() => getContext().focusSuggestion?.()}>定位虚影</button>
+          <button type="button" onClick={adoptSuggestion} title="直接设置虚拟机器人的位置与关节姿态，然后重新检查；不会播放到虚影的移动">采用虚影并重新检查</button></div>
+      </div>}
       {warnings.length > 0 && <details className="polyline-teaching__warnings" open><summary>表面警告 · {warnings.length} 项</summary>
         <p>表面警告不阻止虚拟划线，检查通过后可直接执行。</p>
         <ul aria-label="表面警告列表">{warnings.map((warning) => <li key={`${warning.phase}:${warning.segmentIndex}:${warning.code}`}>
@@ -530,7 +579,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         <span>可划线 {partialSummary(plan)}</span>
         <span>停止位置：P{plan.stoppedAt.segmentIndex} → P{(plan.stoppedAt.segmentIndex + 1) % path.points.length} 的 {(plan.stoppedAt.progress * 100).toFixed(1)}%</span>
         <small>停止原因：{plan.issue.message}</small>
-        <small>绿色为可执行部分，红色为未执行部分；不会跳过失败区间。</small>
+        <small>绿色为待执行的可达部分，红色为不可执行部分，橘黄色为已执行部分。</small>
       </div>}
       {selectedBasePose && <div className="polyline-teaching__base-result" aria-label="底盘搜索结果">
         <strong>已选底盘起始位置</strong>
@@ -559,7 +608,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         onChange={(event) => edit({ ...path, closed: event.target.checked })} />闭合折线</label><button type="button" disabled={busy || !history.length} onClick={() => {
           const previous = history.at(-1); setHistory(history.slice(0, -1)); setPath(previous); setSelected(-1); setPlan(null); setStatus('editing'); clearTrace();
         }}><RotateCcw size={12} />撤销</button><button type="button" disabled={busy} onClick={() => { edit(fresh(), -1); setOperation('append'); }}>新建</button></div>
-      <p className="polyline-teaching__hint">严格直线连接 · 拐角停顿 · {plan?.partial ? '绿色为可执行部分，红色为未执行部分，金色为实际轨迹。' : '青色为目标，橙色为表面警告，金色为实际轨迹。'}{baseMoving && '紫色为底盘计划路径，箭头表示搜索选中的起始朝向。'}</p>
+      <p className="polyline-teaching__hint">严格直线连接 · 拐角停顿 · 橘黄色为已执行部分；{previewPlan?.partial ? '绿色为待执行的可达部分，红色为不可执行部分。' : '未执行部分保持原色：青色为目标，橙色为表面警告。'}{baseMoving && '紫色为底盘计划路径，箭头表示搜索选中的起始朝向。'}</p>
       <details className="polyline-teaching__library"><summary>已保存折线 <b>{savedPaths.length}</b></summary>
         {savedPaths.length ? savedPaths.map(({ taskId, taskName, path: saved }) => <div key={`${taskId}:${saved.id}`}>
           <button type="button" disabled={busy} onClick={() => { edit(structuredClone(saved), -1); setOperation('append'); setMessage('已载入折线，请从当前机器人姿态重新检查。'); }}><strong>{saved.name}</strong><small>{taskName} · {saved.points.length} 点</small></button>
@@ -569,7 +618,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     </div>
     <footer className="polyline-teaching__footer">
       {message && <div className="polyline-teaching__message" role="status" data-error={status === 'failed'}>{message}
-        {status === 'checking' && progress && <small>{progress.phase === 'search' ? `${progress.stage} ${progress.candidate}/${progress.candidates}`
+        {status === 'checking' && progress && <small>{['search', 'suggestion'].includes(progress.phase) ? `${progress.stage} ${progress.candidate}/${progress.candidates}`
           : progress.phase === 'positioning' ? '底盘预定位' : progress.segmentIndex < 0 ? '到起点' : `线段 ${progress.segmentIndex + 1}/${progress.total}`} · {Math.round(progress.fraction * 100)}%</small>}</div>}
       {executable && <div className="polyline-teaching__progress"><progress max={plan.durationMs} value={elapsed} /><span>{(elapsed / 1000).toFixed(1)} / {(plan.durationMs / 1000).toFixed(1)} s</span></div>}
       {executable && <div className="polyline-teaching__motion" aria-label="划线实际移动距离">

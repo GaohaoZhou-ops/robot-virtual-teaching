@@ -99,9 +99,12 @@ const angleDifference = (value, reference, continuous) => continuous
  * the same degree/meter representation as readRobotJointValues(). It stays
  * fixed for an adjustment session; the live pose remains the numerical seed.
  * No event throttling, delayed interpolation or random branch restarts.
+ * positionOnly is for proposing an unconstrained direction; normal interactive
+ * control and trajectory validation always retain their orientation constraint.
  */
 export function solveEndEffectorIk(controller, targetPosition, targetQuaternion, excludedJoints = new Set(), {
   referenceJointValues = null,
+  positionOnly = false,
 } = {}) {
   if (!controller?.frame || !controller.joints?.length) return null;
   const started = performance.now();
@@ -141,7 +144,8 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
     frame.updateWorldMatrix(true, false);
     frame.matrixWorld.decompose(position, quaternion, scale);
     deltaPosition.copy(targetPosition).sub(position);
-    writeRotationError(targetQuaternion, quaternion, deltaRotation, scratchQuaternion);
+    if (positionOnly) deltaRotation.set(0, 0, 0);
+    else writeRotationError(targetQuaternion, quaternion, deltaRotation, scratchQuaternion);
     positionError = deltaPosition.length(); rotationError = deltaRotation.length();
     let cost = positionError ** 2 + (rotationError * ORIENTATION_SCALE) ** 2;
     joints.forEach((joint, i) => {
@@ -180,7 +184,7 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
       if (definitions[i].linear) derivative.copy(axis);
       else derivative.crossVectors(axis, radius.copy(position).sub(jointPosition));
       return [derivative.x, derivative.y, derivative.z,
-        ...axis.toArray().map((value) => definitions[i].linear ? 0 : value * ORIENTATION_SCALE)];
+        ...axis.toArray().map((value) => definitions[i].linear || positionOnly ? 0 : value * ORIENTATION_SCALE)];
     });
     const translationScale = Math.min(1, 0.05 / Math.max(positionError, 1e-12));
     const rotationScale = ORIENTATION_SCALE * Math.min(1, 0.15 / Math.max(rotationError, 1e-12));

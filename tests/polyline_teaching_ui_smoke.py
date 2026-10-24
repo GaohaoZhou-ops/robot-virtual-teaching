@@ -243,6 +243,9 @@ def run():
             expect(panel).to_have_attribute('data-status', 'ready')
             expect(panel).to_have_attribute('data-duration-ms', checked_duration)
             expect(panel.get_by_role('button', name='执行划线', exact=True)).to_be_enabled()
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
+            pending_colors = set(json.loads(canvas.get_attribute('data-polyline-preview-colors')))
+            assert 'ffb02e' not in pending_colors
             page.screenshot(path=str(ARTIFACTS / 'checked.png'), full_page=True)
             panel.get_by_role('button', name='执行划线', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'playing')
@@ -256,6 +259,10 @@ def run():
             global_robot.click()
             expect(canvas).to_have_attribute('data-robot-layer-visible', 'false')
             display.get_by_role('button', name='关闭显示设置', exact=True).click()
+            page.wait_for_function('''() => {
+                const data = document.querySelector('.three-canvas').dataset;
+                return Number(data.polylineCompletedMm) > 25 && Number(data.polylineRemainingMm) > 30;
+            }''')
             preview.uncheck()
             expect(canvas).to_have_attribute('data-polyline-preview-visible', 'false')
             expect(panel).to_have_attribute('data-status', 'playing')
@@ -267,12 +274,20 @@ def run():
             expect(canvas).to_have_attribute('data-polyline-preview-visible', 'true')
             expect(panel).to_have_attribute('data-status', 'paused')
             expect(panel).to_have_attribute('data-elapsed-ms', paused_time)
+            completed_mm = canvas.get_attribute('data-polyline-completed-mm')
+            assert 25 < float(completed_mm) < 200
+            assert set(json.loads(canvas.get_attribute('data-polyline-preview-colors'))) == pending_colors | {'ffb02e'}
+            page.screenshot(path=str(ARTIFACTS / 'progress-paused.png'), full_page=True)
+            page.wait_for_timeout(250)
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', completed_mm)
             rotate_scene(page, panel)
             expect(panel).to_have_attribute('data-status', 'paused')
             assert canvas.get_attribute('data-robot-joint-values') == stopped
             panel.get_by_role('button', name='继续', exact=True).click()
             expect(canvas).to_have_attribute('data-robot-layer-visible', 'false')
             expect(panel).to_have_attribute('data-status', 'completed', timeout=60000)
+            expect(canvas).to_have_attribute('data-polyline-preview-colors', '["ffb02e"]')
+            expect(canvas).to_have_attribute('data-polyline-remaining-mm', '0')
             joints = json.loads(canvas.get_attribute('data-robot-joint-values'))
             assert abs(joints['left_J1'] - .11) < .002 and abs(joints['left_J2'] - .13) < .002, joints
             assert joints['right_J1'] == initial_joints['right_J1']
@@ -307,13 +322,22 @@ def run():
             expect(canvas).to_have_attribute('data-polyline-preview-segments', '2')
             expect(canvas).to_have_attribute('data-polyline-preview-visible', 'true')
             expect(distance).to_have_value('300'); expect(direction).to_have_value('-1')
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
             expect(panel.get_by_role('button', name='执行划线', exact=True)).to_be_disabled()
             panel.get_by_role('button', name='检查路径', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
             panel.get_by_role('button', name='执行划线', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'playing')
+            page.wait_for_function('''() => Number(document.querySelector('.three-canvas').dataset.polylineCompletedMm) > 20''')
             page.keyboard.press('Escape')
             expect(panel).to_have_attribute('data-status', 'editing')
+            stopped_color_length = canvas.get_attribute('data-polyline-completed-mm')
+            assert float(stopped_color_length) > 20
+            page.wait_for_timeout(250)
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', stopped_color_length)
+            panel.get_by_role('button', name='检查路径', exact=True).click()
+            expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
             panel.locator('summary').filter(has_text='虚拟笔尖偏移').click()
             panel.get_by_role('spinbutton', name='笔尖偏移 Z mm', exact=True).fill('1000')
             panel.get_by_role('button', name='检查路径', exact=True).click()

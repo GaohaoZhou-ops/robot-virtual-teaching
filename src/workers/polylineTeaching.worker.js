@@ -1,9 +1,9 @@
-import { restoreMobileTeachingRobot } from '../lib/mobileTeachingKinematics.js';
-import { planPolyline } from '../lib/polylineTeachingSolver.js';
+import { planPolylineWithSuggestion } from '../lib/polylineTeachingSuggestion.js';
 
 self.onmessage = async ({ data }) => {
   try {
-    const plan = await planPolyline({ ...data, robot: restoreMobileTeachingRobot(data.robot),
+    const { robot: snapshot, ...options } = data;
+    const plan = await planPolylineWithSuggestion({ ...options, snapshot,
       onProgress: (value) => self.postMessage({ type: 'progress', value }) });
     self.postMessage({ type: 'complete', value: plan });
   } catch (error) { self.postMessage({ type: 'error', message: error.message || '路径检查失败' }); }

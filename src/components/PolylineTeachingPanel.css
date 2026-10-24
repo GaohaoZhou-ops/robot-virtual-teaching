@@ -44,6 +44,10 @@
 .polyline-teaching__base-result small { color:#9dbec5; }
 .polyline-teaching__partial-result { display:flex; flex-direction:column; gap:6px; padding:10px; background:#2a2b20; border:1px solid #746144; border-radius:7px; color:#f0d49f; font-size:11px; line-height:1.6; }
 .polyline-teaching__partial-result small { color:#cbbd9d; }
+.polyline-teaching__suggestion { display:flex; flex-direction:column; gap:7px; padding:10px; background:#143137; border:1px solid #32626b; border-radius:7px; font-size:11px; line-height:1.6; }
+.polyline-teaching__suggestion small { color:#9dbec5; }
+.polyline-teaching__suggestion label,.polyline-teaching__suggestion>div { display:flex; align-items:center; gap:6px; }
+.polyline-teaching__suggestion button { font-size:10px; }
 .polyline-teaching__motion { display:flex; justify-content:space-between; gap:8px; color:#9cb6c2; font-size:10px; font-variant-numeric:tabular-nums; }
 .polyline-teaching__motion b { color:#dbe9ef; font-weight:500; }
 .polyline-teaching__tcp summary { color:#dbc998; cursor:pointer; font-size:11px; }

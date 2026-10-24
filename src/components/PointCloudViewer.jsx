@@ -1474,6 +1474,7 @@ export default function PointCloudViewer({
   const pendingPolylineRequest = polylineRequest?.sceneId === mapData?.geometry?.uuid
     && polylineRequest?.robotId === (robotDescriptor?.id || robotDescriptor?.relativePath) ? polylineRequest : null;
   const [robotOpacity, setRobotOpacity] = useState(1);
+  const [polylineSuggestion, setPolylineSuggestion] = useState(null);
   const robotOpacityRef = useRef(robotOpacity);
   robotOpacityRef.current = robotOpacity;
   const polylineOpenRef = useRef(polylineOpen);
@@ -1503,6 +1504,7 @@ export default function PointCloudViewer({
   const loadedRobotRef = useRef(null);
   const robotParkingGhostLayerRef = useRef(null);
   const robotParkingGhostVisualRef = useRef(null);
+  const polylineGhostRef = useRef(null);
   const robotChassisHandleRef = useRef(null);
   const robotControlInteractionRef = useRef(null);
   const chassisDragInteractionRef = useRef(null);
@@ -1812,6 +1814,24 @@ export default function PointCloudViewer({
     return { robot, scene: sceneRef.current, camera: cameraRef.current,
       canvas: controlsRef.current?.domElement, geometry: mapData?.geometry,
       lockedJointNames: lockedRobotJointNamesRef.current,
+      focusSuggestion: () => {
+        const visual = polylineGhostRef.current?.visual, camera = cameraRef.current, controls = controlsRef.current;
+        if (!visual || !camera || !controls) return;
+        const bounds = setRobotVisualBounds(new THREE.Box3(), visual.poseRoot);
+        if (robot) bounds.union(setRobotVisualBounds(new THREE.Box3(), robot));
+        const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+        if (!Number.isFinite(sphere.radius)) return;
+        if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+        precisionPanRef.current?.clear?.();
+        const direction = camera.position.clone().sub(controls.target);
+        if (direction.lengthSq() < 1e-12) direction.set(-.5, -.8, .45);
+        const halfFov = Math.min(THREE.MathUtils.degToRad(camera.fov / 2),
+          Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect));
+        camera.zoom = 1; camera.updateProjectionMatrix();
+        controls.target.copy(sphere.center);
+        camera.position.copy(sphere.center).addScaledVector(direction.normalize(), Math.max(.5, sphere.radius * 1.35 / Math.sin(halfFov)));
+        controls.update();
+      },
       configurationKey: robot ? JSON.stringify([robot.userData.armJointCouplingEnabled,
         ['left', 'right'].flatMap((side) => getRobotEndEffector(robot, side)?.joints.map((joint) =>
           [joint.name, joint.userData.jointLimit, joint.userData.armSoftLimitRatio, joint.userData.armJointCouplingEnabled]) || [])]) : '',
@@ -5879,8 +5899,39 @@ export default function PointCloudViewer({
   }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
 
   useEffect(() => {
+    const scene = sceneRef.current, robot = loadedRobotRef.current, canvas = controlsRef.current?.domElement;
+    if (!scene || !robot || !canvas || !polylineOpen || !isActive || !polylineSuggestion) return undefined;
+    const rotation = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().fromArray(polylineSuggestion.basePose.quaternion), 'XYZ');
+    const [x, y, z] = polylineSuggestion.basePose.position;
+    const visual = createRobotParkingGhostVisual(robot, { parkingPointName: '折线参考姿态', jointValues: polylineSuggestion.joints,
+      targetPose: { position: { x, y, z }, rpy: { roll: THREE.MathUtils.radToDeg(rotation.x),
+        pitch: THREE.MathUtils.radToDeg(rotation.y), yaw: THREE.MathUtils.radToDeg(rotation.z) } } });
+    const layer = new THREE.Group(); layer.name = 'polyline-start-suggestion';
+    layer.userData.ownedResources = visual.resources;
+    visual.objects.forEach((object) => layer.add(object));
+    scene.add(layer); layer.visible = showRobotRef.current;
+    polylineGhostRef.current = { layer, visual };
+    applyRobotModelOpacity(visual.ghostRobot, robotOpacityRef.current);
+    updateRobotParkingGhostGuide(visual, robotPoseRef.current, null);
+    canvas.dataset.polylineGhostState = layer.visible ? 'visible' : 'hidden';
+    canvas.dataset.polylineGhostJointValues = JSON.stringify(polylineSuggestion.joints);
+    canvas.dataset.polylineGhostBasePose = JSON.stringify(polylineSuggestion.basePose);
+    canvas.dataset.polylineGhostMeshCount = String(visual.meshCount);
+    if (layer.visible) getPolylineContext().focusSuggestion();
+    return () => {
+      if (polylineGhostRef.current?.visual === visual) polylineGhostRef.current = null;
+      clearRobotParkingGhostLayer(layer); layer.removeFromParent();
+      canvas.dataset.polylineGhostState = 'hidden';
+      delete canvas.dataset.polylineGhostJointValues;
+      delete canvas.dataset.polylineGhostBasePose;
+      delete canvas.dataset.polylineGhostMeshCount;
+    };
+  }, [polylineSuggestion, polylineOpen, isActive, mapData?.geometry, robotDescriptor, robotLoadState?.status]);
+
+  useEffect(() => {
     applyRobotModelOpacity(loadedRobotRef.current, robotOpacity);
     applyRobotModelOpacity(robotParkingGhostVisualRef.current?.ghostRobot, robotOpacity);
+    applyRobotModelOpacity(polylineGhostRef.current?.visual.ghostRobot, robotOpacity);
     const canvas = controlsRef.current?.domElement;
     if (canvas) {
       canvas.dataset.robotModelOpacity = String(robotOpacity);
@@ -5891,10 +5942,12 @@ export default function PointCloudViewer({
   useEffect(() => {
     if (robotLayerRef.current) robotLayerRef.current.visible = showRobot;
     if (robotParkingGhostLayerRef.current) robotParkingGhostLayerRef.current.visible = showRobot;
+    if (polylineGhostRef.current) polylineGhostRef.current.layer.visible = showRobot;
     const canvas = controlsRef.current?.domElement;
     if (canvas) {
       canvas.dataset.robotLayerVisible = String(showRobot);
       canvas.dataset.parkingGhostState = showRobot && robotParkingGhostVisualRef.current ? 'visible' : 'hidden';
+      canvas.dataset.polylineGhostState = showRobot && polylineGhostRef.current ? 'visible' : 'hidden';
     }
     if (!showRobot) {
       chassisDragInteractionRef.current?.exit?.('robot-hidden');
@@ -7720,6 +7773,7 @@ export default function PointCloudViewer({
             savedPaths={teachingTasks.flatMap((task) => (task.polylines || []).map((path) => ({ taskId: task.id, taskName: task.name, path })))}
             onSave={onSavePolyline} onDelete={onDeletePolyline} onClose={() => onPolylineOpenChange?.(false)}
             openRequest={pendingPolylineRequest} onRequestHandled={onPolylineRequestHandled}
+            onSuggestionChange={setPolylineSuggestion} showRobot={showRobot}
             onBusyChange={onPolylineBusyChange || (() => {})} />
           {canShowSurfaceCoverage && showSurfaceCoverage && (
             <TeachingSurfaceCoverage geometry={mapData.geometry} tasks={teachingTasks} />

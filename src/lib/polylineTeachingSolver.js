@@ -104,7 +104,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       const error = position.distanceTo(target);
       const angular = THREE.MathUtils.radToDeg(quaternion.angleTo(targetQuaternion));
       if (error > settings.tolerance || angular > settings.rotationTolerance) return issue('未找到满足沿线精度和固定朝向的连续逆解', index, u,
-        { positionError: error, rotationError: angular });
+        { code: 'continuous-ik', positionError: error, rotationError: angular });
       maximumError = Math.max(maximumError, error);
       // Surface imperfections and intended tip contact are advisory in virtual
       // drawing. Continue checking IK, joints and physical robot collisions.

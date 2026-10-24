@@ -77,17 +77,25 @@ def run():
             expect(note).to_contain_text('P1 → P2')
             expect(note).to_contain_text('停止原因')
             expect(canvas).to_have_attribute('data-polyline-preview-segments', '4')
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
+            assert set(json.loads(canvas.get_attribute('data-polyline-preview-colors'))) == {'72dfb6', 'ff796b'}
             note.scroll_into_view_if_needed()
             page.screenshot(path=str(ARTIFACTS / 'partial-ready.png'), full_page=True)
             panel.get_by_role('button', name='执行可达部分', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'playing')
             expect(maximum).to_be_disabled()
+            page.wait_for_function('''() => Number(document.querySelector('.three-canvas').dataset.polylineCompletedMm) > 20''')
             panel.get_by_role('button', name='暂停', exact=True).click()
             stopped = canvas.get_attribute('data-robot-joint-values')
+            completed_mm = canvas.get_attribute('data-polyline-completed-mm')
+            assert set(json.loads(canvas.get_attribute('data-polyline-preview-colors'))) == {'ffb02e', '72dfb6', 'ff796b'}
             page.wait_for_timeout(250)
+            expect(canvas).to_have_attribute('data-polyline-completed-mm', completed_mm)
             assert canvas.get_attribute('data-robot-joint-values') == stopped
             panel.get_by_role('button', name='继续', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'completed', timeout=60000)
+            assert set(json.loads(canvas.get_attribute('data-polyline-preview-colors'))) == {'ffb02e', 'ff796b'}
+            assert abs(float(canvas.get_attribute('data-polyline-completed-mm')) - float(panel.get_attribute('data-planned-distance')) * 1000) < .001
             expect(panel.locator('[role=status]')).to_contain_text('已完成可执行部分')
             after = json.loads(canvas.get_attribute('data-robot-joint-values'))
             assert .11 < after['left_J1'] <= .12000001 and abs(after['left_J2']) < .001
