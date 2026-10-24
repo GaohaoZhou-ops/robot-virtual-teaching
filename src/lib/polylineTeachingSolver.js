@@ -49,6 +49,8 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   }]));
   const checker = await createMobileCollisionChecker(robot, environment, checkpoint);
   const vertices = polylineVertices(action);
+  const allowPartial = action.base.allowPartial && !action.base.sync && !action.base.search;
+  const requestedDistance = vertices.slice(1).reduce((sum, point, i) => sum + point.distanceTo(vertices[i]), 0);
   const start = controller.frame.getWorldPosition(new THREE.Vector3());
   const issue = (message, index, u, details = {}) => ({ message, segmentIndex: index, progress: u,
     phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing', ...details });
@@ -71,7 +73,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     root.updateMatrixWorld(true);
   };
   if (THREE.MathUtils.radToDeg(controller.frame.getWorldQuaternion(new THREE.Quaternion()).angleTo(targetQuaternion)) > settings.rotationTolerance) {
-    return { complete: false, warnings: [], issue: issue('当前工具朝向与记录不同，请先调整工具朝向，或点击“采用当前朝向”后重新检查', -1, 0) };
+    return { complete: false, warnings: [], issue: issue('工具朝向已变化，请重新检查路径以采用当前朝向', -1, 0) };
   }
 
   const buildPlan = async (candidate = zeroBase, reportProgress = onProgress) => {
@@ -116,16 +118,30 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       checks += 1;
       return collisionIssue(index, u);
     };
-    const fail = (problem) => ({ complete: false, issue: problem, warnings, segments, checks, maximumError });
+    const fail = (problem) => ({ complete: false, executable: false, partial: false,
+      issue: problem, warnings, segments, checks, maximumError });
     const initialIssue = validState(start, -1, 0, 'initial');
     if (initialIssue) return fail({ ...initialIssue, phase: 'initial',
       message: `${initialIssue.message}。请先调整机器人姿态或位置，再重新检查。` });
-    const addSegment = (edge, samples, distance) => {
+    const addSegment = (edge, samples, distance, endFraction = 1) => {
       const { durationMs: segmentDuration, timing } = preparePolylineTiming(samples, distance, settings, definitions);
       segments.push({ index: edge.index, phase: edge.index === -2 ? 'positioning' : edge.index < 0 ? 'approach' : 'drawing',
-        from: edge.from.toArray(), to: edge.to.toArray(), samples, timing,
+        from: edge.from.toArray(), to: edge.to.toArray(), samples, timing, endFraction,
         durationMs: segmentDuration, startMs: durationMs, endMs: durationMs + segmentDuration });
       durationMs += segmentDuration;
+    };
+    const finish = (problem = null) => {
+      const drawing = segments.filter((segment) => segment.index >= 0);
+      if (problem && (!allowPartial || problem.phase !== 'drawing' || !drawing.length)) return fail(problem);
+      if (!drawing.length) throw new Error('折线点重合，请增加有长度的线段');
+      const last = drawing.at(-1);
+      const distance = drawing.reduce((sum, segment) => sum + new THREE.Vector3().fromArray(segment.from)
+        .distanceTo(new THREE.Vector3().fromArray(segment.to)), 0);
+      return { complete: !problem, executable: true, partial: Boolean(problem), ...(problem ? { issue: problem } : {}),
+        warnings, segments, durationMs, initialJoints, quaternion: targetQuaternion.toArray(),
+        ...(base ? { baseReference: base.reference, selectedBase: drawing[0].samples[0].base } : {}),
+        maximumError, checks, distance, requestedDistance, coverage: Math.min(1, distance / requestedDistance),
+        stoppedAt: { segmentIndex: last.index, progress: last.endFraction, position: [...last.to] } };
     };
     const reposition = base && (Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8);
     const reference = referenceValues({ base: candidate });
@@ -141,8 +157,9 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       if (checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
       const count = Math.max(1, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
         ? Math.max(Math.hypot(candidate.x, candidate.y) / 0.002, Math.abs(candidate.yaw) / 0.5) : 0)));
-      if (count > 10000 || segments.reduce((sum, item) => sum + item.samples.length, 0) + count > 30000) {
-        return fail(issue('路线过长，请拆成多条折线后分别检查', index, 0));
+      const sampleLimit = Math.min(count, 10000, 30000 - segments.reduce((sum, item) => sum + item.samples.length, 0));
+      if (count > sampleLimit && (!allowPartial || index < 0 || !Number.isFinite(count) || sampleLimit < 1)) {
+        return finish(issue('路线过长，请拆成多条折线后分别检查', index, 0));
       }
       let samples = [{ u: 0, ...readState() }];
       const solve = (u, seed) => {
@@ -154,47 +171,75 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         if (problem) return { problem };
         return { sample: { u, ...readState() } };
       };
-      for (let i = 1; i <= count; i += 1) {
+      let stopIssue = null;
+      for (let i = 1; i <= sampleLimit; i += 1) {
         await checkpoint();
         const result = solve(i / count, samples.at(-1));
-        if (result.problem) return fail(result.problem);
-        if (movable.some((joint) => Math.abs(result.sample.joints[joint.name] - samples.at(-1).joints[joint.name])
-          > (joint.userData.jointType === 'prismatic' ? 0.01 : 8))) return fail(issue('相邻采样点的关节变化过大，请调整起始姿态或补点', index, i / count));
-        if (base && (Math.hypot(result.sample.base.x - samples.at(-1).base.x, result.sample.base.y - samples.at(-1).base.y) > 0.01
-          || Math.abs(result.sample.base.yaw - samples.at(-1).base.yaw) > 3)) return fail(issue('底盘相邻采样变化过大，请缩短采样间距或调整起始位置', index, i / count));
-        samples.push(result.sample);
-        if (i % 20 === 0 || i === count) reportProgress({ phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing', segmentIndex: index, fraction: i / count, total: vertices.length - 1 });
-      }
-      // Validate the SAME interpolation used by playback, not only IK endpoints.
-      // Re-solve at the offending position, then rebuild tangents and recheck all intervals.
-      for (let pass = 0; pass < 7; pass += 1) {
-        preparePolylineInterpolation(samples);
-        const additions = [];
-        for (let i = 0; i < samples.length - 1; i += 1) {
-          await checkpoint();
-          for (const fraction of [0.25, 0.5, 0.75]) {
-            const u = samples[i].u + (samples[i + 1].u - samples[i].u) * fraction;
-            applyState(samplePolylineState(samples, u));
-            const problem = validState(from.clone().lerp(to, u), index, u);
-            if (!problem) continue;
-            if (problem.collision || !problem.positionError || pass === 6) return fail(problem);
-            const result = solve(u, samples[i]);
-            if (result.problem) return fail(result.problem);
-            additions.push(result.sample);
-          }
+        const problem = result.problem || (movable.some((joint) => Math.abs(result.sample.joints[joint.name] - samples.at(-1).joints[joint.name])
+          > (joint.userData.jointType === 'prismatic' ? 0.01 : 8))
+          ? issue('相邻采样点的关节变化过大，请调整起始姿态或补点', index, i / count)
+          : base && (Math.hypot(result.sample.base.x - samples.at(-1).base.x, result.sample.base.y - samples.at(-1).base.y) > 0.01
+            || Math.abs(result.sample.base.yaw - samples.at(-1).base.yaw) > 3)
+            ? issue('底盘相邻采样变化过大，请缩短采样间距或调整起始位置', index, i / count) : null);
+        if (problem) {
+          if (!allowPartial || index < 0) return fail(problem);
+          stopIssue = problem; break;
         }
-        if (!additions.length) break;
-        if (samples.length + additions.length > 15000) return fail(issue('当前路线无法在计算预算内满足精度，请拆分或调整', index, 0));
-        samples = [...samples, ...additions].sort((a, b) => a.u - b.u);
+        samples.push(result.sample);
+        if (i % 20 === 0 || i === sampleLimit) reportProgress({ phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing', segmentIndex: index, fraction: i / count, total: vertices.length - 1 });
       }
+      if (!stopIssue && sampleLimit < count) stopIssue = issue('路线过长，请拆成多条折线后分别检查', index, samples.at(-1).u);
+      // A successful IK endpoint alone is insufficient: check the same Hermite
+      // interpolation used by playback. A shortened tail changes its tangents,
+      // so EVERY retained interval is checked again after trimming.
+      const validateInterpolation = async (input) => {
+        let checked = input;
+        for (let pass = 0; pass < 7; pass += 1) {
+          preparePolylineInterpolation(checked);
+          const additions = [];
+          let firstRefinement = null;
+          for (let i = 0; i < checked.length - 1; i += 1) {
+            await checkpoint();
+            for (const fraction of [0.25, 0.5, 0.75]) {
+              const u = checked[i].u + (checked[i + 1].u - checked[i].u) * fraction;
+              applyState(samplePolylineState(checked, u));
+              const problem = validState(from.clone().lerp(to, u), index, u);
+              if (!problem) continue;
+              if (problem.collision || !problem.positionError || pass === 6) {
+                return { samples: checked, problem, beforeU: checked[i].u };
+              }
+              const result = solve(u, checked[i]);
+              if (result.problem) return { samples: checked, problem: result.problem, beforeU: checked[i].u };
+              firstRefinement ??= checked[i].u;
+              additions.push(result.sample);
+            }
+          }
+          if (!additions.length) return { samples: checked };
+          if (checked.length + additions.length > 15000) return { samples: checked, beforeU: firstRefinement,
+            problem: issue('当前路线无法在计算预算内满足精度，请拆分或调整', index, firstRefinement) };
+          checked = [...checked, ...additions].sort((a, b) => a.u - b.u);
+        }
+      };
+      while (samples.length > 1) {
+        const checked = await validateInterpolation(samples);
+        samples = checked.samples;
+        if (!checked.problem) break;
+        if (!allowPartial || index < 0) return fail(checked.problem);
+        if (!stopIssue || checked.problem.progress < stopIssue.progress) stopIssue = checked.problem;
+        samples = samples.filter((sample) => sample.u <= checked.beforeU);
+      }
+      if (samples.length < 2) return finish(stopIssue);
+      const endFraction = samples.at(-1).u;
+      const endpoint = from.clone().lerp(to, endFraction);
+      // Reparameterization preserves the checked curve; retiming then brings
+      // the robot smoothly to rest at the end of the executable prefix.
+      samples = samples.map((sample) => ({ ...sample, u: sample.u / endFraction }));
+      preparePolylineInterpolation(samples);
       applyState(samples.at(-1));
-      addSegment(edge, samples, distance);
+      addSegment({ ...edge, to: endpoint }, samples, distance * endFraction, endFraction);
+      if (stopIssue) return finish(stopIssue);
     }
-    if (!segments.some((segment) => segment.index >= 0)) throw new Error('折线点重合，请增加有长度的线段');
-    return { complete: true, warnings, segments, durationMs, initialJoints, quaternion: targetQuaternion.toArray(),
-      ...(base ? { baseReference: base.reference, selectedBase: segments.find((segment) => segment.index >= 0).samples[0].base } : {}),
-      maximumError, checks, distance: segments.filter((segment) => segment.index >= 0)
-        .reduce((sum, segment) => sum + new THREE.Vector3().fromArray(segment.from).distanceTo(new THREE.Vector3().fromArray(segment.to)), 0) };
+    return finish();
   };
 
   if (!action.base.search) return buildPlan();

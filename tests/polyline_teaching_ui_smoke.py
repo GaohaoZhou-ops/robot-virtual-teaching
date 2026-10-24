@@ -94,13 +94,41 @@ def run():
             global_robot.click()
             expect(canvas).to_have_attribute('data-robot-layer-visible', 'false')
             display.get_by_role('button', name='关闭显示设置', exact=True).click()
+            page.get_by_role('tab', name='路径与导航', exact=True).click()
+            page.get_by_role('button', name='折叠图谱控制台', exact=True).click()
             page.get_by_role('button', name='表面折线示教', exact=True).click()
             panel = page.get_by_role('region', name='表面折线示教', exact=True)
             expect(panel).to_be_visible()
+            inspector = page.locator('.inspector-panel')
+            expect(inspector).to_have_attribute('data-panel-mode', 'polyline')
+            expect(inspector).to_have_attribute('data-collapsed', 'false')
+            expect(page.locator('#inspector-panel-content')).to_be_hidden()
+            expect(page.get_by_role('button', name='图谱控制台', exact=True)).to_have_text('图谱控制台')
+            assert panel.evaluate('el => el.parentElement.id') == 'inspector-polyline-content'
+            page.wait_for_function('''() => {
+                const p = document.querySelector('.polyline-teaching').getBoundingClientRect();
+                const i = document.querySelector('.inspector-panel').getBoundingClientRect();
+                const c = document.querySelector('.three-canvas').getBoundingClientRect();
+                return i.width > 300 && p.x >= i.x && p.right <= i.right
+                    && p.y >= i.y && p.bottom <= i.bottom && p.x > c.right;
+            }''')
+            # The body scrolls inside the sidebar and the action footer stays visible.
+            page.set_viewport_size({'width': 1200, 'height': 760})
+            expect(panel.get_by_role('button', name='检查路径', exact=True)).to_be_in_viewport()
+            assert panel.evaluate('el => el.scrollWidth <= el.clientWidth')
+            page.screenshot(path=str(ARTIFACTS / 'sidebar-compact.png'), full_page=True)
+            page.set_viewport_size({'width': 1680, 'height': 1100})
             expect(panel.get_by_role('checkbox', name='显示机器人模型', exact=True)).to_have_count(0)
             expect(canvas).to_have_attribute('data-robot-layer-visible', 'false')
             expect(canvas).to_have_attribute('data-robot-model-opacity', '0.35')
-            panel.get_by_role('button', name='关闭折线示教', exact=True).click()
+            page.get_by_role('button', name='折叠折线示教', exact=True).click()
+            expect(inspector).to_have_attribute('data-collapsed', 'true')
+            page.get_by_role('button', name='图谱控制台', exact=True).click()
+            expect(panel).to_be_hidden()
+            expect(inspector).to_have_attribute('data-panel-mode', 'console')
+            expect(inspector).to_have_attribute('data-collapsed', 'false')
+            expect(page.get_by_role('tab', name='路径与导航', exact=True)).to_have_attribute('aria-selected', 'true')
+            expect(page.get_by_role('button', name='表面折线示教', exact=True)).to_have_text('折线示教')
             expect(canvas).to_have_attribute('data-robot-layer-visible', 'false')
             page.get_by_role('button', name='表面折线示教', exact=True).click()
             expect(canvas).to_have_attribute('data-robot-layer-visible', 'false')
@@ -128,14 +156,16 @@ def run():
             offset_z = panel.get_by_role('spinbutton', name='笔尖偏移 Z mm', exact=True)
             offset_x = panel.get_by_role('spinbutton', name='笔尖偏移 X mm', exact=True)
             # Zero distance retains the chosen direction for the next edit.
-            distance.fill('0'); direction.select_option('1'); distance.fill('80')
+            distance.fill('0'); distance.press('Enter'); direction.select_option('1'); distance.fill('80'); distance.press('Enter')
             expect(offset_z).to_have_value('80')
             offset_x.fill('5'); distance.fill('100')
             expect(offset_x).to_have_value('5')
-            offset_z.fill('-150')
+            # Focus commits the linked distance before replacing Z with a negative value.
+            offset_z.click(); offset_z.press('ControlOrMeta+A')
+            offset_z.press_sequentially('-150'); offset_z.press('Enter')
             expect(distance).to_have_value('150')
             expect(direction).to_have_value('-1')
-            offset_x.fill('0'); distance.fill('250')
+            offset_x.fill('0'); distance.fill('250'); distance.press('Enter')
             expect(offset_z).to_have_value('-250')
             panel.locator('summary').filter(has_text='虚拟笔尖偏移').click()
             # A default left drag rotates immediately, without switching modes.
@@ -153,7 +183,7 @@ def run():
             expect(canvas).to_have_attribute('data-polyline-preview-visible', 'false')
             page.screenshot(path=str(ARTIFACTS / 'preview-hidden.png'), full_page=True)
             # Closing hides all previews without losing the points or toggle.
-            panel.get_by_role('button', name='关闭折线示教', exact=True).click()
+            page.get_by_role('button', name='图谱控制台', exact=True).click()
             expect(canvas).to_have_attribute('data-polyline-preview-visible', 'false')
             page.get_by_role('button', name='表面折线示教', exact=True).click()
             expect(preview).not_to_be_checked()
@@ -202,7 +232,7 @@ def run():
             panel.get_by_role('button', name='检查路径', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
             assert json.loads(canvas.get_attribute('data-robot-joint-values')) == initial_joints, 'planning must not move the live robot'
-            distance.fill('300')
+            distance.fill('300'); distance.press('Enter')
             expect(panel).to_have_attribute('data-status', 'editing')
             expect(panel.get_by_role('button', name='执行划线', exact=True)).to_be_disabled()
             panel.get_by_role('button', name='检查路径', exact=True).click()
@@ -289,7 +319,7 @@ def run():
             panel.get_by_role('button', name='检查路径', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'failed', timeout=60000)
             expect(panel.get_by_role('button', name='执行划线', exact=True)).to_be_disabled()
-            distance.fill('0'); direction.select_option('1')
+            distance.fill('0'); distance.press('Enter'); direction.select_option('1')
             panel.get_by_role('button', name='保存', exact=True).click()
             expect(panel).to_contain_text('已保存至当前示教任务')
             page.reload(wait_until='networkidle')
@@ -300,7 +330,7 @@ def run():
             panel.get_by_role('button').filter(has_text='折线回归样例').click()
             expect(distance).to_have_value('0'); expect(direction).to_have_value('1')
             assert not errors, errors
-            print('Polyline UI: robot opacity, unified top-level visibility across open/close/check/play/resume, immediate TCP preview, tool distance, camera rotation, point editing, playback, ZIP save/reload and stop passed.')
+            print('Polyline UI: docked sidebar switching, console tab restoration, auto-expand, compact layout/footer, robot opacity and visibility, immediate TCP preview, tool distance, camera rotation, point editing, playback, ZIP save/reload and stop passed.')
         except Exception:
             page.screenshot(path=str(ARTIFACTS / 'failure.png'), full_page=True)
             print('errors:', errors, flush=True)

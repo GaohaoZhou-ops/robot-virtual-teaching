@@ -20,6 +20,7 @@ import {
   Maximize2,
   Navigation,
   Play,
+  Route,
   Save,
   Trash2,
   TriangleAlert,
@@ -82,6 +83,9 @@ export default function VirtualTeachingPanel({
   onCapturePoint,
   onRenamePoint,
   onDeletePoint,
+  onOpenPolyline,
+  onDeletePolyline,
+  polylineActionsDisabled = false,
   onApplyPoint,
   onApplyUpperBodyPose,
   onExportTeachingData,
@@ -114,17 +118,19 @@ export default function VirtualTeachingPanel({
   const [captureSelection, setCaptureSelection] = useState(null);
   const previousPreviewPoseId = useRef(previewPoseId);
   const captureSelectionMatches = captureSelection?.taskId === activeTask?.id
-    && captureSelection?.parkingPointId === (activeParkingPoint?.id || null);
+    && (captureSelection?.type === 'polyline' || captureSelection?.parkingPointId === (activeParkingPoint?.id || null));
+  const captureSelectedPolyline = captureSelectionMatches && captureSelection?.type === 'polyline'
+    ? activeTask?.polylines?.find((path) => path.id === captureSelection.pathId) : null;
   const captureSelectedPose = activePoses.find((pose) => pose.id === (
     captureSelectionMatches
       ? captureSelection.poseId
       : previewParkingPointId === activeParkingPoint?.id ? previewPoseId : null
   ));
-  const captureSelectionType = captureSelectionMatches && captureSelection.type === 'task'
+  const captureSelectionType = captureSelectedPolyline ? 'polyline' : captureSelectionMatches && captureSelection.type === 'task'
     ? 'task'
     : captureSelectedPose ? 'pose' : activeParkingPoint ? 'parking' : 'task';
   const captureDeleteLabel = {
-    task: '删除示教', parking: '删除停车点', pose: '删除姿态',
+    task: '删除示教', parking: '删除停车点', pose: '删除姿态', polyline: '删除折线',
   }[captureSelectionType];
   const [taskNameDraft, setTaskNameDraft] = useState(activeTask?.name || '');
   const [parkingPointNameDraft, setParkingPointNameDraft] = useState(
@@ -263,9 +269,11 @@ export default function VirtualTeachingPanel({
   const isParkingSelection = captureSelectionType === 'parking';
   const canMoveToSelectedParkingPoint = Boolean(isParkingSelection && activeParkingPoint
     && robotReady && !captureInProgress && !parkingMoveDisabled && !editingPoseId);
-  const captureDeleteDisabled = captureInProgress || !activeTask
+  const canOpenSelectedPolyline = Boolean(captureSelectedPolyline && robotReady && contextMatches
+    && !captureInProgress && !editingPoseId && !polylineActionsDisabled && onOpenPolyline);
+  const captureDeleteDisabled = captureInProgress || polylineActionsDisabled || !activeTask
     || (captureSelectionType !== 'task' && Boolean(activeTask.abx))
-    || !({ task: onDeleteTask, parking: onDeleteParkingPoint, pose: onDeletePoint }[captureSelectionType]);
+    || !({ task: onDeleteTask, parking: onDeleteParkingPoint, pose: onDeletePoint, polyline: onDeletePolyline }[captureSelectionType]);
   const canExport = Boolean(onExportTeachingData && (mapData || robot || tasks.length));
   const teachingPointCount = tasks.reduce(
     (count, task) => count + (task.mobileCapture?.samples.length || 0) + (task.parkingPoints || []).reduce(
@@ -367,12 +375,22 @@ export default function VirtualTeachingPanel({
     setExpandedCaptureParkingPointIds((current) => new Set(current).add(parkingPoint.id));
   };
 
+  const openCapturePolyline = (task, path, action = 'preview') => {
+    setCaptureSelection({ type: 'polyline', taskId: task.id, pathId: path.id });
+    setExpandedCaptureTaskIds((current) => new Set(current).add(task.id));
+    onOpenPolyline?.(task.id, path.id, action);
+  };
+
   const deleteCaptureSelection = () => {
     if (captureDeleteDisabled) return;
     if (captureSelectionType === 'task') {
-      if (!window.confirm(`删除 ${activeTask.name} 及其全部停车点和姿态？`)) return;
+      if (!window.confirm(`删除 ${activeTask.name} 及其全部停车点、姿态和折线？`)) return;
       onDeleteTask(activeTask.id);
       setCaptureSelection(null);
+    } else if (captureSelectedPolyline) {
+      if (!window.confirm(`删除折线 ${captureSelectedPolyline.name}？`)) return;
+      onDeletePolyline(activeTask.id, captureSelectedPolyline.id);
+      setCaptureSelection({ type: 'task', taskId: activeTask.id, parkingPointId: activeParkingPoint?.id || null });
     } else if (captureSelectionType === 'parking') {
       if (!window.confirm(`删除 ${activeParkingPoint.name} 及其 ${activePoses.length} 组姿态？`)) return;
       onDeleteParkingPoint(activeTask.id, activeParkingPoint.id);
@@ -503,16 +521,16 @@ export default function VirtualTeachingPanel({
       <button
         type="button"
         className="teaching-capture-button"
-        onClick={requestTeachingCapture}
-        disabled={!canCapture || captureInProgress}
+        onClick={() => captureSelectedPolyline ? openCapturePolyline(activeTask, captureSelectedPolyline) : requestTeachingCapture()}
+        disabled={captureSelectedPolyline ? !canOpenSelectedPolyline : !canCapture || captureInProgress}
         aria-busy={captureInProgress}
-        aria-label="记录当前姿态"
-        title={canCapture
+        aria-label={captureSelectedPolyline ? '查看折线轨迹' : '记录当前姿态'}
+        title={captureSelectedPolyline ? '打开折线窗口并显示保存的笔尖轨迹' : canCapture
           ? `保存到 ${activeParkingPoint.name}：${coordinateFrameLabel} 位姿、双臂/头部/躯干等全身关节与左右 Zivid RGB/XYZ 快照`
           : activeParkingPoint ? `当前${environmentLabel}、坐标系或机器人与任务不匹配` : '请先新增或选择停车点'}
       >
-        <Save size={13} />
-        <span>{captureInProgress ? '正在冻结双目视觉…' : '记录当前姿态'}</span>
+        {captureSelectedPolyline ? <Route size={13} /> : <Save size={13} />}
+        <span>{captureSelectedPolyline ? '查看轨迹' : captureInProgress ? '正在冻结双目视觉…' : '记录当前姿态'}</span>
       </button>
       <button
         type="button"
@@ -523,12 +541,17 @@ export default function VirtualTeachingPanel({
         title={activeTask.abx && captureSelectionType !== 'task'
           ? '原生任务的停车点与动作顺序需要在机器人端调整后重新导入'
           : `${captureDeleteLabel}：${captureSelectionType === 'task' ? activeTask.name
-            : captureSelectedPose?.name || activeParkingPoint?.name}`}
+            : captureSelectedPolyline?.name || captureSelectedPose?.name || activeParkingPoint?.name}`}
       >
         <Trash2 size={13} />
         <span>{captureDeleteLabel}</span>
       </button>
-      <button
+      {captureSelectedPolyline ? <button type="button" className="teaching-pose-action teaching-polyline-replay"
+        disabled={!canOpenSelectedPolyline} aria-label="回放当前折线"
+        title="从机器人当前位置检查路径，通过后自动回放；可在折线窗口暂停或停止"
+        onClick={() => openCapturePolyline(activeTask, captureSelectedPolyline, 'play')}>
+        <Play size={13} /><span>检查并回放折线</span>
+      </button> : <><button
         type="button"
         className="teaching-pose-action waypoint-move-button"
         disabled={!canUseSelectedPose || !onApplyPoint}
@@ -555,6 +578,7 @@ export default function VirtualTeachingPanel({
         {isParkingSelection ? <Navigation size={13} /> : <Play size={13} />}
         <span>{isParkingSelection ? '前往停车点' : '仅执行上身'}</span>
       </button>
+      </>}
       </div>
 
       {editingPoseId && <div className="teaching-review-hint">
@@ -583,7 +607,7 @@ export default function VirtualTeachingPanel({
           <header>
             <div className="teaching-capture-tree__identity">
               <FolderOpen size={13} />
-              <span><small>{activeTask?.mobileCapture ? 'DEVICE / POSE' : 'TASK / PARKING'}</small><strong>{activeTask?.mobileCapture ? '采样 Pose' : '任务与停车点'}</strong></span>
+              <span><small>{activeTask?.mobileCapture ? 'DEVICE / POSE' : activeTask?.polylines?.length ? 'TASK / PATH' : 'TASK / PARKING'}</small><strong>{activeTask?.mobileCapture ? '采样 Pose' : activeTask?.polylines?.length ? '任务与轨迹' : '任务与停车点'}</strong></span>
             </div>
             <div className="teaching-capture-tree__actions">
               {activeTask?.mobileCapture && onSolveMobileTask && <button type="button" className="teaching-mobile-solve-action" onClick={() => onSolveMobileTask(activeTask.id)}><Bot size={12} />计算机器人姿态</button>}
@@ -649,6 +673,7 @@ export default function VirtualTeachingPanel({
                         {expanded ? <FolderOpen size={12} /> : <Folder size={12} />}
                         <span><strong>{task.name}</strong><small>{task.mobileCapture
                           ? `${mobileDeviceLabel(task.mobileCapture)} · ${task.mobileCapture.samples.length} 个 Pose`
+                          : !task.parkingPoints?.length && task.polylines?.length ? `${task.polylines.length} 独立折线`
                           : `${task.parkingPoints?.length || 0} 停车点 · ${taskPoseCount} 姿态${task.polylines?.length ? ` · ${task.polylines.length} 折线` : ''}`}</small></span>
                       </button>
                     </div>
@@ -658,6 +683,25 @@ export default function VirtualTeachingPanel({
                         {task.mobileCapture && <MobileTeachingPoseList task={task} robotTasks={robotTasks}
                           selection={mobilePoseSelection} onSelect={onSelectMobilePose}
                           onOpenRobotPose={onOpenMobileRobotPose} onSolve={onSolveMobileTask} />}
+                        {(task.polylines || []).map((path, index) => {
+                          const selected = taskIsActive && captureSelectedPolyline?.id === path.id;
+                          const disabled = polylineActionsDisabled || captureInProgress || Boolean(editingPoseId) || !robotReady || !onOpenPolyline;
+                          return <div key={path.id} role="treeitem" aria-label={`独立折线 ${path.name}`}
+                            aria-selected={selected} data-polyline-id={path.id}
+                            className={`teaching-capture-tree__polyline${selected ? ' is-selected' : ''}`}>
+                            <button type="button" className="teaching-capture-tree__polyline-label"
+                              aria-label={`查看折线 ${path.name}`} disabled={disabled}
+                              title="查看保存的笔尖轨迹；此折线独立于停车点"
+                              onClick={() => openCapturePolyline(task, path)}>
+                              <i>L{String(index + 1).padStart(2, '0')}</i><Route size={12} />
+                              <span><strong>{path.name}</strong><small>独立折线 · {path.side === 'right' ? '右臂' : '左臂'} · {path.points.length} 点</small></span>
+                            </button>
+                            <button type="button" className="teaching-capture-tree__polyline-play"
+                              aria-label={`回放折线 ${path.name}`} disabled={disabled}
+                              title="从当前位置检查，通过后自动回放；无需停车点"
+                              onClick={() => openCapturePolyline(task, path, 'play')}><Play size={13} /></button>
+                          </div>;
+                        })}
                         {(task.parkingPoints || []).map((parkingPoint, index) => {
                           const parkingIsActive = taskIsActive
                             && parkingPoint.id === activeParkingPoint?.id;
@@ -721,7 +765,7 @@ export default function VirtualTeachingPanel({
                             </div>
                           );
                         })}
-                        {!task.parkingPoints?.length && !task.mobileCapture && (
+                        {!task.parkingPoints?.length && !task.polylines?.length && !task.mobileCapture && (
                           <div className="teaching-capture-tree__empty">暂无停车点，可记录机器人当前位置</div>
                         )}
                       </div>
@@ -732,7 +776,10 @@ export default function VirtualTeachingPanel({
             </div>
           ) : emptyState}
 
-          {activeParkingPoint && (
+          {activeTask?.polylines?.length > 0 && <div className="teaching-capture-tree__empty">
+            独立折线无需停车点。点击名称查看，点击播放图标检查并回放。
+          </div>}
+          {activeParkingPoint && !captureSelectedPolyline && (
             <div className="teaching-capture-tree__pose" aria-label="当前停车点地图位姿">
               <span>X <b>{formatValue(activeParkingPoint.mapPose.position.x, 2)}</b></span>
               <span>Y <b>{formatValue(activeParkingPoint.mapPose.position.y, 2)}</b></span>

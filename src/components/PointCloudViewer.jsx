@@ -1398,6 +1398,10 @@ export default function PointCloudViewer({
   workspaceTransfer = null,
   meshRenderQuality = 'auto',
   onMeshRenderQualityChange,
+  showPaths = true,
+  onShowPathsChange,
+  showParkingPoints = true,
+  onShowParkingPointsChange,
   showWaypoints = true,
   onShowWaypointsChange,
   showWaypointNames = true,
@@ -1427,6 +1431,11 @@ export default function PointCloudViewer({
   onSavePolyline,
   onDeletePolyline,
   onPolylineBusyChange,
+  polylineOpen = false,
+  onPolylineOpenChange,
+  polylineContainer,
+  polylineRequest,
+  onPolylineRequestHandled,
   teachingPlayback = null,
   robotParkingGhost = null,
   teachingCaptureBusy = false,
@@ -1462,7 +1471,8 @@ export default function PointCloudViewer({
   onCollisionProtectionStatus,
   isActive = true,
 }) {
-  const [polylineOpen, setPolylineOpen] = useState(false);
+  const pendingPolylineRequest = polylineRequest?.sceneId === mapData?.geometry?.uuid
+    && polylineRequest?.robotId === (robotDescriptor?.id || robotDescriptor?.relativePath) ? polylineRequest : null;
   const [robotOpacity, setRobotOpacity] = useState(1);
   const robotOpacityRef = useRef(robotOpacity);
   robotOpacityRef.current = robotOpacity;
@@ -1480,8 +1490,8 @@ export default function PointCloudViewer({
   const waypointNameElementsRef = useRef(new Map());
   const waypointLabels = useMemo(() => buildWaypointLabels(waypoints), [waypoints]);
   const pathNameElementsRef = useRef(new Map());
-  const pathLabels = useMemo(() => showPathNames ? buildPathLabels(waypoints, edges) : [],
-    [showPathNames, waypoints, edges]);
+  const pathLabels = useMemo(() => showPaths && showPathNames ? buildPathLabels(waypoints, edges) : [],
+    [showPaths, showPathNames, waypoints, edges]);
   const mapOriginGroupRef = useRef(null);
   const mapOriginLabelRef = useRef(null);
   const visionCoverageGroupRef = useRef(null);
@@ -1827,7 +1837,34 @@ export default function PointCloudViewer({
     };
   };
 
-  useEffect(() => { setPolylineOpen(false); }, [mapData?.geometry, robotDescriptor?.id]);
+  useEffect(() => { onPolylineOpenChange?.(false); }, [mapData?.geometry, robotDescriptor?.id, onPolylineOpenChange]);
+
+  useEffect(() => {
+    if (!pendingPolylineRequest || !isActive || robotLoadState?.status !== 'loaded') return;
+    updateRobotKeyboardControl(false);
+    chassisDragInteractionRef.current?.exit?.('polyline-teaching');
+    endEffectorInteractionRef.current?.exit?.();
+    clearEndEffectorLocks();
+    onPolylineOpenChange?.(true);
+    // Frame the saved line together with the robot so both preview and motion
+    // are visible, without changing robot visibility or its physical pose.
+    const camera = cameraRef.current, controls = controlsRef.current;
+    if (!camera || !controls || !pendingPolylineRequest.path.points.length) return;
+    const bounds = new THREE.Box3().setFromPoints(pendingPolylineRequest.path.points.map((point) => new THREE.Vector3().fromArray(point.position)));
+    if (loadedRobotRef.current) bounds.union(setRobotVisualBounds(new THREE.Box3(), loadedRobotRef.current));
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    if (!Number.isFinite(sphere.radius)) return;
+    if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+    precisionPanRef.current?.clear?.();
+    const direction = camera.position.clone().sub(controls.target);
+    if (direction.lengthSq() < 1e-12) direction.set(-0.5, -0.8, 0.45);
+    const halfFov = Math.min(THREE.MathUtils.degToRad(camera.fov / 2),
+      Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect));
+    camera.zoom = 1; camera.updateProjectionMatrix();
+    controls.target.copy(sphere.center);
+    camera.position.copy(sphere.center).addScaledVector(direction.normalize(), Math.max(0.5, sphere.radius * 1.35 / Math.sin(halfFov)));
+    controls.update();
+  }, [pendingPolylineRequest?.id, isActive, robotLoadState?.status, onPolylineOpenChange]);
 
   const reportZividCameraPoses = (force = false) => {
     const frames = zividCameraFramesRef.current;
@@ -3964,6 +4001,7 @@ export default function PointCloudViewer({
         if (waypointSelection) return waypointSelection;
       }
 
+      if (!routeGroup.visible) return null;
       const edgeHit = raycaster.intersectObjects(routeGroup.children, true)[0];
       return edgeHit ? selectionForObject(edgeHit.object) : null;
     };
@@ -7435,15 +7473,25 @@ export default function PointCloudViewer({
   }, [edges, mapData?.geometry, selectedEdgeId, selectedWaypointId, waypoints]);
 
   useEffect(() => {
+    const group = routeGroupRef.current;
+    const canvas = controlsRef.current?.domElement;
+    if (!group || !canvas) return;
+    group.visible = showPaths;
+    canvas.dataset.pathsVisible = String(showPaths);
+  }, [mapData?.geometry, showPaths]);
+
+  useEffect(() => {
     const waypointGroup = waypointGroupRef.current;
     const canvas = controlsRef.current?.domElement;
     if (!waypointGroup || !canvas) return;
-    waypointGroup.visible = showWaypoints;
-    canvas.dataset.waypointsVisible = showWaypoints ? 'true' : 'false';
-    canvas.dataset.waypointVisualStatus = showWaypoints
+    const visible = showParkingPoints && showWaypoints;
+    waypointGroup.visible = visible;
+    canvas.dataset.parkingPointsVisible = String(showParkingPoints);
+    canvas.dataset.waypointsVisible = String(visible);
+    canvas.dataset.waypointVisualStatus = visible
       ? waypointGroup.children.length ? 'visible' : 'no-waypoints'
       : 'hidden-by-user';
-  }, [mapData?.geometry, showWaypoints, waypoints.length]);
+  }, [mapData?.geometry, showParkingPoints, showWaypoints, waypoints.length]);
 
   const focusOrigin = () => {
     const controls = controlsRef.current;
@@ -7667,9 +7715,11 @@ export default function PointCloudViewer({
         <>
           <PolylineTeachingPanel key={`${resolutionMapKey}-${robotDescriptor?.id || ''}`}
             open={polylineOpen} active={isActive && !externalRobotTrajectoryActive && robotLoadState?.status === 'loaded'}
+            container={polylineContainer}
             getContext={getPolylineContext} sceneRevision={mapData.geometry.uuid}
             savedPaths={teachingTasks.flatMap((task) => (task.polylines || []).map((path) => ({ taskId: task.id, taskName: task.name, path })))}
-            onSave={onSavePolyline} onDelete={onDeletePolyline} onClose={() => setPolylineOpen(false)}
+            onSave={onSavePolyline} onDelete={onDeletePolyline} onClose={() => onPolylineOpenChange?.(false)}
+            openRequest={pendingPolylineRequest} onRequestHandled={onPolylineRequestHandled}
             onBusyChange={onPolylineBusyChange || (() => {})} />
           {canShowSurfaceCoverage && showSurfaceCoverage && (
             <TeachingSurfaceCoverage geometry={mapData.geometry} tasks={teachingTasks} />
@@ -7679,7 +7729,7 @@ export default function PointCloudViewer({
               <span ref={mapOriginLabelRef} className="map-origin-label">地图原点 · (0, 0, 0)</span>
             </div>
           )}
-          {showPathNames && (
+          {showPaths && showPathNames && (
             <div className="path-name-layer" role="group" aria-label="3D路径名称">
               {pathLabels.map(({ id, name, pose }) => (
                 <span
@@ -7696,7 +7746,7 @@ export default function PointCloudViewer({
               ))}
             </div>
           )}
-          {showWaypointNames && (
+          {showParkingPoints && showWaypointNames && (
             <div className="waypoint-name-layer" role="group" aria-label="3D停车点名称">
               {waypointLabels.map(({ point, waypointIds }) => (
                 <span
@@ -7870,9 +7920,11 @@ export default function PointCloudViewer({
             </aside>
           )}
           {displaySettingsContainer && createPortal(<>
-            <button type="button" className="polyline-teaching-launch" aria-label="表面折线示教" aria-pressed={polylineOpen}
-              disabled={!isActive || robotLoadState?.status !== 'loaded' || externalRobotTrajectoryActive || teachingCaptureBusy || teachingPoseEditing || !mapData?.faceCount}
-              title={!mapData?.faceCount ? '第一版需要带三角面的模型；纯点云暂不支持表面点选' : '点选物体表面，检查并执行单臂折线轨迹'}
+            <button type="button" className="polyline-teaching-launch" aria-label={polylineOpen ? '图谱控制台' : '表面折线示教'} aria-pressed={polylineOpen}
+              aria-controls={polylineOpen ? 'inspector-panel-content' : 'inspector-polyline-content'}
+              disabled={!isActive || (!polylineOpen && (robotLoadState?.status !== 'loaded' || externalRobotTrajectoryActive || teachingCaptureBusy || teachingPoseEditing || !mapData?.faceCount))}
+              title={polylineOpen ? '返回图谱控制台，隐藏示教线条并停止当前检查或回放'
+                : !mapData?.faceCount ? '第一版需要带三角面的模型；纯点云暂不支持表面点选' : '在右侧打开折线示教，点选表面并检查、执行轨迹'}
               onClick={() => {
                 if (!polylineOpen) {
                   updateRobotKeyboardControl(false);
@@ -7881,8 +7933,8 @@ export default function PointCloudViewer({
                   clearEndEffectorLocks();
                   onClearRobotParkingGhost?.();
                 }
-                setPolylineOpen((value) => !value);
-              }}><Route size={13} />折线示教</button>
+                onPolylineOpenChange?.(!polylineOpen);
+              }}><Route size={13} />{polylineOpen ? '图谱控制台' : '折线示教'}</button>
             <ViewerMenu
               key={`distance-${resolutionMapKey}`}
               label="距离警告"
@@ -7947,7 +7999,8 @@ export default function PointCloudViewer({
                   className={showWaypoints ? 'is-active' : 'is-hidden-state'}
                   aria-label={showWaypoints ? '隐藏3D路径点' : '显示3D路径点'}
                   aria-pressed={showWaypoints}
-                  title={showWaypoints ? '隐藏3D导航点小球，保留路径连线' : '显示3D导航点小球'}
+                  disabled={!showParkingPoints}
+                  title={!showParkingPoints ? '请先在显示设置中开启停车点显示' : showWaypoints ? '隐藏3D导航点小球，保留路径连线' : '显示3D导航点小球'}
                   onClick={() => onShowWaypointsChange?.(!showWaypoints)}
                 >
                   {showWaypoints ? <Eye size={13} /> : <EyeOff size={13} />}
@@ -8075,7 +8128,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`机器人模型、点云颜色、高程色卡、停车点名、路径名${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`机器人模型、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
@@ -8148,6 +8201,16 @@ export default function PointCloudViewer({
                   <span>{showHeightLegend ? '显示' : '隐藏'}</span>
                 </button>
               </div>}
+              <div className="viewer-display-settings__layer">
+                <span><MapPin size={13} /> 停车点</span>
+                <button type="button" role="switch" className="viewer-display-settings__toggle"
+                  aria-label="显示停车点" aria-checked={showParkingPoints}
+                  title={showParkingPoints ? '隐藏3D停车点标记及名称，保留路径连线' : '显示3D停车点，恢复原有标记及名称设置'}
+                  onClick={() => onShowParkingPointsChange?.(!showParkingPoints)}>
+                  {showParkingPoints ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showParkingPoints ? '显示' : '隐藏'}</span>
+                </button>
+              </div>
               <div className="viewer-display-settings__waypoint-names">
                 <span><MapPin size={13} /> 停车点名</span>
                 <button
@@ -8155,11 +8218,22 @@ export default function PointCloudViewer({
                   className="viewer-display-settings__toggle"
                   aria-label={showWaypointNames ? '隐藏停车点名' : '显示停车点名'}
                   aria-pressed={showWaypointNames}
-                  title={showWaypointNames ? '隐藏3D导航点名称' : '显示3D导航点名称'}
+                  disabled={!showParkingPoints}
+                  title={!showParkingPoints ? '请先开启停车点显示；名称偏好已保留' : showWaypointNames ? '隐藏3D导航点名称' : '显示3D导航点名称'}
                   onClick={() => onShowWaypointNamesChange?.(!showWaypointNames)}
                 >
                   {showWaypointNames ? <Eye size={12} /> : <EyeOff size={12} />}
                   <span>{showWaypointNames ? '显示' : '隐藏'}</span>
+                </button>
+              </div>
+              <div className="viewer-display-settings__layer">
+                <span><Route size={13} /> 路径</span>
+                <button type="button" role="switch" className="viewer-display-settings__toggle"
+                  aria-label="显示路径" aria-checked={showPaths}
+                  title={showPaths ? '隐藏3D路径连线、方向箭头及名称，保留停车点' : '显示3D路径连线及方向箭头，恢复原有名称设置'}
+                  onClick={() => onShowPathsChange?.(!showPaths)}>
+                  {showPaths ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showPaths ? '显示' : '隐藏'}</span>
                 </button>
               </div>
               <div className="viewer-display-settings__path-names">
@@ -8169,7 +8243,8 @@ export default function PointCloudViewer({
                   className="viewer-display-settings__toggle"
                   aria-label={showPathNames ? '隐藏路径名' : '显示路径名'}
                   aria-pressed={showPathNames}
-                  title={showPathNames ? '隐藏3D路径名称' : '显示3D路径的起点与终点名称'}
+                  disabled={!showPaths}
+                  title={!showPaths ? '请先开启路径显示；名称偏好已保留' : showPathNames ? '隐藏3D路径名称' : '显示3D路径的起点与终点名称'}
                   onClick={() => onShowPathNamesChange?.(!showPathNames)}
                 >
                   {showPathNames ? <Eye size={12} /> : <EyeOff size={12} />}

@@ -34,7 +34,7 @@ async function plan(path, environment = far, options = {}) {
 }
 
 // Old paths are fixed by default; bad ranges cannot reach the worker.
-assert.deepEqual(makePath().base, { sync: false, search: false, range: 2, yawRange: 180 });
+assert.deepEqual(makePath().base, { sync: false, search: false, allowPartial: false, range: 2, yawRange: 180 });
 assert.equal(makePath({ range: NaN }), null);
 assert.equal(makePath({ yawRange: 181 }), null);
 assert.equal((await plan(makePath())).complete, false, 'a fixed short arm cannot reach the distant line');
