@@ -719,6 +719,7 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
     joint.userData.jointLimit = {
       lower: Number.isFinite(lower) ? lower : Number.NEGATIVE_INFINITY,
       upper: Number.isFinite(upper) ? upper : Number.POSITIVE_INFINITY,
+      ...(Number.isFinite(parseLimit('velocity')) && parseLimit('velocity') > 0 ? { velocity: parseLimit('velocity') } : {}),
     };
     joint.userData.restPosition = joint.position.toArray();
     joint.userData.restQuaternion = joint.quaternion.toArray();

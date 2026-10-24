@@ -55,20 +55,20 @@ class BridgeState:
     def discover(self):
         with self.lock:
             devices = []
-            for device in self.transport.devices():
-                device_id = device['SerialNumber']
+            for device in self.transport.described_devices():
+                device_id = device['id']
                 try:
                     status = self.call(device_id, 'GET', '/status')
                     ready = (status.get('protocol') == PROTOCOL and status.get('keepalive') is True
                              and status.get('jointControl') is True and status.get('usbInvitations') is True
                              and not status.get('active')
                              and (not status.get('invitationPending') or bool(status.get('outgoingInvitation'))))
-                    devices.append({'id': device_id, 'name': status.get('deviceName', 'iPad'), 'ready': ready,
+                    devices.append({'id': device_id, 'name': usb.device_name(device, status.get('deviceName')), 'ready': ready,
                                     'outgoingInvitation': status.get('outgoingInvitation'),
                                     'active': bool(status.get('active')), 'message': '正在进行画面协作' if status.get('active')
                                     else '' if ready else '请更新 Atlas App 并保持在前台。'})
                 except Exception:
-                    devices.append({'id': device_id, 'name': 'USB 设备', 'ready': False,
+                    devices.append({'id': device_id, 'name': usb.device_name(device), 'ready': False,
                                     'message': '请解锁并信任这台电脑，在前台打开 Atlas App。'})
             return {'supported': True, 'devices': devices,
                     'message': '' if devices else '请用支持数据传输的线缆连接 iPad，解锁并信任电脑，再打开 Atlas App。'}
@@ -99,6 +99,7 @@ class BridgeState:
                 raise BridgeError(409, '已有数据线协作，请先结束当前协作。')
             if not isinstance(device_id, str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', device_id):
                 raise BridgeError(400, '设备参数无效')
+            device = next((device for device in self.transport.described_devices() if device['id'] == device_id), {'id': device_id})
             status = self.call(device_id, 'GET', '/status')
             if status.get('active'):
                 raise BridgeError(409, 'iPad 正在协作，请先在 iPad 上结束当前协作。')
@@ -110,7 +111,7 @@ class BridgeState:
                     or (status.get('outgoingInvitation') or {}).get('id') != invitation_id):
                 raise BridgeError(409, '邀请已取消或过期，请重新发起。')
             current = {'id': str(uuid.uuid4()), 'token': secrets.token_hex(32), 'deviceId': device_id,
-                       'deviceName': status.get('deviceName', 'iPad'), 'mode': 'usb',
+                       'deviceName': usb.device_name(device, status.get('deviceName')), 'mode': 'usb',
                        'updated': time.monotonic(), 'ownerSeen': time.monotonic(), 'watching': False,
                        'invitationDeadline': time.monotonic() + 60, 'deviceReady': False,
                        'events': queue.Queue(maxsize=8), 'ended': False}

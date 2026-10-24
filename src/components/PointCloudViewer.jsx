@@ -33,6 +33,7 @@ import {
   X,
 } from 'lucide-react';
 import EndEffectorControlPanel from './EndEffectorControlPanel.jsx';
+import PolylineTeachingPanel from './PolylineTeachingPanel.jsx';
 import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
@@ -45,6 +46,7 @@ import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
 import { RobotJointCouplingContext, RobotJointLimitContext } from './RobotJointLimitContext.js';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
+import { applyRobotModelOpacity } from '../lib/robotDisplay.js';
 import {
   createUniformMeshIndex,
   MESH_RENDER_QUALITY_OPTIONS,
@@ -1414,13 +1416,17 @@ export default function PointCloudViewer({
   resetRequest,
   robotDescriptor,
   showRobot = true,
+  onShowRobotChange,
   robotLoadState,
   robotPose,
   robotJointValues,
   lockedRobotJointNames = [],
   robotControlEnabled = false,
   robotHeightLocked = false,
-  robotTrajectoryActive = false,
+  robotTrajectoryActive: externalRobotTrajectoryActive = false,
+  onSavePolyline,
+  onDeletePolyline,
+  onPolylineBusyChange,
   teachingPlayback = null,
   robotParkingGhost = null,
   teachingCaptureBusy = false,
@@ -1456,6 +1462,13 @@ export default function PointCloudViewer({
   onCollisionProtectionStatus,
   isActive = true,
 }) {
+  const [polylineOpen, setPolylineOpen] = useState(false);
+  const [robotOpacity, setRobotOpacity] = useState(1);
+  const robotOpacityRef = useRef(robotOpacity);
+  robotOpacityRef.current = robotOpacity;
+  const polylineOpenRef = useRef(polylineOpen);
+  polylineOpenRef.current = polylineOpen;
+  const robotTrajectoryActive = externalRobotTrajectoryActive || polylineOpen;
   const mountRef = useRef(null);
   const distanceScaleRef = useRef(null);
   const distanceScaleLabelRef = useRef(null);
@@ -1782,6 +1795,39 @@ export default function PointCloudViewer({
     lastRobotJointReportRef.current = now;
     onRobotJointValuesChangeRef.current?.(values);
   };
+
+  const getPolylineContext = () => {
+    const robot = loadedRobotRef.current;
+    robot?.updateWorldMatrix(true, true);
+    return { robot, scene: sceneRef.current, camera: cameraRef.current,
+      canvas: controlsRef.current?.domElement, geometry: mapData?.geometry,
+      lockedJointNames: lockedRobotJointNamesRef.current,
+      configurationKey: robot ? JSON.stringify([robot.userData.armJointCouplingEnabled,
+        ['left', 'right'].flatMap((side) => getRobotEndEffector(robot, side)?.joints.map((joint) =>
+          [joint.name, joint.userData.jointLimit, joint.userData.armSoftLimitRatio, joint.userData.armJointCouplingEnabled]) || [])]) : '',
+      applyState: ({ joints, basePose }) => {
+        if (basePose) {
+          const layer = robotLayerRef.current;
+          layer.parent?.updateWorldMatrix(true, false);
+          const position = new THREE.Vector3().fromArray(basePose.position);
+          const quaternion = new THREE.Quaternion().fromArray(basePose.quaternion);
+          if (layer.parent) {
+            position.applyMatrix4(layer.parent.matrixWorld.clone().invert());
+            quaternion.premultiply(layer.parent.getWorldQuaternion(new THREE.Quaternion()).invert());
+          }
+          const rotation = new THREE.Euler().setFromQuaternion(quaternion, 'XYZ');
+          const pose = { position: { x: position.x, y: position.y, z: position.z },
+            rpy: { roll: THREE.MathUtils.radToDeg(rotation.x), pitch: THREE.MathUtils.radToDeg(rotation.y), yaw: THREE.MathUtils.radToDeg(rotation.z) } };
+          robotPoseRef.current = applyRobotPose(layer, pose);
+          writeRobotPoseDataset(controlsRef.current?.domElement, pose);
+          onRobotPoseChangeRef.current?.(pose);
+        }
+        applyRobotJointStateToScene(joints, 'polyline-playback'); reportRobotJointValues(true);
+      },
+    };
+  };
+
+  useEffect(() => { setPolylineOpen(false); }, [mapData?.geometry, robotDescriptor?.id]);
 
   const reportZividCameraPoses = (force = false) => {
     const frames = zividCameraFramesRef.current;
@@ -4328,6 +4374,9 @@ export default function PointCloudViewer({
         return;
       }
 
+      // Polyline clicks belong to the teaching panel; retain the camera's
+      // pointer lifecycle without also selecting or clearing navigation items.
+      if (polylineOpenRef.current) return;
       const selection = selectionAtPointer(event);
       lastPointerSelection = selection;
       renderer.domElement.dataset.lastPickType = selection?.type || 'none';
@@ -5588,6 +5637,8 @@ export default function PointCloudViewer({
         configureRobotArmSoftLimits(robot, robotArmSoftLimitRatioRef.current);
         layer.add(robot);
         loadedRobotRef.current = robot;
+        applyRobotModelOpacity(robot, robotOpacityRef.current);
+        canvas.dataset.robotModelOpacity = String(robotOpacityRef.current);
         applyRobotPose(layer, robotPoseRef.current);
         robotJointValuesRef.current = applyRobotJointStateToScene(
           robotJointValuesRef.current,
@@ -5751,6 +5802,7 @@ export default function PointCloudViewer({
       layer.userData.ownedResources = visual.resources;
       layer.userData.parkingPointId = robotParkingGhost.parkingPointId;
       robotParkingGhostVisualRef.current = visual;
+      applyRobotModelOpacity(visual.ghostRobot, robotOpacityRef.current);
       updateRobotParkingGhostGuide(visual, robotPoseRef.current, canvas);
       canvas.dataset.parkingGhostState = showRobotRef.current ? 'visible' : 'hidden';
       canvas.dataset.parkingGhostKind = robotParkingGhost.kind || 'parking';
@@ -5761,7 +5813,7 @@ export default function PointCloudViewer({
       canvas.dataset.parkingGhostJointValues = JSON.stringify(
         normalizeRobotJointValues(robotParkingGhost.jointValues),
       );
-      canvas.dataset.parkingGhostOpacity = String(ROBOT_PARKING_GHOST_OPACITY);
+      canvas.dataset.parkingGhostOpacity = String(ROBOT_PARKING_GHOST_OPACITY * robotOpacityRef.current);
       canvas.dataset.parkingGhostTargetPose = [
         visual.targetPose.position.x,
         visual.targetPose.position.y,
@@ -5787,6 +5839,16 @@ export default function PointCloudViewer({
       }
     };
   }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
+
+  useEffect(() => {
+    applyRobotModelOpacity(loadedRobotRef.current, robotOpacity);
+    applyRobotModelOpacity(robotParkingGhostVisualRef.current?.ghostRobot, robotOpacity);
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) {
+      canvas.dataset.robotModelOpacity = String(robotOpacity);
+      if (robotParkingGhostVisualRef.current) canvas.dataset.parkingGhostOpacity = String(ROBOT_PARKING_GHOST_OPACITY * robotOpacity);
+    }
+  }, [robotOpacity, mapData?.geometry]);
 
   useEffect(() => {
     if (robotLayerRef.current) robotLayerRef.current.visible = showRobot;
@@ -7603,6 +7665,12 @@ export default function PointCloudViewer({
       )}
       {mapData?.geometry && (
         <>
+          <PolylineTeachingPanel key={`${resolutionMapKey}-${robotDescriptor?.id || ''}`}
+            open={polylineOpen} active={isActive && !externalRobotTrajectoryActive && robotLoadState?.status === 'loaded'}
+            getContext={getPolylineContext} sceneRevision={mapData.geometry.uuid}
+            savedPaths={teachingTasks.flatMap((task) => (task.polylines || []).map((path) => ({ taskId: task.id, taskName: task.name, path })))}
+            onSave={onSavePolyline} onDelete={onDeletePolyline} onClose={() => setPolylineOpen(false)}
+            onBusyChange={onPolylineBusyChange || (() => {})} />
           {canShowSurfaceCoverage && showSurfaceCoverage && (
             <TeachingSurfaceCoverage geometry={mapData.geometry} tasks={teachingTasks} />
           )}
@@ -7802,6 +7870,19 @@ export default function PointCloudViewer({
             </aside>
           )}
           {displaySettingsContainer && createPortal(<>
+            <button type="button" className="polyline-teaching-launch" aria-label="表面折线示教" aria-pressed={polylineOpen}
+              disabled={!isActive || robotLoadState?.status !== 'loaded' || externalRobotTrajectoryActive || teachingCaptureBusy || teachingPoseEditing || !mapData?.faceCount}
+              title={!mapData?.faceCount ? '第一版需要带三角面的模型；纯点云暂不支持表面点选' : '点选物体表面，检查并执行单臂折线轨迹'}
+              onClick={() => {
+                if (!polylineOpen) {
+                  updateRobotKeyboardControl(false);
+                  chassisDragInteractionRef.current?.exit?.('polyline-teaching');
+                  endEffectorInteractionRef.current?.exit?.();
+                  clearEndEffectorLocks();
+                  onClearRobotParkingGhost?.();
+                }
+                setPolylineOpen((value) => !value);
+              }}><Route size={13} />折线示教</button>
             <ViewerMenu
               key={`distance-${resolutionMapKey}`}
               label="距离警告"
@@ -7994,10 +8075,37 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`点云颜色、高程色卡、停车点名、路径名${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`机器人模型、点云颜色、高程色卡、停车点名、路径名${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
             >
+              <div className="viewer-display-settings__robot">
+                <span><Bot size={13} /> 机器人模型</span>
+                <button
+                  type="button"
+                  role="switch"
+                  className="viewer-display-settings__toggle"
+                  aria-label="显示机器人模型"
+                  aria-checked={showRobot}
+                  disabled={!onShowRobotChange || teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
+                  title={robotLoadState?.status !== 'loaded' ? '加载机器人后可切换显示' : showRobot ? '隐藏机器人模型，方便点选附近表面' : '显示机器人模型'}
+                  onClick={() => onShowRobotChange?.(!showRobot)}
+                >
+                  {showRobot ? <Eye size={12} /> : <EyeOff size={12} />}
+                  <span>{showRobot ? '显示' : '隐藏'}</span>
+                </button>
+              </div>
+              <label className="viewer-display-settings__opacity">
+                <span>机器人模型透明度</span>
+                <input type="range" min="0" max="100" step="1"
+                  value={Math.round(robotOpacity * 100)} aria-label="机器人模型透明度"
+                  aria-valuetext={`${Math.round(robotOpacity * 100)}%`}
+                  title="100% 为完全不透明，调低可透过机器人观察表面"
+                  disabled={teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
+                  style={{ '--vision-coverage-opacity': `${Math.round(robotOpacity * 100)}%` }}
+                  onChange={(event) => setRobotOpacity(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
+                <output>{Math.round(robotOpacity * 100)}%</output>
+              </label>
               <div className="viewer-display-settings__color">
                 <span><Palette size={13} /> {hasObjectColorControl ? '地图颜色' : '点云颜色'}</span>
                 <button

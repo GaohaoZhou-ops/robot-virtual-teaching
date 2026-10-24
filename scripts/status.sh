@@ -25,7 +25,7 @@ if [[ "$SERVICE_COMMAND" != *"vite"* ]]; then
   exit 4
 fi
 
-if curl -fsS "http://127.0.0.1:${APP_PORT:-$DEFAULT_PORT}" >/dev/null 2>&1; then
+if curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:${APP_PORT:-$DEFAULT_PORT}" >/dev/null 2>&1; then
   if atlas_command_is_loopback_only "$SERVICE_COMMAND" "${BIND_HOST:-}"; then
     echo "服务运行正常，但当前进程只监听本机回环地址 (PID $SERVICE_PID)"
     echo "要允许其他设备访问，请在合适时机停止并重新启动服务"

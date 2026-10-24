@@ -96,6 +96,7 @@ export function buildTeachingDataExport(project) {
       ...fields(task, ['id', 'name', 'createdAt', 'updatedAt']),
       sequence: taskIndex + 1,
       coordinateFrame: taskFrame,
+      ...(task.polylines ? { polylines: structuredClone(task.polylines) } : {}),
       robot: robotIdentity(task.robot),
       sourceMap: mapIdentity(task.map),
       parkingPoints: (task.parkingPoints || []).map((parking, parkingIndex) => (

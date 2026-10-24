@@ -305,7 +305,7 @@ def run():
             "slider", name="表面贴图渲染透明度", exact=True
         )
         assert opacity_slider.input_value() == "5"
-        assert display_settings.locator("output").inner_text() == "5%"
+        assert opacity_slider.locator('..').locator('output').inner_text() == "5%"
         assert canvas.get_attribute("data-teaching-surface-tint-opacity") == "0.05"
         assert overlap_metrics["render_enabled"] == "true"
         assert overlap_metrics["render_state"] == "enabled"
@@ -326,7 +326,7 @@ def run():
         )
         assert opacity_slider.input_value() == "35"
         assert surface_coverage(page, 4) == first_area_coverage
-        assert display_settings.locator("output").inner_text() == "35%"
+        assert opacity_slider.locator('..').locator('output').inner_text() == "35%"
         assert canvas.get_attribute("data-teaching-surface-tint-opacity") == "0.35"
         page.screenshot(path="/tmp/atlas-surface-opacity-display-settings.png")
         display_settings.get_by_role("button", name="关闭显示设置").click()

@@ -1,9 +1,10 @@
 import { Object3D, Vector3 } from 'three';
 import { collectRobotCollisionProxies } from './robotCollision.js';
+import { serializeCollisionHull } from './robotCollisionHull.js';
 
 // Transfer only the kinematic hierarchy. Mesh buffers, textures, picking
 // helpers and the live scene never enter the background worker.
-export function serializeMobileTeachingRobot(robot, { includeCollision = false } = {}) {
+export function serializeMobileTeachingRobot(robot, { includeCollision = false, includeCollisionHulls = false } = {}) {
   const keep = new Set([robot]);
   const collision = new Map();
   if (includeCollision) {
@@ -21,7 +22,8 @@ export function serializeMobileTeachingRobot(robot, { includeCollision = false }
       const jointSpacing = joints.map((node, i) => !i || [node, joints[i - 1]].some((joint) => joint.userData.jointType === 'prismatic') ? null
         : node.getWorldPosition(new Vector3()).distanceTo(joints[i - 1].getWorldPosition(new Vector3())));
       collision.set(proxy.mesh, { linkName: proxy.linkName, source: proxy.source, chain, jointSpacing, jointLink,
-        center: proxy.localCenter.toArray(), halfSize: proxy.localHalfSize.toArray() });
+        center: proxy.localCenter.toArray(), halfSize: proxy.localHalfSize.toArray(),
+        ...(includeCollisionHulls ? { hull: serializeCollisionHull(proxy.mesh.geometry) } : {}) });
     }
   }
   robot.traverse((node) => {

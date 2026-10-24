@@ -2,6 +2,7 @@ import { Euler, Matrix4, Quaternion, Vector3, MathUtils } from 'three';
 import { buildExport, createId, normalizeProject, teachingCoordinateFrame } from './io.js';
 import { sha256Bytes } from './hash.js';
 import { appendPlacedObjectLayers } from './placedObjectRendering.js';
+import { transformPolyline } from './polylineTeaching.js';
 
 const axes = ['x', 'y', 'z'];
 const rotationAxes = ['roll', 'pitch', 'yaw'];
@@ -161,6 +162,7 @@ export function transformTeachingTasks(tasks, matrix, mode, map) {
   const pose = (value) => transformTeachingPose(value, matrix, frame);
   return tasks.map((task) => ({
     ...task, coordinateFrame: frame,
+    ...(task.polylines ? { polylines: task.polylines.map((path) => transformPolyline(path, matrix)) } : {}),
     ...(task.mobileSolveSource?.initialMapPose ? { mobileSolveSource: { ...task.mobileSolveSource,
       initialMapPose: pose(task.mobileSolveSource.initialMapPose) } } : {}),
     ...(task.mobileCapture ? { mobileTransform: matrix.clone().multiply(new Matrix4().fromArray(task.mobileTransform)).toArray(), mobileSolve: null } : {}),
@@ -339,6 +341,7 @@ async function createBaseline(project) {
     tasks: await Promise.all(project.teachingTasks.map(async (task) => ({
       id: task.id, name: task.name,
       ...(task.mobileCapture ? { mobileHash: await hashObject({ capture: task.mobileCapture, transform: task.mobileTransform }) } : {}),
+      ...(task.polylines ? { polylines: await Promise.all(task.polylines.map(async (path) => ({ id: path.id, hash: await hashObject(path) }))) } : {}),
       parkingPoints: await Promise.all(task.parkingPoints.map(async (point) => ({ id: point.id, hash: await hashObject(point) }))),
     }))),
     waypoints: await Promise.all(project.waypoints.map(async (point) => ({ id: point.id, hash: await hashObject(point) }))),
@@ -354,8 +357,10 @@ export async function extractTeachingWorkspace(source, { bounds, localToMap, nam
   const selected = {
     ...project,
     teachingTasks: project.teachingTasks.map((task) => ({ ...task,
+      ...(task.polylines ? { polylines: task.polylines.filter((path) => path.points.every((point) =>
+        insideTransferBounds(new Vector3().fromArray(point.position), bounds))) } : {}),
       parkingPoints: task.parkingPoints.filter((point) => insideTransferBounds(point.mapPose.position, bounds)),
-    })).filter((task) => task.parkingPoints.length || task.mobileCapture?.samples.some((sample) => {
+    })).filter((task) => task.parkingPoints.length || task.polylines?.length || task.mobileCapture?.samples.some((sample) => {
       const p = sample.cameraPose.position;
       return insideTransferBounds(new Vector3(p.x, p.y, p.z).applyMatrix4(new Matrix4().fromArray(task.mobileTransform)), bounds);
     })),
@@ -394,6 +399,7 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
   const remap = new Map();
   const newId = (id) => { if (!remap.has(id)) remap.set(id, createId('transferred')); return remap.get(id); };
   const importedTasks = transformTeachingTasks(local.teachingTasks, matrix, 'map', map).map((task) => ({ ...task,
+    ...(task.polylines ? { polylines: task.polylines.map((path) => ({ ...path, id: newId(path.id) })) } : {}),
     id: newId(task.id), parkingPoints: task.parkingPoints.map((point) => ({ ...point,
       id: newId(point.id), poses: point.poses.map((pose) => ({ ...pose, id: newId(pose.id) })),
     })),
@@ -451,6 +457,7 @@ async function verifyBaseline(baseline, project) {
     if (saved.mobileHash) requireValue(await hashObject({ capture: task.mobileCapture, transform: task.mobileTransform }) === saved.mobileHash,
       '原地图中的 iPad 示教已修改，请重新提取局部');
     await verifyItems(saved.parkingPoints, task.parkingPoints);
+    await verifyItems(saved.polylines || [], task.polylines || []);
   }
   await verifyItems(baseline.waypoints, project.waypoints);
   await verifyItems(baseline.edges, project.edges);
@@ -485,10 +492,15 @@ export async function writeBackTeachingWorkspace(source, target) {
     const parkingPoints = task.parkingPoints.flatMap((point) => selected.has(point.id)
       ? edits.has(point.id) ? [edits.get(point.id)] : [] : [point]);
     parkingPoints.push(...(edited?.parkingPoints || []).filter((point) => !selected.has(point.id)));
+    const selectedPolylines = new Set((saved.polylines || []).map((path) => path.id));
+    const untouchedPolylines = (task.polylines || []).filter((path) => !selectedPolylines.has(path.id));
+    requireValue(!(edited?.polylines || []).some((path) => untouchedPolylines.some((other) => other.id === path.id)), '局部折线与原地图其他折线 ID 冲突');
+    const polylines = [...untouchedPolylines, ...(edited?.polylines || [])];
     return { ...task, name: edited && edited.name !== saved.name ? edited.name : task.name,
+      ...(task.polylines || edited?.polylines ? { polylines } : {}),
       ...(saved.mobileHash ? { mobileCapture: edited?.mobileCapture, mobileTransform: edited?.mobileTransform } : {}),
       parkingPoints, updatedAt: new Date().toISOString() };
-  }).filter((task) => !selectedTaskIds.has(task.id) || task.parkingPoints.length || tasks.some((edited) => edited.id === task.id));
+  }).filter((task) => !selectedTaskIds.has(task.id) || task.parkingPoints.length || task.polylines?.length || tasks.some((edited) => edited.id === task.id));
   mergedTasks.push(...tasks.filter((task) => !selectedTaskIds.has(task.id)));
   const mergeGraph = (original, edited, saved) => {
     const selected = new Set(saved.map((item) => item.id));
@@ -517,7 +529,8 @@ export async function writeBackTeachingWorkspace(source, target) {
       const localTask = tasks.find((item) => item.id === task.id);
       if (!localTask) return [];
       const parkingIds = new Set(localTask.parkingPoints.map((point) => point.id));
-      return [{ ...task, parkingPoints: task.parkingPoints.filter((point) => parkingIds.has(point.id)) }];
+      return [{ ...task, parkingPoints: task.parkingPoints.filter((point) => parkingIds.has(point.id)),
+        ...(task.polylines ? { polylines: task.polylines.filter((path) => localTask.polylines?.some((localPath) => localPath.id === path.id)) } : {}) }];
     }),
     waypoints: savedProject.waypoints.filter((point) => points.some((localPoint) => localPoint.id === point.id)),
     edges: savedProject.edges.filter((edge) => local.edges.some((localEdge) => localEdge.id === edge.id)),

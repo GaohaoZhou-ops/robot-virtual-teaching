@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<robot name="polyline_test_robot">
+  <link name="base_link"><visual><geometry><box size="0.1 0.1 0.1"/></geometry></visual><collision><geometry><box size="0.1 0.1 0.1"/></geometry></collision></link>
+  <link name="left_L1"><visual><geometry><sphere radius="0.015"/></geometry></visual><collision><geometry><sphere radius="0.015"/></geometry></collision></link>
+  <joint name="left_J1" type="prismatic"><parent link="base_link"/><child link="left_L1"/><origin xyz="0 0 0.8"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="10" velocity="0.1"/></joint>
+  <link name="left_L2"><visual><geometry><sphere radius="0.015"/></geometry></visual><collision><geometry><sphere radius="0.015"/></geometry></collision></link>
+  <joint name="left_J2" type="prismatic"><parent link="left_L1"/><child link="left_L2"/><origin xyz="0.4 0 0"/><axis xyz="0 1 0"/><limit lower="-1" upper="1" effort="10" velocity="0.1"/></joint>
+  <link name="left_L3"><visual><geometry><sphere radius="0.025"/></geometry></visual><collision><geometry><sphere radius="0.025"/></geometry></collision></link>
+  <joint name="left_J3" type="prismatic"><parent link="left_L2"/><child link="left_L3"/><origin xyz="0 0.3 0"/><axis xyz="0 0 1"/><limit lower="-1" upper="1" effort="10" velocity="0.1"/></joint>
+  <link name="tool_left"/>
+  <joint name="left_tool_fixed" type="fixed"><parent link="left_L3"/><child link="tool_left"/><origin xyz="0 0 -0.1"/></joint>
+  <link name="right_L1"><visual><geometry><sphere radius="0.02"/></geometry></visual><collision><geometry><sphere radius="0.02"/></geometry></collision></link>
+  <joint name="right_J1" type="prismatic"><parent link="base_link"/><child link="right_L1"/><origin xyz="0.4 -0.3 0.8"/><axis xyz="1 0 0"/><limit lower="-1" upper="1" effort="10" velocity="0.1"/></joint>
+  <link name="tool_right"/>
+  <joint name="right_tool_fixed" type="fixed"><parent link="right_L1"/><child link="tool_right"/><origin xyz="0 0 -0.1"/></joint>
+</robot>

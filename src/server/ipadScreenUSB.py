@@ -10,11 +10,17 @@ import json
 import plistlib
 import socket
 import struct
+import subprocess
 import sys
+import tempfile
+import time
+from collections import Counter
+from pathlib import Path
 
 PORT = 21991
 MAX_FRAME = 2 * 1024 * 1024
 WINDOWS_MUX_ADDRESS = ('127.0.0.1', 27015)
+_name_cache = {'ids': (), 'updated': float('-inf'), 'names': {}}
 
 
 def read_exact(sock, length):
@@ -55,6 +61,62 @@ def devices():
     sock.close()
     return [item['Properties'] for item in response.get('DeviceList', [])
             if item.get('Properties', {}).get('ConnectionType') == 'USB']
+
+
+def _text(value, limit=160):
+    return ' '.join(value.split())[:limit] if isinstance(value, str) else ''
+
+
+def _mac_device_names(ids):
+    """Resolve USB UDIDs using CoreDevice's supported JSON interface, never its table."""
+    if sys.platform != 'darwin' or not ids:
+        return {}
+    key, now = tuple(sorted(ids)), time.monotonic()
+    if key == _name_cache['ids'] and now - _name_cache['updated'] < 30:
+        return _name_cache['names']
+    _name_cache.update(ids=key, updated=now)
+    try:
+        with tempfile.TemporaryDirectory(prefix='atlas-usb-names-') as temporary:
+            output = Path(temporary) / 'devices.json'
+            subprocess.run(['xcrun', 'devicectl', 'list', 'devices', '--quiet', '--timeout', '5',
+                            '--json-output', str(output)], check=True, timeout=2,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            value = json.loads(output.read_text())
+        if value.get('info', {}).get('outcome') != 'success':
+            raise ValueError('Device names unavailable')
+        names = {}
+        for device in value.get('result', {}).get('devices', []):
+            hardware = device.get('hardwareProperties', {})
+            udid = hardware.get('udid')
+            if udid not in ids:
+                continue
+            name = _text(device.get('deviceProperties', {}).get('name'))
+            model = _text(hardware.get('marketingName'))
+            names[udid] = ' · '.join(part for part in (name, model if model != name else '') if part)
+        _name_cache['names'] = names
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+        # Naming is optional: missing Xcode or a slow device query must not
+        # disable USB collaboration, or repeatedly block its transport queue.
+        _name_cache['names'] = {key: name for key, name in _name_cache['names'].items() if key in ids}
+    return _name_cache['names']
+
+
+def described_devices():
+    connected = devices()
+    names = _mac_device_names([device['SerialNumber'] for device in connected])
+    result = [{'id': device['SerialNumber'],
+               'name': names.get(device['SerialNumber']) or _text(device.get('DeviceName'))}
+              for device in connected]
+    counts = Counter(device['name'] for device in result if device['name'])
+    for device in result:
+        if counts[device['name']] > 1:
+            device['name'] += ' · ' + device['id'][-8:]
+    return result
+
+
+def device_name(device, app_name='USB 设备'):
+    name = _text(device.get('name'), 320) or _text(app_name) or 'USB 设备'
+    return name + ' · ' + device['id'][-8:] if name.lower() in ('ipad', 'iphone', 'ios 设备', 'usb 设备') else name
 
 
 def connect(device_id):
@@ -156,7 +218,7 @@ def main():
             if command['action'] == 'events':
                 events(command)
                 return
-            value = ([{'id': d['SerialNumber']} for d in devices()] if command['action'] == 'devices'
+            value = (described_devices() if command['action'] == 'devices'
                      else client.request(command))
             print(json.dumps({'value': value}), flush=True)
         except Exception as error:

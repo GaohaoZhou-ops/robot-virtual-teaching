@@ -8,13 +8,15 @@ import { createIPadScreenService, SCREEN_PROTOCOL } from '../src/server/ipadScre
 let now = Date.now(), active = false, phase = '', token = '', outgoing = null, wired = true, supportsInvitations = true;
 let cancelOnAccept = false, starts = 0, streams = 0, frames = 0, stops = 0;
 const deviceId = 'invitation-test-ipad';
+const fullName = 'Test iPad Air · iPad Air 11-inch (M3)';
+let hostName = fullName;
 const transport = {
-  devices: async () => wired ? [{ id: deviceId }] : [],
+  devices: async () => wired ? [{ id: deviceId, name: hostName }] : [],
   async request(device, method, path, body, suppliedToken) {
     if (!wired) throw new Error('unplugged');
     assert.equal(device, deviceId);
     if (outgoing && now >= outgoing.expiresAt) outgoing = null;
-    if (path === '/status') return { status: 200, body: { protocol: SCREEN_PROTOCOL, deviceName: 'Invitation iPad', active,
+    if (path === '/status') return { status: 200, body: { protocol: SCREEN_PROTOCOL, deviceName: 'iPad', active,
       keepalive: true, jointControl: true, realtimeUSB: true, usbInvitations: supportsInvitations,
       invitationPending: phase === 'pending' || !!outgoing, outgoingInvitation: outgoing } };
     const failure = (error) => ({ status: 409, body: { error } });
@@ -69,7 +71,13 @@ const end = async (session, watcher) => {
   await request(`/session/${session.id}`, 'DELETE', null, session); await waitFor(() => watcher.socket.readyState === WebSocket.CLOSED);
 };
 try {
+  assert.equal((await request('/devices')).devices[0].name, fullName);
+  hostName = '';
+  assert.equal((await request('/devices')).devices[0].name, `iPad · ${deviceId.slice(-8)}`);
+  hostName = fullName;
   const session = await invite(), watcher = await watch(session);
+  assert.equal(session.deviceName, fullName);
+  assert(watcher.messages.some((value) => value.deviceName === fullName));
   assert.equal(session.deviceReady, false);
   assert(watcher.messages.some((value) => value.ready && value.deviceReady === false));
   await request(`/session/${session.id}/frame`, 'PUT', Buffer.alloc(16), session, 409);
@@ -94,6 +102,7 @@ try {
 
   outgoing = { id: randomUUID(), expiresAt: now + 60000 };
   const offer = (await request('/invitations')).invitations[0]; assert.equal(offer.invitationId, outgoing.id);
+  assert.equal(offer.deviceName, fullName);
   await request('/invitations', 'GET', null, null, 403, { Origin: 'http://untrusted.example' });
   await request('/invitations/reject', 'POST', { deviceId, invitationId: randomUUID() }, null, 409);
   await request('/invitations/reject', 'POST', offer); assert.equal(outgoing, null);
