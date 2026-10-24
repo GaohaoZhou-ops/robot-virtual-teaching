@@ -71,6 +71,7 @@ def run():
                 if search:
                     expect(panel.get_by_label('底盘搜索结果', exact=True)).to_be_visible()
                 panel.get_by_role('spinbutton', name='底盘水平范围 m', exact=True).fill('0.9')
+                panel.get_by_role('spinbutton', name='底盘水平范围 m', exact=True).press('Enter')
                 expect(panel).to_have_attribute('data-status', 'editing')
                 expect(panel.get_by_role('button', name='执行划线', exact=True)).to_be_disabled()
                 panel.get_by_role('button', name='检查路径', exact=True).click()

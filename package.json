@@ -15,7 +15,7 @@
     "test:robot-limits": "node tests/robot_joint_limits_smoke.mjs",
     "test:robot-coupling": "node tests/robot_joint_coupling_smoke.mjs",
     "test:interactive-ik": "node tests/end_effector_ik_smoke.mjs",
-    "test:polyline": "node tests/robot_collision_hull_smoke.mjs && node tests/polyline_teaching_smoke.mjs && node tests/polyline_base_smoke.mjs && node tests/polyline_timing_smoke.mjs",
+    "test:polyline": "node tests/robot_collision_hull_smoke.mjs && node tests/polyline_teaching_smoke.mjs && node tests/polyline_base_smoke.mjs && node tests/polyline_timing_smoke.mjs && node tests/polyline_partial_smoke.mjs",
     "test:teaching-insert": "node tests/teaching_preset_insertion_smoke.mjs",
     "test:playback": "node tests/teaching_playback_smoke.mjs",
     "test:archive": "node tests/project_archive_smoke.mjs",

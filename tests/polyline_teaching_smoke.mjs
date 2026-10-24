@@ -159,6 +159,7 @@ for (const approach of [false, true]) {
 // Source data survives project and lightweight exports. Only world quantities
 // rotate/translate during workspace conversion; local tool offsets stay local.
 const path = normalizePolyline({ id: 'saved', name: '试验折线', side: 'right', tcpOffset: [0, 0, .15],
+  base: { allowPartial: true },
   points: points([new THREE.Vector3(1, 2, 3), new THREE.Vector3(2, 2, 3)]), quaternion: [0, 0, 0, 1] });
 const project = teachingTransferFixture('map').config.config.project;
 project.virtualTeaching.tasks[0].polylines = [path];

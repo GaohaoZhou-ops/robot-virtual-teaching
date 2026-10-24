@@ -20,6 +20,7 @@ import {
   MapPin,
   Maximize2,
   Play,
+  Route,
   Server,
   Trash2,
   X,
@@ -66,6 +67,18 @@ const poseCountForTask = (task) => (task?.parkingPoints || []).reduce(
   (total, parkingPoint) => total + (parkingPoint.poses?.length || 0),
   0,
 );
+
+const taskContextMatches = (task, mapData, robot) => {
+  const taskRobotKey = task?.robot?.id || task?.robot?.relativePath;
+  const currentRobotKey = robot?.id || robot?.relativePath;
+  const sameRobot = Boolean(taskRobotKey && currentRobotKey && taskRobotKey === currentRobotKey);
+  const sameMap = task?.map?.sourceHash && mapData?.sourceHash
+    ? task.map.sourceHash === mapData.sourceHash
+    : Boolean(task?.map?.fileName && task.map.fileName === mapData?.name);
+  const sameFrame = !mapData?.coordinateFrame || !task?.coordinateFrame
+    || task.coordinateFrame === mapData.coordinateFrame;
+  return sameRobot && sameMap && sameFrame;
+};
 
 const getDefaultSelection = (tasks, activeTaskId, activeParkingPointId) => {
   const task = tasks.find((item) => item.id === activeTaskId) || tasks[0] || null;
@@ -126,6 +139,8 @@ export default function TeachingArchiveTree({
   onInsertPreset,
   onMovePoint,
   onPlayTask,
+  onOpenPolyline,
+  playbackDisabled = false,
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
   onExportTeachingData,
@@ -157,6 +172,7 @@ export default function TeachingArchiveTree({
     activeParkingPointId,
   ));
   const [nameDraft, setNameDraft] = useState('');
+  const [playbackSelection, setPlaybackSelection] = useState(null);
   const [visionPreview, setVisionPreview] = useState(null);
   const [insertActionTarget, setInsertActionTarget] = useState(null);
   const [copying, setCopying] = useState(false);
@@ -188,16 +204,29 @@ export default function TeachingArchiveTree({
     0,
   );
   const totalPoses = tasks.reduce((total, task) => total + poseCountForTask(task), 0);
-  const taskRobotKey = selectedTask?.robot?.id || selectedTask?.robot?.relativePath;
-  const currentRobotKey = robot?.id || robot?.relativePath;
-  const sameRobot = Boolean(taskRobotKey && currentRobotKey && taskRobotKey === currentRobotKey);
-  const sameMap = selectedTask?.map?.sourceHash && mapData?.sourceHash
-    ? selectedTask.map.sourceHash === mapData.sourceHash
-    : Boolean(selectedTask?.map?.fileName && selectedTask.map.fileName === mapData?.name);
-  const sameCoordinateFrame = !mapData?.coordinateFrame
-    || selectedCoordinateFrame === mapData.coordinateFrame;
-  const contextMatches = Boolean(selectedTask && sameRobot && sameMap && sameCoordinateFrame);
+  const totalPolylines = tasks.reduce((total, task) => total + (task.polylines?.length || 0), 0);
+  const contextMatches = taskContextMatches(selectedTask, mapData, robot);
   const robotReady = robotLoadState?.status === 'loaded' && Boolean(robot);
+  const polylineDisabledReason = (task, path) => {
+    if (!robotReady) return '机器人模型尚未装配完成';
+    if (!taskContextMatches(task, mapData, robot)) return '当前地图或机器人与任务不匹配';
+    if (playbackDisabled) return '请先结束当前检查、播放或编辑，并等待工程就绪';
+    if (!mapData?.faceCount) return '折线查看和回放需要带三角面的模型';
+    if (!onOpenPolyline) return '折线回放暂不可用';
+    if (path.points?.length < 2 || !path.points) return '折线至少需要两个点';
+    return '';
+  };
+  const playbackOptions = [
+    ...(poseCountForTask(selectedTask) ? [{ value: 'poses', label: '停车点与机械臂姿态' }] : []),
+    ...(selectedTask?.polylines || []).map((path) => ({ value: `polyline:${path.id}`, label: `独立折线 · ${path.name}`, path })),
+  ];
+  const playbackOption = playbackOptions.find((option) => playbackSelection?.taskId === selectedTask?.id
+    && option.value === playbackSelection.value) || playbackOptions[0];
+  const playbackPath = playbackOption?.path;
+  const playbackDisabledReason = playbackPath ? polylineDisabledReason(selectedTask, playbackPath)
+    : !poseCountForTask(selectedTask) ? '请先保存折线或记录机械臂姿态'
+      : !contextMatches ? '当前地图或机器人与任务不匹配'
+        : !robotReady ? '机器人模型尚未装配完成' : '';
   const mergePlannerAvailable = Boolean(
     parkingMergePlannerReady
     && robotReady
@@ -570,12 +599,31 @@ export default function TeachingArchiveTree({
           >
             {taskCollapsed ? <Folder size={13} /> : <FolderOpen size={13} />}
             <span>{task.name}</span>
-            <small>{task.mobileCapture ? `${task.mobileCapture.samples.length} ${mobileDeviceLabel(task.mobileCapture)} Pose` : `${task.parkingPoints?.length || 0} / ${poseCountForTask(task)}`}</small>
+            <small>{task.mobileCapture ? `${task.mobileCapture.samples.length} ${mobileDeviceLabel(task.mobileCapture)} Pose` : `${task.parkingPoints?.length || 0} / ${poseCountForTask(task)}${task.polylines?.length ? ` · ${task.polylines.length} 折线` : ''}`}</small>
           </button>
         </div>
 
         {!taskCollapsed && (
           <div className="teaching-tree-group teaching-tree-group--parking" role="group">
+            {(task.polylines || []).map((path) => {
+              const disabledReason = polylineDisabledReason(task, path);
+              return (
+                <div className="teaching-tree-node teaching-tree-node--polyline" key={path.id}
+                  role="treeitem" aria-label={`独立折线 ${path.name}`} data-polyline-id={path.id}>
+                  <span className="teaching-tree-leaf-line" />
+                  <button type="button" className="teaching-tree-label" aria-label={`查看折线 ${path.name}`}
+                    disabled={Boolean(disabledReason)} title={disabledReason || '在 3D 工作台查看独立折线'}
+                    onClick={() => onOpenPolyline?.(task.id, path.id, 'preview')}>
+                    <Route size={12} /><span>{path.name}</span><small>{path.points?.length || 0} 点</small>
+                  </button>
+                  <button type="button" className="teaching-tree-polyline-play" aria-label={`回放折线 ${path.name}`}
+                    disabled={Boolean(disabledReason)} title={disabledReason || '返回 3D 工作台，检查通过后回放折线'}
+                    onClick={() => onOpenPolyline?.(task.id, path.id, 'play')}>
+                    <Play size={12} fill="currentColor" />
+                  </button>
+                </div>
+              );
+            })}
             {(task.parkingPoints || []).map((parkingPoint) => {
               const parkingCollapsed = collapsedParkingPointIds.has(parkingPoint.id);
               const parkingSelected = selection?.type === 'parking'
@@ -642,7 +690,7 @@ export default function TeachingArchiveTree({
                 </div>
               );
             })}
-            {!task.parkingPoints?.length && (
+            {!task.parkingPoints?.length && !task.polylines?.length && (
               <div className="teaching-tree-empty-leaf">{task.mobileCapture ? `${task.mobileCapture.samples.length} 个 ${mobileDeviceLabel(task.mobileCapture)} Pose · 见右侧详情` : '暂无停车点'}</div>
             )}
           </div>
@@ -660,6 +708,7 @@ export default function TeachingArchiveTree({
         data-teaching-task-count={tasks.length}
         data-parking-point-count={totalParkingPoints}
         data-teaching-point-count={totalPoses}
+        data-polyline-count={totalPolylines}
         data-active-teaching-task={selectedTask?.id || ''}
         data-active-parking-point={selectedParkingPoint?.id || ''}
         data-teaching-context-match={contextMatches ? 'true' : 'false'}
@@ -671,9 +720,9 @@ export default function TeachingArchiveTree({
         <header className="teaching-tree-toolbar">
           <div>
             <ListTree size={15} />
-            <span><strong>示教数据树</strong><small>TASK / STOP / POSE</small></span>
+            <span><strong>示教数据树</strong><small>TASK / STOP / POSE{totalPolylines ? ' / PATH' : ''}</small></span>
           </div>
-          <span>{tasks.length} 任务 · {totalParkingPoints} 停车点 · {totalPoses} 姿态</span>
+          <span>{tasks.length} 任务 · {totalParkingPoints} 停车点 · {totalPoses} 姿态{totalPolylines ? ` · ${totalPolylines} 折线` : ''}</span>
           {selection?.type === 'pose' && selectedPoint && (
             <>
               <button type="button" className="teaching-tree-insert-action"
@@ -800,28 +849,38 @@ export default function TeachingArchiveTree({
                       <dl>
                         <div><dt>{selectedTask.mobileCapture ? '校准段数' : '停车点'}</dt><dd>{selectedTask.mobileCapture?.calibrations.length ?? (selectedTask.parkingPoints?.length || 0)}</dd></div>
                         <div><dt>{selectedTask.mobileCapture ? `${mobileDeviceLabel(selectedTask.mobileCapture)} Pose` : '机械臂姿态'}</dt><dd>{selectedTask.mobileCapture?.samples.length ?? poseCountForTask(selectedTask)}</dd></div>
+                        {selectedTask.polylines?.length > 0 && <div><dt>独立折线</dt><dd>{selectedTask.polylines.length}</dd></div>}
                         <div><dt>{isIndependentTeachingSpace ? '空间点云' : '地图'}</dt><dd>{selectedTask.map?.fileName || '未绑定'}</dd></div>
                         <div><dt>{selectedTask.mobileCapture ? '采集设备' : '机器人'}</dt><dd>{selectedTask.mobileCapture?.device.model || selectedTask.robot?.name || '未绑定'}</dd></div>
                         <div><dt>创建时间</dt><dd>{formatCapturedAt(selectedTask.createdAt)}</dd></div>
                         <div><dt>坐标系</dt><dd>{selectedCoordinateFrame}</dd></div>
                       </dl>
+                      {!selectedTask.mobileCapture && selectedTask.polylines?.length > 0 && (
+                        <div className="teaching-tree-playback-choice">
+                          <label className="teaching-tree-name-field">
+                            <span>回放内容</span>
+                            <select aria-label="任务回放内容" value={playbackOption?.value || ''}
+                              onChange={(event) => setPlaybackSelection({ taskId: selectedTask.id, value: event.target.value })}>
+                              {playbackOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </select>
+                          </label>
+                          <p>独立折线单独回放，无需停车点；检查通过后自动执行。</p>
+                        </div>
+                      )}
                       <div className="teaching-tree-task-actions">
                         {!selectedTask.mobileCapture && <>
                         <button
                           type="button"
                           className="teaching-tree-play-action"
                           aria-label={`播放示教任务 ${selectedTask.name}`}
-                          disabled={!poseCountForTask(selectedTask) || !contextMatches || !robotReady}
-                          title={!poseCountForTask(selectedTask)
-                            ? '请先在停车点下记录至少一个机械臂姿态'
-                            : !contextMatches
-                              ? '当前地图或机器人与任务不匹配'
-                              : !robotReady
-                                ? '机器人模型尚未装配完成'
-                                : '切换到主工作台，按停车点与姿态顺序执行连续规划轨迹'}
-                          onClick={() => onPlayTask?.(selectedTask.id)}
+                          disabled={Boolean(playbackDisabledReason)}
+                          title={playbackDisabledReason || (playbackPath
+                            ? '返回 3D 工作台，检查通过后回放所选折线'
+                            : '切换到主工作台，按停车点与姿态顺序执行连续规划轨迹')}
+                          onClick={() => playbackPath ? onOpenPolyline?.(selectedTask.id, playbackPath.id, 'play')
+                            : onPlayTask?.(selectedTask.id)}
                         >
-                          <Play size={12} fill="currentColor" /> 播放任务
+                          <Play size={12} fill="currentColor" /> {playbackPath ? '回放折线' : '播放任务'}
                         </button>
                         <button
                           type="button"
@@ -871,7 +930,7 @@ export default function TeachingArchiveTree({
                           className="teaching-tree-danger"
                           aria-label="删除当前示教任务"
                           onClick={() => {
-                            if (window.confirm(`删除 ${selectedTask.name} 及其全部${selectedTask.mobileCapture ? ` ${mobileDeviceLabel(selectedTask.mobileCapture)} Pose` : '停车点和机械臂姿态'}？`)) {
+                            if (window.confirm(`删除 ${selectedTask.name} 及其全部${selectedTask.mobileCapture ? ` ${mobileDeviceLabel(selectedTask.mobileCapture)} Pose` : `停车点、机械臂姿态${selectedTask.polylines?.length ? '和独立折线' : ''}`}？`)) {
                               onDeleteTask(selectedTask.id);
                             }
                           }}

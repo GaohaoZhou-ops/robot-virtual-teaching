@@ -44,7 +44,8 @@ node_modules/
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
 # browser/native captures, readiness markers, device reports and deployment logs.
 # The persistent web service uses build/service/; surface-polyline browser
-# captures use test-artifacts/polyline-{teaching,base,surface-warnings}/.
+# captures (including sidebar, partial-path and orientation checks) use
+# test-artifacts/polyline-*/.
 dist/
 build/
 out/
@@ -207,13 +208,20 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
-# Standalone copies of surface-polyline validation output and packed reports.
+# Standalone copies of surface-polyline validation output and packed reports,
+# including screenshots/videos copied out of their original artifact directory.
 # Scope these to root/tests output directories; polyline_*.py/.mjs runners,
 # src/ modules and nested tests/fixtures/ models remain trackable.
 /polyline-*/
 /tests/polyline-*/
 /polyline-*.[zZ][iI][pP]
 /tests/polyline-*.[zZ][iI][pP]
+/polyline-*.[pP][nN][gG]
+/tests/polyline-*.[pP][nN][gG]
+/polyline-*.[wW][eE][bB][mM]
+/tests/polyline-*.[wW][eE][bB][mM]
+/polyline-*.[mM][pP]4
+/tests/polyline-*.[mM][pP]4
 # USB / Wi-Fi collaboration diagnostics copied from /tmp or build/.
 # Keep reports, frame captures, review bundles and local environments scoped
 # to output locations so source files and nested regression fixtures stay visible.

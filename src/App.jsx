@@ -606,6 +606,8 @@ export default function App() {
   const [placedObjectColorMode, setPlacedObjectColorMode] = useState('height');
   const layerRecoveryAttemptRef = useRef(null);
   const [meshRenderQuality, setMeshRenderQuality] = useState('auto');
+  const [showPaths3D, setShowPaths3D] = useState(true);
+  const [showParkingPoints3D, setShowParkingPoints3D] = useState(true);
   const [showWaypoints3D, setShowWaypoints3D] = useState(true);
   const [showWaypointNames3D, setShowWaypointNames3D] = useState(true);
   const [showPathNames3D, setShowPathNames3D] = useState(false);
@@ -682,6 +684,22 @@ export default function App() {
   } = useProjectImportProgress();
   const [teachingPlayback, setTeachingPlayback] = useState(createIdleTeachingPlayback);
   const [polylineTeachingBusy, setPolylineTeachingBusy] = useState(false);
+  const [polylineTeachingOpen, setPolylineTeachingOpen] = useState(false);
+  const [polylineTeachingContainer, setPolylineTeachingContainer] = useState(null);
+  const [polylineTeachingRequest, setPolylineTeachingRequest] = useState(null);
+  useEffect(() => { setPolylineTeachingRequest(null); }, [mapData?.mapId, selectedRobot?.id, teachingSpaceMode]);
+  useEffect(() => {
+    if (appPage !== APP_PAGE_WORKBENCH) {
+      setPolylineTeachingRequest(null);
+      setPolylineTeachingOpen(false);
+    }
+  }, [appPage]);
+  useEffect(() => {
+    setInspectorCollapsed(false);
+  }, [polylineTeachingOpen]);
+  const finishPolylineTeachingRequest = useCallback((id) => {
+    setPolylineTeachingRequest((current) => current?.id === id ? null : current);
+  }, []);
   const [sessionState, setSessionState] = useState({ status: 'checking', restored: false });
   const [cachedWorkspaces, setCachedWorkspaces] = useState({
     map: null,
@@ -823,6 +841,8 @@ export default function App() {
     pointColorMode,
     placedObjectColorMode,
     meshRenderQuality,
+    showPaths3D,
+    showParkingPoints3D,
     showWaypoints3D,
     showWaypointNames3D,
     showPathNames3D,
@@ -1098,6 +1118,8 @@ export default function App() {
           meshRenderQuality: current.meshRenderQuality,
           pointColorMode: current.pointColorMode,
           placedObjectColorMode: current.placedObjectColorMode,
+          showPaths3D: current.showPaths3D,
+          showParkingPoints3D: current.showParkingPoints3D,
           showWaypoints3D: current.showWaypoints3D,
           showWaypointNames3D: current.showWaypointNames3D,
           showPathNames3D: current.showPathNames3D,
@@ -1125,6 +1147,8 @@ export default function App() {
         pointColorMode: current.pointColorMode,
         placedObjectColorMode: current.placedObjectColorMode,
         meshRenderQuality: current.meshRenderQuality,
+        showPaths3D: current.showPaths3D,
+        showParkingPoints3D: current.showParkingPoints3D,
         showWaypoints3D: current.showWaypoints3D,
         showWaypointNames3D: current.showWaypointNames3D,
         showPathNames3D: current.showPathNames3D,
@@ -1617,6 +1641,8 @@ export default function App() {
           setMeshRenderQuality(normalizeMeshRenderQuality(
             snapshot?.ui?.meshRenderQuality ?? project?.rendering?.meshQuality,
           ));
+          setShowPaths3D((snapshot?.ui?.showPaths3D ?? project?.workspace?.showPaths3D) !== false);
+          setShowParkingPoints3D((snapshot?.ui?.showParkingPoints3D ?? project?.workspace?.showParkingPoints3D) !== false);
           setShowWaypoints3D(snapshot?.ui?.showWaypoints3D !== false);
           setShowWaypointNames3D(
             (snapshot?.ui?.showWaypointNames3D ?? project?.workspace?.showWaypointNames3D) !== false,
@@ -1881,6 +1907,8 @@ export default function App() {
           setPointColorMode('height');
           setPlacedObjectColorMode('height');
           setMeshRenderQuality('auto');
+          setShowPaths3D(true);
+          setShowParkingPoints3D(true);
           setShowWaypoints3D(true);
           setShowWaypointNames3D(true);
           setShowPathNames3D(false);
@@ -2066,6 +2094,8 @@ export default function App() {
     activeTeachingParkingPointId,
     jointPoses,
     sessionState.status,
+    showPaths3D,
+    showParkingPoints3D,
     showWaypoints3D,
     showWaypointNames3D,
     showPathNames3D,
@@ -2441,6 +2471,8 @@ export default function App() {
         robotArmJointCouplingEnabled: current.robotArmJointCouplingEnabled,
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
         placedObjectColorMode: current.placedObjectColorMode,
+        showPaths3D: current.showPaths3D,
+        showParkingPoints3D: current.showParkingPoints3D,
         showWaypoints3D: syncRoute || current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
         showPathNames3D: current.showPathNames3D,
         showHeightLegend3D: current.showHeightLegend3D,
@@ -2675,6 +2707,8 @@ export default function App() {
       const importedPointColorMode = pointColorModes.has(project.workspace?.pointColorMode)
         ? project.workspace.pointColorMode
         : 'height';
+      const importedShowPaths3D = project.workspace?.showPaths3D !== false;
+      const importedShowParkingPoints3D = project.workspace?.showParkingPoints3D !== false;
       const importedShowWaypoints3D = project.workspace?.showWaypoints3D !== false;
       const importedShowWaypointNames3D = project.workspace?.showWaypointNames3D !== false;
       const importedShowPathNames3D = project.workspace?.showPathNames3D === true;
@@ -2714,6 +2748,8 @@ export default function App() {
       setMeshRenderQuality(importedMeshQuality);
       setPointColorMode(importedPointColorMode);
       setPlacedObjectColorMode(importedObjectColor);
+      setShowPaths3D(importedShowPaths3D);
+      setShowParkingPoints3D(importedShowParkingPoints3D);
       setShowWaypoints3D(importedShowWaypoints3D);
       setShowWaypointNames3D(importedShowWaypointNames3D);
       setShowPathNames3D(importedShowPathNames3D);
@@ -2791,6 +2827,8 @@ export default function App() {
             meshRenderQuality: importedMeshQuality,
             pointColorMode: importedPointColorMode,
             placedObjectColorMode: importedObjectColor,
+            showPaths3D: importedShowPaths3D,
+            showParkingPoints3D: importedShowParkingPoints3D,
             showWaypoints3D: importedShowWaypoints3D,
             showWaypointNames3D: importedShowWaypointNames3D,
             showPathNames3D: importedShowPathNames3D,
@@ -2812,6 +2850,8 @@ export default function App() {
             pointColorMode: importedPointColorMode,
             placedObjectColorMode: importedObjectColor,
             meshRenderQuality: importedMeshQuality,
+            showPaths3D: importedShowPaths3D,
+            showParkingPoints3D: importedShowParkingPoints3D,
             showWaypoints3D: importedShowWaypoints3D,
             showWaypointNames3D: importedShowWaypointNames3D,
             showPathNames3D: importedShowPathNames3D,
@@ -3633,6 +3673,31 @@ export default function App() {
     setMobileComputation((current) => current ? { ...current, preview: null, followLatest: false } : current);
   }, []);
 
+  const openTeachingPolyline = useCallback((taskId, pathId, action = 'preview') => {
+    const task = teachingTasks.find((item) => item.id === taskId);
+    const path = task?.polylines?.find((item) => item.id === pathId);
+    if (!path) { notify('折线不存在或已经被删除', 'warning'); return; }
+    if (polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)
+      || teachingCaptureState.status === 'capturing' || robotParkingGhost?.editing) {
+      notify('请先结束当前检查、播放或姿态编辑，再打开折线', 'warning'); return;
+    }
+    if (robotLoadState.status !== 'loaded' || !teachingContextMatches(task)) {
+      notify('请先加载该折线所属任务的地图与机器人', 'warning'); return;
+    }
+    if (!mapData?.faceCount) { notify('折线查看和回放需要带三角面的模型', 'warning'); return; }
+    clearRobotParkingGhost();
+    setActiveTeachingTaskId(taskId);
+    setActiveTeachingParkingPointId(null);
+    setCollapsedPanel((current) => current === '3d' ? null : current);
+    setPolylineTeachingRequest({ id: createId('polyline-request'), taskId, pathId, action,
+      sceneId: mapData.geometry.uuid, robotId: selectedRobot.id || selectedRobot.relativePath,
+      path: structuredClone(path) });
+    requestInspectorPage({ page: 'teaching' });
+    navigateAppPage(APP_PAGE_WORKBENCH);
+  }, [teachingTasks, polylineTeachingBusy, teachingPlayback.status, teachingCaptureState.status,
+    robotParkingGhost?.editing, robotLoadState.status, teachingContextMatches, mapData, selectedRobot,
+    clearRobotParkingGhost, requestInspectorPage, navigateAppPage, notify]);
+
   const selectNavigationWaypoint = useCallback((id) => {
     selectWaypoint(id);
     if (waypoints.some((point) => point.id === id && point.teachingTaskId)) {
@@ -4392,6 +4457,8 @@ export default function App() {
     meshRenderQuality,
     pointColorMode,
     placedObjectColorMode,
+    showPaths3D,
+    showParkingPoints3D,
     showWaypoints3D,
     showWaypointNames3D,
     showPathNames3D,
@@ -5046,7 +5113,9 @@ export default function App() {
       return;
     }
 
-    if (task.polylines?.length) { notify('此任务含表面折线，请在三维视图的“折线示教”中逐条检查和执行', 'info'); return; }
+    if (task.polylines?.length && !task.parkingPoints?.some((point) => point.poses?.length)) {
+      notify('请在示教数据中心或图谱控制台中选择对应折线并点击回放', 'info'); return;
+    }
     const plan = buildTeachingTaskTrajectory({
       task,
       jointDefinitions: robotLoadState.movableJoints || [],
@@ -6877,6 +6946,10 @@ export default function App() {
                 workspaceTransfer={workspaceTransfer}
                 meshRenderQuality={meshRenderQuality}
                 onMeshRenderQualityChange={setMeshRenderQuality}
+                showPaths={showPaths3D}
+                onShowPathsChange={setShowPaths3D}
+                showParkingPoints={showParkingPoints3D}
+                onShowParkingPointsChange={setShowParkingPoints3D}
                 showWaypoints={showWaypoints3D}
                 onShowWaypointsChange={setShowWaypoints3D}
                 showWaypointNames={showWaypointNames3D}
@@ -6911,6 +6984,11 @@ export default function App() {
                 onSavePolyline={saveTeachingPolyline}
                 onDeletePolyline={deleteTeachingPolyline}
                 onPolylineBusyChange={setPolylineTeachingBusy}
+                polylineOpen={polylineTeachingOpen}
+                onPolylineOpenChange={setPolylineTeachingOpen}
+                polylineContainer={polylineTeachingContainer}
+                polylineRequest={polylineTeachingRequest}
+                onPolylineRequestHandled={finishPolylineTeachingRequest}
                 selectedMobilePose={selectedMobilePose}
                 spaceMouseInputRef={spaceMouseInputRef}
                 viewportCanvasRef={main3DCanvasRef}
@@ -7050,6 +7128,8 @@ export default function App() {
         <Inspector
           mapData={mapData}
           pageRequest={inspectorPageRequest}
+          polylineOpen={polylineTeachingOpen}
+          onPolylineContainer={setPolylineTeachingContainer}
           teachingSpaceMode={teachingSpaceMode}
           waypoints={waypoints}
           edges={edges}
@@ -7116,6 +7196,10 @@ export default function App() {
           onDeleteTeachingTask={deleteTeachingTask}
           onDeleteTeachingParkingPoint={deleteTeachingParkingPoint}
           onDeleteTeachingPoint={deleteTeachingPoint}
+          onOpenTeachingPolyline={openTeachingPolyline}
+          onDeleteTeachingPolyline={deleteTeachingPolyline}
+          polylineActionsDisabled={polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)
+            || loadState.loading || sessionState.status !== 'ready'}
           onApplyTeachingPoint={applyTeachingParkingPoint}
           onApplyTeachingUpperBodyPose={applyTeachingUpperBodyPose}
           onSolveMobileTask={openMobileTeachingSolve}
@@ -7291,6 +7375,10 @@ export default function App() {
           onInsertPreset={insertTeachingPresetAction}
           onMovePoint={moveTeachingPoint}
           onPlayTask={startTeachingTaskPlayback}
+          onOpenPolyline={openTeachingPolyline}
+          playbackDisabled={polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)
+            || teachingCaptureState.status === 'capturing' || Boolean(robotParkingGhost?.editing)
+            || loadState.loading || sessionState.status !== 'ready'}
           onAnalyzeParkingPointMerge={analyzeTeachingParkingPointMerge}
           onMergeParkingPoints={mergeTeachingParkingPoints}
           onExportProject={exportProject}

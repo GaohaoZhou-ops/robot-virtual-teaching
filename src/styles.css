@@ -3735,6 +3735,7 @@ code {
 
 .viewer-display-settings__color,
 .viewer-display-settings__robot,
+.viewer-display-settings__layer,
 .viewer-display-settings__height-legend,
 .viewer-display-settings__waypoint-names,
 .viewer-display-settings__path-names,
@@ -3750,6 +3751,7 @@ code {
 
 .viewer-display-settings__color > span,
 .viewer-display-settings__robot > span,
+.viewer-display-settings__layer > span,
 .viewer-display-settings__height-legend > span,
 .viewer-display-settings__waypoint-names > span,
 .viewer-display-settings__path-names > span,
@@ -3781,14 +3783,14 @@ code {
 }
 
 .viewer-display-settings__color .height-color-toggle:hover,
-.viewer-display-settings__toggle:hover,
+.viewer-display-settings__toggle:hover:not(:disabled),
 .distance-warning-toggle:hover {
   border-color: var(--cyan);
   background: #153139;
 }
 
 .viewer-display-settings__color button:disabled,
-.viewer-display-settings__robot button:disabled { opacity: .4; cursor: not-allowed; }
+.viewer-display-settings__toggle:disabled { opacity: .4; cursor: not-allowed; }
 .viewer-display-settings__layer-notice { margin: 0; padding: 10px 14px; color: var(--muted); font-size: 10px; line-height: 1.6; border-bottom: 1px solid var(--line); }
 
 .viewer-display-settings__toggle > span,
@@ -5104,6 +5106,9 @@ input[type="number"]::-webkit-inner-spin-button {
     visibility 0s linear;
 }
 
+.inspector-panel__content[hidden] { display: none; }
+.inspector-polyline-host { display: block; }
+
 .inspector-panel.is-collapsed {
   border-color: rgba(89, 219, 232, 0.22);
   background:
@@ -5526,6 +5531,33 @@ input[type="number"]::-webkit-inner-spin-button {
 .teaching-tree-node--task > .teaching-tree-label > svg { color: #75939a; }
 .teaching-tree-node--parking > .teaching-tree-label > svg { color: #4fa1a7; }
 .teaching-tree-node--pose > .teaching-tree-label > svg { color: #596c6d; }
+.teaching-tree-node--polyline > .teaching-tree-label > svg { color: #59c6d2; }
+
+.teaching-tree-node--polyline {
+  grid-template-columns: 24px minmax(0, 1fr) 30px;
+}
+
+.teaching-tree-polyline-play {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(89, 219, 232, 0.18);
+  color: #71c8d0;
+  background: rgba(89, 219, 232, 0.04);
+  cursor: pointer;
+}
+
+.teaching-tree-node--polyline button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.teaching-tree-polyline-play:focus-visible {
+  outline: 1px solid #59dbe8;
+  outline-offset: 2px;
+}
 
 .teaching-tree-label > span {
   overflow: hidden;
@@ -5671,7 +5703,8 @@ input[type="number"]::-webkit-inner-spin-button {
   font-size: 12px;
 }
 
-.teaching-tree-name-field input {
+.teaching-tree-name-field input,
+.teaching-tree-name-field select {
   width: 100%;
   min-width: 0;
   height: 32px;
@@ -5683,8 +5716,20 @@ input[type="number"]::-webkit-inner-spin-button {
   font-size: 13px;
 }
 
-.teaching-tree-name-field input:focus {
+.teaching-tree-name-field input:focus,
+.teaching-tree-name-field select:focus {
   border-color: rgba(89, 219, 232, 0.4);
+}
+
+.teaching-tree-playback-choice {
+  margin-top: 14px;
+}
+
+.teaching-tree-playback-choice p {
+  margin: 7px 0 0;
+  color: #687d7d;
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .teaching-tree-task-detail,
@@ -10841,6 +10886,55 @@ input[type="number"]::-webkit-inner-spin-button {
   line-height: 1.6;
 }
 
+.teaching-capture-tree__polyline {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  min-height: 48px;
+  padding-right: 5px;
+  border-left: 2px solid transparent;
+}
+.teaching-capture-tree__polyline::before {
+  content: "";
+  position: absolute;
+  top: 50%; left: -10px; width: 8px; height: 1px;
+  background: rgba(137, 177, 179, 0.14);
+}
+.teaching-capture-tree__polyline:hover { background: rgba(137, 177, 179, 0.05); }
+.teaching-capture-tree__polyline.is-selected {
+  border-left-color: #63e6ee;
+  background: linear-gradient(90deg, rgba(99, 230, 238, 0.13), rgba(99, 230, 238, 0.025));
+}
+.teaching-capture-tree__polyline-label {
+  display: grid;
+  grid-template-columns: 24px 13px minmax(0, 1fr);
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 6px 5px 6px 0;
+  border: 0;
+  color: #829c99;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.teaching-capture-tree__polyline-label > i { color: #7c9fa1; font: normal 10px "SFMono-Regular", Menlo, monospace; text-align: center; }
+.teaching-capture-tree__polyline-label > svg { color: #63c6ce; }
+.teaching-capture-tree__polyline-label > span { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.teaching-capture-tree__polyline-label strong { color: #c6deda; font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.teaching-capture-tree__polyline-label small { color: #829b98; font-size: 10px; }
+.teaching-capture-tree__polyline-play {
+  display: grid; place-items: center;
+  width: 28px; height: 28px; padding: 0;
+  border: 1px solid rgba(89, 219, 232, 0.3);
+  background: rgba(89, 219, 232, 0.065);
+  color: var(--cyan); cursor: pointer;
+}
+.teaching-capture-tree__polyline-play:hover:not(:disabled) { background: rgba(89, 219, 232, 0.13); border-color: var(--cyan); }
+.teaching-capture-tree__polyline button:disabled { opacity: .4; cursor: not-allowed; }
+.teaching-capture-tree__polyline button:focus-visible { outline: 1px solid #63e6ee; outline-offset: -1px; }
+
 .teaching-capture-tree__pose {
   display: grid;
   flex: 0 0 auto;
@@ -11441,6 +11535,7 @@ input[type="number"]::-webkit-inner-spin-button {
   min-width: 0;
   margin: 0;
 }
+.teaching-capture-actions > .teaching-polyline-replay { grid-column: 1 / -1; }
 
 .teaching-pose-action {
   display: inline-flex;

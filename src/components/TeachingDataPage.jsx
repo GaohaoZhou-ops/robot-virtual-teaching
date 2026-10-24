@@ -55,6 +55,8 @@ export default function TeachingDataPage({
   onInsertPreset,
   onMovePoint,
   onPlayTask,
+  onOpenPolyline,
+  playbackDisabled = false,
   onAnalyzeParkingPointMerge,
   onMergeParkingPoints,
   onExportProject,
@@ -256,6 +258,8 @@ export default function TeachingDataPage({
                 onInsertPreset={onInsertPreset}
                 onMovePoint={onMovePoint}
                 onPlayTask={onPlayTask}
+                onOpenPolyline={onOpenPolyline}
+                playbackDisabled={playbackDisabled}
                 onAnalyzeParkingPointMerge={onAnalyzeParkingPointMerge}
                 onMergeParkingPoints={onMergeParkingPoints}
                 onExportTeachingData={onExportTeachingData}

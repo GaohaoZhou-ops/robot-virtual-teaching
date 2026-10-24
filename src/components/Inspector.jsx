@@ -112,6 +112,8 @@ const statusMeta = {
 export default function Inspector({
   mapData,
   pageRequest = null,
+  polylineOpen = false,
+  onPolylineContainer,
   teachingSpaceMode = 'map',
   waypoints,
   edges,
@@ -174,6 +176,9 @@ export default function Inspector({
   onDeleteTeachingTask,
   onDeleteTeachingParkingPoint,
   onDeleteTeachingPoint,
+  onOpenTeachingPolyline,
+  onDeleteTeachingPolyline,
+  polylineActionsDisabled = false,
   onApplyTeachingPoint,
   onApplyTeachingUpperBodyPose,
   onSolveMobileTask,
@@ -373,16 +378,18 @@ export default function Inspector({
   return (
     <>
       <aside
-        className={`inspector-panel ${collapsed ? 'is-collapsed' : ''}`}
+        className={`inspector-panel ${collapsed ? 'is-collapsed' : ''} ${polylineOpen ? 'is-polyline-mode' : ''}`}
         data-active-page={activePage}
+        data-panel-mode={polylineOpen ? 'polyline' : 'console'}
         data-collapsed={collapsed ? 'true' : 'false'}
-        aria-label="图谱控制台"
+        aria-label={polylineOpen ? '折线示教控制台' : '图谱控制台'}
       >
       <div
         id="inspector-panel-content"
         className="inspector-panel__content"
-        aria-hidden={collapsed ? 'true' : 'false'}
-        inert={collapsed ? '' : undefined}
+        hidden={polylineOpen}
+        aria-hidden={collapsed || polylineOpen ? 'true' : 'false'}
+        inert={collapsed || polylineOpen ? '' : undefined}
       >
       <div className="inspector-heading">
         <div>
@@ -887,6 +894,9 @@ export default function Inspector({
               onDeleteTask={onDeleteTeachingTask}
               onDeleteParkingPoint={onDeleteTeachingParkingPoint}
               onDeletePoint={onDeleteTeachingPoint}
+              onOpenPolyline={onOpenTeachingPolyline}
+              onDeletePolyline={onDeleteTeachingPolyline}
+              polylineActionsDisabled={polylineActionsDisabled}
               onApplyPoint={onApplyTeachingPoint}
               onApplyUpperBodyPose={onApplyTeachingUpperBodyPose}
               onMoveToParkingPoint={onMoveToWaypoint}
@@ -916,7 +926,7 @@ export default function Inspector({
                 <ZividCameraPanel
                   key={side}
                   side={side}
-                  active={activePage === 'camera' && !collapsed && (!expandedCameraSide || expandedCameraSide === side)}
+                  active={activePage === 'camera' && !collapsed && !polylineOpen && (!expandedCameraSide || expandedCameraSide === side)}
                   mapData={mapData}
                   robot={robot}
                   robotLoadState={robotLoadState}
@@ -941,27 +951,31 @@ export default function Inspector({
         )}
       </div>
       </div>
+      <div id="inspector-polyline-content" ref={onPolylineContainer}
+        className="inspector-panel__content inspector-polyline-host" hidden={!polylineOpen}
+        aria-hidden={!polylineOpen || collapsed ? 'true' : 'false'}
+        inert={!polylineOpen || collapsed ? '' : undefined} />
       <button
         type="button"
         className="inspector-collapse-toggle"
-        aria-label={collapsed ? '展开图谱控制台' : '折叠图谱控制台'}
+        aria-label={`${collapsed ? '展开' : '折叠'}${polylineOpen ? '折线示教' : '图谱控制台'}`}
         aria-expanded={!collapsed}
-        aria-controls="inspector-panel-content"
-        title={collapsed ? '向左展开图谱控制台' : '向右收起图谱控制台'}
+        aria-controls={polylineOpen ? 'inspector-polyline-content' : 'inspector-panel-content'}
+        title={`${collapsed ? '向左展开' : '向右收起'}${polylineOpen ? '折线示教' : '图谱控制台'}`}
         onClick={() => onCollapsedChange?.(!collapsed)}
       >
         {collapsed ? <PanelRightOpen size={14} /> : <PanelRightClose size={13} />}
-        <span>{collapsed ? '展开控制台' : '折叠'}</span>
+        <span>{collapsed ? polylineOpen ? '展开折线示教' : '展开控制台' : '折叠'}</span>
       </button>
       </aside>
 
-      {connectivityResultsOpen && validation.status === 'partial' && activePage === 'navigation' && !collapsed && isWorkbenchActive && (
+      {connectivityResultsOpen && validation.status === 'partial' && activePage === 'navigation' && !collapsed && !polylineOpen && isWorkbenchActive && (
         <ConnectivityResults anchorRef={pathTestRef} validation={validation} waypoints={waypoints} edges={edges}
           onClose={closeConnectivityResults} onLocateWaypoint={onSearchWaypoint} onLocateEdge={onSelectEdge} />
       )}
 
       <FloatingRobotJointPanel
-        open={jointWindowOpen}
+        open={jointWindowOpen && !polylineOpen}
         teachingPoseEditing={Boolean(editingTeachingPoseId)}
         onClose={() => setJointWindowOpen(false)}
         robot={robot}
