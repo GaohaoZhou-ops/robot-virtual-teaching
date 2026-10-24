@@ -105,8 +105,13 @@ def run():
                     assert time.monotonic() < deadline, devices
                     page.wait_for_timeout(500)
             topbar_action(page, name='iPad / iPhone', exact=True).click()
-            with page.expect_response(lambda r: r.url.endswith('/ipad-screen/session') and r.request.method == 'POST') as created:
+            if LIVE and not BRIDGE:
                 page.get_by_role('menuitem', name='画面协作', exact=True).click()
+            with page.expect_response(lambda r: r.url.endswith('/ipad-screen/session') and r.request.method == 'POST') as created:
+                if LIVE and not BRIDGE:
+                    page.get_by_role('dialog', name='画面协作', exact=True).get_by_role('button', name='发起邀请', exact=True).click()
+                else:
+                    page.get_by_role('menuitem', name='画面协作', exact=True).click()
             ticket = created.value.json()
             if not LIVE:
                 credential = page.request.post(BASE + '/__atlas/ipad-screen/pair', data={
@@ -121,6 +126,7 @@ def run():
                     dialog.get_by_role('button', name='连接本机助手', exact=True).click()
                 helper = opened.value
                 helper.get_by_role('button', name='允许连接此工作台').click()
+                dialog.get_by_role('button', name='发起邀请', exact=True).click()
             expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible(timeout=90000)
             dialog.get_by_role('button', name='关闭画面协作窗口', exact=True).click()
             if LIVE:

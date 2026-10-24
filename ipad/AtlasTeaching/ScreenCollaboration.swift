@@ -97,6 +97,15 @@ extension EnvironmentValues {
     }
 }
 
+struct ScreenUSBInvitation: Identifiable {
+    let id: String
+    let outgoing: Bool
+    let computerName: String
+    let expiresAt: Date
+    var status = "pending"
+    var token = ""
+}
+
 /// The listener is loopback-only: the paired computer reaches it through USB
 /// multiplexing. It is never advertised on Bonjour or exposed on Wi-Fi.
 @MainActor
@@ -123,6 +132,49 @@ final class ScreenCollaboration: ObservableObject {
     @Published private(set) var connecting = false
     @Published private(set) var connectionError = ""
     @Published private(set) var connectionKind = "USB"
+    @Published private(set) var usbInvitation: ScreenUSBInvitation?
+    @Published private(set) var usbInvitationMessage = ""
+    var awaitingUSBInvitation: Bool { usbInvitation?.status == "pending" }
+    var incomingUSBInvitation: ScreenUSBInvitation? {
+        guard let invitation = usbInvitation, !invitation.outgoing, invitation.status == "pending" else { return nil }
+        return invitation
+    }
+
+    func inviteUSBComputer() {
+        guard !active, !connecting, !awaitingUSBInvitation else { return }
+        usbInvitation = ScreenUSBInvitation(id: UUID().uuidString.lowercased(), outgoing: true,
+            computerName: "电脑", expiresAt: Date().addingTimeInterval(60))
+        usbInvitationMessage = "已发出邀请，等待电脑确认（60 秒内有效）。请保持数据线连接，并在电脑打开示教工作台。"
+        connectionError = ""
+    }
+
+    func cancelUSBInvitation() {
+        guard awaitingUSBInvitation else { return }
+        usbInvitation?.status = "cancelled"
+        usbInvitationMessage = "邀请已取消，可以重新发起。"
+    }
+
+    func respondToUSBInvitation(id: String, accept: Bool) {
+        expireUSBInvitation()
+        guard let invitation = incomingUSBInvitation, invitation.id == id else { return }
+        usbInvitation?.status = accept ? "accepted" : "rejected"
+        usbInvitationMessage = accept ? "已接受邀请，正在等待电脑画面…" : "已拒绝电脑的协作邀请。"
+        if accept { beginSession(token: invitation.token) }
+    }
+
+    private func expireUSBInvitation() {
+        if let invitation = usbInvitation, invitation.status == "pending", Date() >= invitation.expiresAt {
+            usbInvitation?.status = "expired"
+            usbInvitationMessage = "邀请已过期，请重新发起协作。"
+        }
+    }
+
+    private func beginSession(token candidate: String) {
+        token = candidate; receivedFrames = 0; lastFrame = Date(); lastContact = lastFrame; stale = true
+        previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
+        UIApplication.shared.isIdleTimerDisabled = true
+        connecting = false; connectionError = ""; active = true
+    }
     private var networkSocket: URLSessionWebSocketTask?
     private var networkTask: Task<Void, Never>?
     private var networkToken = ""
@@ -266,7 +318,7 @@ final class ScreenCollaboration: ObservableObject {
     }
 
     func connect(address: String, code: String, deviceID: String, qr: PairingQRCode? = nil) async {
-        guard !active, !connecting else { return }
+        guard !active, !connecting, !awaitingUSBInvitation else { return }
         connecting = true; connectionError = ""; lastContact = Date()
         let generation = UUID(); networkGeneration = generation
         do {
@@ -325,6 +377,7 @@ final class ScreenCollaboration: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.expireUSBInvitation()
                 for (id, lastActivity) in self.connectionActivity where id != self.usbControlsID && Date().timeIntervalSince(lastActivity) > 8 {
                     self.connections[id]?.cancel()
                 }
@@ -358,6 +411,7 @@ final class ScreenCollaboration: ObservableObject {
         networkGeneration = UUID(); networkTask?.cancel(); networkTask = nil
         networkSocket?.cancel(with: .normalClosure, reason: nil); networkSocket = nil; networkToken = ""
         connecting = false; connectionError = ""; connectionKind = "USB"
+        usbInvitation = nil; usbInvitationMessage = ""
         if active { UIApplication.shared.isIdleTimerDisabled = previousIdleTimerDisabled }
         active = false; stale = true; token = ""; left = nil; right = nil
         usbControls?.cancel(); usbControls = nil; usbControlsID = nil
@@ -461,8 +515,15 @@ final class ScreenCollaboration: ObservableObject {
 
     private func process(method: String, path: String, authorization: String, body: Data, response: (Int, [String: Any]) -> Void) async {
         func respond(_ status: Int = 200, _ value: [String: Any]) { response(status, value) }
+        expireUSBInvitation()
         if method == "GET", path == "/status" {
+            var outgoing: Any = NSNull()
+            if let invitation = usbInvitation, invitation.outgoing, invitation.status == "pending" {
+                outgoing = ["id": invitation.id, "expiresAt": invitation.expiresAt.timeIntervalSince1970 * 1000]
+            }
             respond(200, ["protocol": screenProtocol, "deviceName": UIDevice.current.name, "active": active,
+                     "usbInvitations": true, "invitationPending": awaitingUSBInvitation,
+                     "outgoingInvitation": outgoing,
                      "stale": stale, "receivedFrames": receivedFrames, "keepalive": true, "jointControl": true,
                      "realtimeUSB": UIDevice.current.userInterfaceIdiom == .pad,
                      "controlPage": page, "connectionKind": connectionKind, "jointCount": workspace?.joints.count ?? 0, "viewportFrames": viewportFrames,
@@ -476,6 +537,27 @@ final class ScreenCollaboration: ObservableObject {
                      "capturePending": awaitingCapture, "captureMessage": captureMessage, "captureNotice": captureNotice ?? "",
                      "width": left?.size.width ?? 0, "height": left?.size.height ?? 0]); return
         }
+        if method == "POST", path == "/invitation" {
+            guard let value = try? JSONSerialization.jsonObject(with: body) as? [String: String],
+                  value["decision"] == "reject", let invitation = usbInvitation,
+                  invitation.outgoing, invitation.status == "pending", value["id"] == invitation.id else {
+                respond(409, ["error": "邀请已取消或过期，请重新发起"]); return
+            }
+            usbInvitation?.status = "rejected"; usbInvitationMessage = "电脑已拒绝此次协作邀请。"
+            respond(200, ["rejected": true]); return
+        }
+        if path == "/session", method == "GET" || method == "DELETE",
+           let invitation = usbInvitation, !invitation.token.isEmpty, authorization == "Bearer \(invitation.token)" {
+            if method == "DELETE" {
+                if active { finish() }
+                else if invitation.status == "pending" { cancelUSBInvitation() }
+                respond(200, ["stopped": true])
+            } else {
+                respond(200, ["ready": active, "invitationStatus": invitation.status,
+                              "expiresAt": invitation.expiresAt.timeIntervalSince1970 * 1000])
+            }
+            return
+        }
         if method == "POST", path == "/session" {
             guard !active else { respond(409, ["error": "设备已有画面协作"]); return }
             let candidate = String(authorization.dropFirst(7))
@@ -484,10 +566,33 @@ final class ScreenCollaboration: ObservableObject {
                   candidate.allSatisfy({ "0123456789abcdef".contains($0) }),
                   let value = try? JSONSerialization.jsonObject(with: body) as? [String: String],
                   value["protocol"] == screenProtocol else { respond(400, ["error": "协作协议无效"]); return }
-            token = candidate; receivedFrames = 0; lastFrame = Date(); lastContact = lastFrame; stale = true
-            previousIdleTimerDisabled = UIApplication.shared.isIdleTimerDisabled
-            UIApplication.shared.isIdleTimerDisabled = true
-            connecting = false; connectionError = ""; active = true; respond(200, ["ready": true]); return
+            // Scanning a code / entering a Wi-Fi code is already an explicit join action.
+            if connecting, candidate == networkToken {
+                guard !awaitingUSBInvitation else { respond(409, ["error": "请先结束有线邀请"]); return }
+                beginSession(token: candidate); respond(200, ["ready": true]); return
+            }
+            guard !connecting else { respond(409, ["error": "正在连接 Wi-Fi，请先完成或取消当前连接"]); return }
+            guard let sessionID = value["sessionId"], UUID(uuidString: sessionID) != nil else {
+                respond(409, ["error": "请更新并刷新电脑工作台，以使用需要确认的有线协作邀请"]); return
+            }
+            if let invitationID = value["invitationId"] {
+                guard let invitation = usbInvitation, invitation.outgoing, invitation.status == "pending",
+                      invitation.id == invitationID else { respond(409, ["error": "邀请已取消或过期"]); return }
+                usbInvitation?.token = candidate; usbInvitation?.status = "accepted"
+                usbInvitationMessage = "电脑已接受邀请，正在准备画面…"
+                beginSession(token: candidate); respond(200, ["ready": true]); return
+            }
+            if let invitation = usbInvitation, invitation.id == sessionID, invitation.token == candidate {
+                respond(200, ["ready": false, "invitationStatus": invitation.status,
+                              "expiresAt": invitation.expiresAt.timeIntervalSince1970 * 1000]); return
+            }
+            guard !awaitingUSBInvitation else { respond(409, ["error": "已有协作邀请，请先处理当前邀请"]); return }
+            usbInvitation = ScreenUSBInvitation(id: sessionID, outgoing: false,
+                computerName: String((value["computerName"] ?? "电脑工作台").prefix(80)),
+                expiresAt: Date().addingTimeInterval(60), token: candidate)
+            usbInvitationMessage = "电脑正在邀请你加入画面协作。"
+            respond(200, ["ready": false, "invitationStatus": "pending",
+                          "expiresAt": usbInvitation!.expiresAt.timeIntervalSince1970 * 1000]); return
         }
         guard active, authorization == "Bearer \(token)" else { respond(410, ["error": "设备已结束画面协作"]); return }
         if method == "DELETE", path == "/session" { finish(); respond(200, ["stopped": true]); return }
@@ -596,6 +701,17 @@ struct ScreenCollaborationHost: View {
             }
             .onAppear { if scenePhase == .active { screen.start() } }
             .onChange(of: scenePhase) { _, phase in if phase == .active { screen.start() } else { screen.stop() } }
+            .alert("接受画面协作邀请？", isPresented: Binding(
+                get: { screen.incomingUSBInvitation != nil },
+                set: { _ in }
+            ), presenting: screen.incomingUSBInvitation) { invitation in
+                Button("接受邀请") { screen.respondToUSBInvitation(id: invitation.id, accept: true) }
+                    .accessibilityIdentifier("accept-screen-invitation")
+                Button("拒绝", role: .cancel) { screen.respondToUSBInvitation(id: invitation.id, accept: false) }
+                    .accessibilityIdentifier("reject-screen-invitation")
+            } message: { invitation in
+                Text("「\(invitation.computerName)」通过数据线邀请你协作。接受后可查看相机画面与 3D 视图、调整虚拟机器人关节，并将记录的姿态保存到电脑当前工程。")
+            }
     }
 }
 

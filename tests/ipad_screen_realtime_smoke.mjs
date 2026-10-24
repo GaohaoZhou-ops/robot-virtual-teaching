@@ -12,7 +12,8 @@ const transport = {
   async request(device, method, route, body, token, options) {
     calls.push({ method, route, keepAlive: options?.keepAlive });
     if (route === '/status') return { status: 200, body: { protocol: SCREEN_PROTOCOL, deviceName: 'Test iPad',
-      keepalive: true, jointControl: true, realtimeUSB: realtime } };
+      keepalive: true, jointControl: true, usbInvitations: true, realtimeUSB: realtime } };
+    if (route === '/session' && method === 'POST') return { status: 200, body: { ready: true } };
     if (route === '/workspace' && releaseFrame) await new Promise((resolve) => { releaseFrame = resolve; });
     return { status: 200, body: { page: 'cameras' } };
   },

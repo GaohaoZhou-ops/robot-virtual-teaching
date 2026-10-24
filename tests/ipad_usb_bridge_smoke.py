@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 import unittest
+import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -28,15 +29,34 @@ class FakePad:
         self.viewport_commands = []
         self.capture = None
         self.page = 'cameras'
+        self.auto_accept = True
+        self.phase = ''
+        self.outgoing = None
 
     def request(self, method, path, body, token):
         if path == '/status':
             return 200, {'protocol': PROTOCOL, 'deviceName': 'Windows USB iPad', 'active': self.active,
-                         'keepalive': True, 'jointControl': True}
+                         'keepalive': True, 'jointControl': True, 'usbInvitations': True,
+                         'invitationPending': self.phase == 'pending' or bool(self.outgoing), 'outgoingInvitation': self.outgoing}
+        if path == '/invitation' and method == 'POST':
+            if not self.outgoing or self.outgoing['id'] != json.loads(body).get('id'):
+                return 409, {'error': 'stale invitation'}
+            self.outgoing = None
+            return 200, {'rejected': True}
         if path == '/session' and method == 'POST':
-            assert json.loads(body)['protocol'] == PROTOCOL
-            self.active = True
+            value = json.loads(body)
+            assert value['protocol'] == PROTOCOL
+            if value.get('invitationId'):
+                if not self.outgoing or self.outgoing['id'] != value['invitationId']:
+                    return 409, {'error': 'stale invitation'}
+                self.outgoing = None
+            self.active = self.auto_accept or bool(value.get('invitationId'))
+            self.phase = 'accepted' if self.active else 'pending'
             self.token = token
+        elif path == '/session' and method == 'GET' and token == self.token:
+            return 200, {'ready': self.active, 'invitationStatus': self.phase}
+        elif path == '/session' and method == 'DELETE' and token == self.token:
+            self.active = False; self.phase = ''
         elif token != self.token or not self.active:
             return 401, {'error': 'iPad session ended'}
         elif path == '/session' and method == 'DELETE':
@@ -52,7 +72,7 @@ class FakePad:
                 self.capture = None
         elif path == '/heartbeat':
             self.heartbeats += 1
-        return 200, {'active': self.active, 'page': self.page, 'commands': self.commands,
+        return 200, {'ready': self.active, 'invitationStatus': self.phase, 'active': self.active, 'page': self.page, 'commands': self.commands,
                      'viewportCommands': self.viewport_commands, 'captureRequest': self.capture}
 
 
@@ -167,13 +187,57 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(self.pad.active)
         self.api(route, 'DELETE', token=ticket['token'], status=410)
 
+    def wait_for(self, predicate):
+        deadline = time.monotonic() + 4
+        while not predicate():
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.03)
+
+    def test_pending_invitation_gate_and_lifecycle(self):
+        self.pad.auto_accept = False
+        ticket = self.api('/api/session', 'POST', {'deviceId': self.pad.device_id}, status=201)
+        self.assertFalse(ticket['deviceReady'])
+        route = '/api/session/' + ticket['id']
+        self.api(route + '/frame', 'PUT', b'not yet allowed', ticket['token'], status=409)
+        self.assertFalse(self.pad.active)
+        self.assertEqual(self.pad.frames, [])
+        self.pad.active = True; self.pad.phase = 'accepted'
+        self.wait_for(lambda: self.fixture.state.session['deviceReady'])
+        self.api(route, 'DELETE', token=ticket['token'])
+        declined = self.api('/api/session', 'POST', {'deviceId': self.pad.device_id}, status=201)
+        self.pad.phase = 'rejected'
+        self.wait_for(lambda: self.fixture.state.session is None)
+        self.api('/api/session/' + declined['id'], 'DELETE', token=declined['token'], status=410)
+        pending = self.api('/api/session', 'POST', {'deviceId': self.pad.device_id}, status=201)
+        self.api('/api/session/' + pending['id'], 'DELETE', token=pending['token'])
+        self.assertEqual(self.pad.phase, '')
+        self.api('/api/session', 'POST', {'deviceId': self.pad.device_id}, status=201)
+        self.fixture.state.session['invitationDeadline'] = time.monotonic() - 1
+        self.wait_for(lambda: self.fixture.state.session is None)
+        self.assertFalse(self.pad.active)
+
+    def test_ipad_initiated_invitation(self):
+        self.pad.auto_accept = False
+        self.pad.outgoing = {'id': str(uuid.uuid4()), 'expiresAt': time.time() * 1000 + 60000}
+        offer = self.api('/api/invitations')['invitations'][0]
+        self.api('/api/invitations', headers={'X-Atlas-Bridge': ''}, status=403)
+        self.api('/api/invitations/reject', 'POST', {**offer, 'invitationId': str(uuid.uuid4())}, status=409)
+        self.api('/api/invitations/reject', 'POST', offer)
+        self.assertEqual(self.api('/api/invitations')['invitations'], [])
+        self.pad.outgoing = {'id': str(uuid.uuid4()), 'expiresAt': time.time() * 1000 + 60000}
+        offer = self.api('/api/invitations')['invitations'][0]
+        ticket = self.api('/api/session', 'POST', offer, status=201)
+        self.assertTrue(ticket['deviceReady'])
+        self.api('/api/session/' + ticket['id'], 'DELETE', token=ticket['token'])
+        self.api('/api/session', 'POST', offer, status=409)
+
     def test_frames_controls_and_background_lifecycle(self):
         ticket = self.api('/api/session', 'POST', {'deviceId': self.pad.device_id}, status=201)
         route = '/api/session/' + ticket['id']
         connection = http.client.HTTPConnection('127.0.0.1', self.fixture.port, timeout=10)
         connection.request('GET', route + '/events', headers={'X-Atlas-Bridge': self.secret, 'Authorization': 'Bearer ' + ticket['token']})
         events = connection.getresponse()
-        self.assertEqual(json.loads(events.readline()), {'ready': True})
+        self.assertEqual(json.loads(events.readline()), {'ready': True, 'deviceReady': True, 'deviceName': 'Windows USB iPad'})
         self.api(route + '/events', token=ticket['token'], status=409)
         jpeg = b'\xff\xd8\x12\xff\xd9'
         frame = struct.pack('>II', len(jpeg), len(jpeg)) + jpeg * 2

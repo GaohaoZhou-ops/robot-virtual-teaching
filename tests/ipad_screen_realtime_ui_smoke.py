@@ -100,8 +100,9 @@ def run():
                 page.wait_for_timeout(750)
             print('REALTIME_MAP_READY ' + map_file, flush=True)
             topbar_action(page, name='iPad / iPhone', exact=True).click()
+            page.get_by_role('menuitem', name='画面协作', exact=True).click()
             with page.expect_response(lambda r: r.url.endswith('/ipad-screen/session') and r.request.method == 'POST') as created:
-                page.get_by_role('menuitem', name='画面协作', exact=True).click()
+                page.get_by_role('dialog', name='画面协作', exact=True).get_by_role('button', name='发起邀请', exact=True).click()
             ticket = created.value.json()
             assert ticket.get('realtimeUSB') is True, 'Install the new iPad app and restart the Mac service'
             dialog = page.get_by_role('dialog', name='画面协作', exact=True)

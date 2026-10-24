@@ -41,7 +41,11 @@ final class TeachingSession: ObservableObject {
         return true
         #endif
     }
-    static let localTeachingUnavailableMessage = "此设备不支持 LiDAR，本机虚拟示教不可用。请使用画面协作。"
+    static var localTeachingUnavailableMessage: String {
+        TeachingDevice.isPhone
+            ? "此设备不支持 LiDAR，本机虚拟示教不可用。请使用画面协作。"
+            : "此 iPad 仅支持画面协作；本机虚拟示教仅适用于配备 LiDAR 的 iPad Pro。"
+    }
     private func requireLocalTeaching() -> Bool {
         guard Self.supportsLocalTeaching else {
             error = Self.localTeachingUnavailableMessage

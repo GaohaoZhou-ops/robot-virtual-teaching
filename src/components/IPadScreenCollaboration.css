@@ -61,3 +61,6 @@
   .ipad-screen-dialog .ipad-qr__manual { justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) { .ipad-screen-dialog .is-spinning { animation: none; } }
+.ipad-screen-backdrop.ipad-screen-invitation-backdrop { z-index: 16000; }
+.ipad-screen-dialog.ipad-screen-invitation-dialog { max-width: 560px; }
+.ipad-screen-invitation-dialog .ipad-screen-intro strong { color: var(--text, #edf7fa); }

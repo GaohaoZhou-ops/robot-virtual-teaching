@@ -7,6 +7,60 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    func testLiveUSBBidirectionalInvitations() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_USB_INVITATIONS_LIVE"] == "1" else {
+            throw XCTSkip("Run with tests/ipad_screen_invitation_ui_smoke.py on the USB-connected iPad")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); app.launch()
+        let invite = app.buttons["invite-usb-collaboration"]
+        XCTAssertTrue(invite.waitForExistence(timeout: 20))
+        invite.tap()
+        let declined = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "电脑已拒绝"),
+                                                object: app.staticTexts["usb-invitation-status"])
+        XCTAssertEqual(XCTWaiter.wait(for: [declined], timeout: 60), .completed)
+        invite.tap()
+        let stop = app.buttons["screen-collaboration-stop"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 60))
+        XCTAssertFalse(app.alerts["接受画面协作邀请？"].exists, "The iPad already consented by sending its own invitation")
+        XCTAssertTrue(stop.waitForNonExistence(timeout: 60), "The browser finishes the first stream")
+        let alert = app.alerts["接受画面协作邀请？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 60))
+        XCTAssertFalse(stop.exists, "An incoming invitation must not open collaboration before confirmation")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "USB invitation requires iPad confirmation"; shot.lifetime = .keepAlways; add(shot)
+        // Allow the desktop fixture to verify that no frames are being shared.
+        Thread.sleep(forTimeInterval: 3)
+        alert.buttons["reject-screen-invitation"].firstMatch.tap()
+        // The desktop can send the next invitation before XCTest observes the
+        // dismissal. Its refusal assertion verifies the first response.
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(alert.waitForExistence(timeout: 60))
+        XCTAssertFalse(stop.exists)
+        Thread.sleep(forTimeInterval: 3)
+        alert.buttons["accept-screen-invitation"].firstMatch.tap()
+        XCTAssertTrue(stop.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 30))
+        Thread.sleep(forTimeInterval: 4)
+        let connected = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        connected.name = "USB collaboration after acceptance"; connected.lifetime = .keepAlways; add(connected)
+        stop.tap()
+        XCTAssertTrue(stop.waitForNonExistence(timeout: 10))
+        invite.tap()
+        Thread.sleep(forTimeInterval: 4)
+        app.buttons["cancel-usb-invitation"].tap()
+        XCTAssertTrue(invite.waitForExistence(timeout: 10))
+    }
+
+    private func acceptFixtureUSBInvitation(_ app: XCUIApplication) {
+        if app.buttons["screen-collaboration-stop"].exists { return }
+        print("ATLAS_SCREEN_WAITING_FOR_INVITATION")
+        let alert = app.alerts["接受画面协作邀请？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 180))
+        alert.buttons["accept-screen-invitation"].firstMatch.tap()
+    }
+
     private func launchScreenFixture() throws -> XCUIApplication {
         let app = XCUIApplication()
         let environment = ProcessInfo.processInfo.environment
@@ -15,7 +69,6 @@ final class AtlasTeachingUITests: XCTestCase {
             app.launch()
             let purpose = app.segmentedControls["library-pairing-purpose"]
             XCTAssertTrue(purpose.waitForExistence(timeout: 20)); purpose.buttons["画面协作"].tap()
-            app.buttons["screen-pairing-wireless"].tap()
             if environment["ATLAS_SCREEN_SCAN_UI"] == "1" {
                 app.buttons["scan-pairing-code"].tap()
                 XCTAssertTrue(app.buttons["cancel-pairing-scan"].waitForExistence(timeout: 10))
@@ -57,14 +110,10 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertTrue(app.staticTexts["screen-pairing-status"].exists)
             XCTAssertFalse(app.otherElements["usb-receiving-panel"].exists)
             XCTAssertFalse(app.buttons["capture-pose"].exists)
-            let wireless = app.buttons["screen-pairing-wireless"]
-            XCTAssertTrue(wireless.isEnabled)
-            wireless.tap()
             XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.buttons["scan-pairing-code"].isEnabled)
             XCTAssertTrue(app.textFields["server-address-octet-0"].exists)
             XCTAssertTrue(app.buttons["discover-services"].isEnabled)
-            wireless.tap()
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             shot.name = "Non-LiDAR collaboration welcome - \(orientation.rawValue)"
             shot.lifetime = .keepAlways; add(shot)
@@ -79,6 +128,7 @@ final class AtlasTeachingUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
         print("ATLAS_SCREEN_REALTIME_WAITING")
+        acceptFixtureUSBInvitation(app)
         let stop = app.buttons["screen-collaboration-stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 180))
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -112,6 +162,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication()
         if ProcessInfo.processInfo.environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
         else { app.launch() }
+        acceptFixtureUSBInvitation(app)
         XCTAssertTrue(app.buttons["screen-collaboration-stop"].waitForExistence(timeout: 180))
         XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -145,6 +196,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication()
         if ProcessInfo.processInfo.environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
         else { app.launch() }
+        acceptFixtureUSBInvitation(app)
         let record = app.buttons["screen-record-pose"]
         XCTAssertTrue(record.waitForExistence(timeout: 180))
         XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
@@ -220,6 +272,7 @@ final class AtlasTeachingUITests: XCTestCase {
         continueAfterFailure = false
         let app = try launchScreenFixture()
         print("ATLAS_SCREEN_WAITING_FOR_DESKTOP")
+        acceptFixtureUSBInvitation(app)
         let stop = app.buttons["screen-collaboration-stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 150))
         if XCUIDevice.shared.orientation != .landscapeLeft { XCUIDevice.shared.orientation = .landscapeLeft }
@@ -258,6 +311,7 @@ final class AtlasTeachingUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()
         print("ATLAS_SCREEN_WAITING_FOR_DESKTOP")
+        acceptFixtureUSBInvitation(app)
         let view = app.buttons["screen-collaboration-stop"]
         XCTAssertTrue(view.waitForExistence(timeout: 150))
         XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
@@ -3579,17 +3633,13 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertFalse(app.staticTexts["方式一"].exists)
             XCTAssertFalse(app.otherElements["usb-receiving-panel"].exists)
             XCTAssertFalse(app.otherElements["model-transfer-progress"].exists)
-            XCTAssertFalse(app.textFields["server-address-octet-0"].exists)
+            XCTAssertTrue(app.textFields["server-address-octet-0"].exists)
             let waitingScreenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             waitingScreenshot.name = "Collaboration invitation guidance - \(orientation.rawValue)"
             waitingScreenshot.lifetime = .keepAlways; add(waitingScreenshot)
-            let wireless = app.buttons["screen-pairing-wireless"]
-            wireless.tap()
             XCTAssertTrue(scan.waitForExistence(timeout: 5))
             XCTAssertTrue(app.textFields["server-address-octet-0"].exists)
             XCTAssertTrue(app.buttons["discover-services"].exists)
-            wireless.tap()
-            XCTAssertFalse(scan.exists)
             purpose.buttons["接收物体"].tap()
             XCTAssertTrue(app.textFields["server-address-octet-0"].waitForExistence(timeout: 5))
             XCTAssertTrue(app.otherElements["usb-receiving-panel"].exists)

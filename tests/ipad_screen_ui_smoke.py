@@ -108,6 +108,8 @@ def run():
             page.get_by_role('menuitem', name='画面协作', exact=True).click()
         dialog = page.get_by_role('dialog', name='画面协作', exact=True)
         expect(dialog).to_be_visible()
+        if not wireless:
+            dialog.get_by_role('button', name='发起邀请', exact=True).click()
         if wireless:
             expect(dialog.get_by_role('tab', name='数据线', exact=True)).to_be_visible()
             ticket = created.value.json()

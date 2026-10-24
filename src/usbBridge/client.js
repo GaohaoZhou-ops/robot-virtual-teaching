@@ -53,7 +53,15 @@ window.addEventListener('message', async (event) => {
         let end;
         while ((end = pending.indexOf('\n')) >= 0) {
           const line = pending.slice(0, end); pending = pending.slice(end + 1);
-          if (line) send({ kind: 'event', sessionId: data.sessionId, data: line });
+          if (line) {
+            const update = JSON.parse(line);
+            if (update.deviceReady === true && session?.id === data.sessionId) {
+              session.deviceReady = true;
+              status.textContent = `${session.deviceName} 已连接。画面、关节与姿态记录经 USB 传输。`;
+            }
+            if (update.error) status.textContent = update.error;
+            send({ kind: 'event', sessionId: data.sessionId, data: line });
+          }
         }
       }
       if (!controller.signal.aborted) send({ kind: 'stream-closed', sessionId: data.sessionId });
@@ -65,7 +73,7 @@ window.addEventListener('message', async (event) => {
   if (data.kind !== 'request' || typeof data.id !== 'number') return;
   try {
     const route = data.route;
-    if (typeof route !== 'string' || !/^\/(devices|session(?:\/[a-f0-9-]{36}(?:\/(frame|workspace))?)?)$/.test(route)
+    if (typeof route !== 'string' || !/^\/(devices|invitations(?:\/reject)?|session(?:\/[a-f0-9-]{36}(?:\/(frame|workspace))?)?)$/.test(route)
       || !['GET', 'POST', 'PUT', 'DELETE'].includes(data.method)) throw new Error('连接操作无效');
     const auth = data.authorization || '';
     if (route.startsWith('/session/') && (!session || !route.startsWith(`/session/${session.id}`)
@@ -76,7 +84,8 @@ window.addEventListener('message', async (event) => {
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || '数据线连接失败');
     if (route === '/session' && data.method === 'POST') {
-      session = result; status.textContent = `${result.deviceName} 已连接。画面、关节与姿态记录经 USB 传输。`;
+      session = result; status.textContent = result.deviceReady
+        ? `${result.deviceName} 已连接。画面、关节与姿态记录经 USB 传输。` : `邀请已发送，等待 ${result.deviceName} 确认接受。`;
     }
     if (data.method === 'DELETE') { session = null; status.textContent = '协作已结束，可以从工作台重新开始。'; }
     send({ kind: 'response', id: data.id, value: result });

@@ -49,8 +49,7 @@ struct ContentView: View {
     @EnvironmentObject private var session: TeachingSession
     @EnvironmentObject private var screen: ScreenCollaboration
     @State private var collaboration = !TeachingSession.supportsLocalTeaching
-    @State private var collaborationWirelessExpanded = false
-    private var pairingBusy: Bool { session.busy || screen.connecting }
+    private var pairingBusy: Bool { session.busy || screen.connecting || screen.awaitingUSBInvitation }
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var discovery = LANServiceDiscovery()
     @StateObject private var usbReceiver = USBFileReceiver()
@@ -164,7 +163,6 @@ struct ContentView: View {
             else { discovery.stop() }
         }
         .onChange(of: session.serverAddress) { _, _ in discovery.resetProbe() }
-        .onChange(of: collaboration) { _, _ in collaborationWirelessExpanded = false }
     }
     private func handleLibraryTap(at location: CGPoint) {
         guard TeachingSession.supportsLocalTeaching, !pairingBusy else { return }
@@ -234,7 +232,8 @@ struct ContentView: View {
     private var libraryHeader: some View {
         HStack(alignment: .center, spacing: 24) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("虚拟示教").font(TeachingDevice.isPhone ? .title.weight(.medium) : .largeTitle.weight(.medium))
+                Text(TeachingSession.supportsLocalTeaching ? "虚拟示教" : "画面协作")
+                    .font(TeachingDevice.isPhone ? .title.weight(.medium) : .largeTitle.weight(.medium))
                 Text(TeachingDevice.isPhone ? "ATLAS / IPHONE" : "ATLAS / IPAD").font(.system(.caption, design: .monospaced)).tracking(3).foregroundStyle(accent)
             }
             Spacer(minLength: 0)
@@ -275,11 +274,11 @@ struct ContentView: View {
         else { modelPairingContents }
     }
     private var collaborationPairingContents: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Label(screen.connecting ? "正在连接画面协作…" : "等待电脑端发起协作", systemImage: "display")
+        VStack(alignment: .leading, spacing: 12) {
+            Label(screen.connecting ? "正在连接画面协作…" : screen.awaitingUSBInvitation ? "等待处理协作邀请" : "连接电脑，开始协作", systemImage: "display")
                 .font(.headline).foregroundStyle(accent)
                 .accessibilityIdentifier("screen-pairing-status")
-            Text("在电脑端打开「设备 → iPad / iPhone → 画面协作」，选择连接方式。")
+            Text("可在下方用数据线邀请电脑，或选择扫码 / Wi-Fi 配对。")
                 .font(.callout).foregroundStyle(.secondary)
             if screen.connecting {
                 HStack {
@@ -288,34 +287,48 @@ struct ContentView: View {
                     Button("取消", action: screen.finish)
                 }.font(.callout)
             } else {
-                Text("数据线连接：保持此 App 打开，在 Mac 端点击「开始协作」即可。")
-                    .font(.callout).foregroundStyle(.secondary)
-                Text("扫码或 Wi-Fi：先在电脑端生成二维码或配对码，再展开下方入口完成连接。Windows 请使用这两种方式。")
-                    .font(.callout).foregroundStyle(.secondary)
+                wiredCollaborationGuide
             }
             if !screen.connectionError.isEmpty {
                 Text(screen.connectionError).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
             }
-            Divider()
-            Button {
-                collaborationWirelessExpanded.toggle()
-                if collaborationWirelessExpanded { searchConfiguredServer() }
-            } label: {
-                HStack {
-                    Text("扫码 / Wi-Fi 连接")
-                    Spacer()
-                    Image(systemName: collaborationWirelessExpanded ? "chevron.up" : "chevron.down")
-                }.font(.body).padding(.vertical, 10).contentShape(Rectangle())
-            }.buttonStyle(.plain).foregroundStyle(accent).disabled(pairingBusy)
-                .accessibilityValue(collaborationWirelessExpanded ? "已展开" : "已收起")
-                .accessibilityIdentifier("screen-pairing-wireless")
-            if collaborationWirelessExpanded {
-                scanPairingButton
-                Text("Wi-Fi 连接").font(.headline)
-                LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(pairingBusy)
-                discoveryPanel
-            }
+            Divider().padding(.vertical, 4)
+            Label("扫码配对", systemImage: "qrcode").font(.headline)
+            scanPairingButton
+            Divider().padding(.vertical, 4)
+            Label("Wi-Fi 连接", systemImage: "globe").font(.headline)
+            LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(pairingBusy)
+            discoveryPanel
         }.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    private var wiredCollaborationGuide: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("数据线连接（USB）", systemImage: "cable.connector")
+                .font(.headline).foregroundStyle(accent)
+            Text("1. 用数据线连接电脑，解锁 \(TeachingDevice.storageName) 并信任此电脑。")
+            Text("2. 在下方邀请电脑，或由电脑端发起邀请；对方确认接受后进入协作。")
+            Text("无需扫码或输入配对码，请保持此 App 与电脑工作台打开。")
+                .font(.caption).foregroundStyle(accent)
+            Text("Windows 或远端电脑需先在电脑端启动并连接「数据线连接助手」。")
+                .font(.caption).foregroundStyle(.secondary)
+            if screen.awaitingUSBInvitation {
+                Button("取消邀请", action: screen.cancelUSBInvitation)
+                    .buttonStyle(.bordered).accessibilityIdentifier("cancel-usb-invitation")
+            } else {
+                Button("邀请电脑协作", action: screen.inviteUSBComputer)
+                    .buttonStyle(.borderedProminent).disabled(session.busy || screen.connecting)
+                    .accessibilityIdentifier("invite-usb-collaboration")
+            }
+            if !screen.usbInvitationMessage.isEmpty {
+                Text(screen.usbInvitationMessage).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("usb-invitation-status")
+            }
+        }
+        .font(.callout).fixedSize(horizontal: false, vertical: true)
+        .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(accent.opacity(0.25)))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("screen-pairing-wired-guide")
     }
     private var scanPairingButton: some View {
         Button(action: beginScanning) {
@@ -523,7 +536,7 @@ struct ContentView: View {
             }
             Divider()
             if !TeachingSession.supportsLocalTeaching {
-                Label("本机虚拟示教 · 需要 LiDAR", systemImage: "lock.fill")
+                Label(TeachingDevice.isPhone ? "本机虚拟示教 · 需要 LiDAR" : "本机虚拟示教 · 仅限配备 LiDAR 的 iPad Pro", systemImage: "lock.fill")
                     .font(.callout).foregroundStyle(.secondary)
                     .accessibilityIdentifier("local-teaching-locked")
             }
@@ -549,8 +562,10 @@ struct ContentView: View {
             if session.projects.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "cube.transparent").font(.system(size: 64, weight: .ultraLight)).foregroundStyle(accent.opacity(0.7))
-                    Text("从电脑接收第一个物体").font(.headline)
-                    Text("接收后，物体和示教草稿都会出现在这里。")
+                    Text(TeachingSession.supportsLocalTeaching ? "从电脑接收第一个物体" : "本机虚拟示教不可用").font(.headline)
+                    Text(TeachingSession.supportsLocalTeaching
+                         ? "接收后，物体和示教草稿都会出现在这里。"
+                         : "请使用画面协作，查看电脑画面并协作操作虚拟机器人。")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.frame(maxWidth: .infinity, minHeight: 230)
             } else {

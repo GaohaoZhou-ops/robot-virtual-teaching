@@ -60,7 +60,7 @@ const transport = {
   async request(device, method, route, body, token) {
     calls.push({ device, method, route });
     if (!wired || device !== 'test-usb-device') throw new Error('Disconnected');
-    if (route === '/status') return { status: 200, body: { protocol: SCREEN_PROTOCOL, deviceName: 'Test iPad', active, keepalive, jointControl: true } };
+    if (route === '/status') return { status: 200, body: { protocol: SCREEN_PROTOCOL, deviceName: 'Test iPad', active, keepalive, jointControl: true, usbInvitations: true } };
     assert.match(token, /^[a-f0-9]{64}$/);
     if (method === 'POST') { active = true; return { status: 200, body: { ready: true } }; }
     if (method === 'DELETE') { active = false; return { status: 200, body: { stopped: true } }; }
