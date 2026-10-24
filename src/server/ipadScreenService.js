@@ -167,8 +167,9 @@ export function createIPadScreenService({ transport, supported = process.platfor
     const advertised = getAddresses(req.socket.localPort).some((address) => new URL(address).host === host);
     if (!isLocalRequest(req) && !advertised) fail(403, '请使用当前服务的局域网地址打开工作台。');
   };
-  const status = (current) => ({ mode: current.mode || 'usb', deviceReady: current.mode !== 'wifi' || !!current.deviceReady,
-    deviceName: current.deviceName, pairingStatus: current.deviceReady ? 'paired' : 'ready', realtimeUSB: !!current.realtimeUSB });
+  const status = (current) => ({ mode: current.mode || 'usb', deviceReady: !!current.deviceReady,
+    deviceName: current.deviceName, pairingStatus: current.deviceReady ? 'paired' : current.mode === 'wifi' ? 'ready' : 'pending',
+    realtimeUSB: !!current.realtimeUSB });
   const publishStatus = (current) => {
     if (isCurrent(current) && current.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify(status(current)));
   };
@@ -201,7 +202,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
     current.lan?.close();
   };
   const publishControls = (current, status) => {
-    if (!isCurrent(current)) return;
+    if (!isCurrent(current) || !current.deviceReady) return;
     current.page = status.page === 'joints' ? 'joints' : 'cameras';
     const commands = (Array.isArray(status.commands) ? status.commands.slice(0, 128) : [])
       .map((command) => screenJointCommand({ ...command, receivedAt: now() }, current.controlState, current.controlState?.ack || 0, now()))
@@ -212,7 +213,16 @@ export function createIPadScreenService({ transport, supported = process.platfor
       .filter(Boolean).sort((a, b) => a.sequence - b.sequence);
     if (current.socket?.readyState === WebSocket.OPEN) current.socket.send(JSON.stringify({ page: current.page, commands, captureRequest, viewportCommands }));
   };
+  const startUSBControls = (current) => {
+    if (!isCurrent(current) || !current.deviceReady || !current.realtimeUSB || current.stopControls
+      || current.socket?.readyState !== WebSocket.OPEN) return;
+    current.stopControls = transport.events(current.deviceId, current.token,
+      (value) => publishControls(current, value), () => { void end(current, 'USB 控制连接已断开，请重新连接画面协作。'); });
+  };
   const keepAlive = (current) => {
+    if (current.mode !== 'wifi' && !current.deviceReady && now() >= current.invitationDeadline) {
+      void end(current, '协作邀请已过期，请重新发起。'); return;
+    }
     if (current.mode === 'wifi' && !current.deviceReady) {
       if (now() >= current.pairingExpiresAt || (current.pairedAt != null && now() - current.pairedAt > 10000)) {
         void end(current, '配对已过期或 iPad 未连接，请重新开始协作。'); return;
@@ -231,6 +241,22 @@ export function createIPadScreenService({ transport, supported = process.platfor
       current.lastPing = now(); current.socket.ping();
       if (current.deviceSocket?.readyState === WebSocket.OPEN) current.deviceSocket.ping();
     }
+    if (current.mode !== 'wifi' && !current.deviceReady) {
+      if (now() >= current.invitationDeadline) { void end(current, '协作邀请已过期，请重新发起。'); return; }
+      if (!current.confirming && now() - (current.lastConfirmationCheck ?? -Infinity) >= 750) {
+        current.confirming = true; current.lastConfirmationCheck = now();
+        void deviceRequest(current, 'GET', '/session').then((reply) => {
+          if (!isCurrent(current)) return;
+          if (reply.ready === true) {
+            current.deviceReady = true; current.updatedAt = now();
+            startUSBControls(current); publishStatus(current); scheduleFrame(current);
+          } else if (reply.invitationStatus !== 'pending') {
+            void end(current, reply.invitationStatus === 'rejected' ? 'iPad 已拒绝此次协作邀请。' : '协作邀请已取消或过期。');
+          }
+        }).catch((error) => end(current, error.message)).finally(() => { current.confirming = false; });
+      }
+      return;
+    }
     if (current.mode === 'wifi' && !current.deviceReady) return;
     if (current.mode === 'wifi' && now() - current.devicePong > 15000) { void end(current, 'iPad 连接已断开，请重新配对。'); return; }
     if (!current.keepingAlive && now() - current.updatedAt >= (current.page === 'joints' ? 200 : 2000)) {
@@ -246,11 +272,11 @@ export function createIPadScreenService({ transport, supported = process.platfor
   // The desktop clock lives outside the tab. Only one unacknowledged tick is
   // allowed, so a hidden/frozen browser cannot accumulate stale render requests.
   const scheduleFrame = (current) => {
-    if (!isCurrent(current) || !current.realtimeUSB || current.tickPending || current.frameTimer
+    if (!isCurrent(current) || !current.deviceReady || !current.realtimeUSB || current.tickPending || current.frameTimer
       || current.socket?.readyState !== WebSocket.OPEN) return;
     current.frameTimer = setTimeout(() => {
       current.frameTimer = null;
-      if (!isCurrent(current) || current.socket?.readyState !== WebSocket.OPEN) return;
+      if (!isCurrent(current) || !current.deviceReady || current.socket?.readyState !== WebSocket.OPEN) return;
       current.lastFrameTick = performance.now();
       if (current.socket.bufferedAmount > SCREEN_CONTROL_LIMIT) { scheduleFrame(current); return; }
       current.tickPending = true;
@@ -266,8 +292,15 @@ export function createIPadScreenService({ transport, supported = process.platfor
       for (const device of devices) {
         try {
           const status = await appRequest(device.id, 'GET', '/status');
-          result.push({ id: device.id, name: status.deviceName, ready: status.protocol === SCREEN_PROTOCOL && status.keepalive === true && status.jointControl === true && !status.active,
-            active: !!status.active, message: status.active ? '正在进行画面协作' : status.jointControl !== true ? '请更新 Atlas App 以支持关节协作。' : '' });
+          const invitation = status.outgoingInvitation;
+          const outgoingInvitation = invitation && /^[a-f0-9-]{36}$/.test(invitation.id) && Number.isFinite(invitation.expiresAt)
+            ? { id: invitation.id, expiresAt: invitation.expiresAt } : null;
+          result.push({ id: device.id, name: status.deviceName,
+            ready: status.protocol === SCREEN_PROTOCOL && status.keepalive === true && status.jointControl === true
+              && status.usbInvitations === true && !status.active && (!status.invitationPending || !!outgoingInvitation),
+            outgoingInvitation, active: !!status.active,
+            message: status.active ? '正在进行画面协作' : status.usbInvitations !== true ? '请更新 Atlas App 以支持双向协作邀请。'
+              : status.invitationPending ? '等待处理协作邀请' : '' });
         } catch { result.push({ id: device.id, name: 'USB 设备', ready: false, message: '请解锁设备，并在前台打开新版 Atlas App。' }); }
       }
       return { supported: true, devices: result };
@@ -320,6 +353,22 @@ export function createIPadScreenService({ transport, supported = process.platfor
         return json(res, 200, supported && isLocalRequest(req) ? await discover()
           : { supported: false, devices: [], message: '请使用扫码或 Wi-Fi 配对；数据线仅限服务器本机使用。' });
       }
+      if (route === '/__atlas/ipad-screen/invitations' && req.method === 'GET') {
+        checkLocalRequest(req);
+        if (!supported || usbBusy()) return json(res, 200, { invitations: [] });
+        const { devices } = await discover();
+        return json(res, 200, { invitations: devices.filter((device) => device.ready && device.outgoingInvitation)
+          .map((device) => ({ deviceId: device.id, deviceName: device.name,
+            invitationId: device.outgoingInvitation.id, expiresAt: device.outgoingInvitation.expiresAt })) });
+      }
+      if (route === '/__atlas/ipad-screen/invitations/reject' && req.method === 'POST') {
+        checkLocalRequest(req);
+        const body = await readJSON(req);
+        if (!supported || !/^[a-zA-Z0-9-]{8,80}$/.test(body.deviceId || '')
+          || !/^[a-f0-9-]{36}$/.test(body.invitationId || '')) fail(400, '邀请参数无效');
+        await appRequest(body.deviceId, 'POST', '/invitation', Buffer.from(JSON.stringify({ id: body.invitationId, decision: 'reject' })));
+        return json(res, 200, { rejected: true });
+      }
       if (route === '/__atlas/ipad-screen/session' && req.method === 'POST') {
         const body = await readJSON(req);
         if (body.mode === 'wifi') {
@@ -339,13 +388,21 @@ export function createIPadScreenService({ transport, supported = process.platfor
         starting = true;
         try {
           const status = await appRequest(body.deviceId, 'GET', '/status');
-          if (status.protocol !== SCREEN_PROTOCOL || status.keepalive !== true || status.jointControl !== true) fail(409, '请更新设备上的 Atlas App 以支持关节协作。');
+          if (status.protocol !== SCREEN_PROTOCOL || status.keepalive !== true || status.jointControl !== true
+            || status.usbInvitations !== true) fail(409, '请更新设备上的 Atlas App 以支持双向协作邀请。');
           if (status.active) fail(409, '设备正在进行画面协作，请先在设备上结束协作');
+          if (body.invitationId != null && (!/^[a-f0-9-]{36}$/.test(body.invitationId)
+            || status.outgoingInvitation?.id !== body.invitationId)) fail(409, '邀请已取消或过期，请重新发起。');
           const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), deviceId: body.deviceId, deviceName: status.deviceName, updatedAt: now(),
+            deviceReady: false, invitationDeadline: now() + 60000,
             realtimeUSB: status.realtimeUSB === true && typeof transport.events === 'function' };
-          await appRequest(current.deviceId, 'POST', '/session', Buffer.from(JSON.stringify({ protocol: SCREEN_PROTOCOL })), current.token);
+          const reply = await appRequest(current.deviceId, 'POST', '/session', Buffer.from(JSON.stringify({ protocol: SCREEN_PROTOCOL,
+            sessionId: current.id, computerName: serverName, ...(body.invitationId ? { invitationId: body.invitationId } : {}) })), current.token);
+          current.deviceReady = reply.ready === true;
+          if (!current.deviceReady && reply.invitationStatus !== 'pending') fail(409, '协作邀请已拒绝或失效，请重新发起。');
           sessions.set(current.id, current);
-          return json(res, 201, { id: current.id, token: current.token, deviceName: current.deviceName, realtimeUSB: current.realtimeUSB });
+          return json(res, 201, { id: current.id, token: current.token, mode: 'usb', deviceReady: current.deviceReady,
+            deviceName: current.deviceName, realtimeUSB: current.realtimeUSB, pairingStatus: current.deviceReady ? 'paired' : 'pending' });
         } finally { starting = false; }
       }
       const match = route.match(/^\/__atlas\/ipad-screen\/session\/([a-f0-9-]{36})(\/frame|\/workspace|\/pairing-qr|\/renew)?$/);
@@ -371,7 +428,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
       }
       if (req.method !== 'PUT' || !match[2]) fail(405, '不支持该操作');
       if (!['/frame', '/workspace'].includes(match[2])) fail(405, '不支持该操作');
-      if (current.mode === 'wifi' && !current.deviceReady) fail(409, '等待 iPad 配对');
+      if (!current.deviceReady) fail(409, current.mode === 'wifi' ? '等待 iPad 配对' : '请等待 iPad 接受协作邀请');
       if (current.frameBusy) fail(429, '上一帧正在传输');
       current.frameBusy = true;
       try {
@@ -442,8 +499,7 @@ export function createIPadScreenService({ transport, supported = process.platfor
                   }
                 } catch { /* Ignore invalid clock acknowledgements. */ }
               });
-              current.stopControls = transport.events(current.deviceId, current.token,
-                (value) => publishControls(current, value), () => { void end(current, 'USB 控制连接已断开，请重新连接画面协作。'); });
+              startUSBControls(current);
             }
             connection.send(JSON.stringify({ ready: true, ...status(current) }));
             scheduleFrame(current);

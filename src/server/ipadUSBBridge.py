@@ -60,8 +60,11 @@ class BridgeState:
                 try:
                     status = self.call(device_id, 'GET', '/status')
                     ready = (status.get('protocol') == PROTOCOL and status.get('keepalive') is True
-                             and status.get('jointControl') is True and not status.get('active'))
+                             and status.get('jointControl') is True and status.get('usbInvitations') is True
+                             and not status.get('active')
+                             and (not status.get('invitationPending') or bool(status.get('outgoingInvitation'))))
                     devices.append({'id': device_id, 'name': status.get('deviceName', 'iPad'), 'ready': ready,
+                                    'outgoingInvitation': status.get('outgoingInvitation'),
                                     'active': bool(status.get('active')), 'message': '正在进行画面协作' if status.get('active')
                                     else '' if ready else '请更新 Atlas App 并保持在前台。'})
                 except Exception:
@@ -70,7 +73,27 @@ class BridgeState:
             return {'supported': True, 'devices': devices,
                     'message': '' if devices else '请用支持数据传输的线缆连接 iPad，解锁并信任电脑，再打开 Atlas App。'}
 
-    def start(self, device_id):
+    def invitations(self):
+        with self.lock:
+            if self.session:
+                return {'invitations': []}
+            return {'invitations': [
+                {'deviceId': device['id'], 'deviceName': device['name'],
+                 'invitationId': device['outgoingInvitation']['id'], 'expiresAt': device['outgoingInvitation']['expiresAt']}
+                for device in self.discover()['devices'] if device['ready']
+                and isinstance(device.get('outgoingInvitation'), dict)
+                and re.fullmatch(r'[a-f0-9-]{36}', str(device['outgoingInvitation'].get('id', '')))
+                and isinstance(device['outgoingInvitation'].get('expiresAt'), (int, float))]}
+
+    def reject_invitation(self, device_id, invitation_id):
+        with self.lock:
+            if not isinstance(device_id, str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', device_id) \
+                    or not isinstance(invitation_id, str) or not re.fullmatch(r'[a-f0-9-]{36}', invitation_id):
+                raise BridgeError(400, '邀请参数无效')
+            self.call(device_id, 'POST', '/invitation', json.dumps({'id': invitation_id, 'decision': 'reject'}).encode())
+            return {'rejected': True}
+
+    def start(self, device_id, invitation_id=None):
         with self.lock:
             if self.session:
                 raise BridgeError(409, '已有数据线协作，请先结束当前协作。')
@@ -79,15 +102,27 @@ class BridgeState:
             status = self.call(device_id, 'GET', '/status')
             if status.get('active'):
                 raise BridgeError(409, 'iPad 正在协作，请先在 iPad 上结束当前协作。')
-            if status.get('protocol') != PROTOCOL or not status.get('keepalive') or not status.get('jointControl'):
-                raise BridgeError(409, '请在 iPad 上打开新版 Atlas App。')
+            if status.get('protocol') != PROTOCOL or not status.get('keepalive') or not status.get('jointControl') \
+                    or status.get('usbInvitations') is not True:
+                raise BridgeError(409, '请更新 iPad 上的 Atlas App 以支持双向协作邀请。')
+            if invitation_id is not None and (not isinstance(invitation_id, str)
+                    or not re.fullmatch(r'[a-f0-9-]{36}', invitation_id)
+                    or (status.get('outgoingInvitation') or {}).get('id') != invitation_id):
+                raise BridgeError(409, '邀请已取消或过期，请重新发起。')
             current = {'id': str(uuid.uuid4()), 'token': secrets.token_hex(32), 'deviceId': device_id,
                        'deviceName': status.get('deviceName', 'iPad'), 'mode': 'usb',
                        'updated': time.monotonic(), 'ownerSeen': time.monotonic(), 'watching': False,
+                       'invitationDeadline': time.monotonic() + 60, 'deviceReady': False,
                        'events': queue.Queue(maxsize=8), 'ended': False}
-            self.call(device_id, 'POST', '/session', json.dumps({'protocol': PROTOCOL}).encode(), current['token'])
+            payload = {'protocol': PROTOCOL, 'sessionId': current['id'], 'computerName': socket.gethostname()[:80]}
+            if invitation_id:
+                payload['invitationId'] = invitation_id
+            reply = self.call(device_id, 'POST', '/session', json.dumps(payload).encode(), current['token'])
+            current['deviceReady'] = reply.get('ready') is True
+            if not current['deviceReady'] and reply.get('invitationStatus') != 'pending':
+                raise BridgeError(409, '协作邀请已拒绝或失效，请重新发起。')
             self.session = current
-            return {key: current[key] for key in ('id', 'token', 'deviceName', 'mode')}
+            return {key: current[key] for key in ('id', 'token', 'deviceName', 'mode', 'deviceReady')}
 
     def authorize(self, session_id, authorization):
         current = self.session
@@ -101,7 +136,7 @@ class BridgeState:
     def publish(current, status):
         # Commands remain on the iPad until acknowledged by the workbench; keep
         # only recent status under backpressure, never an unbounded frame queue.
-        value = {key: status[key] for key in ('page', 'commands', 'captureRequest', 'viewportCommands', 'error') if key in status}
+        value = {key: status[key] for key in ('page', 'commands', 'captureRequest', 'viewportCommands', 'error', 'deviceReady', 'deviceName') if key in status}
         # Timestamp on native receipt, before queuing. The workbench reuses the
         # existing sequence/age/robot/task/soft-limit checks for every command.
         received = time.time() * 1000
@@ -136,6 +171,8 @@ class BridgeState:
         with self.lock:
             if self.session is not current:
                 raise BridgeError(410, '数据线协作已结束')
+            if not current['deviceReady']:
+                raise BridgeError(409, '请等待 iPad 接受协作邀请')
             validate_payload(route, body)
             try:
                 result = self.call(current['deviceId'], 'PUT', route, body, current['token'])
@@ -155,6 +192,21 @@ class BridgeState:
                 now = time.monotonic()
                 if now - current['ownerSeen'] > 10:
                     self.stop(current, '电脑连接窗口已关闭，请重新连接。')
+                elif not current['deviceReady']:
+                    if now >= current['invitationDeadline']:
+                        self.stop(current, '协作邀请已过期，请重新发起。')
+                    elif now - current['updated'] >= 0.75:
+                        try:
+                            reply = self.call(current['deviceId'], 'GET', '/session', token=current['token'])
+                            current['updated'] = time.monotonic()
+                            if reply.get('ready') is True:
+                                current['deviceReady'] = True
+                                self.publish(current, {'deviceReady': True, 'deviceName': current['deviceName']})
+                            elif reply.get('invitationStatus') != 'pending':
+                                self.stop(current, 'iPad 已拒绝此次协作邀请。' if reply.get('invitationStatus') == 'rejected'
+                                          else '协作邀请已取消或过期。')
+                        except BridgeError as error:
+                            self.stop(current, str(error))
                 elif now - current['updated'] >= 2:
                     try:
                         status = self.call(current['deviceId'], 'PUT', '/heartbeat', token=current['token'])
@@ -245,14 +297,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 raise BridgeError(400, '请求不完整')
             if self.path == '/api/devices' and self.command == 'GET':
                 return self.respond(200, state.discover())
-            if self.path == '/api/session' and self.command == 'POST':
+            if self.path == '/api/invitations' and self.command == 'GET':
+                return self.respond(200, state.invitations())
+            if self.path in ('/api/session', '/api/invitations/reject') and self.command == 'POST':
                 try:
                     value = json.loads(body)
                     if not isinstance(value, dict):
                         raise ValueError()
                 except (ValueError, UnicodeDecodeError):
                     raise BridgeError(400, '设备参数无效')
-                return self.respond(201, state.start(value.get('deviceId')))
+                if self.path == '/api/invitations/reject':
+                    return self.respond(200, state.reject_invitation(value.get('deviceId'), value.get('invitationId')))
+                return self.respond(201, state.start(value.get('deviceId'), value.get('invitationId')))
             match = re.fullmatch(r'/api/session/([a-f0-9-]{36})(/frame|/workspace|/events)?', self.path)
             if not match:
                 raise BridgeError(404, '连接接口不存在')
@@ -286,7 +342,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.close_connection = True
         try:
-            self.wfile.write(b'{"ready":true}\n')
+            self.wfile.write(json.dumps({'ready': True, 'deviceReady': current['deviceReady'], 'deviceName': current['deviceName']}).encode() + b'\n')
             self.wfile.flush()
             while not state.closed.is_set():
                 try:

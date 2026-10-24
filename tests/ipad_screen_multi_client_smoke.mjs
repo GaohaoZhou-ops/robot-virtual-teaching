@@ -13,7 +13,7 @@ const service = createIPadScreenService({ serverId, supported: true, now: () => 
   getAddresses: (port) => [`http://192.168.42.10:${port}`, `http://192.168.42.11:${port}`],
   generatePairingCode: () => plannedCodes.shift() || randomPairingCode(),
   transport: { devices() { usbCalls++; return []; }, close() {},
-    request() { usbCalls++; return { status: 200, body: { protocol: SCREEN_PROTOCOL, keepalive: true, jointControl: true } }; } },
+    request() { usbCalls++; return { status: 200, body: { protocol: SCREEN_PROTOCOL, keepalive: true, jointControl: true, usbInvitations: true, ready: true } }; } },
 });
 const server = createServer((req, res) => service(req, res, () => { res.writeHead(404); res.end(); }));
 service.attach(server);

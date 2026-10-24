@@ -82,7 +82,7 @@ def run():
                 native_log = os.environ.get('ATLAS_SCREEN_NATIVE_LOG')
                 if native_log:
                     deadline = time.monotonic() + 180
-                    while 'Waiting 180.0s for "screen-collaboration-stop"' not in Path(native_log).read_text(errors='replace'):
+                    while 'ATLAS_SCREEN_WAITING_FOR_INVITATION' not in Path(native_log).read_text(errors='replace'):
                         assert time.monotonic() < deadline, 'Native test did not finish launching the app'
                         page.wait_for_timeout(300)
                 deadline = time.monotonic() + 180
@@ -92,8 +92,13 @@ def run():
                     assert time.monotonic() < deadline, devices
                     page.wait_for_timeout(500)
             topbar_action(page, name='iPad / iPhone', exact=True).click()
-            with page.expect_response(lambda r: r.url.endswith('/ipad-screen/session') and r.request.method == 'POST') as created:
+            if LIVE:
                 page.get_by_role('menuitem', name='画面协作', exact=True).click()
+            with page.expect_response(lambda r: r.url.endswith('/ipad-screen/session') and r.request.method == 'POST') as created:
+                if LIVE:
+                    page.get_by_role('dialog', name='画面协作', exact=True).get_by_role('button', name='发起邀请', exact=True).click()
+                else:
+                    page.get_by_role('menuitem', name='画面协作', exact=True).click()
             ticket = created.value.json()
             if not LIVE:
                 credential = page.request.post(BASE + '/__atlas/ipad-screen/pair', data={

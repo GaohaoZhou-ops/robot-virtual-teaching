@@ -41,6 +41,8 @@ node_modules/
 # Coupled-wrist UI checks use build/robot-joint-coupling/ for browser captures.
 # Mac/iPad realtime checks use build/ipad-realtime-*/ and ipad/build/realtime-testing/;
 # performance samples, device/signing settings, captures and Python environments stay local.
+# Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
+# browser/native captures, readiness markers, device reports and deployment logs.
 dist/
 build/
 out/
@@ -305,6 +307,16 @@ playwright/.auth/
 /ipad-windows-usb.[zZ][iI][pP]
 /Atlas-iPad-USB/
 /Atlas-iPad-USB.[zZ][iI][pP]
+# USB invitation validation exports copied out of build/, including per-run
+# directories and ZIPs. Keep maintained tests and nested fixtures trackable.
+/ipad-screen-invitations/
+/tests/ipad-screen-invitations/
+/ipad-screen-invitations-*/
+/tests/ipad-screen-invitations-*/
+/ipad-screen-invitations.[zZ][iI][pP]
+/tests/ipad-screen-invitations.[zZ][iI][pP]
+/ipad-screen-invitations-*.[zZ][iI][pP]
+/tests/ipad-screen-invitations-*.[zZ][iI][pP]
 # Grouped topbar/cascading-menu captures and packed review copies from /tmp.
 # Keep the same prefixes in source artwork and nested fixtures trackable.
 /atlas-toolbar-*/

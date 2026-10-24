@@ -21,6 +21,7 @@ def run():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     fixture = BridgeFixture(port=21994)
     pad = fixture.pad
+    pad.auto_accept = False
     errors, remote_frames, sync_writes = [], [], []
     try:
         with sync_playwright() as p:
@@ -73,7 +74,13 @@ def run():
                 assert fixture.state.session is None, 'the helper needs explicit approval before USB access'
                 helper.screenshot(path=str(OUTPUT / 'allow.png'))
                 helper.get_by_role('button', name='允许连接此工作台').click()
+                dialog.get_by_role('button', name='发起邀请', exact=True).click()
+                expect(dialog.get_by_text('等待 Windows USB iPad 接受邀请', exact=True)).to_be_visible()
+                page.wait_for_timeout(1000)
+                assert not pad.active and not pad.frames and not pad.workspace, 'USB helper must wait for consent'
+                pad.active = True; pad.phase = 'accepted'; pad.auto_accept = True
                 expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible()
+                expect(helper.locator('#status')).to_contain_text('Windows USB iPad 已连接')
                 page.screenshot(path=str(OUTPUT / 'connected.png'))
 
                 def wait(check, label, timeout=30):
@@ -143,11 +150,25 @@ def run():
                     dialog.get_by_role('button', name='连接本机助手', exact=True).click()
                 helper = reopened.value
                 helper.get_by_role('button', name='允许连接此工作台').click()
+                dialog.get_by_role('button', name='发起邀请', exact=True).click()
                 expect(dialog.get_by_text('正在共享双臂画面', exact=True)).to_be_visible()
                 assert fixture.state.session['id'] != session_id
                 dialog.get_by_role('button', name='结束协作', exact=True).click()
                 wait(lambda: not pad.active, 'explicit stop')
                 dialog.get_by_role('button', name='关闭画面协作窗口').click()
+                incoming = page.get_by_role('dialog', name='接受 iPad 的协作邀请？', exact=True)
+                pad.outgoing = {'id': str(uuid.uuid4()), 'expiresAt': time.time() * 1000 + 60000}
+                expect(incoming).to_be_visible(timeout=15000)
+                incoming.get_by_role('button', name='拒绝', exact=True).click()
+                expect(incoming).not_to_be_visible()
+                assert pad.outgoing is None and not pad.active
+                pad.outgoing = {'id': str(uuid.uuid4()), 'expiresAt': time.time() * 1000 + 60000}
+                expect(incoming).to_be_visible(timeout=15000)
+                incoming.get_by_role('button', name='接受邀请', exact=True).click()
+                expect(incoming).not_to_be_visible()
+                wait(lambda: pad.active, 'accept tablet invitation through helper')
+                page.get_by_role('button', name='结束画面协作', exact=True).click()
+                wait(lambda: not pad.active, 'stop tablet-initiated collaboration')
                 with page.expect_download() as saved:
                     start_project_download(page)
                 archive = read_exported_archive(saved.value)
