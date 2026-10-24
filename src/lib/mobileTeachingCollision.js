@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OBB } from 'three/addons/math/OBB.js';
+import { collisionHullsSeparated } from './robotCollisionHull.js';
 
 // Static, conservative screening: robot collision meshes become oriented boxes.
 // Every environment triangle (or point) is indexed; large triangles are tested
@@ -169,7 +170,27 @@ async function buildEnvironmentIndex(environment, checkpoint) {
     }
     return true;
   };
-  return { intersects, encloses, kind: mesh ? 'mesh' : 'points', count };
+  const intersectsSegment = (from, to, endpointTolerance = 0.0002) => {
+    if (!mesh) return false;
+    const length = from.distanceTo(to);
+    if (length <= endpointTolerance * 2) return false;
+    ray.set(from, to.clone().sub(from).divideScalar(length));
+    const stack = [root];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!ray.intersectsBox(node.box)) continue;
+      if (node.left) { stack.push(node.left, node.right); continue; }
+      for (let i = node.start; i < node.end; i += 1) {
+        [triangle.a, triangle.b, triangle.c].forEach((v, corner) => v.fromArray(positions, vertex(order[i], corner) * 3));
+        if (ray.intersectTriangle(triangle.a, triangle.b, triangle.c, false, hit)) {
+          const distance = from.distanceTo(hit);
+          if (distance > endpointTolerance && distance < length - endpointTolerance) return true;
+        }
+      }
+    }
+    return false;
+  };
+  return { intersects, encloses, intersectsSegment, kind: mesh ? 'mesh' : 'points', count };
 }
 
 export async function createMobileCollisionChecker(robot, environment, checkpoint = async () => {}, { armBodyClearance = 0 } = {}) {
@@ -257,14 +278,26 @@ export async function createMobileCollisionChecker(robot, environment, checkpoin
       if (!/(base|wheel|caster|chassis)/i.test(proxy.linkName)
         && proxy.worldBox.min.z + CONTACT_MARGIN < robot.parent.position.z - CONTACT_MARGIN) groundLinks.add(proxy.linkName);
     }
-    for (const [a, b] of pairs) {
-      if (a.worldBox.intersectsBox(b.worldBox) && a.obb.intersectsOBB(b.obb)) selfPairs.push([a.linkName, b.linkName]);
+    for (const pair of pairs) {
+      const [a, b] = pair;
+      if (!a.worldBox.intersectsBox(b.worldBox) || !a.obb.intersectsOBB(b.obb)) continue;
+      if (a.hull && b.hull) {
+        const relative = new THREE.Matrix4().copy(a.inverse).multiply(b.node.matrixWorld);
+        // Fixed torso pairs share this result throughout an arm trajectory.
+        // Recompute as soon as either link's relative transform changes.
+        if (!pair.hullTransform?.equals(relative)) {
+          pair.hullTransform = relative;
+          pair.hullSeparated = collisionHullsSeparated(a.hull, b.hull, relative);
+        }
+        if (pair.hullSeparated) continue;
+      }
+      selfPairs.push([a.linkName, b.linkName]);
     }
     const clearance = measureClearance();
-    return { checked: true, method: 'conservative-obb', environment: index.kind,
+    return { checked: true, method: proxies.some((proxy) => proxy.hull) ? 'conservative-obb-convex' : 'conservative-obb', environment: index.kind,
       clear: !selfPairs.length && !environmentLinks.size && !groundLinks.size && clearance.clear,
       selfPairs, environmentLinks: [...environmentLinks], groundLinks: [...groundLinks], armBodyClearance: clearance };
   };
-  return { check, measureArmBodyClearance, measurePostureClearance,
+  return { check, measureArmBodyClearance, measurePostureClearance, containsPoint: index.encloses, intersectsSegment: index.intersectsSegment,
     proxyCount: proxies.length, environmentKind: index.kind, environmentCount: index.count };
 }

@@ -43,6 +43,8 @@ node_modules/
 # performance samples, device/signing settings, captures and Python environments stay local.
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
 # browser/native captures, readiness markers, device reports and deployment logs.
+# The persistent web service uses build/service/; surface-polyline browser
+# captures use test-artifacts/polyline-{teaching,base,surface-warnings}/.
 dist/
 build/
 out/
@@ -205,6 +207,13 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Standalone copies of surface-polyline validation output and packed reports.
+# Scope these to root/tests output directories; polyline_*.py/.mjs runners,
+# src/ modules and nested tests/fixtures/ models remain trackable.
+/polyline-*/
+/tests/polyline-*/
+/polyline-*.[zZ][iI][pP]
+/tests/polyline-*.[zZ][iI][pP]
 # USB / Wi-Fi collaboration diagnostics copied from /tmp or build/.
 # Keep reports, frame captures, review bundles and local environments scoped
 # to output locations so source files and nested regression fixtures stay visible.
@@ -779,6 +788,15 @@ playwright/.auth/
 /atlas-ipad-snapshot-*.[zZ][iI][pP]
 /ipad/atlas-ipad-snapshot-*.[zZ][iI][pP]
 /tests/atlas-ipad-snapshot-*.[zZ][iI][pP]
+
+# CoreDevice USB-name lookups write device catalogs to temporary workspaces.
+# Cover repository-local TMPDIR overrides and packed diagnostics, preserving fixtures.
+/atlas-usb-names-*/
+/tests/atlas-usb-names-*/
+/ipad/atlas-usb-names-*/
+/atlas-usb-names-*.[zZ][iI][pP]
+/tests/atlas-usb-names-*.[zZ][iI][pP]
+/ipad/atlas-usb-names-*.[zZ][iI][pP]
 
 # Read-only parking/route-reference tests create LAN sessions, model payloads
 # and Swift test binaries under this TMPDIR prefix. Keep repository-local

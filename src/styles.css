@@ -3734,6 +3734,7 @@ code {
 }
 
 .viewer-display-settings__color,
+.viewer-display-settings__robot,
 .viewer-display-settings__height-legend,
 .viewer-display-settings__waypoint-names,
 .viewer-display-settings__path-names,
@@ -3748,6 +3749,7 @@ code {
 }
 
 .viewer-display-settings__color > span,
+.viewer-display-settings__robot > span,
 .viewer-display-settings__height-legend > span,
 .viewer-display-settings__waypoint-names > span,
 .viewer-display-settings__path-names > span,
@@ -3785,7 +3787,8 @@ code {
   background: #153139;
 }
 
-.viewer-display-settings__color button:disabled { opacity: .4; cursor: not-allowed; }
+.viewer-display-settings__color button:disabled,
+.viewer-display-settings__robot button:disabled { opacity: .4; cursor: not-allowed; }
 .viewer-display-settings__layer-notice { margin: 0; padding: 10px 14px; color: var(--muted); font-size: 10px; line-height: 1.6; border-bottom: 1px solid var(--line); }
 
 .viewer-display-settings__toggle > span,
@@ -3795,6 +3798,7 @@ code {
 }
 
 .distance-warning-toggle[aria-checked="false"],
+.viewer-display-settings__toggle[aria-checked="false"],
 .viewer-display-settings__toggle[aria-pressed="false"] {
   color: var(--muted);
   background: transparent;
@@ -3862,6 +3866,8 @@ code {
   );
   box-shadow: 0 0 6px rgba(45, 240, 152, 0.12);
 }
+
+.viewer-display-settings__opacity input:disabled { opacity: .4; cursor: not-allowed; }
 
 .viewer-display-settings__opacity input::-webkit-slider-thumb {
   appearance: none;

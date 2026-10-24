@@ -512,6 +512,9 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null, att
   const mode = payload.teachingSpace?.mode || payload.workspace?.teachingSpaceMode || payload.map?.teachingSpaceMode || 'map';
   if (mode !== 'map') return null;
   try {
+    if (payload.virtualTeaching?.tasks?.some((task) => task.polylines?.length)) {
+      throw new Error('当前任务包含表面折线，第一版仅支持工程保存与虚拟回放，不能导出为机器人 ABX 动作。请单独导出不含折线的任务。');
+    }
     const virtualPayload = { ...payload, virtualTeaching: { ...payload.virtualTeaching,
       tasks: (payload.virtualTeaching?.tasks || []).filter((task) => !task.abx) } };
     const result = await appendImportedAbxTasks(await compileExport(virtualPayload, robotPackage), payload, { attachLegacyRoutes });

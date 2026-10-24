@@ -52,12 +52,26 @@ echo "正在构建示教服务…"
   echo "服务构建失败，请查看日志: $LOG_FILE" >&2
   exit 1
 }
-nohup "$VITE_BIN" preview --outDir "$SERVICE_BUILD_DIR" --host "$BIND_HOST" --port "$APP_PORT" --strictPort >>"$LOG_FILE" 2>&1 &
-SERVICE_PID=$!
+# A detached session survives terminal/command-runner process-group cleanup;
+# nohup alone only ignores SIGHUP and leaves the server in the caller's group.
+SERVICE_PID="$(node --input-type=module - "$VITE_BIN" "$SERVICE_BUILD_DIR" "$BIND_HOST" "$APP_PORT" "$LOG_FILE" <<'NODE'
+import { spawn } from 'node:child_process';
+import { openSync, closeSync } from 'node:fs';
+const [vite, directory, host, port, logPath] = process.argv.slice(2);
+const log = openSync(logPath, 'a');
+const child = spawn(process.execPath, [vite, 'preview', '--outDir', directory, '--host', host, '--port', port, '--strictPort'], {
+  detached: true,
+  stdio: ['ignore', log, log],
+});
+closeSync(log);
+child.once('error', (error) => { console.error(`服务启动失败：${error.message}`); process.exitCode = 1; });
+child.once('spawn', () => { console.log(child.pid); child.unref(); });
+NODE
+)"
 printf '%s %s %s\n' "$SERVICE_PID" "$APP_PORT" "$BIND_HOST" > "$PID_FILE"
 
 for _ in {1..40}; do
-  if curl -fsS "http://127.0.0.1:$APP_PORT" >/dev/null 2>&1; then
+  if curl --noproxy '*' --connect-timeout 1 --max-time 2 -fsS "http://127.0.0.1:$APP_PORT" >/dev/null 2>&1; then
     echo "服务已启动，监听地址 ${BIND_HOST}:${APP_PORT} (PID $SERVICE_PID)"
     atlas_print_access_urls "$APP_PORT" "$BIND_HOST"
     echo "日志文件: $LOG_FILE"

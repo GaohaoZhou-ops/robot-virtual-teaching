@@ -23,23 +23,32 @@ final class AtlasTeachingUITests: XCTestCase {
         invite.tap()
         let stop = app.buttons["screen-collaboration-stop"]
         XCTAssertTrue(stop.waitForExistence(timeout: 60))
-        XCTAssertFalse(app.alerts["接受画面协作邀请？"].exists, "The iPad already consented by sending its own invitation")
+        let accept = app.buttons["accept-screen-invitation"].firstMatch
+        let reject = app.buttons["reject-screen-invitation"].firstMatch
+        XCTAssertFalse(accept.exists, "The iPad already consented by sending its own invitation")
         XCTAssertTrue(stop.waitForNonExistence(timeout: 60), "The browser finishes the first stream")
-        let alert = app.alerts["接受画面协作邀请？"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 60))
+        XCTAssertTrue(accept.waitForExistence(timeout: 60), app.debugDescription)
         XCTAssertFalse(stop.exists, "An incoming invitation must not open collaboration before confirmation")
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "USB invitation requires iPad confirmation"; shot.lifetime = .keepAlways; add(shot)
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            for button in [reject, accept] {
+                XCTAssertTrue(button.isHittable)
+                XCTAssertTrue(app.windows.firstMatch.frame.contains(button.frame))
+            }
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "USB invitation card - \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        XCUIDevice.shared.orientation = .landscapeLeft
         // Allow the desktop fixture to verify that no frames are being shared.
         Thread.sleep(forTimeInterval: 3)
-        alert.buttons["reject-screen-invitation"].firstMatch.tap()
+        reject.tap()
         // The desktop can send the next invitation before XCTest observes the
         // dismissal. Its refusal assertion verifies the first response.
         Thread.sleep(forTimeInterval: 1)
-        XCTAssertTrue(alert.waitForExistence(timeout: 60))
+        XCTAssertTrue(accept.waitForExistence(timeout: 60))
         XCTAssertFalse(stop.exists)
         Thread.sleep(forTimeInterval: 3)
-        alert.buttons["accept-screen-invitation"].firstMatch.tap()
+        accept.tap()
         XCTAssertTrue(stop.waitForExistence(timeout: 30))
         XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 30))
         Thread.sleep(forTimeInterval: 4)
@@ -56,9 +65,41 @@ final class AtlasTeachingUITests: XCTestCase {
     private func acceptFixtureUSBInvitation(_ app: XCUIApplication) {
         if app.buttons["screen-collaboration-stop"].exists { return }
         print("ATLAS_SCREEN_WAITING_FOR_INVITATION")
-        let alert = app.alerts["接受画面协作邀请？"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 180))
-        alert.buttons["accept-screen-invitation"].firstMatch.tap()
+        let accept = app.buttons["accept-screen-invitation"].firstMatch
+        XCTAssertTrue(accept.waitForExistence(timeout: 180), app.debugDescription)
+        accept.tap()
+    }
+
+    /// Send a desktop USB invitation after ATLAS_INVITATION_LARGE_TEXT_READY.
+    func testLiveUSBInvitationCardLargeText() throws {
+        guard ProcessInfo.processInfo.environment["ATLAS_INVITATION_LARGE_TEXT_LIVE"] == "1" else {
+            throw XCTSkip("Requires a desktop USB invitation on the connected iPad")
+        }
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication()
+        app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        app.launch()
+        XCTAssertTrue(app.buttons["invite-usb-collaboration"].waitForExistence(timeout: 20))
+        print("ATLAS_INVITATION_LARGE_TEXT_READY")
+        let accept = app.buttons["accept-screen-invitation"].firstMatch
+        let reject = app.buttons["reject-screen-invitation"].firstMatch
+        XCTAssertTrue(accept.waitForExistence(timeout: 60), app.debugDescription)
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            for button in [reject, accept] {
+                XCTAssertTrue(button.isHittable)
+                XCTAssertTrue(app.windows.firstMatch.frame.contains(button.frame))
+            }
+            XCTAssertFalse(app.buttons["invite-usb-collaboration"].isHittable)
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.08)).tap()
+            XCTAssertTrue(accept.exists, "Tapping outside must not dismiss or accept an invitation")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "USB invitation large text - \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        reject.tap()
+        XCTAssertTrue(accept.waitForNonExistence(timeout: 10))
+        XCUIDevice.shared.orientation = .landscapeLeft
     }
 
     private func launchScreenFixture() throws -> XCUIApplication {

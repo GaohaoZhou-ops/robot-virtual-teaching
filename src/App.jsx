@@ -681,6 +681,7 @@ export default function App() {
     cancel: cancelProjectImport, prepareReload: checkpointProjectImport,
   } = useProjectImportProgress();
   const [teachingPlayback, setTeachingPlayback] = useState(createIdleTeachingPlayback);
+  const [polylineTeachingBusy, setPolylineTeachingBusy] = useState(false);
   const [sessionState, setSessionState] = useState({ status: 'checking', restored: false });
   const [cachedWorkspaces, setCachedWorkspaces] = useState({
     map: null,
@@ -720,7 +721,7 @@ export default function App() {
     || teachingCaptureState.status === 'capturing' || projectExportBusyRef.current || abxImportBusy
     || mapRouteSyncBusy || robotLoadState.status === 'pending' || robotLoadState.status === 'loading'
     || ['running', 'pausing', 'paused'].includes(mobileComputation?.status)
-    || ['playing', 'paused'].includes(teachingPlayback.status);
+    || ['playing', 'paused'].includes(teachingPlayback.status) || polylineTeachingBusy;
   const alternateTeachingMode = isIndependentTeachingSpace ? 'map' : 'independent';
   const activeCollapsedPanel = isIndependentTeachingSpace ? null : collapsedPanel;
   const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
@@ -3327,6 +3328,39 @@ export default function App() {
     [coordinateFrame, mapData, selectedRobot],
   );
 
+  const saveTeachingPolyline = useCallback(async (path) => {
+    if (!mapData || !selectedRobot || robotLoadState.status !== 'loaded') return null;
+    if (!sessionReadyRef.current || workspaceSwitchingRef.current) throw new Error('请等待工程就绪后再保存折线');
+    const timestamp = new Date().toISOString();
+    const saved = { ...structuredClone(path), id: path.id || createId('polyline'),
+      name: path.name.trim() || '表面折线', createdAt: path.createdAt || timestamp, updatedAt: timestamp };
+    const existing = teachingTasks.find((task) => task.polylines?.some((item) => item.id === saved.id) && teachingContextMatches(task));
+    const active = teachingTasks.find((task) => task.id === activeTeachingTaskId && !task.mobileCapture && !task.abx && teachingContextMatches(task));
+    const target = existing || active || { id: createId('teach-task'), name: '折线示教',
+      createdAt: timestamp, updatedAt: timestamp, coordinateFrame,
+      robot: { id: selectedRobot.id || selectedRobot.relativePath, name: selectedRobot.name, relativePath: selectedRobot.relativePath },
+      map: { id: mapData.mapId || '', fileName: mapData.name || '', sourceHash: mapData.sourceHash || null, teachingSpaceMode, coordinateFrame },
+      parkingPoints: [] };
+    const update = (task) => ({ ...task, updatedAt: timestamp, polylines: task.polylines?.some((item) => item.id === saved.id)
+      ? task.polylines.map((item) => item.id === saved.id ? saved : item) : [...(task.polylines || []), saved] });
+    const tasks = teachingTasks.some((task) => task.id === target.id)
+      ? teachingTasks.map((task) => task.id === target.id ? update(task) : task) : [...teachingTasks, update(target)];
+    // Explicit save must finish before success is shown. An immediate reload
+    // must not race the normal 180 ms workspace autosave debounce.
+    latestWorkspaceRef.current = { ...latestWorkspaceRef.current, teachingTasks: tasks, activeTeachingTaskId: target.id };
+    setTeachingTasks(tasks);
+    setActiveTeachingTaskId(target.id);
+    await persistWorkspaceNow();
+    if (!sessionReadyRef.current) throw new Error('折线已更新，但工程写入失败，请另存工程备份后重试');
+    notify(`${saved.name} 已保存至 ${target.name}`, 'success');
+    return saved;
+  }, [mapData, selectedRobot, robotLoadState.status, teachingTasks, activeTeachingTaskId, teachingContextMatches, coordinateFrame, teachingSpaceMode, notify, persistWorkspaceNow]);
+
+  const deleteTeachingPolyline = useCallback((taskId, pathId) => {
+    setTeachingTasks((tasks) => tasks.map((task) => task.id === taskId ? { ...task,
+      updatedAt: new Date().toISOString(), polylines: (task.polylines || []).filter((path) => path.id !== pathId) } : task));
+  }, []);
+
   const createTeachingTask = useCallback((options = {}) => {
     if (!mapData?.bounds) {
       notify('请先加载地图，再创建虚拟示教任务', 'warning');
@@ -3673,6 +3707,10 @@ export default function App() {
   }, [activeTeachingParkingPointId, notify, teachingTasks]);
 
   const captureTeachingPoint = useCallback(async (options = {}) => {
+    if (polylineTeachingBusy) {
+      notify('请先停止折线检查或划线，再记录普通姿态', 'warning');
+      return { success: false, message: '折线任务进行中。' };
+    }
     const replacePoseId = options?.replacePoseId;
     const createParkingPoint = options?.createParkingPoint === true;
     const task = teachingTasks.find((item) => item.id === (options?.taskId || activeTeachingTaskId));
@@ -3851,6 +3889,7 @@ export default function App() {
   }, [
     activeTeachingParkingPointId,
     activeTeachingTaskId,
+    polylineTeachingBusy,
     coordinateFrame,
     notify,
     robotJointValues,
@@ -3865,7 +3904,7 @@ export default function App() {
 
   const screenCaptureParkingPoint = activeTeachingTask?.parkingPoints?.find((point) => point.id === activeTeachingParkingPointId);
   const ipadPoseCaptureState = screenPoseCaptureState(activeTeachingTask, activeTeachingParkingPointId,
-    ['playing', 'paused'].includes(teachingPlayback.status) ? '请先在网页端结束轨迹播放，再记录姿态。'
+    (polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '请先在网页端结束轨迹播放或折线任务，再记录姿态。'
       : robotParkingGhost?.editing ? '请先在网页端完成或取消姿态编辑，再记录姿态。'
         : teachingCaptureState.status === 'capturing' ? '正在记录姿态，请稍候。'
           : robotLoadState.status !== 'loaded' || !teachingContextMatches(activeTeachingTask) ? '请在网页端加载与当前任务匹配的地图和机器人。'
@@ -4866,6 +4905,11 @@ export default function App() {
     },
     [notify],
   );
+  const handleShowRobotChange = useCallback((visible) => {
+    if (!visible) setRobotControlEnabled(false);
+    setShowRobotModel(Boolean(visible));
+  }, []);
+
   const handleRobotControlChange = useCallback(
     (enabled, { announce = true } = {}) => {
       const nextEnabled = Boolean(enabled) && robotLoadState.status === 'loaded';
@@ -4992,6 +5036,7 @@ export default function App() {
   }, []);
 
   const startTeachingPlayback = useCallback((task, mobilePreview = null) => {
+    if (polylineTeachingBusy) { notify('请先停止折线检查或划线，再播放示教任务', 'warning'); return; }
     if (!task) {
       notify('示教任务不存在或已经被删除', 'warning');
       return;
@@ -5001,6 +5046,7 @@ export default function App() {
       return;
     }
 
+    if (task.polylines?.length) { notify('此任务含表面折线，请在三维视图的“折线示教”中逐条检查和执行', 'info'); return; }
     const plan = buildTeachingTaskTrajectory({
       task,
       jointDefinitions: robotLoadState.movableJoints || [],
@@ -5060,6 +5106,7 @@ export default function App() {
     return true;
   }, [
     advanceTeachingPlayback,
+    polylineTeachingBusy,
     mapData,
     navigateAppPage,
     notify,
@@ -6646,10 +6693,7 @@ export default function App() {
                     onSelect={handleSelectRobot}
                     showRobot={showRobotModel}
                     visibilityDisabled={teachingCaptureState.status === 'capturing'}
-                    onShowRobotChange={(visible) => {
-                      if (!visible) setRobotControlEnabled(false);
-                      setShowRobotModel(visible);
-                    }}
+                    onShowRobotChange={handleShowRobotChange}
                   />
                   <button type="button" className="action-button" disabled={!robotPresetReady}
                     title={robotPresetReady ? '输入双臂、躯干和头部关节值并保存' : '请先加载具有可动关节的机器人模型'}
@@ -6661,7 +6705,7 @@ export default function App() {
                   disabledReason={robotLoadState.status !== 'loaded' ? '加载机器人后可调整双臂关节软限位。'
                     : !robotLoadState.movableJoints?.some((joint) => joint.softLimitRatio) ? '当前模型没有可配置的双臂关节。'
                       : teachingCaptureState.status === 'capturing' ? '采集完成后可调整关节软限位。'
-                        : ['playing', 'paused'].includes(teachingPlayback.status) ? '停止轨迹播放后可调整关节软限位。'
+                        : (polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '停止轨迹播放或折线任务后可调整关节软限位。'
                           : mobileComputation ? '结束示教计算后可调整关节软限位。' : ''} />
                 <RobotJointCouplingSettings enabled={robotArmJointCouplingEnabled} onChange={setRobotArmJointCouplingEnabled}
                   disabledReason={robotLoadState.status !== 'loaded' ? '加载机器人后可调整关节6–7角度耦合约束。'
@@ -6669,7 +6713,7 @@ export default function App() {
                       (joint) => new RegExp(`^${side}[_-]J${index}$`, 'i').test(joint.name)
                         && ['revolute', 'continuous'].includes(joint.type)))) ? '当前模型没有成对的 J6、J7 旋转关节。'
                       : teachingCaptureState.status === 'capturing' ? '采集完成后可调整耦合约束。'
-                        : ['playing', 'paused'].includes(teachingPlayback.status) ? '停止轨迹播放后可调整耦合约束。'
+                        : (polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '停止轨迹播放或折线任务后可调整耦合约束。'
                           : mobileComputation ? '结束示教计算后可调整耦合约束。' : ''} />
                 <section className="workbench-menu-section robot-presets-list">
                   <p>预设姿态{robotPresets.length > 0 ? ` · ${robotPresets.length}` : ''}</p>
@@ -6850,6 +6894,7 @@ export default function App() {
                 onViewChange={handleView3dChange}
                 robotDescriptor={selectedRobot}
                 showRobot={showRobotModel}
+                onShowRobotChange={handleShowRobotChange}
                 robotLoadState={robotLoadState}
                 robotPose={robotPose}
                 robotJointValues={robotJointValues}
@@ -6863,6 +6908,9 @@ export default function App() {
                 teachingSpaceMode={teachingSpaceMode}
                 teachingDevice={teachingDevice}
                 teachingTasks={workbenchTeachingTasks}
+                onSavePolyline={saveTeachingPolyline}
+                onDeletePolyline={deleteTeachingPolyline}
+                onPolylineBusyChange={setPolylineTeachingBusy}
                 selectedMobilePose={selectedMobilePose}
                 spaceMouseInputRef={spaceMouseInputRef}
                 viewportCanvasRef={main3DCanvasRef}
@@ -7316,7 +7364,7 @@ export default function App() {
       mapData={mapData} robot={selectedRobot} robotLoadState={robotLoadState} cameraPoses={zividCameraPoses} meshRenderQuality={meshRenderQuality}
       jointValues={robotJointValues} onChangeJoint={updateRobotJointValue} viewportCaptureRef={collaborationViewportRef}
       poseCaptureState={ipadPoseCaptureState} onRecordPose={recordPoseFromIPad}
-      controlBlockedReason={['playing', 'paused'].includes(teachingPlayback.status) ? '请先在网页端结束轨迹播放，再调整关节。'
+      controlBlockedReason={(polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '请先在网页端结束轨迹播放或折线任务，再调整关节。'
         : teachingCaptureState.status === 'capturing' ? '正在记录 Pose，请稍候。' : ''} />}
     {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}

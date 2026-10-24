@@ -71,6 +71,14 @@ struct ContentView: View {
             } else { library(bottomSafeArea: viewport.safeAreaInsets.bottom) }
         }.frame(width: viewport.size.width, height: viewport.size.height)
         }.tint(accent).task { await session.reload() }
+            .onChange(of: screen.incomingUSBInvitation?.id) { _, id in
+                guard id != nil else { return }
+                // A native pairing sheet would otherwise cover the invitation.
+                // Clear deferred pairing before dismissing it so it cannot join
+                // another connection while the user reviews the USB invitation.
+                scannedCode = nil; requestedWiFiPairing = nil
+                scanning = false; pairingServer = nil; projectToDelete = nil
+            }
     }
     private func library(bottomSafeArea: CGFloat) -> some View {
         GeometryReader { viewport in
@@ -288,6 +296,11 @@ struct ContentView: View {
                 }.font(.callout)
             } else {
                 wiredCollaborationGuide
+                wiredCollaborationButton
+                if !screen.usbInvitationMessage.isEmpty {
+                    Text(screen.usbInvitationMessage).font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("usb-invitation-status")
+                }
             }
             if !screen.connectionError.isEmpty {
                 Text(screen.connectionError).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
@@ -311,24 +324,24 @@ struct ContentView: View {
                 .font(.caption).foregroundStyle(accent)
             Text("Windows 或远端电脑需先在电脑端启动并连接「数据线连接助手」。")
                 .font(.caption).foregroundStyle(.secondary)
-            if screen.awaitingUSBInvitation {
-                Button("取消邀请", action: screen.cancelUSBInvitation)
-                    .buttonStyle(.bordered).accessibilityIdentifier("cancel-usb-invitation")
-            } else {
-                Button("邀请电脑协作", action: screen.inviteUSBComputer)
-                    .buttonStyle(.borderedProminent).disabled(session.busy || screen.connecting)
-                    .accessibilityIdentifier("invite-usb-collaboration")
-            }
-            if !screen.usbInvitationMessage.isEmpty {
-                Text(screen.usbInvitationMessage).font(.caption).foregroundStyle(.secondary)
-                    .accessibilityIdentifier("usb-invitation-status")
-            }
         }
         .font(.callout).fixedSize(horizontal: false, vertical: true)
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
         .background(accent.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(accent.opacity(0.25)))
         .accessibilityElement(children: .contain).accessibilityIdentifier("screen-pairing-wired-guide")
+    }
+    @ViewBuilder private var wiredCollaborationButton: some View {
+        if screen.awaitingUSBInvitation {
+            Button(action: screen.cancelUSBInvitation) {
+                pairingActionLabel("取消邀请", systemImage: "xmark")
+            }.buttonStyle(.bordered).accessibilityIdentifier("cancel-usb-invitation")
+        } else {
+            Button(action: screen.inviteUSBComputer) {
+                pairingActionLabel("邀请电脑协作", systemImage: "cable.connector")
+            }.buttonStyle(.borderedProminent).disabled(session.busy || screen.connecting)
+                .accessibilityIdentifier("invite-usb-collaboration")
+        }
     }
     private var scanPairingButton: some View {
         Button(action: beginScanning) {
@@ -1126,6 +1139,7 @@ private struct TeachingResultSyncView: View {
 struct TeachingView: View {
     @Environment(\.screenCollaborationActive) private var screenCollaborationActive
     @EnvironmentObject private var session: TeachingSession
+    @EnvironmentObject private var screen: ScreenCollaboration
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var ar = ARController()
     @StateObject private var renderer = ModelRenderer()
@@ -1356,6 +1370,12 @@ struct TeachingView: View {
             if !available { nearbyPoseConfirmation = nil }
         }
         .onChange(of: session.current?.result.samples.last?.id) { _, _ in nearbyPoseConfirmation = nil }
+        .onChange(of: screen.incomingUSBInvitation?.id) { _, id in
+            guard id != nil else { return }
+            // Keep the invitation reachable from the iPad Pro workspace too.
+            displaySettingsOpen = false; resultSyncOpen = false; review = false
+            nearbyPoseConfirmation = nil
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { nearbyPoseConfirmation = nil; ar.suspend(); coverage.cancel(); session.backgroundSave() }
             else { coverage.resume(); if !completed { Task { await ar.start() } } }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Cable, CheckCircle2, LoaderCircle, Monitor, QrCode, RefreshCw, Square, Wifi, X } from 'lucide-react';
+import { Cable, CheckCircle2, ChevronDown, LoaderCircle, Monitor, QrCode, RefreshCw, Square, Wifi, X } from 'lucide-react';
 import ZividCameraPanel from './ZividCameraPanel.jsx';
 import IPadPairingQRCode from './IPadPairingQRCode.jsx';
 import IPadScreenInvitation from './IPadScreenInvitation.jsx';
@@ -379,9 +379,12 @@ export default function IPadScreenCollaboration({ open, onClose, mapData, robot,
                 <li>连接并解锁 iPad，信任电脑并打开 Atlas App，再点击下方“连接本机助手”。</li></ol>
               <p>连接窗口打开后点击“允许连接此工作台”，随后可最小化。Mac 远端工作台也可运行助手内的 Python 脚本。</p>
             </div>}
-            {devices.length > 0 && <select aria-label="画面协作设备" value={selected} disabled={busy} onChange={(event) => setSelected(event.target.value)}>
-              <option value="">选择已连接的设备</option>{devices.map((device) => <option key={device.id} value={device.id} disabled={!device.ready}>{device.name}{!device.ready ? ` · ${device.message}` : ''}</option>)}
-            </select>}
+            {devices.length > 0 && <div className="ipad-screen-device-select">
+              <select aria-label="画面协作设备" title={devices.find((device) => device.id === selected)?.name || '选择已连接的设备'}
+                value={selected} disabled={busy} onChange={(event) => setSelected(event.target.value)}>
+                <option value="">选择已连接的设备</option>{devices.map((device) => <option key={device.id} value={device.id} disabled={!device.ready}>{device.name}{!device.ready ? ` · ${device.message}` : ''}</option>)}
+              </select><ChevronDown size={16} aria-hidden="true"/>
+            </div>}
             {devices.filter((device) => !device.ready).map((device) => <p key={device.id}>{device.name}：{device.message}</p>)}
             {message && <p>{message}</p>}{checking && <p role="status">正在检测有线设备与 App…</p>}
           </div> : <div className="ipad-screen-wireless">

@@ -649,7 +649,7 @@ export default function VirtualTeachingPanel({
                         {expanded ? <FolderOpen size={12} /> : <Folder size={12} />}
                         <span><strong>{task.name}</strong><small>{task.mobileCapture
                           ? `${mobileDeviceLabel(task.mobileCapture)} · ${task.mobileCapture.samples.length} 个 Pose`
-                          : `${task.parkingPoints?.length || 0} 停车点 · ${taskPoseCount} 姿态`}</small></span>
+                          : `${task.parkingPoints?.length || 0} 停车点 · ${taskPoseCount} 姿态${task.polylines?.length ? ` · ${task.polylines.length} 折线` : ''}`}</small></span>
                       </button>
                     </div>
 

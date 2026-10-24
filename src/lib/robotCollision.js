@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { collisionSideForLink, normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
 import { isRobotBodyJoint } from './robotJointLocks.js';
+import { applyRobotMaterialOpacity, robotSourceMaterialOpacity } from './robotDisplay.js';
 
 export const ROBOT_COLLISION_SAFETY_DISTANCE = 0.1;
 export const ROBOT_COLLISION_CONTACT_MARGIN = 0.008;
@@ -87,7 +88,7 @@ const materialAllowsCollisionOverlay = (mesh) => {
     material
     && material.visible !== false
     && material.colorWrite !== false
-    && Number(material.opacity ?? 1) > 0.01
+    && Number(robotSourceMaterialOpacity(material)) > 0.01
   ));
 };
 
@@ -214,6 +215,7 @@ export function collectRobotCollisionProxies(robot, ignoredJointNames = [], { in
   });
 
   return {
+    robot,
     proxies,
     highlightEntries,
     excludedLinks: [...excludedLinks].sort(),
@@ -317,12 +319,14 @@ export function applyRobotCollisionHighlights(collection, result = {}) {
     entry.mesh.material = nextState === 'safe'
       ? entry.originalMaterial
       : entry.warningMaterials[nextState];
+    applyRobotMaterialOpacity(entry.mesh.material, collection.robot?.userData.robotDisplayOpacity ?? 1);
   });
 }
 
 export function disposeRobotCollisionProxies(collection) {
   collection?.highlightEntries?.forEach((entry) => {
     entry.mesh.material = entry.originalMaterial;
+    applyRobotMaterialOpacity(entry.originalMaterial, collection.robot?.userData.robotDisplayOpacity ?? 1);
     entry.warningState = 'safe';
   });
   collection?.warningMaterials?.forEach((material) => material.dispose());

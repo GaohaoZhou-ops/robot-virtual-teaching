@@ -6,6 +6,7 @@ import { normalizeArmJointCouplingEnabled } from './robotJointCoupling.js';
 import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult, withoutDesktopPoseReferences } from './ipadProtocol.js';
 import { normalizeMobileSolveReport } from './mobileTeachingSolver.js';
+import { normalizePolyline } from './polylineTeaching.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { ZIVID_M70_PROFILE } from './zividCamera.js';
 import { withoutTemporaryMapNavigation } from './teachingNavigation.js';
@@ -43,7 +44,8 @@ const normalizeWorkspaceTransfer = (value) => {
   const validItems = (items) => Array.isArray(items)
     && items.every((item) => typeof item?.id === 'string' && typeof item?.hash === 'string');
   if (value.kind === 'extraction' && (!Array.isArray(value.baseline?.tasks)
-    || !value.baseline.tasks.every((task) => typeof task?.id === 'string' && typeof task?.name === 'string' && validItems(task.parkingPoints))
+    || !value.baseline.tasks.every((task) => typeof task?.id === 'string' && typeof task?.name === 'string' && validItems(task.parkingPoints)
+      && (task.polylines == null || validItems(task.polylines)))
     || !validItems(value.baseline.waypoints) || !validItems(value.baseline.edges)
     || (value.baseline.jointPoses != null && !validItems(value.baseline.jointPoses)))) return null;
   const { previousPlacements, ...transfer } = value;
@@ -502,6 +504,7 @@ export function normalizeTeachingTasks(payload) {
         coordinateFrame: String(map.coordinateFrame || task?.coordinateFrame || 'map'),
       },
       parkingPoints,
+      ...(Array.isArray(task.polylines) ? { polylines: task.polylines.map(normalizePolyline).filter(Boolean) } : {}),
       ...(task.abx ? { abx: structuredClone(task.abx) } : {}),
       ...(task.mobileSolveSource && typeof task.mobileSolveSource === 'object' ? { mobileSolveSource: structuredClone(task.mobileSolveSource) } : {}),
       ...(task.mobileCapture ? {

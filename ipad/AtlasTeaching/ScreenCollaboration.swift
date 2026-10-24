@@ -691,27 +691,142 @@ final class ScreenCollaboration: ObservableObject {
 
 struct ScreenCollaborationHost: View {
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var screen = ScreenCollaboration()
     var body: some View {
-        ContentView()
-            .environmentObject(screen)
-            .environment(\.screenCollaborationActive, screen.active)
-            .fullScreenCover(isPresented: Binding(get: { screen.active }, set: { if !$0 { screen.finish() } })) {
-                ScreenCollaborationView(screen: screen).interactiveDismissDisabled()
+        ZStack {
+            ContentView()
+                .environmentObject(screen)
+                .environment(\.screenCollaborationActive, screen.active)
+                .allowsHitTesting(screen.incomingUSBInvitation == nil)
+                .accessibilityHidden(screen.incomingUSBInvitation != nil)
+            if let invitation = screen.incomingUSBInvitation {
+                ScreenUSBInvitationDialog(invitation: invitation,
+                    accept: { screen.respondToUSBInvitation(id: invitation.id, accept: true) },
+                    reject: { screen.respondToUSBInvitation(id: invitation.id, accept: false) })
+                    .id(invitation.id).transition(.opacity).zIndex(1)
             }
-            .onAppear { if scenePhase == .active { screen.start() } }
-            .onChange(of: scenePhase) { _, phase in if phase == .active { screen.start() } else { screen.stop() } }
-            .alert("接受画面协作邀请？", isPresented: Binding(
-                get: { screen.incomingUSBInvitation != nil },
-                set: { _ in }
-            ), presenting: screen.incomingUSBInvitation) { invitation in
-                Button("接受邀请") { screen.respondToUSBInvitation(id: invitation.id, accept: true) }
-                    .accessibilityIdentifier("accept-screen-invitation")
-                Button("拒绝", role: .cancel) { screen.respondToUSBInvitation(id: invitation.id, accept: false) }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: screen.incomingUSBInvitation?.id)
+        .fullScreenCover(isPresented: Binding(get: { screen.active }, set: { if !$0 { screen.finish() } })) {
+            ScreenCollaborationView(screen: screen).interactiveDismissDisabled()
+        }
+        .onAppear { if scenePhase == .active { screen.start() } }
+        .onChange(of: scenePhase) { _, phase in if phase == .active { screen.start() } else { screen.stop() } }
+        .onChange(of: screen.incomingUSBInvitation?.id) { _, id in
+            if id != nil {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
+        }
+    }
+}
+
+private struct ScreenUSBInvitationDialog: View {
+    let invitation: ScreenUSBInvitation
+    let accept: () -> Void
+    let reject: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @AccessibilityFocusState private var titleFocused: Bool
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.65).ignoresSafeArea()
+                .contentShape(Rectangle()).onTapGesture { }
+                .accessibilityHidden(true)
+            // Keep the actions visible when a small window or large text makes
+            // the invitation taller than the available space.
+            ViewThatFits(in: .vertical) {
+                card(scrollable: false).fixedSize(horizontal: false, vertical: true)
+                card(scrollable: true)
+            }
+            .frame(maxWidth: 560)
+            .background(Color(red: 0.055, green: 0.085, blue: 0.10), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(screenAccent.opacity(0.24)))
+            .shadow(color: .black.opacity(0.4), radius: 32, y: 16)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityIdentifier("screen-invitation-dialog")
+            .accessibilityAction(.escape, reject)
+        }
+        .onAppear { titleFocused = true }
+    }
+
+    private func card(scrollable: Bool) -> some View {
+        VStack(spacing: 22) {
+            if scrollable {
+                ScrollView { details }.scrollBounceBehavior(.basedOnSize)
+            } else { details }
+            Rectangle().fill(.white.opacity(0.08)).frame(height: 1).accessibilityHidden(true)
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+            layout {
+                Button("拒绝", action: reject)
+                    .buttonStyle(ScreenInvitationButtonStyle(primary: false))
+                    .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier("reject-screen-invitation")
-            } message: { invitation in
-                Text("「\(invitation.computerName)」通过数据线邀请你协作。接受后可查看相机画面与 3D 视图、调整虚拟机器人关节，并将记录的姿态保存到电脑当前工程。")
+                Button(action: accept) { Label("接受邀请", systemImage: "checkmark") }
+                    .buttonStyle(ScreenInvitationButtonStyle(primary: true))
+                    .accessibilityIdentifier("accept-screen-invitation")
             }
+        }.padding(24)
+    }
+
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(alignment: .top, spacing: 16) {
+                Image(systemName: "display.2")
+                    .font(.system(size: 24, weight: .medium)).foregroundStyle(screenAccent)
+                    .frame(width: 54, height: 54)
+                    .background(screenAccent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("画面协作邀请").font(.title2.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader).accessibilityFocused($titleFocused)
+                    Label("数据线连接 · USB", systemImage: "cable.connector")
+                        .font(.subheadline).foregroundStyle(screenAccent)
+                }
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("来自电脑").font(.caption).foregroundStyle(.secondary)
+                Text(invitation.computerName).font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.07)))
+            .accessibilityElement(children: .combine)
+            VStack(alignment: .leading, spacing: 13) {
+                feature("查看相机画面与 3D 视图", symbol: "viewfinder")
+                feature("调整虚拟机器人关节、记录姿态", symbol: "slider.horizontal.3")
+                Text("记录的姿态将保存到电脑当前工程。")
+                    .font(.footnote).foregroundStyle(.secondary).padding(.leading, 30)
+            }
+            Label("接受后才会开始共享画面与协作控制", systemImage: "lock.shield")
+                .font(.footnote).foregroundStyle(.secondary)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func feature(_ title: String, symbol: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: symbol).foregroundStyle(screenAccent).frame(width: 20)
+                .accessibilityHidden(true)
+            Text(title).foregroundStyle(.white.opacity(0.9))
+        }.font(.callout)
+    }
+}
+
+private struct ScreenInvitationButtonStyle: ButtonStyle {
+    let primary: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold)).multilineTextAlignment(.center)
+            .padding(.horizontal, 16).padding(.vertical, 14).frame(maxWidth: .infinity, minHeight: 50)
+            .foregroundStyle(primary ? Color(red: 0.02, green: 0.12, blue: 0.14) : .white.opacity(0.9))
+            .background(primary ? screenAccent : .white.opacity(0.055), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(primary ? .clear : .white.opacity(0.12)))
+            .opacity(configuration.isPressed ? 0.75 : 1)
     }
 }
 

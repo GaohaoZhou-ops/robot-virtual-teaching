@@ -120,6 +120,11 @@ const checkLocalRequest = (req) => {
 };
 const validToken = (current, token) => typeof token === 'string' && /^[a-f0-9]{64}$/.test(token)
   && timingSafeEqual(Buffer.from(token), Buffer.from(current.token));
+const usbDeviceName = (device, appName = 'USB 设备') => {
+  const text = (value) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, 320) : '';
+  const name = text(device.name) || text(appName) || 'USB 设备';
+  return /^(ipad|iphone|ios 设备|usb 设备)$/i.test(name) ? `${name} · ${device.id.slice(-8)}` : name;
+};
 
 export function createIPadScreenService({ transport, supported = process.platform === 'darwin', now = Date.now,
   serverId = randomUUID(), serverName = 'Atlas', getAddresses = lanAddresses, generatePairingCode = randomPairingCode }) {
@@ -295,13 +300,13 @@ export function createIPadScreenService({ transport, supported = process.platfor
           const invitation = status.outgoingInvitation;
           const outgoingInvitation = invitation && /^[a-f0-9-]{36}$/.test(invitation.id) && Number.isFinite(invitation.expiresAt)
             ? { id: invitation.id, expiresAt: invitation.expiresAt } : null;
-          result.push({ id: device.id, name: status.deviceName,
+          result.push({ id: device.id, name: usbDeviceName(device, status.deviceName),
             ready: status.protocol === SCREEN_PROTOCOL && status.keepalive === true && status.jointControl === true
               && status.usbInvitations === true && !status.active && (!status.invitationPending || !!outgoingInvitation),
             outgoingInvitation, active: !!status.active,
             message: status.active ? '正在进行画面协作' : status.usbInvitations !== true ? '请更新 Atlas App 以支持双向协作邀请。'
               : status.invitationPending ? '等待处理协作邀请' : '' });
-        } catch { result.push({ id: device.id, name: 'USB 设备', ready: false, message: '请解锁设备，并在前台打开新版 Atlas App。' }); }
+        } catch { result.push({ id: device.id, name: usbDeviceName(device), ready: false, message: '请解锁设备，并在前台打开新版 Atlas App。' }); }
       }
       return { supported: true, devices: result };
     })().finally(() => { discovering = undefined; });
@@ -387,13 +392,15 @@ export function createIPadScreenService({ transport, supported = process.platfor
         if (usbBusy()) fail(409, '已有有线画面协作，请先结束当前有线协作');
         starting = true;
         try {
+          const device = (await transport.devices()).find((device) => device.id === body.deviceId) || { id: body.deviceId };
           const status = await appRequest(body.deviceId, 'GET', '/status');
           if (status.protocol !== SCREEN_PROTOCOL || status.keepalive !== true || status.jointControl !== true
             || status.usbInvitations !== true) fail(409, '请更新设备上的 Atlas App 以支持双向协作邀请。');
           if (status.active) fail(409, '设备正在进行画面协作，请先在设备上结束协作');
           if (body.invitationId != null && (!/^[a-f0-9-]{36}$/.test(body.invitationId)
             || status.outgoingInvitation?.id !== body.invitationId)) fail(409, '邀请已取消或过期，请重新发起。');
-          const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), deviceId: body.deviceId, deviceName: status.deviceName, updatedAt: now(),
+          const current = { id: randomUUID(), token: randomBytes(32).toString('hex'), deviceId: body.deviceId,
+            deviceName: usbDeviceName(device, status.deviceName), updatedAt: now(),
             deviceReady: false, invitationDeadline: now() + 60000,
             realtimeUSB: status.realtimeUSB === true && typeof transport.events === 'function' };
           const reply = await appRequest(current.deviceId, 'POST', '/session', Buffer.from(JSON.stringify({ protocol: SCREEN_PROTOCOL,
