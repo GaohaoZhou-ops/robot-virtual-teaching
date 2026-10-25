@@ -45,8 +45,8 @@ node_modules/
 # browser/native captures, readiness markers, device reports and deployment logs.
 # The persistent web service uses build/service/; surface-polyline browser
 # captures (including sidebar, endpoint editing, waist assistance, approach recovery,
-# partial-path, orientation, suggestion and progress checks) use
-# test-artifacts/polyline-*/.
+# partial-path, camera direction, uniform speed, replay and progress pixel checks)
+# use test-artifacts/polyline-*/.
 dist/
 build/
 out/
@@ -210,7 +210,8 @@ playwright/.auth/
 /tests/atlas-*.png
 /tests/transfer-*.png
 # Standalone copies of surface-polyline validation output and packed reports,
-# including screenshots/videos copied out of their original artifact directory.
+# including screenshots/videos copied out of their original artifact directory
+# and JPEG/WebP copies of browser screenshots.
 # Scope these to root/tests output directories; polyline_*.py/.mjs runners,
 # src/ modules and nested tests/fixtures/ models remain trackable.
 /polyline-*/
@@ -219,6 +220,12 @@ playwright/.auth/
 /tests/polyline-*.[zZ][iI][pP]
 /polyline-*.[pP][nN][gG]
 /tests/polyline-*.[pP][nN][gG]
+/polyline-*.[jJ][pP][gG]
+/tests/polyline-*.[jJ][pP][gG]
+/polyline-*.[jJ][pP][eE][gG]
+/tests/polyline-*.[jJ][pP][eE][gG]
+/polyline-*.[wW][eE][bB][pP]
+/tests/polyline-*.[wW][eE][bB][pP]
 /polyline-*.[wW][eE][bB][mM]
 /tests/polyline-*.[wW][eE][bB][mM]
 /polyline-*.[mM][pP]4

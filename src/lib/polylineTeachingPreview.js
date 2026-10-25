@@ -2,22 +2,23 @@ import { Color, MathUtils } from 'three';
 import { polylineVertices } from './polylineTeaching.js';
 
 export const POLYLINE_EXECUTED_COLOR = 0xffb02e;
-const colors = new Map([POLYLINE_EXECUTED_COLOR, 0x72dfb6, 0xff796b, 0xf0a555, 0x50dce6]
+const colors = new Map([POLYLINE_EXECUTED_COLOR, 0x72dfb6, 0xff796b, 0x50dce6]
   .map((value) => [value, new Color(value)]));
 
 // Split at the actual time-parameterized playback position, not at a waypoint
 // or a nearest point in space (which is ambiguous on closed/retraced paths).
 export function polylinePreviewParts(path, plan, playback = null) {
   const vertices = polylineVertices(path), parts = [];
-  const warnings = new Set((plan?.warnings || []).map((warning) => warning.segmentIndex));
   vertices.slice(1).forEach((to, index) => {
     const from = vertices[index];
     const executableEnd = plan?.partial ? index < plan.stoppedAt.segmentIndex ? 1
       : index === plan.stoppedAt.segmentIndex ? plan.stoppedAt.progress : 0 : 1;
     const completedEnd = playback?.drawing ? Math.min(executableEnd, index < playback.segmentIndex ? 1
       : index === playback.segmentIndex ? MathUtils.clamp(playback.segmentProgress, 0, 1) : 0) : 0;
-    const pendingColor = plan?.partial ? 0x72dfb6
-      : plan?.issue?.segmentIndex === index ? 0xff796b : warnings.has(index) ? 0xf0a555 : 0x50dce6;
+    // Reserve orange for the completed portion, including within one edge.
+    // Advisory surface warnings remain in the panel; coloring the whole edge
+    // orange made untouched sections appear already drawn at the start.
+    const pendingColor = plan?.partial ? 0x72dfb6 : plan?.issue?.segmentIndex === index ? 0xff796b : 0x50dce6;
     const add = (start, end, color, completed = false) => {
       const a = from.clone().lerp(to, start), b = from.clone().lerp(to, end);
       if (a.distanceToSquared(b) < 1e-12) return;

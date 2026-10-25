@@ -59,7 +59,14 @@ for (const [source, stop] of [[path, null], [path, { index: 1, fraction: .4 }], 
 const plan = makePlan(path);
 const sample = samplePolylinePlan(plan, plan.segments[1].startMs + plan.segments[1].durationMs / 2);
 const pending = polylinePreviewParts(path, plan, sample).filter((part) => !part.completed);
-assert.ok(pending.some((part) => part.color === 0x50dce6), 'pending normal path keeps cyan');
-assert.ok(pending.some((part) => part.color === 0xf0a555), 'pending warning path keeps its warning color');
+assert.ok(pending.every((part) => part.color === 0x50dce6), 'all untraveled sections stay cyan, including surface warnings');
+for (const progress of [0, .01, .25, .5, .99, 1]) {
+  const parts = polylinePreviewParts(path, plan, { drawing: true, segmentIndex: 1, segmentProgress: progress });
+  const edge = parts.filter((part) => part.segmentIndex === 1);
+  assert.ok(Math.abs(sum(edge, true) - .2 * progress) < 1e-9, 'only the traversed fraction of a warning edge becomes orange');
+  assert.ok(Math.abs(sum(edge, false) - .2 * (1 - progress)) < 1e-9);
+  assert.ok(edge.filter((part) => !part.completed).every((part) => part.color === 0x50dce6));
+}
+assert.deepEqual(plan.warnings, [{ segmentIndex: 1 }], 'progress colors must not discard warning diagnostics');
 geometry.dispose();
-console.log('Polyline progress: timed intra-segment coloring, approach exclusion, preserved pending/warning colors, closed paths, partial endpoints and GPU buffer reuse passed.');
+console.log('Polyline progress: timed intra-segment orange/cyan boundary, warnings never precolor an entire edge, approach exclusion, closed paths, partial endpoints and GPU buffer reuse passed.');

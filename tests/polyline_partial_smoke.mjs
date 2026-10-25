@@ -76,7 +76,7 @@ const vertices = [[.4, .3, .7], [.45, .3, .7], [.8, .3, .7], [.4, .35, .7]];
 const strict = await plan(path(vertices));
 assert.equal(strict.complete, false);
 assert.equal(isPolylinePlanExecutable(strict), false, 'old/default behavior still requires the whole path');
-assert.ok(strict.segments.some((segment) => segment.index === 0));
+assert.equal(strict.issue.phase, 'drawing', 'a failed continuous drawing block is not executable');
 
 for (const points of [vertices, [vertices[0], vertices[2], vertices[3]]]) {
   const action = path(points, { allowPartial: true });

@@ -1,8 +1,9 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { samplePolylineProgress } from './polylineTeachingTiming.js';
+import { samplePolylineCurve } from './polylineTeachingCurve.js';
 
 export const POLYLINE_DEFAULTS = Object.freeze({ speed: 0.05, acceleration: 0.2,
-  step: 0.004, tolerance: 0.001, rotationTolerance: 0.5 });
+  step: 0.004, tolerance: 0.001, rotationTolerance: 0.5, uniformSpeed: true });
 export const POLYLINE_MAX_POINTS = 500;
 export const POLYLINE_BASE_DEFAULTS = Object.freeze({ sync: false, search: false, allowPartial: false, waistAssist: false, range: 2, yawRange: 180 });
 const finiteVector = (value, size) => Array.isArray(value) && value.length === size && value.every(Number.isFinite);
@@ -16,7 +17,7 @@ export function normalizePolyline(value) {
   if (quaternion && quaternion.lengthSq() < 1e-12) return null;
   const tcpOffset = value.tcpOffset ?? [0, 0, 0];
   if (!finiteVector(tcpOffset, 3) || tcpOffset.some((value) => Math.abs(value) > 1)) return null;
-  const settings = {};
+  const settings = { uniformSpeed: value.settings?.uniformSpeed !== false };
   const base = { sync: Boolean(value.base?.sync), search: Boolean(value.base?.search),
     allowPartial: value.base?.allowPartial === true,
     waistAssist: value.base?.waistAssist === true,
@@ -36,6 +37,8 @@ export function normalizePolyline(value) {
     // The sign of Z is authoritative for old records; retain the selected
     // direction explicitly when the distance is zero.
     toolAxisDirection: Math.sign(tcpOffset[2]) || (value.toolAxisDirection === 1 ? 1 : -1),
+    // Older records are explicit manual settings, never migrated by arm name.
+    toolAxisMode: value.toolAxisMode === 'camera' ? 'camera' : 'manual',
     points: value.points.map((point, index) => ({ id: String(point.id || `p${index}`),
       position: [...point.position], ...(finiteVector(point.normal, 3) ? { normal: [...point.normal] } : {}) })),
     quaternion: quaternion?.normalize().toArray() || null, settings, base,
@@ -66,6 +69,24 @@ export function isPolylinePlanExecutable(plan) {
   return Boolean((plan?.complete || (plan?.partial && plan?.executable))
     && plan.segments?.some((segment) => segment.index >= 0)
     && Number.isFinite(plan.durationMs) && plan.durationMs > 0);
+}
+
+// Reuse the checked poses and timing after a completed run. Return along the
+// same drawing trajectory in reverse, without marking it, then draw forward.
+// No new IK, shortcut through space or jump back to the original pose.
+export function repeatPolylinePlan(plan) {
+  if (!isPolylinePlanExecutable(plan)) return null;
+  const drawing = plan.segments.filter((segment) => segment.index >= 0);
+  const first = drawing[0].samples[0], last = drawing.at(-1).samples.at(-1);
+  const equalValues = (a = {}, b = {}) => Object.keys({ ...a, ...b }).every((key) => Math.abs(a[key] - b[key]) < 1e-9);
+  const atStart = equalValues(first.joints, last.joints) && equalValues(first.base, last.base);
+  const returning = atStart ? [] : [...drawing].reverse().map((segment) => ({ ...segment, index: -1, phase: 'returning', reverse: true }));
+  let durationMs = 0;
+  const segments = [...returning, ...drawing].map((segment) => {
+    const startMs = durationMs; durationMs += segment.durationMs;
+    return { ...segment, startMs, endMs: durationMs };
+  });
+  return { ...plan, initialJoints: last.joints, segments, durationMs };
 }
 
 export const smoothProgress = (t) => { const u = Math.max(0, Math.min(1, t)); return u ** 3 * (10 - 15 * u + 6 * u * u); };
@@ -117,12 +138,15 @@ export function polylineBasePose(reference, base) {
 export function samplePolylinePlan(plan, elapsedMs) {
   const elapsed = Math.max(0, Math.min(plan.durationMs, elapsedMs));
   const segment = plan.segments.find((item) => elapsed < item.endMs) || plan.segments.at(-1);
-  const progress = segment.timing ? samplePolylineProgress(segment, elapsed - segment.startMs)
-    : smoothProgress((elapsed - segment.startMs) / segment.durationMs);
+  const localElapsed = segment.reverse ? segment.durationMs - (elapsed - segment.startMs) : elapsed - segment.startMs;
+  const timedProgress = segment.timing ? samplePolylineProgress(segment, localElapsed)
+    : smoothProgress(localElapsed / segment.durationMs);
+  const progress = segment.arcMapping ? samplePolylineJoints(segment.arcMapping.samples, timedProgress).pathU : timedProgress;
   const state = samplePolylineState(segment.samples, progress);
+  const curve = segment.curve ? samplePolylineCurve(segment.curve, progress * (segment.endFraction ?? 1)) : null;
   return { ...state, ...(state.base ? { basePose: polylineBasePose(plan.baseReference, state.base) } : {}),
-    phase: segment.phase || (segment.index < 0 ? 'approach' : 'drawing'), segmentIndex: segment.index,
-    segmentProgress: progress * (segment.endFraction ?? 1),
+    phase: segment.phase || (segment.index < 0 ? 'approach' : 'drawing'), segmentIndex: curve?.segmentIndex ?? segment.index,
+    segmentProgress: curve?.segmentProgress ?? progress * (segment.endFraction ?? 1),
     drawing: segment.index >= 0, done: elapsed >= plan.durationMs,
-    target: new Vector3().fromArray(segment.from).lerp(new Vector3().fromArray(segment.to), progress).toArray() };
+    target: curve ? curve.target.toArray() : new Vector3().fromArray(segment.from).lerp(new Vector3().fromArray(segment.to), progress).toArray() };
 }

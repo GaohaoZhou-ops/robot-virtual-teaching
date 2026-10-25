@@ -1,5 +1,6 @@
 // Retiming changes only the speed along the already checked Hermite path.
-// A tight limit in one small interval must not slow the entire original edge.
+// Approach/strict mode adapts locally; uniform drawing uses one safe cruise
+// speed across the whole continuous block without stops at sampling knots.
 const baseDefinitions = {
   x: { type: 'prismatic', velocity: 0.1 / Math.SQRT2, acceleration: 0.25 / Math.SQRT2 },
   y: { type: 'prismatic', velocity: 0.1 / Math.SQRT2, acceleration: 0.25 / Math.SQRT2 },
@@ -19,15 +20,24 @@ function derivativeBounds(a, b, name, field, tangentField) {
   };
 }
 
-export function preparePolylineTiming(samples, distance, settings, definitions) {
-  const intervals = samples.slice(1).map((b, i) => {
-    const a = samples[i], h = b.u - a.u;
+export function preparePolylineTiming(samples, distance, settings, definitions, { curvature = 0, arcMapping = null } = {}) {
+  const knots = arcMapping?.samples || samples;
+  let sourceIndex = 0;
+  let intervals = knots.slice(1).map((b, i) => {
+    const a = knots[i], h = b.u - a.u;
+    if (arcMapping) while (sourceIndex < samples.length - 2 && a.joints.pathU >= samples[sourceIndex + 1].u - 1e-12) sourceIndex += 1;
+    const inverse = arcMapping ? derivativeBounds(a, b, 'pathU', 'joints', 'tangents') : null;
     if (!(h > 0)) throw new Error('轨迹采样顺序无效，请重新检查');
     let speed = distance > 0 ? settings.speed / distance : Infinity;
     let acceleration = distance > 0 ? settings.acceleration / distance : Infinity;
     const constrain = (entries, field, tangentField) => {
       for (const [name, definition] of Object.entries(entries)) {
-        const { first, second } = derivativeBounds(a, b, name, field, tangentField);
+        const source = inverse ? derivativeBounds(samples[sourceIndex], samples[sourceIndex + 1], name, field, tangentField)
+          : derivativeBounds(a, b, name, field, tangentField);
+        // Chain rule for q(u(s)): include the inverse arc map's curvature in
+        // the bounds, rather than assuming target speed equals actual speed.
+        const first = inverse ? source.first * inverse.first : source.first;
+        const second = inverse ? source.second * inverse.first ** 2 + source.first * inverse.second : source.second;
         const linear = definition.type === 'prismatic';
         const maxSpeed = Math.min(linear ? 0.1 : 36, definition.velocity > 0 ? definition.velocity : Infinity);
         const maxAcceleration = definition.acceleration || (linear ? 0.25 : 90);
@@ -42,7 +52,7 @@ export function preparePolylineTiming(samples, distance, settings, definitions) 
       }
     };
     constrain(definitions, 'joints', 'tangents');
-    if (a.base) constrain(baseDefinitions, 'base', 'baseTangents');
+    if (samples[0].base) constrain(baseDefinitions, 'base', 'baseTangents');
     // A zero-motion interval may still carry a progress coordinate.
     if (speed === Infinity) speed = 4;
     if (acceleration === Infinity) acceleration = 16;
@@ -52,10 +62,20 @@ export function preparePolylineTiming(samples, distance, settings, definitions) 
     return { from: a.u, to: b.u, h, speed, acceleration };
   });
 
+  if (settings.uniformSpeed) {
+    // One cruise speed for the entire continuous drawing block. A restrictive
+    // joint interval lowers this common speed instead of causing repeated ramps.
+    // Reserve Cartesian acceleration for both turning and starting/stopping.
+    const turnSpeed = curvature > 0 ? Math.sqrt(settings.acceleration / 2 / curvature) / distance : Infinity;
+    intervals = [{ from: 0, to: 1, h: 1,
+      speed: intervals.reduce((minimum, interval) => Math.min(minimum, interval.speed), turnSpeed),
+      acceleration: intervals.reduce((minimum, interval) => Math.min(minimum, interval.acceleration),
+        curvature > 0 ? settings.acceleration / 2 / distance : Infinity) }];
+  }
+
   // Continuous speeds at IK knots; only actual polyline corners stop. Cubic
   // speed ramps have peak acceleration 1.5 Δv/T and distance .75 Δ(v²)/a.
-  const speeds = samples.map((_, i) => i === 0 || i === samples.length - 1 ? 0
-    : Math.min(intervals[i - 1].speed, intervals[i].speed));
+  const speeds = [0, ...intervals.slice(1).map((interval, i) => Math.min(intervals[i].speed, interval.speed)), 0];
   intervals.forEach((interval, i) => {
     speeds[i + 1] = Math.min(speeds[i + 1], Math.sqrt(speeds[i] ** 2 + 4 / 3 * interval.acceleration * interval.h));
   });
@@ -86,7 +106,8 @@ export function preparePolylineTiming(samples, distance, settings, definitions) 
     }
     durationMs = 250;
   }
-  return { durationMs, timing };
+  return { durationMs, timing, ...(settings.uniformSpeed ? { uniformSpeed: true,
+    cruiseSpeed: Math.max(...timing.map((phase) => Math.max(phase.v0, phase.v1))) * distance } : {}) };
 }
 
 export function samplePolylineProgress(segment, elapsedMs) {

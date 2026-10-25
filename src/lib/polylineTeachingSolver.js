@@ -7,6 +7,8 @@ import { solveEndEffectorIk } from './robotEndEffectorIk.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
 import { normalizePolyline, polylineVertices, preparePolylineInterpolation, samplePolylineState } from './polylineTeaching.js';
 import { preparePolylineTiming } from './polylineTeachingTiming.js';
+import { buildPolylineDrawingEdges, samplePolylineCurve } from './polylineTeachingCurve.js';
+import { preparePolylineArcMapping } from './polylineTeachingSpeed.js';
 import { createPolylineBase, polylineBaseCandidates, polylinePostureCost } from './polylineTeachingBase.js';
 
 export async function planPolyline({ robot, parentMatrix, path, environment, lockedJointNames = [],
@@ -55,10 +57,14 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const allowPartial = action.base.allowPartial && !action.base.sync && !action.base.search;
   const requestedDistance = vertices.slice(1).reduce((sum, point, i) => sum + point.distanceTo(vertices[i]), 0);
   const start = controller.frame.getWorldPosition(new THREE.Vector3());
-  let approachOffset = 0, approachLength = start.distanceTo(vertices[0]);
-  const issue = (message, index, u, details = {}) => ({ message, segmentIndex: index, progress: u,
-    phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing',
-    ...(index < 0 ? { distanceFromStart: approachOffset + approachLength * u } : {}), ...details });
+  let approachOffset = 0, approachLength = start.distanceTo(vertices[0]), activeCurve = null;
+  const issue = (message, index, u, details = {}) => {
+    const point = index >= 0 && activeCurve ? samplePolylineCurve(activeCurve, u) : null;
+    return { message, segmentIndex: point?.segmentIndex ?? index, progress: point?.segmentProgress ?? u,
+      phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing',
+      ...(point ? { curveProgress: u } : {}),
+      ...(index < 0 ? { distanceFromStart: approachOffset + approachLength * u } : {}), ...details };
+  };
   const collisionIssue = (index, u) => {
     const collision = checker.check({ detailedEnvironment: true });
     if (collision.clear) return null;
@@ -71,10 +77,13 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   };
   const referenceValues = (state) => ({ ...initialJoints, ...state.joints, ...(base ? Object.fromEntries(base.joints.map((joint, i) =>
     [joint.name, state.base[['x', 'y', 'yaw'][i]]])) : {}) });
-  const solveTarget = (target, exclusions, reference, repeats = 1) => {
+  const solveTarget = (target, exclusions, reference, repeats = 1, precise = false) => {
+    const positionTolerance = precise ? 2e-7 : undefined;
     for (let i = 0; i < repeats; i += 1) {
-      const result = solveEndEffectorIk(controller, target, targetQuaternion, exclusions, { referenceJointValues: reference });
-      if (result.positionError <= settings.tolerance && result.rotationError <= settings.rotationTolerance) break;
+      const result = solveEndEffectorIk(controller, target, targetQuaternion, exclusions, {
+        referenceJointValues: reference, positionTolerance, refineOnly: precise,
+      });
+      if (result.positionError <= (positionTolerance ?? settings.tolerance) && result.rotationError <= settings.rotationTolerance) break;
     }
     root.updateMatrixWorld(true);
   };
@@ -84,6 +93,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
 
   const buildPlan = async (candidate = zeroBase, reportProgress = onProgress) => {
     applyState(initialState);
+    activeCurve = null;
     approachOffset = 0; approachLength = start.distanceTo(vertices[0]);
     const segments = [];
     const position = new THREE.Vector3(), quaternion = new THREE.Quaternion();
@@ -92,9 +102,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     const warn = (code, message, index, u, phase = index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing') => {
       // Sampling and interpolation may hit the same surface many times. Keep
       // one visible warning per kind and segment, with its first location.
-      const key = `${phase}:${index}:${code}`;
+      const warning = issue(message, index, u, { code, phase });
+      const key = `${phase}:${warning.segmentIndex}:${code}`;
       if (warningKeys.has(key)) return;
-      warningKeys.add(key); warnings.push(issue(message, index, u, { code, phase }));
+      warningKeys.add(key); warnings.push(warning);
     };
     const validState = (target, index, u, phase) => {
       root.updateMatrixWorld(true);
@@ -109,10 +120,13 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         && Math.abs(joints[name] - initialJoints[name]) > 1e-7)) return issue('求解改变了不允许参与规划的关节', index, u);
       controller.frame.getWorldPosition(position); controller.frame.getWorldQuaternion(quaternion);
       const error = position.distanceTo(target);
+      const sourcePosition = index >= 0 && activeCurve ? samplePolylineCurve(activeCurve, u).sourcePosition : target;
+      const sourceError = position.distanceTo(sourcePosition);
       const angular = THREE.MathUtils.radToDeg(quaternion.angleTo(targetQuaternion));
-      if (error > settings.tolerance || angular > settings.rotationTolerance) return issue('未找到满足沿线精度和固定朝向的连续逆解', index, u,
-        { code: 'continuous-ik', positionError: error, rotationError: angular });
-      maximumError = Math.max(maximumError, error);
+      const trackingTolerance = settings.tolerance - target.distanceTo(sourcePosition);
+      if (error > trackingTolerance || sourceError > settings.tolerance || angular > settings.rotationTolerance) return issue('未找到满足沿线精度和固定朝向的连续逆解', index, u,
+        { code: 'continuous-ik', positionError: error, sourceError, rotationError: angular });
+      maximumError = Math.max(maximumError, sourceError);
       // Surface imperfections and intended tip contact are advisory in virtual
       // drawing. Continue checking IK, joints and physical robot collisions.
       // Require a neighbourhood inside the mesh to avoid noisy face parity.
@@ -130,10 +144,14 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     const initialIssue = validState(start, -1, 0, 'initial');
     if (initialIssue) return fail({ ...initialIssue, phase: 'initial',
       message: `${initialIssue.message}。请先调整机器人姿态或位置，再重新检查。` });
-    const addSegment = (edge, samples, distance, endFraction = 1) => {
-      const { durationMs: segmentDuration, timing } = preparePolylineTiming(samples, distance, settings, definitions);
+    const addSegment = async (edge, samples, distance, endFraction = 1) => {
+      const arcMapping = edge.curve ? await preparePolylineArcMapping(samples, applyState, controller.frame, checkpoint) : null;
+      const { durationMs: segmentDuration, ...timed } = preparePolylineTiming(samples, arcMapping?.length ?? distance,
+        { ...settings, uniformSpeed: Boolean(edge.curve) }, definitions,
+        { curvature: Math.max(edge.curve?.curvature || 0, arcMapping?.curvature || 0), arcMapping });
       segments.push({ index: edge.index, phase: edge.index === -2 ? 'positioning' : edge.index < 0 ? 'approach' : 'drawing',
-        from: edge.from.toArray(), to: edge.to.toArray(), samples, timing, endFraction,
+        from: edge.from.toArray(), to: edge.to.toArray(), samples, ...timed, endFraction,
+        ...(edge.curve ? { curve: edge.curve, arcMapping } : {}),
         durationMs: segmentDuration, startMs: durationMs, endMs: durationMs + segmentDuration });
       durationMs += segmentDuration;
     };
@@ -141,14 +159,29 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       const drawing = segments.filter((segment) => segment.index >= 0);
       if (problem && (!allowPartial || problem.phase !== 'drawing' || !drawing.length)) return fail(problem);
       if (!drawing.length) throw new Error('折线点重合，请增加有长度的线段');
+      if (settings.uniformSpeed && drawing.length > 1) {
+        // Reversals require stops, but their continuous blocks still share the
+        // same attainable cruise speed throughout this drawing operation.
+        const speed = Math.min(...drawing.map((segment) => segment.cruiseSpeed));
+        durationMs = 0;
+        for (const segment of segments) {
+          if (segment.uniformSpeed) Object.assign(segment, preparePolylineTiming(segment.samples, segment.arcMapping.length,
+            { ...settings, speed }, definitions, { curvature: Math.max(segment.curve.curvature, segment.arcMapping.curvature), arcMapping: segment.arcMapping }));
+          segment.startMs = durationMs; durationMs += segment.durationMs; segment.endMs = durationMs;
+        }
+      }
       const last = drawing.at(-1);
-      const distance = drawing.reduce((sum, segment) => sum + new THREE.Vector3().fromArray(segment.from)
-        .distanceTo(new THREE.Vector3().fromArray(segment.to)), 0);
+      const distance = drawing.reduce((sum, segment) => sum + (segment.curve
+        ? samplePolylineCurve(segment.curve, segment.endFraction).sourceDistance - samplePolylineCurve(segment.curve, 0).sourceDistance
+        : new THREE.Vector3().fromArray(segment.from).distanceTo(new THREE.Vector3().fromArray(segment.to))), 0);
+      const lastPoint = last.curve ? samplePolylineCurve(last.curve, last.endFraction) : null;
       return { complete: !problem, executable: true, partial: Boolean(problem), ...(problem ? { issue: problem } : {}),
         warnings, segments, durationMs, initialJoints, quaternion: targetQuaternion.toArray(),
         ...(base ? { baseReference: base.reference, selectedBase: drawing[0].samples[0].base } : {}),
         maximumError, checks, distance, requestedDistance, coverage: Math.min(1, distance / requestedDistance),
-        stoppedAt: { segmentIndex: last.index, progress: last.endFraction, position: [...last.to] } };
+        ...(settings.uniformSpeed ? { speedProfile: { mode: 'uniform', cruiseSpeed: Math.min(...drawing.map((segment) => segment.cruiseSpeed)),
+          requestedSpeed: settings.speed, blendTolerance: settings.tolerance * .5, cornerStops: drawing.length - 1 } } : {}),
+        stoppedAt: { segmentIndex: lastPoint?.segmentIndex ?? last.index, progress: lastPoint?.segmentProgress ?? last.endFraction, position: [...last.to] } };
     };
     const reposition = base && (Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8);
     let reference = referenceValues({ base: candidate });
@@ -158,29 +191,48 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     const approach = [start, ...approachWaypoints.map((point) => new THREE.Vector3().fromArray(point)), vertices[0]];
     const edges = [...approach.slice(1).map((to, index) => ({ from: approach[index], to, index: reposition ? -2 : -1,
       ...(reposition ? { baseTarget: candidate } : {}) })),
-      ...vertices.slice(1).map((to, index) => ({ from: vertices[index], to, index }))];
+      ...(settings.uniformSpeed ? buildPolylineDrawingEdges(vertices, settings)
+        : vertices.slice(1).map((to, index) => ({ from: vertices[index], to, index })))];
     let approachTravel = 0;
     for (const edge of edges) {
-      const { from, to, index } = edge, distance = from.distanceTo(to);
+      const { from, to, index } = edge, distance = edge.distance ?? from.distanceTo(to);
+      activeCurve = edge.curve || null;
+      const targetAt = (u) => edge.curve ? samplePolylineCurve(edge.curve, u).target : from.clone().lerp(to, u);
       // Once recovery reaches P0, keep its achieved posture as the drawing
       // reference. Releasing held joints must not pull them abruptly back
       // toward the pre-approach configuration via IK regularization.
       if (index === 0 && (approachLocks.size || approachWaypoints.length)) reference = referenceValues(readState());
       if (distance < 0.00001 && !edge.baseTarget) continue;
       if (index < 0) { approachOffset = approachTravel; approachLength = distance; approachTravel += distance; }
-      if (checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
-      const count = Math.max(1, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
+      if (!edge.curve && checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
+      const count = edge.sampleCount ?? Math.max(1, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
         ? Math.max(Math.hypot(candidate.x, candidate.y) / 0.002, Math.abs(candidate.yaw) / 0.5) : 0)));
-      const sampleLimit = Math.min(count, 10000, 30000 - segments.reduce((sum, item) => sum + item.samples.length, 0));
+      const sampleLimit = Math.min(count, edge.curve ? 30000 : 10000, 30000 - segments.reduce((sum, item) => sum + item.samples.length, 0));
       if (count > sampleLimit && (!allowPartial || index < 0 || !Number.isFinite(count) || sampleLimit < 1)) {
         return finish(issue('路线过长，请拆成多条折线后分别检查', index, 0));
       }
       let samples = [{ u: 0, ...readState() }];
+      const jumpIssue = (state, seed, u) => movable.some((joint) => Math.abs(state.joints[joint.name] - seed.joints[joint.name])
+        > (joint.userData.jointType === 'prismatic' ? 0.01 : 8))
+        ? issue('相邻采样点的关节变化过大，请调整起始姿态或补点', index, u)
+        : base && (Math.hypot(state.base.x - seed.base.x, state.base.y - seed.base.y) > 0.01 || Math.abs(state.base.yaw - seed.base.yaw) > 3)
+          ? issue('底盘相邻采样变化过大，请缩短采样间距或调整起始位置', index, u) : null;
       const solve = (u, seed) => {
-        applyState(seed);
-        if (edge.baseTarget) base.apply(Object.fromEntries(Object.entries(edge.baseTarget).map(([axis, value]) => [axis, value * u])));
-        const target = from.clone().lerp(to, u);
-        solveTarget(target, edge.baseTarget ? fixedBaseExcluded : index < 0 ? approachExcluded : solvingExcluded, reference);
+        const resetSeed = () => {
+          applyState(seed);
+          if (edge.baseTarget) base.apply(Object.fromEntries(Object.entries(edge.baseTarget).map(([axis, value]) => [axis, value * u])));
+        };
+        resetSeed();
+        const target = targetAt(u), precise = settings.uniformSpeed && (index >= 0 || u === 1);
+        const exclusions = edge.baseTarget ? fixedBaseExcluded : index < 0 ? approachExcluded : solvingExcluded;
+        solveTarget(target, exclusions, reference, precise ? 3 : 1, precise);
+        // Extra numerical precision is a preference, never a reason to reject
+        // an otherwise valid posture within the user's geometric tolerance.
+        // A residual correction near a singularity may choose a colliding pose;
+        // retry the regularized seed and subject it to all the same checks.
+        if (precise && (jumpIssue(readState(), seed, u) || collisionIssue(index, u))) {
+          resetSeed(); solveTarget(target, exclusions, reference);
+        }
         const problem = validState(target, index, u);
         if (problem) return { problem };
         return { sample: { u, ...readState() } };
@@ -188,19 +240,22 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       let stopIssue = null;
       for (let i = 1; i <= sampleLimit; i += 1) {
         await checkpoint();
-        const result = solve(i / count, samples.at(-1));
-        const problem = result.problem || (movable.some((joint) => Math.abs(result.sample.joints[joint.name] - samples.at(-1).joints[joint.name])
-          > (joint.userData.jointType === 'prismatic' ? 0.01 : 8))
-          ? issue('相邻采样点的关节变化过大，请调整起始姿态或补点', index, i / count)
-          : base && (Math.hypot(result.sample.base.x - samples.at(-1).base.x, result.sample.base.y - samples.at(-1).base.y) > 0.01
-            || Math.abs(result.sample.base.yaw - samples.at(-1).base.yaw) > 3)
-            ? issue('底盘相邻采样变化过大，请缩短采样间距或调整起始位置', index, i / count) : null);
+        const u = edge.knots ? edge.knots[i] : i / count;
+        if (edge.curve && checker.intersectsSegment(targetAt(samples.at(-1).u), targetAt(u))) {
+          warn('path-crosses-surface', '笔尖路线穿过物体表面', index, u);
+        }
+        const result = solve(u, samples.at(-1));
+        const problem = result.problem || jumpIssue(result.sample, samples.at(-1), u);
         if (problem) {
           if (!allowPartial || index < 0) return fail(problem);
           stopIssue = problem; break;
         }
         samples.push(result.sample);
-        if (i % 20 === 0 || i === sampleLimit) reportProgress({ phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing', segmentIndex: index, fraction: i / count, total: vertices.length - 1 });
+        if (i % 20 === 0 || i === sampleLimit) {
+          const point = edge.curve ? samplePolylineCurve(edge.curve, u) : null;
+          reportProgress({ phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing',
+            segmentIndex: point?.segmentIndex ?? index, fraction: point?.segmentProgress ?? u, total: vertices.length - 1 });
+        }
       }
       if (!stopIssue && sampleLimit < count) stopIssue = issue('路线过长，请拆成多条折线后分别检查', index, samples.at(-1).u);
       // A successful IK endpoint alone is insufficient: check the same Hermite
@@ -217,7 +272,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
             for (const fraction of [0.25, 0.5, 0.75]) {
               const u = checked[i].u + (checked[i + 1].u - checked[i].u) * fraction;
               applyState(samplePolylineState(checked, u));
-              const problem = validState(from.clone().lerp(to, u), index, u);
+              const problem = validState(targetAt(u), index, u);
               if (!problem) continue;
               if (problem.collision || !problem.positionError || pass === 6) {
                 return { samples: checked, problem, beforeU: checked[i].u };
@@ -229,7 +284,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
             }
           }
           if (!additions.length) return { samples: checked };
-          if (checked.length + additions.length > 15000) return { samples: checked, beforeU: firstRefinement,
+          if (checked.length + additions.length > (edge.curve ? 30000 : 15000)) return { samples: checked, beforeU: firstRefinement,
             problem: issue('当前路线无法在计算预算内满足精度，请拆分或调整', index, firstRefinement) };
           checked = [...checked, ...additions].sort((a, b) => a.u - b.u);
         }
@@ -239,18 +294,18 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         samples = checked.samples;
         if (!checked.problem) break;
         if (!allowPartial || index < 0) return fail(checked.problem);
-        if (!stopIssue || checked.problem.progress < stopIssue.progress) stopIssue = checked.problem;
+        if (!stopIssue || (checked.problem.curveProgress ?? checked.problem.progress) < (stopIssue.curveProgress ?? stopIssue.progress)) stopIssue = checked.problem;
         samples = samples.filter((sample) => sample.u <= checked.beforeU);
       }
       if (samples.length < 2) return finish(stopIssue);
       const endFraction = samples.at(-1).u;
-      const endpoint = from.clone().lerp(to, endFraction);
+      const endpoint = targetAt(endFraction);
       // Reparameterization preserves the checked curve; retiming then brings
       // the robot smoothly to rest at the end of the executable prefix.
       samples = samples.map((sample) => ({ ...sample, u: sample.u / endFraction }));
       preparePolylineInterpolation(samples);
       applyState(samples.at(-1));
-      addSegment({ ...edge, to: endpoint }, samples, distance * endFraction, endFraction);
+      await addSegment({ ...edge, to: endpoint }, samples, distance * endFraction, endFraction);
       if (stopIssue) return finish(stopIssue);
     }
     return finish();

@@ -70,6 +70,8 @@
 .polyline-teaching input[type=checkbox] { accent-color:#4cb6c3; }
 .polyline-teaching__row button { padding:5px 7px; font-size:10px; }
 .polyline-teaching__hint { color:#8aa7b5; font-size:10px; line-height:1.8; margin:0; }
+.polyline-teaching__tool-direction { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; color:#9cb6c2; font-size:10px; }
+.polyline-teaching__tool-direction button { padding:4px 7px; font-size:10px; }
 .polyline-teaching__message { font-size:11px; line-height:1.7; background:#142b36; border-left:2px solid #4a8d9f; padding:8px 10px; }
 .polyline-teaching__message[data-error=true] { color:#ffb4a8; background:#34272b; border-color:#ff8b79; }
 .polyline-teaching__message small { display:block; color:#a5d4df; }

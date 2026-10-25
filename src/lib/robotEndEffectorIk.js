@@ -101,13 +101,22 @@ const angleDifference = (value, reference, continuous) => continuous
  * No event throttling, delayed interpolation or random branch restarts.
  * positionOnly is for proposing an unconstrained direction; normal interactive
  * control and trajectory validation always retain their orientation constraint.
+ * refineOnly follows a dense trajectory from the current seed without repeated
+ * posture attraction. Hard limits and coupling remain active; the caller still
+ * validates the resulting trajectory, precision and whole-robot collisions.
  */
 export function solveEndEffectorIk(controller, targetPosition, targetQuaternion, excludedJoints = new Set(), {
   referenceJointValues = null,
   positionOnly = false,
+  positionTolerance = POSITION_TOLERANCE,
+  refineOnly = false,
 } = {}) {
   if (!controller?.frame || !controller.joints?.length) return null;
   const started = performance.now();
+  // Dense trajectory samples need a smaller residual than interactive drags;
+  // otherwise the convergence deadband becomes visible velocity ripple.
+  const precise = positionTolerance < POSITION_TOLERANCE;
+  const correctionBudget = precise ? 24 : MAX_CORRECTION_ITERATIONS;
   const { robot, frame } = controller;
   const joints = controller.joints.filter((joint) => !excludedJoints.has(joint));
   const couplingPairs = getRobotJointCouplingPairs(robot);
@@ -135,7 +144,7 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
   const jointPosition = new THREE.Vector3(), jointQuaternion = new THREE.Quaternion();
   const axis = new THREE.Vector3(), radius = new THREE.Vector3(), derivative = new THREE.Vector3();
   let positionError = 0, rotationError = 0, iterations = 0;
-  let correcting = false, correctionIterations = 0;
+  let correcting = refineOnly, correctionIterations = 0;
   const limitOffset = (value, definition) => definition.margin
     ? value - THREE.MathUtils.clamp(value, definition.lower + definition.margin, definition.upper - definition.margin) : 0;
   const measure = () => {
@@ -169,13 +178,13 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
     cost = measure();
     damping = 0.025;
   };
-  for (; iterations < MAX_ITERATIONS + MAX_CORRECTION_ITERATIONS && joints.length; iterations += 1) {
-    if (positionError < POSITION_TOLERANCE && rotationError < ROTATION_TOLERANCE) break;
+  for (; iterations < MAX_ITERATIONS + correctionBudget && joints.length; iterations += 1) {
+    if (positionError < positionTolerance && rotationError < ROTATION_TOLERANCE) break;
     if (!correcting && iterations >= MAX_ITERATIONS) {
       if (!canCorrect()) break;
       startCorrection();
     }
-    if (correcting && correctionIterations++ >= MAX_CORRECTION_ITERATIONS) break;
+    if (correcting && correctionIterations++ >= correctionBudget) break;
     const postureWeight = correcting ? 0 : POSTURE_WEIGHT;
     const limitWeight = correcting ? 0 : LIMIT_WEIGHT;
     const columns = joints.map((joint, i) => {
@@ -208,10 +217,10 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
         joints.forEach((joint, i) => setRobotJointValue(joint, before[i] + step[i] * fraction));
         projectCoupling();
         const candidateCost = measure();
-        if (candidateCost < cost - 1e-12) {
+        if (candidateCost < cost - Math.min(1e-12, positionTolerance ** 2 * .01)) {
           cost = candidateCost; improved = true;
           largestStep = Math.max(...joints.map((joint, i) => Math.abs(joint.userData.jointValue - before[i])));
-          damping = Math.max(0.008, damping * 0.7);
+          damping = Math.max(precise && correcting ? 0.0005 : 0.008, damping * 0.7);
           break;
         }
       }
@@ -221,7 +230,7 @@ export function solveEndEffectorIk(controller, targetPosition, targetQuaternion,
         damping = Math.min(0.2, damping * 4);
       }
     }
-    if (!improved || largestStep < 1e-6) {
+    if (!improved || largestStep < (precise ? 1e-10 : 1e-6)) {
       if (!canCorrect()) break;
       startCorrection();
     }

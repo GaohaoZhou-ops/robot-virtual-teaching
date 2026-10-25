@@ -66,7 +66,7 @@ const parentMatrix = new THREE.Matrix4().toArray();
 for (const side of ['left', 'right']) {
   const { robot, p, controller } = setup(side);
   const source = readRobotJointValues(robot);
-  const path = normalizePolyline({ id: 'line', side, points: points([p.clone().add(new THREE.Vector3(-0.01, 0, 0)),
+  const path = normalizePolyline({ id: 'line', side, settings: { uniformSpeed: false }, points: points([p.clone().add(new THREE.Vector3(-0.01, 0, 0)),
     p.clone().add(new THREE.Vector3(-0.025, 0, 0)), p.clone().add(new THREE.Vector3(-0.025, side === 'left' ? 0.015 : -0.015, 0))]) });
   const plan = await planPolyline({ robot, parentMatrix, path, environment: far });
   assert.ok(plan.complete, JSON.stringify(plan.issue));
