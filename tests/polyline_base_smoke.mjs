@@ -34,7 +34,7 @@ async function plan(path, environment = far, options = {}) {
 }
 
 // Old paths are fixed by default; bad ranges cannot reach the worker.
-assert.deepEqual(makePath().base, { sync: false, search: false, allowPartial: false, range: 2, yawRange: 180 });
+assert.deepEqual(makePath().base, { sync: false, search: false, allowPartial: false, waistAssist: false, range: 2, yawRange: 180 });
 assert.equal(makePath({ range: NaN }), null);
 assert.equal(makePath({ yawRange: 181 }), null);
 assert.equal((await plan(makePath())).complete, false, 'a fixed short arm cannot reach the distant line');
@@ -126,8 +126,10 @@ const obstruction = { kind: 'mesh', positions: wall.attributes.position.array, i
 for (const base of [{ sync: true, yawRange: 0 }, { search: true, yawRange: 0 }, { sync: true, search: true, yawRange: 0 }]) {
   const result = await plan(makePath(base), obstruction);
   assert.equal(result.complete, false);
-  assert.match(result.issue.message, /机器人与模型碰撞/);
+  assert.match(result.issue.message, /8 mm 预留区/);
   assert.ok(result.issue.collision.environmentLinks.includes('base'));
+  assert.ok(result.issue.collision.environmentClearanceLinks.includes('base'));
+  assert.ok(!result.issue.collision.environmentIntersectingLinks.includes('base'));
   if (base.search) assert.equal(result.issue.phase, 'positioning');
 }
 wall.dispose();

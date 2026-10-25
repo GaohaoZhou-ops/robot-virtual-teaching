@@ -4,7 +4,7 @@ import { samplePolylineProgress } from './polylineTeachingTiming.js';
 export const POLYLINE_DEFAULTS = Object.freeze({ speed: 0.05, acceleration: 0.2,
   step: 0.004, tolerance: 0.001, rotationTolerance: 0.5 });
 export const POLYLINE_MAX_POINTS = 500;
-export const POLYLINE_BASE_DEFAULTS = Object.freeze({ sync: false, search: false, allowPartial: false, range: 2, yawRange: 180 });
+export const POLYLINE_BASE_DEFAULTS = Object.freeze({ sync: false, search: false, allowPartial: false, waistAssist: false, range: 2, yawRange: 180 });
 const finiteVector = (value, size) => Array.isArray(value) && value.length === size && value.every(Number.isFinite);
 
 // Only authoring data is persisted. A computed trajectory must be checked again
@@ -19,6 +19,7 @@ export function normalizePolyline(value) {
   const settings = {};
   const base = { sync: Boolean(value.base?.sync), search: Boolean(value.base?.search),
     allowPartial: value.base?.allowPartial === true,
+    waistAssist: value.base?.waistAssist === true,
     range: Number(value.base?.range ?? POLYLINE_BASE_DEFAULTS.range),
     yawRange: Number(value.base?.yawRange ?? POLYLINE_BASE_DEFAULTS.yawRange) };
   if (!Number.isFinite(base.range) || base.range < 0.05 || base.range > 10

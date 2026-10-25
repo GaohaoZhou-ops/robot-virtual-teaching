@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from './robotLoader.js';
 import { restoreMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { getRobotJointLimits } from './robotJointLimits.js';
-import { isRobotBodyJoint } from './robotJointLocks.js';
+import { polylineJointExclusions } from './polylineTeachingJoints.js';
 import { solveEndEffectorIk } from './robotEndEffectorIk.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
 import { normalizePolyline, polylineBasePose, polylineVertices } from './polylineTeaching.js';
 import { polylineBaseCandidates } from './polylineTeachingBase.js';
 import { planPolyline } from './polylineTeachingSolver.js';
+import { planPolylineWithApproach } from './polylineTeachingApproach.js';
 
 const halton = (index, base) => {
   let value = 0, fraction = 1;
@@ -50,7 +51,7 @@ function toolOrientations(current, point) {
 // Suggestions are independently checked starting poses, never executable
 // transit plans from the user's current robot. Keep the original failure.
 export async function planPolylineWithSuggestion({ snapshot, checkpoint = async () => {}, onProgress = () => {}, ...options }) {
-  const result = await planPolyline({ ...options, robot: restoreMobileTeachingRobot(snapshot), checkpoint, onProgress });
+  const result = await planPolylineWithApproach({ ...options, snapshot, checkpoint, onProgress });
   if (result.complete || result.partial || result.issue?.phase !== 'approach' || result.issue.code !== 'continuous-ik') return result;
 
   const action = normalizePolyline(options.path);
@@ -59,10 +60,7 @@ export async function planPolylineWithSuggestion({ snapshot, checkpoint = async 
   originalMatrix.decompose(layer.position, layer.quaternion, layer.scale);
   layer.add(robot); layer.updateMatrixWorld(true);
   const controller = getRobotEndEffector(robot, action.side);
-  const opposite = getRobotEndEffector(robot, action.side === 'left' ? 'right' : 'left');
-  const locked = new Set(options.lockedJointNames || []);
-  const excluded = new Set(controller.joints.filter((joint) => locked.has(joint.name)
-    || opposite?.joints.includes(joint) || isRobotBodyJoint(joint) || /torso|chest|head/i.test(joint.name)));
+  const excluded = polylineJointExclusions(controller, action, options.lockedJointNames);
   const movable = controller.joints.filter((joint) => !excluded.has(joint));
   const initial = readRobotJointValues(robot), seeds = postureSeeds(movable, initial);
   const tcp = new THREE.Object3D(); tcp.position.fromArray(action.tcpOffset); controller.frame.add(tcp); controller.frame = tcp;

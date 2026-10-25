@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from './robotLoader.js';
 import { getRobotJointLimits } from './robotJointLimits.js';
 import { getRobotJointCouplingPairs, robotJointCouplingViolations } from './robotJointCoupling.js';
-import { isRobotBodyJoint } from './robotJointLocks.js';
+import { polylineJointExclusions } from './polylineTeachingJoints.js';
 import { solveEndEffectorIk } from './robotEndEffectorIk.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
 import { normalizePolyline, polylineVertices, preparePolylineInterpolation, samplePolylineState } from './polylineTeaching.js';
@@ -10,9 +10,11 @@ import { preparePolylineTiming } from './polylineTeachingTiming.js';
 import { createPolylineBase, polylineBaseCandidates, polylinePostureCost } from './polylineTeachingBase.js';
 
 export async function planPolyline({ robot, parentMatrix, path, environment, lockedJointNames = [],
-  checkpoint = async () => {}, onProgress = () => {} }) {
+  approachWaypoints = [], approachLockedJointNames = [], checkpoint = async () => {}, onProgress = () => {} }) {
   const action = normalizePolyline(path);
   if (!action || action.points.length < 2) throw new Error('请至少选择两个有效的表面点');
+  if (approachWaypoints.length && (action.base.sync || action.base.search)) throw new Error('接近绕行仅支持底盘静止');
+  if (approachWaypoints.some((point) => point.length !== 3 || !point.every(Number.isFinite))) throw new Error('接近路线包含无效坐标');
   const layer = new THREE.Group();
   new THREE.Matrix4().fromArray(parentMatrix).decompose(layer.position, layer.quaternion, layer.scale);
   layer.add(robot); layer.updateMatrixWorld(true);
@@ -21,10 +23,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const toolFrame = controller.frame;
   const tcpFrame = new THREE.Object3D(); tcpFrame.position.fromArray(action.tcpOffset);
   toolFrame.add(tcpFrame); controller.frame = tcpFrame; layer.updateMatrixWorld(true);
-  const opposite = getRobotEndEffector(robot, action.side === 'left' ? 'right' : 'left');
-  const locked = new Set(lockedJointNames);
-  const excluded = new Set(controller.joints.filter((joint) => locked.has(joint.name)
-    || opposite?.joints.includes(joint) || isRobotBodyJoint(joint) || /torso|chest|head/i.test(joint.name)));
+  const excluded = polylineJointExclusions(controller, action, lockedJointNames);
   const movable = controller.joints.filter((joint) => !excluded.has(joint));
   if (!movable.length && !action.base.sync) throw new Error('所选机械臂的关节均被锁定');
   const initialJoints = readRobotJointValues(robot);
@@ -40,6 +39,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   };
   const fixedBaseExcluded = new Set([...excluded, ...(base?.joints || [])]);
   const solvingExcluded = action.base.sync ? excluded : fixedBaseExcluded;
+  // Recovery trials can temporarily hold redundant joints on the way to P0.
+  // Release these additional restrictions for drawing; user locks still apply.
+  const approachLocks = new Set(approachLockedJointNames);
+  const approachExcluded = new Set([...solvingExcluded, ...controller.joints.filter((joint) => approachLocks.has(joint.name))]);
   const targetQuaternion = action.quaternion ? new THREE.Quaternion().fromArray(action.quaternion)
     : controller.frame.getWorldQuaternion(new THREE.Quaternion());
   const settings = action.settings, coupling = getRobotJointCouplingPairs(robot);
@@ -52,18 +55,21 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const allowPartial = action.base.allowPartial && !action.base.sync && !action.base.search;
   const requestedDistance = vertices.slice(1).reduce((sum, point, i) => sum + point.distanceTo(vertices[i]), 0);
   const start = controller.frame.getWorldPosition(new THREE.Vector3());
+  let approachOffset = 0, approachLength = start.distanceTo(vertices[0]);
   const issue = (message, index, u, details = {}) => ({ message, segmentIndex: index, progress: u,
-    phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing', ...details });
+    phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing',
+    ...(index < 0 ? { distanceFromStart: approachOffset + approachLength * u } : {}), ...details });
   const collisionIssue = (index, u) => {
-    const collision = checker.check();
+    const collision = checker.check({ detailedEnvironment: true });
     if (collision.clear) return null;
     const reasons = [];
     if (collision.selfPairs.length) reasons.push(`机器人自身碰撞：${collision.selfPairs.map((pair) => pair.join(' ↔ ')).join('；')}`);
-    if (collision.environmentLinks.length) reasons.push(`机器人与模型碰撞：${collision.environmentLinks.join('、')}`);
+    if (collision.environmentIntersectingLinks.length) reasons.push(`机器人与模型碰撞：${collision.environmentIntersectingLinks.join('、')}（碰撞体重叠）`);
+    if (collision.environmentClearanceLinks.length) reasons.push(`机器人碰撞体的 ${(collision.environmentMargin * 1000).toFixed(0)} mm 预留区与模型相交：${collision.environmentClearanceLinks.join('、')}`);
     if (collision.groundLinks.length) reasons.push(`部件低于支撑平面：${collision.groundLinks.join('、')}`);
     return issue(reasons.join('；') || '碰撞检查未通过', index, u, { collision });
   };
-  const referenceValues = (state) => ({ ...initialJoints, ...(base ? Object.fromEntries(base.joints.map((joint, i) =>
+  const referenceValues = (state) => ({ ...initialJoints, ...state.joints, ...(base ? Object.fromEntries(base.joints.map((joint, i) =>
     [joint.name, state.base[['x', 'y', 'yaw'][i]]])) : {}) });
   const solveTarget = (target, exclusions, reference, repeats = 1) => {
     for (let i = 0; i < repeats; i += 1) {
@@ -78,6 +84,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
 
   const buildPlan = async (candidate = zeroBase, reportProgress = onProgress) => {
     applyState(initialState);
+    approachOffset = 0; approachLength = start.distanceTo(vertices[0]);
     const segments = [];
     const position = new THREE.Vector3(), quaternion = new THREE.Quaternion();
     let maximumError = 0, checks = 0, durationMs = 0;
@@ -98,8 +105,8 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       }
       if (robotJointCouplingViolations(coupling).length) return issue('关节耦合约束不满足', index, u);
       const joints = readRobotJointValues(robot);
-      if (Object.keys(joints).some((name) => !movable.some((joint) => joint.name === name)
-        && Math.abs(joints[name] - initialJoints[name]) > 1e-7)) return issue('求解改变了锁定的躯干或另一机械臂', index, u);
+      if (Object.keys(joints).some((name) => (!movable.some((joint) => joint.name === name) || (index < 0 && approachLocks.has(name)))
+        && Math.abs(joints[name] - initialJoints[name]) > 1e-7)) return issue('求解改变了不允许参与规划的关节', index, u);
       controller.frame.getWorldPosition(position); controller.frame.getWorldQuaternion(quaternion);
       const error = position.distanceTo(target);
       const angular = THREE.MathUtils.radToDeg(quaternion.angleTo(targetQuaternion));
@@ -144,16 +151,23 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         stoppedAt: { segmentIndex: last.index, progress: last.endFraction, position: [...last.to] } };
     };
     const reposition = base && (Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8);
-    const reference = referenceValues({ base: candidate });
+    let reference = referenceValues({ base: candidate });
     // Prescribe a continuous base transit and solve the arm along the matching
     // TCP line to P0. This keeps world tool orientation even during positioning.
     // Its interpolation receives the same refinement/collision checks as drawing.
-    const edges = [{ from: start, to: vertices[0], index: reposition ? -2 : -1,
-      ...(reposition ? { baseTarget: candidate } : {}) },
+    const approach = [start, ...approachWaypoints.map((point) => new THREE.Vector3().fromArray(point)), vertices[0]];
+    const edges = [...approach.slice(1).map((to, index) => ({ from: approach[index], to, index: reposition ? -2 : -1,
+      ...(reposition ? { baseTarget: candidate } : {}) })),
       ...vertices.slice(1).map((to, index) => ({ from: vertices[index], to, index }))];
+    let approachTravel = 0;
     for (const edge of edges) {
       const { from, to, index } = edge, distance = from.distanceTo(to);
+      // Once recovery reaches P0, keep its achieved posture as the drawing
+      // reference. Releasing held joints must not pull them abruptly back
+      // toward the pre-approach configuration via IK regularization.
+      if (index === 0 && (approachLocks.size || approachWaypoints.length)) reference = referenceValues(readState());
       if (distance < 0.00001 && !edge.baseTarget) continue;
+      if (index < 0) { approachOffset = approachTravel; approachLength = distance; approachTravel += distance; }
       if (checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
       const count = Math.max(1, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
         ? Math.max(Math.hypot(candidate.x, candidate.y) / 0.002, Math.abs(candidate.yaw) / 0.5) : 0)));
@@ -166,7 +180,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         applyState(seed);
         if (edge.baseTarget) base.apply(Object.fromEntries(Object.entries(edge.baseTarget).map(([axis, value]) => [axis, value * u])));
         const target = from.clone().lerp(to, u);
-        solveTarget(target, edge.baseTarget ? fixedBaseExcluded : solvingExcluded, reference);
+        solveTarget(target, edge.baseTarget ? fixedBaseExcluded : index < 0 ? approachExcluded : solvingExcluded, reference);
         const problem = validState(target, index, u);
         if (problem) return { problem };
         return { sample: { u, ...readState() } };

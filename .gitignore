@@ -44,7 +44,8 @@ node_modules/
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
 # browser/native captures, readiness markers, device reports and deployment logs.
 # The persistent web service uses build/service/; surface-polyline browser
-# captures (including sidebar, partial-path, orientation, suggestion and progress checks) use
+# captures (including sidebar, endpoint editing, waist assistance, approach recovery,
+# partial-path, orientation, suggestion and progress checks) use
 # test-artifacts/polyline-*/.
 dist/
 build/
@@ -230,6 +231,28 @@ playwright/.auth/
 /tests/polyline-*-trace.json
 /polyline-*-profile.json
 /tests/polyline-*-profile.json
+# Ad-hoc polyline/approach/posture-search workspaces and diagnostic snapshots
+# copied from temporary directories. JSON can contain full robot/scene state.
+# Restrict these to root/tests output locations; maintained test scripts and
+# deliberate nested tests/fixtures/ inputs must remain trackable.
+/atlas-polyline-*/
+/tests/atlas-polyline-*/
+/atlas-approach-*/
+/tests/atlas-approach-*/
+/atlas-self-recovery-*/
+/tests/atlas-self-recovery-*/
+/atlas-polyline-*.json
+/tests/atlas-polyline-*.json
+/atlas-approach-*.json
+/tests/atlas-approach-*.json
+/atlas-self-recovery-*.json
+/tests/atlas-self-recovery-*.json
+/atlas-polyline-*.[zZ][iI][pP]
+/tests/atlas-polyline-*.[zZ][iI][pP]
+/atlas-approach-*.[zZ][iI][pP]
+/tests/atlas-approach-*.[zZ][iI][pP]
+/atlas-self-recovery-*.[zZ][iI][pP]
+/tests/atlas-self-recovery-*.[zZ][iI][pP]
 # USB / Wi-Fi collaboration diagnostics copied from /tmp or build/.
 # Keep reports, frame captures, review bundles and local environments scoped
 # to output locations so source files and nested regression fixtures stay visible.

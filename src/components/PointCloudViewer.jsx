@@ -1431,6 +1431,7 @@ export default function PointCloudViewer({
   onSavePolyline,
   onDeletePolyline,
   onPolylineBusyChange,
+  polylineBusy = false,
   polylineOpen = false,
   onPolylineOpenChange,
   polylineContainer,
@@ -1480,6 +1481,10 @@ export default function PointCloudViewer({
   const polylineOpenRef = useRef(polylineOpen);
   polylineOpenRef.current = polylineOpen;
   const robotTrajectoryActive = externalRobotTrajectoryActive || polylineOpen;
+  // Keep chassis/navigation controls reserved throughout teaching, while arm
+  // editing is available between path checks and playback.
+  const endEffectorEditingBlockedRef = useRef(false);
+  endEffectorEditingBlockedRef.current = externalRobotTrajectoryActive || (polylineOpen && polylineBusy);
   const mountRef = useRef(null);
   const distanceScaleRef = useRef(null);
   const distanceScaleLabelRef = useRef(null);
@@ -1518,6 +1523,7 @@ export default function PointCloudViewer({
   const lockedEndEffectorsRef = useRef(createEndEffectorLocks());
   const globalEndEffectorUpdateRef = useRef(null);
   const endEffectorInteractionRef = useRef(null);
+  const endEffectorPointerRef = useRef(null);
   const endEffectorObjectChangeRef = useRef(null);
   const robotDragHistoryRef = useRef({ entries: [], pending: null, restoring: false });
   const robotDragActionsRef = useRef(null);
@@ -1814,6 +1820,13 @@ export default function PointCloudViewer({
     return { robot, scene: sceneRef.current, camera: cameraRef.current,
       canvas: controlsRef.current?.domElement, geometry: mapData?.geometry,
       lockedJointNames: lockedRobotJointNamesRef.current,
+      isEndEffectorPointer: (event) => Boolean(endEffectorPointerRef.current?.(event)),
+      endEffectorEditing: Boolean(endEffectorControlRef.current),
+      finishEndEffectorEditing: () => {
+        if (endEffectorControlRef.current) endEffectorInteractionRef.current?.exit?.();
+        clearEndEffectorLocks();
+        clearRobotDragHistory();
+      },
       focusSuggestion: () => {
         const visual = polylineGhostRef.current?.visual, camera = cameraRef.current, controls = controlsRef.current;
         if (!visual || !camera || !controls) return;
@@ -2565,7 +2578,8 @@ export default function PointCloudViewer({
   };
 
   const enterEndEffectorControl = (side) => {
-    if (!showRobotRef.current || robotTrajectoryActiveRef.current) return false;
+    if (!showRobotRef.current || endEffectorEditingBlockedRef.current) return false;
+    if (polylineOpenRef.current && side !== 'left' && side !== 'right') return false;
     const isTorso = side === 'torso';
     const controller = isTorso ? torsoControllerRef.current : endEffectorControllersRef.current[side];
     const transform = transformControlsRef.current;
@@ -2886,7 +2900,8 @@ export default function PointCloudViewer({
 
   const beginRobotDrag = (kind) => {
     const history = robotDragHistoryRef.current;
-    if (history.restoring || !loadedRobotRef.current || robotTrajectoryActiveRef.current) return;
+    const blocked = kind === 'end-effector' ? endEffectorEditingBlockedRef.current : robotTrajectoryActiveRef.current;
+    if (history.restoring || !loadedRobotRef.current || blocked) return;
     history.pending = { kind, before: captureRobotDragState(), moved: false };
   };
 
@@ -2923,9 +2938,11 @@ export default function PointCloudViewer({
 
   const undoRobotDrag = () => {
     const history = robotDragHistoryRef.current;
-    if (!renderActiveRef.current || robotTrajectoryActiveRef.current || history.restoring) {
+    if (!renderActiveRef.current || endEffectorEditingBlockedRef.current || history.restoring) {
       return false;
     }
+    if (polylineOpenRef.current
+      && (!endEffectorControlRef.current || (history.pending || history.entries.at(-1))?.kind !== 'end-effector')) return false;
     // A gesture still under the pointer takes priority over completed drags.
     const entry = history.pending || history.entries.pop();
     if (!entry) return false;
@@ -3004,7 +3021,7 @@ export default function PointCloudViewer({
     if (
       !snapshot
       || snapshot.robot !== loadedRobotRef.current
-      || robotTrajectoryActiveRef.current
+      || endEffectorEditingBlockedRef.current
       || history.restoring
     ) return false;
 
@@ -4496,6 +4513,20 @@ export default function PointCloudViewer({
       }
       return null;
     };
+    const isEndEffectorPointer = (event) => {
+      if (!showRobotRef.current) return false;
+      if (transformControls.object && transformControls.enabled) {
+        // The panel sees pointerdown before TransformControls. Refresh hover
+        // here so a click without a preceding mousemove still owns its handle.
+        if (!transformControls.dragging && setRayFromPointer(event)) {
+          transformControls.pointerHover(normalizedPointer);
+        }
+        if (transformControls.dragging || transformControls.axis) return true;
+      }
+      const side = endEffectorAtPointer(event);
+      return side === 'left' || side === 'right';
+    };
+    endEffectorPointerRef.current = isEndEffectorPointer;
     const onSceneClick = (event) => {
       if (event.detail === 1) {
         firstClickWaypoint = lastPointerSelection?.type === 'waypoint'
@@ -4507,10 +4538,11 @@ export default function PointCloudViewer({
       // before the second click. Keep that gesture's original waypoint target.
       const waypoint = firstClickWaypoint || selectionAtPointer(event);
       firstClickWaypoint = null;
-      if (!renderActiveRef.current || robotTrajectoryActiveRef.current) return;
+      if (!renderActiveRef.current || endEffectorEditingBlockedRef.current) return;
       if (transformControls.dragging || transformControls.axis) return;
       const robotLoaded = robotLoadStateRef.current?.status === 'loaded';
       const side = robotLoaded ? endEffectorAtPointer(event) : null;
+      if (polylineOpenRef.current && side !== 'left' && side !== 'right') return;
       // A repeated double-click must also reopen navigation for an already
       // selected parking point; selecting the same ID does not rerun effects.
       if (!side && waypoint?.type === 'waypoint') {
@@ -4535,7 +4567,7 @@ export default function PointCloudViewer({
       if (side) {
         chassisDragInteractionRef.current?.exit?.('end-effector-control');
         const entered = endEffectorInteractionRef.current?.enter?.(side);
-        if (entered && (side === 'left' || side === 'right')) {
+        if (entered && !polylineOpenRef.current && (side === 'left' || side === 'right')) {
           onInspectorPageRequestRef.current?.({ page: 'camera', cameraSide: side });
         }
       } else {
@@ -5496,6 +5528,7 @@ export default function PointCloudViewer({
       renderer.domElement.removeEventListener('pointerleave', onPickPointerLeave);
       renderer.domElement.removeEventListener('click', onSceneClick, true);
       renderer.domElement.removeEventListener('dblclick', onSceneDoubleClick, true);
+      if (endEffectorPointerRef.current === isEndEffectorPointer) endEffectorPointerRef.current = null;
       renderer.domElement.removeEventListener(
         MAIN_VIEW_PREVIEW_CONTROL_EVENT,
         onMainViewPreviewControl,
@@ -6695,6 +6728,7 @@ export default function PointCloudViewer({
     if (active) {
       chassisDragInteractionRef.current?.exit?.('teaching-trajectory-playback');
       endEffectorInteractionRef.current?.exit?.();
+      if (polylineOpenRef.current && polylineBusy) clearEndEffectorLocks();
       robotControlEnabledRef.current = false;
       clearRobotDragHistory();
       pressedKeysRef.current.clear();
@@ -6705,7 +6739,7 @@ export default function PointCloudViewer({
       canvas.dataset.robotTrajectoryActive = active ? 'true' : 'false';
       if (active) canvas.dataset.keyboardControlOwner = 'camera';
     }
-  }, [mapData?.geometry, robotTrajectoryActive]);
+  }, [mapData?.geometry, robotTrajectoryActive, polylineBusy]);
 
   useEffect(() => {
     if (!robotParkingGhost?.editing || !isActive || robotLoadState?.status !== 'loaded') {

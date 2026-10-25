@@ -264,15 +264,28 @@ export async function createMobileCollisionChecker(robot, environment, checkpoin
     for (const [a, b] of pairs) selfSeparation = Math.min(selfSeparation, obbSignedSeparation(a.obb, b.obb, selfSeparation));
     return { ...clearance, selfSeparation };
   };
-  const check = () => {
+  const check = ({ detailedEnvironment = false } = {}) => {
     updateBoxes();
     const selfPairs = [], environmentLinks = new Set(), groundLinks = new Set();
+    const environmentIntersectingLinks = new Set(), environmentClearanceLinks = new Set();
     for (const proxy of proxies) {
       proxy.worldBox.copy(proxy.localBox).applyMatrix4(proxy.node.matrixWorld).expandByScalar(CONTACT_MARGIN);
       proxy.inverse.copy(proxy.node.matrixWorld).invert();
       const scale = proxy.node.getWorldScale(new THREE.Vector3());
       const local = proxy.localBox.clone().expandByVector(new THREE.Vector3(...xyz.map((axis) => CONTACT_MARGIN / Math.max(1e-9, Math.abs(scale[axis])))));
-      if (index.intersects(proxy.worldBox, local, proxy.inverse, robot.parent.position.z) || index.encloses(proxy.obb.center)) environmentLinks.add(proxy.linkName);
+      const paddedIntersection = index.intersects(proxy.worldBox, local, proxy.inverse, robot.parent.position.z);
+      const inside = !paddedIntersection && index.encloses(proxy.obb.center);
+      if (inside || paddedIntersection) {
+        environmentLinks.add(proxy.linkName);
+        if (detailedEnvironment) {
+          // Preserve the same conservative rejection, but distinguish an
+          // intersection of the collision box itself from its padded shell.
+          // The per-axis shell is not an exact Euclidean distance measurement.
+          const intersects = inside || index.intersects(proxy.worldBox, proxy.localBox, proxy.inverse, robot.parent.position.z)
+            || index.encloses(proxy.obb.center);
+          (intersects ? environmentIntersectingLinks : environmentClearanceLinks).add(proxy.linkName);
+        }
+      }
       // Search stays on the current horizontal support plane. Wheel/base contact
       // is intentional; arm/torso penetration below that plane is not.
       if (!/(base|wheel|caster|chassis)/i.test(proxy.linkName)
@@ -296,7 +309,10 @@ export async function createMobileCollisionChecker(robot, environment, checkpoin
     const clearance = measureClearance();
     return { checked: true, method: proxies.some((proxy) => proxy.hull) ? 'conservative-obb-convex' : 'conservative-obb', environment: index.kind,
       clear: !selfPairs.length && !environmentLinks.size && !groundLinks.size && clearance.clear,
-      selfPairs, environmentLinks: [...environmentLinks], groundLinks: [...groundLinks], armBodyClearance: clearance };
+      selfPairs, environmentLinks: [...environmentLinks], groundLinks: [...groundLinks], armBodyClearance: clearance,
+      ...(detailedEnvironment ? { environmentMargin: CONTACT_MARGIN,
+        environmentIntersectingLinks: [...environmentIntersectingLinks],
+        environmentClearanceLinks: [...environmentClearanceLinks].filter((name) => !environmentIntersectingLinks.has(name)) } : {}) };
   };
   return { check, measureArmBodyClearance, measurePostureClearance, containsPoint: index.encloses, intersectsSegment: index.intersectsSegment,
     proxyCount: proxies.length, environmentKind: index.kind, environmentCount: index.count };

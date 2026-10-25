@@ -6984,6 +6984,7 @@ export default function App() {
                 onSavePolyline={saveTeachingPolyline}
                 onDeletePolyline={deleteTeachingPolyline}
                 onPolylineBusyChange={setPolylineTeachingBusy}
+                polylineBusy={polylineTeachingBusy}
                 polylineOpen={polylineTeachingOpen}
                 onPolylineOpenChange={setPolylineTeachingOpen}
                 polylineContainer={polylineTeachingContainer}
