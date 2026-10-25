@@ -17,7 +17,7 @@ export default function PolylineSearchExplanationDialog({ plan, path, waistAvail
     aria-labelledby="polyline-search-explanation-title" aria-describedby="polyline-search-explanation-summary"
     onCancel={(event) => { event.preventDefault(); onClose(); }}
     onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
-    <header><CircleHelp size={21} /><div><span>深入搜索结果</span><h2 id="polyline-search-explanation-title">路径检查结果说明</h2></div>
+    <header><CircleHelp size={21} /><div><span>{plan.startToolCheck?.blocked ? '起点工具检查' : '深入搜索结果'}</span><h2 id="polyline-search-explanation-title">路径检查结果说明</h2></div>
       <button type="button" autoFocus aria-label="关闭路径检查结果说明" onClick={onClose}><X size={18} /></button></header>
     <div className="polyline-search-explanation__body">
       <div className="polyline-search-explanation__conclusion">

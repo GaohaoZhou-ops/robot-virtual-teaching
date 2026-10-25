@@ -16,10 +16,15 @@ def surface(saved_guide=False, blocked=False):
     # Drawing plane below the wrist, plus a wall crossing only the approach.
     vertices = [[.82, .2, .551], [1, .2, .551], [1, .45, .551], [.82, .45, .551], [0, 0, 0]]
     faces = [[0, 1, 2], [0, 2, 3]]
-    boxes = [([.02, .3, .3], [.9 if blocked else .7, .3, .85])] if not saved_guide else [
-        ([.5, .02, .4], [.55, .349, .85]), ([.5, .02, .4], [.55, .251, .85]),
-        ([.5, .5, .02], [.55, .3, .899]), ([.5, .5, .02], [.55, .3, .801]),
-    ]
+    if blocked == 'approach':
+        # Block the transit while leaving P0 itself clear, so search budgets
+        # continue to be exercised after adding the rigid-tool goal check.
+        boxes = [([.06, 1.4, 1.4], [.7, .3, .7])]
+    elif saved_guide:
+        boxes = [([.5, .02, .4], [.55, .349, .85]), ([.5, .02, .4], [.55, .251, .85]),
+                 ([.5, .5, .02], [.55, .3, .899]), ([.5, .5, .02], [.55, .3, .801])]
+    else:
+        boxes = [([.02, .3, .3], [.9 if blocked else .7, .3, .85])]
     for size, center in boxes:
         start = len(vertices)
         low = [center[i] - size[i] / 2 for i in range(3)]
@@ -76,7 +81,7 @@ def run(saved_guide=False, deep_search=False, failed_search=False):
             display.get_by_role('button', name='关闭显示设置', exact=True).click()
             page.get_by_role('button', name='表面折线示教', exact=True).click()
             panel = page.get_by_role('region', name='表面折线示教', exact=True)
-            help_button = panel.get_by_role('button', name='查看深入搜索失败说明', exact=True)
+            help_button = panel.get_by_role('button', name='查看起点工具碰撞说明' if failed_search else '查看深入搜索失败说明', exact=True)
             expect(help_button).to_have_count(0)
             if saved_guide:
                 for point in [[.9, .3, .551], [.98, .3, .551]]:
@@ -97,7 +102,7 @@ def run(saved_guide=False, deep_search=False, failed_search=False):
             panel.get_by_role('button', name='检查路径', exact=True).click()
             if failed_search:
                 expect(panel).to_have_attribute('data-status', 'failed', timeout=60000)
-                expect(panel).to_have_attribute('data-approach-stage', 'deep')
+                expect(panel).to_have_attribute('data-approach-stage', '')
                 expect(help_button).to_be_visible()
                 error_box = panel.locator('.polyline-teaching__message[data-error=true]')
                 rect, icon = error_box.bounding_box(), help_button.bounding_box()
@@ -108,11 +113,12 @@ def run(saved_guide=False, deep_search=False, failed_search=False):
                 help_button.click()
                 explanation = page.get_by_role('dialog', name='路径检查结果说明', exact=True)
                 expect(explanation).to_be_visible()
-                expect(explanation).to_contain_text('划线尚未开始')
-                expect(explanation).to_contain_text('有限搜索失败不代表全局不可达')
-                expect(explanation).to_contain_text('初次直线接近的失败记录')
-                expect(explanation).to_contain_text('预留区相交不等于真实外壳已经接触')
-                expect(explanation.get_by_role('region', name='本次搜索统计')).to_contain_text('深入搜索')
+                expect(explanation).to_contain_text('当前工具配置未通过起点检查')
+                expect(explanation).to_contain_text('不表示调整配置后仍不可达')
+                expect(explanation).to_contain_text('检查已计入')
+                expect(explanation).to_contain_text('与工件存在碰撞体重叠')
+                expect(explanation.get_by_role('region', name='本次搜索统计')).to_contain_text('已跳过')
+                assert not page.evaluate('window.approachProgress'), 'known P0 tool collision skips all detour search'
                 expect(explanation.get_by_role('heading', name='可以尝试的调整', exact=True)).to_be_visible()
                 explanation.locator('summary').filter(has_text='本次规划约束').click()
                 expect(explanation).to_contain_text('200.0 mm · 工具 −Z')
@@ -149,7 +155,7 @@ def run(saved_guide=False, deep_search=False, failed_search=False):
                 page.screenshot(path=str(ARTIFACTS / 'failure-explanation-compact.png'), full_page=True)
                 explanation.get_by_role('button', name='返回调整', exact=True).click()
                 assert not errors, errors
-                print('Polyline failure explanation: real deep-search failure, contextual diagnosis/advice, icon placement, Escape/focus, nonmutating close and stale-result reset passed.')
+                print('Polyline start-tool explanation: real worker collision check, skipped detour search, contextual advice, icon placement, Escape/focus, nonmutating close and stale-result reset passed.')
                 return
             expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
             expect(help_button).to_have_count(0)

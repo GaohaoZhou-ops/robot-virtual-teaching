@@ -143,9 +143,8 @@ const recover = async (action, environment = wall, extra = {}) => {
   assert.equal(strict.approachSearch.reachedStart, true);
   const blocked = await recover(path([[.7, -.3, .7], vertices[1]]));
   assert.equal(isPolylinePlanExecutable(blocked), false, 'a colliding P0 cannot be rescued by a short transit');
-  assert.equal(blocked.approachSearch.found, false); assert.equal(blocked.issue.phase, 'approach');
-  assert.ok(blocked.approachSearch.quickAttempts <= 35 && blocked.approachSearch.deepAttempts <= 128);
-  assert.ok(blocked.approachSearch.deepAttempts > 0);
+  assert.equal(blocked.issue.code, 'tool-goal-collision'); assert.equal(blocked.issue.phase, 'approach');
+  assert.equal(blocked.approachSearch, undefined, 'do not search detours when the rigid tool is blocked at P0');
   const initial = await recover(action, box([.04, .04, .04], [.4, -.3, cameraZ]));
   assert.equal(initial.issue.phase, 'initial'); assert.equal(initial.approachSearch, undefined, 'never search out of an initially colliding pose');
 }
@@ -388,7 +387,8 @@ for (const side of ['left', 'right']) {
   const blocked = await planPolylineWithSuggestion({ ...options, path: blockedPath,
     approachGuides: polylineApproachGuides(blockedPath, [saved], start) });
   assert.equal(isPolylinePlanExecutable(blocked), false, 'a valid saved route cannot make a colliding new P0 executable');
-  assert.ok(blocked.approachSearch.guideAttempts > 0);
+  assert.equal(blocked.issue.code, 'tool-goal-collision');
+  assert.equal(blocked.approachSearch, undefined, 'saved guides cannot change the rigid tool pose at P0');
   let searching = false;
   await assert.rejects(planPolylineWithSuggestion({ ...options, path: nearby, approachGuides: guides,
     onProgress: (value) => { searching ||= value.stage === '参考已保存折线接近'; },

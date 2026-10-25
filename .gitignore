@@ -46,7 +46,8 @@ node_modules/
 # The persistent web service uses build/service/.
 # Surface-polyline UI artifacts (selection/new drafts, constraint/help dialogs,
 # tool/pose editing, undo, planning, progress/replay and start-pose ghosts),
-# solver A/B source snapshots and service-index backups belong in
+# imported-project reproductions, solver A/B source snapshots, serialized robot
+# collision hulls, playback verification and service-index backups belong in
 # test-artifacts/polyline-*/; maintained regression runners stay in tests/.
 dist/
 build/
@@ -250,6 +251,15 @@ playwright/.auth/
 /tests/polyline-*-benchmark.json
 /polyline-*-metrics.json
 /tests/polyline-*-metrics.json
+# Standalone copies of archive-reproduction inputs and checked planning output.
+# These can include full robot geometry/joints and customer-authored trajectories.
+# Preserve generic JSON and deliberate regression inputs under tests/fixtures/.
+/polyline-*-snapshot.json
+/tests/polyline-*-snapshot.json
+/polyline-*-result.json
+/tests/polyline-*-result.json
+/polyline-*-verification.json
+/tests/polyline-*-verification.json
 # Ad-hoc polyline/approach/posture-search workspaces and diagnostic snapshots
 # copied from temporary directories. JSON can contain full robot/scene state.
 # Restrict these to root/tests output locations; maintained test scripts and

@@ -3,10 +3,50 @@ import { normalizePolyline } from './polylineTeaching.js';
 const mm = (value) => (value * 1000).toFixed(1);
 const seconds = (value) => (Math.max(0, value || 0) / 1000).toFixed(1);
 
+const constraintsFor = (path, waistAvailable) => [
+  ['执行臂', path.side === 'right' ? '右臂' : '左臂'],
+  ['底盘', path.base.sync ? '移动' : path.base.search ? '自搜索' : '静止 · 位置和姿态固定'],
+  ['腰部协同', waistAvailable ? path.base.waistAssist ? '已开启' : '未开启' : '当前执行链无可协同腰部'],
+  ['末端距线段', `${mm(Math.abs(path.tcpOffset[2]))} mm · 工具 ${path.toolAxisDirection === 1 ? '+Z' : '−Z'}`],
+  ['工具 XYZ 偏移', `${path.tcpOffset.map(mm).join(' / ')} mm`],
+  ['位置 / 朝向容差', `${mm(path.settings.tolerance)} mm / ${path.settings.rotationTolerance.toFixed(2)}°`],
+  ['工具朝向', '采用检查时的朝向，并沿线保持'],
+  ['最大保障', path.base.allowPartial ? '已开启' : '未开启'],
+];
+
+function explainStartTool(plan, path, waistAvailable) {
+  const check = plan.startToolCheck, collision = check.collision, suggestions = [];
+  const alternative = check.oppositeDirection;
+  if (alternative) suggestions.push({ title: `检查“从末端指向线段”：工具 ${alternative.direction === 1 ? '+Z' : '−Z'}`,
+    text: `保留 ${mm(Math.abs(alternative.tcpOffset[2]))} mm 距离、反转工具 Z 方向后，P0 的固定安装部件通过了工件碰撞检查。这仅是起点工具检查，尚未验证整机逆解和整条路线；请核对实际工具安装后手动切换，再点击“检查路径”。` });
+  suggestions.push({ title: '核对工具偏移与安装方向',
+    text: '“从末端指向线段”表示虚拟笔尖相对于工具坐标系原点的方向。不同机械臂、不同工具的坐标轴可能不同；请核对方向、末端距线段及高级 XYZ 偏移。' },
+  { title: '调整工具朝向或起点位置',
+    text: '可在折线示教中双击末端调整朝向，或调整 P0。重新检查时会采用当前工具朝向。仅改变肘部、腰部或底盘位置，同时保持 P0 的工具朝向和偏移不变，无法消除这一固定安装部件的干涉。' });
+  const physical = collision.environmentIntersectingLinks || [], clearance = collision.environmentClearanceLinks || [];
+  const details = [];
+  if (physical.length) details.push(`${physical.join('、')} 与工件存在碰撞体重叠；本次并非只触及预留区。`);
+  if (clearance.length) details.push(`${clearance.join('、')} 的 ${mm(collision.environmentMargin)} mm 碰撞预留区与工件相交；这不等于真实外壳已接触。`);
+  details.push(`检查已计入 ${mm(path.settings.tolerance)} mm 位置容差和 ${path.settings.rotationTolerance.toFixed(2)}° 朝向容差；即使利用这些容差，固定安装部件仍不能避开工件。`,
+    '固定安装部件在 P0 的位置由点位、工具偏移和工具朝向共同决定。因此需要先调整这些配置，再搜索到起点的路线。');
+  const original = check.originalIssue;
+  return { summary: 'P0 处的固定安装部件与工件干涉，当前工具配置未通过起点检查。',
+    scope: '这是当前点位、工具偏移与朝向下的几何干涉结论，不表示调整配置后仍不可达。',
+    location: '起点 P0 · 固定安装部件', message: plan.issue.message, details,
+    stop: '已停止接近绕行搜索。增加候选数量或延长搜索时间无法消除 P0 处的这一干涉。',
+    stats: [['工具碰撞体', `${check.rigidLinkCount} 个`], ['绕行搜索', '已跳过'], ['检查耗时', `${seconds(check.elapsedMs)} s`]],
+    countNote: '只检查与工具末端刚性连接的部件。通过这项检查后，仍需验证整机逆解、碰撞和完整运动过程。',
+    original: original ? `原直线${Number.isFinite(original.distanceFromStart) ? `在约 ${mm(original.distanceFromStart)} mm 处` : ''}失败：${original.message}。本次进一步检查发现 P0 本身也受工具干涉限制。` : null,
+    partialNote: path.base.allowPartial ? '最大保障需先到达 P0；当前尚不能开始划线。' : null,
+    constraints: constraintsFor(path, waistAvailable), suggestions,
+    nearby: '相近点位也可能让固定工具组件进入工件或碰撞预留区。比较两条折线时，需同时比较执行臂、工具方向、XYZ 偏移和检查时的工具朝向。' };
+}
+
 // Explain recorded evidence, not a new feasibility verdict. In particular,
 // approachSearch.originalIssue describes ONE straight trial, not every detour.
 export function explainPolylineSearch(plan, value, { waistAvailable = false } = {}) {
   const path = normalizePolyline(value), search = plan?.approachSearch, issue = plan?.issue;
+  if (path && issue && plan?.startToolCheck?.blocked) return explainStartTool(plan, path, waistAvailable);
   if (!path || !search || !issue) return null;
   const drawing = issue.phase === 'drawing', collision = issue.collision;
   const physical = collision?.environmentIntersectingLinks || [];
@@ -62,7 +102,6 @@ export function explainPolylineSearch(plan, value, { waistAvailable = false } = 
   });
   if (!suggestions.length) suggestions.push({ title: '根据失败位置调整路线', text: '检查上述失败记录及当前参数，调整对应点位或机器人起始姿态后重新检查。' });
 
-  const axis = path.toolAxisDirection === 1 ? '+Z' : '−Z';
   return {
     summary: drawing || search.reachedStart
       ? '已有接近路线验证到达 P0，但后续划线未通过，本次没有可执行轨迹。'
@@ -80,16 +119,7 @@ export function explainPolylineSearch(plan, value, { waistAvailable = false } = 
       ? drawing || search.reachedStart ? '已开启最大保障，但本次仍未得到从 P0 开始、可完整验证并安全停止的连续划线部分。'
         : '最大保障需先到达 P0，前往 P0 的移动不算已划线，不能作为可执行的划线部分。'
       : null,
-    constraints: [
-      ['执行臂', path.side === 'right' ? '右臂' : '左臂'],
-      ['底盘', path.base.sync ? '移动' : path.base.search ? '自搜索' : '静止 · 位置和姿态固定'],
-      ['腰部协同', waistAvailable ? path.base.waistAssist ? '已开启' : '未开启' : '当前执行链无可协同腰部'],
-      ['末端距线段', `${mm(Math.abs(path.tcpOffset[2]))} mm · 工具 ${axis}`],
-      ['工具 XYZ 偏移', `${path.tcpOffset.map(mm).join(' / ')} mm`],
-      ['位置 / 朝向容差', `${mm(path.settings.tolerance)} mm / ${path.settings.rotationTolerance.toFixed(2)}°`],
-      ['工具朝向', '采用检查时的朝向，并沿线保持'],
-      ['最大保障', path.base.allowPartial ? '已开启' : '未开启'],
-    ],
+    constraints: constraintsFor(path, waistAvailable),
     suggestions,
     nearby: '相近折线仍可能要求不同的接近路线和关节姿态，微小位移也可能跨过碰撞预留区或关节可达边界。比较时应使用相同起始姿态、执行臂、工具偏移和规划约束；已保存折线只提供几何参考，新路线仍会独立检查。',
   };

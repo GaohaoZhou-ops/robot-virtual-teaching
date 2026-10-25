@@ -5,6 +5,7 @@ import { isPolylinePlanExecutable, normalizePolyline, readPolylineTcp } from './
 import { isPolylineWaistJoint, polylineJointExclusions } from './polylineTeachingJoints.js';
 import { planPolyline } from './polylineTeachingSolver.js';
 import { prepareMobileCollisionEnvironment } from './mobileTeachingCollision.js';
+import { checkPolylineStartTool } from './polylineTeachingToolCheck.js';
 import { polylineApproachTrialKey,
   polylineApproachFailureSeed, polylineDeepApproachTrials } from './polylineTeachingDeepSearch.js';
 
@@ -77,6 +78,24 @@ export async function planPolylineWithApproach({ snapshot, approachGuides = [], 
   new THREE.Matrix4().fromArray(options.parentMatrix).decompose(layer.position, layer.quaternion, layer.scale);
   layer.add(robot); layer.updateMatrixWorld(true);
   const controller = getRobotEndEffector(robot, action.side);
+  const checkTool = (path, certifyTolerance = true) => checkPolylineStartTool({ robot, frame: controller.frame, path,
+    environment: options.environment, preparedEnvironment, checkpoint, certifyTolerance });
+  const startToolCheck = await checkTool(action);
+  if (startToolCheck?.blocked) {
+    // Suggest a geometric comparison only. Never change the authored offset,
+    // move the live robot or advertise this as an executable IK solution.
+    let oppositeDirection = null;
+    if (Math.abs(action.tcpOffset[2]) > 1e-9) {
+      const tcpOffset = [...action.tcpOffset]; tcpOffset[2] *= -1;
+      const alternative = await checkTool({ ...action, tcpOffset }, false);
+      if (alternative?.allAttachmentsChecked && !alternative.blocked) oppositeDirection = { direction: Math.sign(tcpOffset[2]), tcpOffset };
+    }
+    return { ...original,
+      issue: { code: 'tool-goal-collision', phase: 'approach', segmentIndex: -1, progress: 1,
+        message: `固定安装部件与工件干涉：${startToolCheck.collision.environmentLinks.join('、')}。请调整工具轴方向、偏移或朝向`,
+        collision: startToolCheck.collision },
+      startToolCheck: { ...startToolCheck, oppositeDirection, originalIssue: original.issue, elapsedMs: Math.max(0, now() - started) } };
+  }
   const postures = postureTrials(controller, action, options.lockedJointNames, original.issue.collision);
   const start = readPolylineTcp(robot, action), goal = new THREE.Vector3().fromArray(action.points[0].position);
   const detours = detourTrials(start, goal, layer.position, action.points[0].normal);

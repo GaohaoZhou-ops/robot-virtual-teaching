@@ -31,7 +31,8 @@ const disposeLayer = (group) => {
 };
 const statusLabels = { editing: '编辑折线', checking: '正在检查', ready: '路径检查通过', playing: '正在执行', paused: '已暂停', saving: '正在保存', completed: '执行完成', failed: '需要调整' };
 const busyStatuses = ['checking', 'playing', 'paused', 'saving'];
-const checkLocation = (issue, count) => issue.phase === 'initial' ? '当前机器人姿态（尚未移动）'
+const checkLocation = (issue, count) => issue.code === 'tool-goal-collision' ? '起点 P0 的工具配置'
+  : issue.phase === 'initial' ? '当前机器人姿态（尚未移动）'
   : issue.phase === 'positioning' ? '底盘预定位'
   : issue.segmentIndex < 0 ? '到起点的移动' : `P${issue.segmentIndex} → P${(issue.segmentIndex + 1) % count}`;
 const robotState = (context) => ({ joints: readRobotJointValues(context.robot), matrix: context.robot?.parent.matrixWorld.toArray() });
@@ -92,7 +93,8 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const busy = busyStatuses.includes(status);
   const warnings = plan?.warnings || [];
   const executable = isPolylinePlanExecutable(plan);
-  const canExplain = status === 'failed' && !executable && plan?.approachSearch?.lastStage === 'deep' && Boolean(plan?.issue);
+  const canExplain = status === 'failed' && !executable && Boolean(plan?.issue)
+    && (plan?.startToolCheck?.blocked || plan?.approachSearch?.lastStage === 'deep');
   const playbackDuration = executable ? (runtimeRef.current?.plan || executedRef.current?.plan || plan).durationMs : 0;
   const previewPlan = plan || executedRef.current?.plan;
   const toolZ = path.tcpOffset?.[2] || 0;
@@ -498,7 +500,9 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       const searchHint = search ? ` · 接近搜索：快速 ${search.quickAttempts} 种${search.lastStage === 'deep' ? ` + 深入 ${search.deepAttempts} 种` : ''}，耗时 ${(search.elapsedMs / 1000).toFixed(1)} s${search.stopReason === 'time-budget'
         ? `；深入搜索达到 ${(search.deepBudgetMs / 1000).toFixed(0)} s 时限${canExecute ? '，保留已检查的可执行部分' : ''}`
         : search.stopReason === 'candidate-limit' ? '；已达深入搜索方案上限' : ''}` : '';
-      const approachHint = result.issue?.phase === 'approach'
+      const approachHint = result.issue?.code === 'tool-goal-collision'
+        ? `。当前容差内仍有干涉，已跳过接近绕行搜索${action.base.allowPartial ? '；最大保障需先到达 P0' : ''}`
+        : result.issue?.phase === 'approach'
         ? `。直线前往 P0 约 ${((result.issue.distanceFromStart || 0) * 1000).toFixed(1)} mm 处未通过检查；${result.approachSearch
           ? '当前搜索未找到可执行路线，不代表全局不可达' : '尚未进行接近路线绕障搜索'}${action.base.allowPartial && !action.base.sync && !action.base.search
           ? '；最大保障需先到达 P0，尚未开始划线' : ''}` : '';
@@ -806,7 +810,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     <footer className="polyline-teaching__footer">
       {message && <div className="polyline-teaching__message" role="status" data-error={status === 'failed'}
         data-has-help={canExplain} data-warning={status === 'checking' && progress?.phase === 'approach-search' && progress.searchStage === 'deep'}>{message}
-        {canExplain && <button type="button" className="polyline-teaching__explain" aria-label="查看深入搜索失败说明" title="查看原因与调整建议"
+        {canExplain && <button type="button" className="polyline-teaching__explain" aria-label={plan.startToolCheck?.blocked ? '查看起点工具碰撞说明' : '查看深入搜索失败说明'} title="查看原因与调整建议"
           aria-haspopup="dialog" onClick={() => setExplanationOpen(true)}><CircleHelp size={16} /></button>}
         {status === 'checking' && progress && <small>{progress.phase === 'approach-search'
           ? `${progress.searchStage === 'deep' ? '深入搜索' : '快速搜索'} ${progress.candidate}/${progress.candidates} · ${progress.stage} · 本方案 ${Math.round(progress.fraction * 100)}% · 已耗时 ${(progress.elapsedMs / 1000).toFixed(1)} s${progress.searchStage === 'deep'

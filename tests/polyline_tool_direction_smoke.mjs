@@ -58,8 +58,13 @@ for (const [side, direction] of [['left', -1], ['right', -1], ['right', 1]]) {
   if (side === 'right' && direction === -1) {
     assert.equal(result.executable, false);
     assert.equal(result.issue.phase, 'approach');
-    assert.ok(result.issue.collision.environmentClearanceLinks.includes('zivid_right_link'));
-    assert.equal(result.approachSearch.found, false);
+    assert.equal(result.issue.code, 'tool-goal-collision');
+    assert.ok(result.startToolCheck.originalIssue.collision.environmentClearanceLinks.includes('zivid_right_link'));
+    assert.ok(result.issue.collision.environmentLinks.length > 0);
+    assert.ok(result.issue.collision.environmentLinks.every(name => ['zivid_right_link', 'right_L7'].includes(name)),
+      'the blocked goal involves only bodies rigidly attached to the controlled flange');
+    assert.equal(result.approachSearch, undefined);
+    assert.equal(result.startToolCheck.oppositeDirection.direction, 1);
   } else {
     assert.equal(result.complete, true, JSON.stringify(result.issue));
     const replay = restoreMobileTeachingRobot(snapshot), base = new THREE.Group(); base.add(replay); base.updateMatrixWorld(true);

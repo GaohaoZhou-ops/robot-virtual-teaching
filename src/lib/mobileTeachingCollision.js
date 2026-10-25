@@ -6,7 +6,8 @@ import { collisionHullsSeparated } from './robotCollisionHull.js';
 // Every environment triangle (or point) is indexed; large triangles are tested
 // by triangle/box SAT, not by sparse surface samples. Connected links are exempt
 // from self checks, but the chassis still participates in environment checks.
-const CONTACT_MARGIN = 0.008;
+export const MOBILE_ENVIRONMENT_MARGIN = 0.008;
+const CONTACT_MARGIN = MOBILE_ENVIRONMENT_MARGIN;
 const xyz = ['x', 'y', 'z'];
 const adjacent = (left, right) => {
   const a = left.chain, b = right.chain;

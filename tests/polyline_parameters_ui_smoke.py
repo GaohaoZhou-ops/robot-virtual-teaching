@@ -39,7 +39,7 @@ def setup(page, blocked=False):
     page.goto(BASE + '/workbench', wait_until='networkidle')
     page.locator('[data-session-state=ready]').wait_for()
     if blocked:
-        page.locator('input[type=file][accept=".ply"]').set_input_files({'name': 'blocked-start.ply', 'mimeType': 'application/octet-stream', 'buffer': surface(blocked=True).encode()})
+        page.locator('input[type=file][accept=".ply"]').set_input_files({'name': 'blocked-start.ply', 'mimeType': 'application/octet-stream', 'buffer': surface(blocked=blocked).encode()})
     else:
         page.locator('input[type=file][accept=".ply"]').set_input_files(str(ROOT / 'tests/fixtures/polyline-surface.ply'))
     page.locator('.loading-curtain').wait_for(state='hidden')
@@ -204,12 +204,27 @@ def run():
         page = browser.new_page(viewport={'width': 1680, 'height': 1100})
         page.on('pageerror', lambda error: errors.append(str(error)))
         try:
-            panel, canvas = setup(page, blocked=True)
+            panel, canvas = setup(page, blocked='approach')
+            # View the drawing patch from its side of the wall. Otherwise a
+            # real raycast would select the wall in front of the intended P0.
+            panel.get_by_role('button', name='仅调整视角', exact=True).click()
+            rect = canvas.bounding_box()
+            for _ in range(4):
+                if float(canvas.get_attribute('data-camera-x')) > .8:
+                    break
+                previous = canvas.get_attribute('data-camera-x')
+                x, y = rect['x'] + rect['width'] * .3, rect['y'] + rect['height'] * .3
+                page.mouse.move(x, y); page.mouse.down()
+                page.mouse.move(x + rect['width'] * .4, y, steps=15); page.mouse.up()
+                expect(canvas).not_to_have_attribute('data-camera-x', previous)
+            assert float(canvas.get_attribute('data-camera-x')) > .8
+            panel.get_by_role('button', name='返回表面点选', exact=True).click()
             panel.locator('.polyline-teaching__algorithm summary').click()
             limit = panel.get_by_role('spinbutton', name='深入候选上限 个', exact=True)
             limit.fill('2'); limit.press('Enter')
             for vertex in [[.9, .27, .551], [.9, .35, .551]]:
                 point = project_point(page, vertex); page.mouse.click(point['x'], point['y'])
+            expect(panel.get_by_role('button', name='选择折线点 P0', exact=True)).to_contain_text('0.900 / 0.270 / 0.551')
             panel.get_by_role('button', name='检查路径', exact=True).click()
             expect(panel).to_have_attribute('data-status', 'failed', timeout=60000)
             expect(panel).to_have_attribute('data-approach-stop-reason', 'candidate-limit')
