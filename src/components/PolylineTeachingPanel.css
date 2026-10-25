@@ -31,6 +31,10 @@
 .polyline-teaching__warnings li { display:flex; flex-direction:column; gap:3px; padding:6px 0; border-top:1px solid #59432f; font-size:10px; line-height:1.6; }
 .polyline-teaching__warnings strong { font-weight:600; color:#f5d7b4; }
 .polyline-teaching__field { display:flex; flex-direction:column; gap:5px; color:#9cb6c2; font-size:11px; }
+.polyline-teaching__name { display:flex; align-items:flex-end; gap:8px; }
+.polyline-teaching__name>.polyline-teaching__field { flex:1; min-width:0; }
+.polyline-teaching__name>button { flex-shrink:0; font-size:11px; }
+.polyline-teaching__name kbd { font:inherit; font-size:9px; opacity:.65; }
 .polyline-teaching input:not([type=checkbox]),.polyline-teaching select { width:100%; min-width:0; box-sizing:border-box; padding:7px 8px; color:#ecf8fc; background:#0b1a24; border:1px solid #314652; border-radius:5px; font:inherit; }
 .polyline-teaching__columns { display:grid; grid-template-columns:1.1fr 1fr; gap:10px; }
 .polyline-teaching__base { margin:0; min-width:0; padding:10px; border:1px solid #36505c; border-radius:7px; display:flex; flex-direction:column; gap:9px; }

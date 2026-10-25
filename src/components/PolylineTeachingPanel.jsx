@@ -72,6 +72,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const [previewVisible, setPreviewVisible] = useState(true);
   const [suggestionVisible, setSuggestionVisible] = useState(true);
   const [executionGhosts, setExecutionGhosts] = useState([]);
+  const bodyRef = useRef(null);
   const live = useRef({});
   live.current = { path, plan, status, selected, operation, getContext, open, active };
   const abortRef = useRef(null), runtimeRef = useRef(null), animationRef = useRef(null), snapshotRef = useRef(null);
@@ -131,6 +132,11 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     setHistory((items) => [...items.slice(-49), previous]);
     setPath(next); setSelected(nextSelected); setPlan(null); setStatus('editing'); clearTrace();
     setMessage('路线已更新，请检查后执行。');
+  };
+  const startNewPolyline = () => {
+    if (busyStatuses.includes(live.current.status)) return;
+    edit(fresh(), -1); setOperation('append'); setElapsed(0); setMessage('');
+    bodyRef.current?.scrollTo({ top: 0 });
   };
   const setToolDistance = (distance, direction = toolDirection) => {
     if (!Number.isFinite(distance) || distance < 0 || distance > 1) return;
@@ -309,12 +315,16 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     };
     const key = (event) => {
       if (event.key !== 'Escape' || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) return;
+      if (event.target.closest?.('[role="dialog"], [role="menu"]')) return;
       // Escape first cancels the arm adjustment via the viewer's handler;
       // the polyline panel and its authored points remain open.
       if (live.current.getContext().endEffectorEditing) return;
       stopEvent(event);
-      if (savingRef.current) return;
-      if (['checking', 'playing', 'paused'].includes(live.current.status)) cancel(); else onClose();
+      if (savingRef.current || event.repeat) return;
+      if (['checking', 'playing', 'paused'].includes(live.current.status)) { cancel(); return; }
+      if (gesture) { cancelled({ pointerId: gesture.id }); return; }
+      if (live.current.path.id) startNewPolyline();
+      else { setSelected(-1); setOperation('append'); }
     };
     const listeners = [['pointerdown', down], ['pointermove', move], ['pointerup', up], ['pointercancel', cancelled], ['lostpointercapture', cancelled], ['dblclick', doubleClick]];
     const eventRoot = canvas.parentElement;
@@ -583,7 +593,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     <header>
       <div><span className="polyline-teaching__eyebrow">CARTESIAN PATH</span><strong><MousePointer2 size={16} /> 表面折线示教</strong></div>
       <button type="button" aria-label="关闭折线示教" title="返回图谱控制台" disabled={status === 'saving'} onClick={onClose}><X size={17} /></button></header>
-    <div className="polyline-teaching__body">
+    <div className="polyline-teaching__body" ref={bodyRef}>
       <div className="polyline-teaching__status" data-state={status} data-warning={warnings.length > 0 || plan?.partial}><i />{plan?.partial && status === 'ready' ? '可执行部分轨迹'
         : plan?.partial && status === 'completed' ? '部分划线完成'
           : status === 'ready' && warnings.length ? '检查通过 · 有表面警告' : statusLabels[status]}<span>{path.points.length} 点 · {(distance * 1000).toFixed(0)} mm</span></div>
@@ -610,8 +620,12 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
           <strong>{checkLocation(warning, path.points.length)}</strong><span>{warning.message}</span>
         </li>)}</ul>
       </details>}
-      <label className="polyline-teaching__field">名称<input aria-label="折线名称" value={path.name} disabled={busy} maxLength={80}
-        onChange={(event) => setPath({ ...path, name: event.target.value })} /></label>
+      <div className="polyline-teaching__name">
+        <label className="polyline-teaching__field">名称<input aria-label="折线名称" value={path.name} disabled={busy} maxLength={80}
+          onChange={(event) => setPath({ ...path, name: event.target.value })} /></label>
+        {path.id && <button type="button" disabled={busy} aria-label="取消选择并新建折线"
+          title="保留已保存记录，开始点选新折线 · Esc" onClick={startNewPolyline}>取消选择 <kbd>Esc</kbd></button>}
+      </div>
       <div className="polyline-teaching__columns">
         <label className="polyline-teaching__field">执行机械臂<select aria-label="折线执行机械臂" disabled={busy} value={path.side}
           onChange={(event) => edit(polylineWithSide(path, event.target.value))}><option value="left">左臂 · tool_left</option><option value="right">右臂 · tool_right</option></select></label>
@@ -710,11 +724,14 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       <div className="polyline-teaching__row"><label><input type="checkbox" checked={path.closed} disabled={busy || path.points.length < 3}
         onChange={(event) => edit({ ...path, closed: event.target.checked })} />闭合折线</label><button type="button" disabled={busy || !history.length} onClick={() => {
           const previous = history.at(-1); setHistory(history.slice(0, -1)); setPath(previous); setSelected(-1); setPlan(null); setStatus('editing'); clearTrace();
-        }}><RotateCcw size={12} />撤销</button><button type="button" disabled={busy} onClick={() => { edit(fresh(), -1); setOperation('append'); }}>新建</button></div>
+        }}><RotateCcw size={12} />撤销</button><button type="button" disabled={busy} onClick={startNewPolyline}>新建</button></div>
       <p className="polyline-teaching__hint">{path.settings.uniformSpeed !== false ? '容差内平滑过弯' : '严格直线连接 · 拐角停顿'} · 橘黄色为已执行部分；{previewPlan?.partial ? '绿色为待执行的可达部分，红色为不可执行部分。' : '未执行部分保持青绿色；表面警告见提示列表。'}{baseMoving && '紫色为底盘计划路径，箭头表示搜索选中的起始朝向。'}</p>
       <details className="polyline-teaching__library"><summary>已保存折线 <b>{savedPaths.length}</b></summary>
         {savedPaths.length ? savedPaths.map(({ taskId, taskName, path: saved }) => <div key={`${taskId}:${saved.id}`}>
-          <button type="button" disabled={busy} onClick={() => { edit(structuredClone(saved), -1); setOperation('append'); setMessage('已载入折线，请从当前机器人姿态重新检查。'); }}><strong>{saved.name}</strong><small>{taskName} · {saved.points.length} 点</small></button>
+          <button type="button" disabled={busy} aria-pressed={path.id === saved.id} onClick={() => {
+            edit(structuredClone(saved), -1); setOperation('append'); setMessage('已载入折线，请从当前机器人姿态重新检查。');
+            bodyRef.current?.scrollTo({ top: 0 });
+          }}><strong>{saved.name}</strong><small>{taskName} · {saved.points.length} 点</small></button>
           <button type="button" disabled={busy} aria-label={`删除已保存折线 ${saved.name}`} onClick={() => { onDelete(taskId, saved.id); if (path.id === saved.id) setPath({ ...path, id: '' }); }}><Trash2 size={13} /></button>
         </div>) : <p>保存后可在这里重新打开。</p>}
       </details>

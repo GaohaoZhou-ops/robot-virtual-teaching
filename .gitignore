@@ -43,10 +43,10 @@ node_modules/
 # performance samples, device/signing settings, captures and Python environments stay local.
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
 # browser/native captures, readiness markers, device reports and deployment logs.
-# The persistent web service uses build/service/; surface-polyline browser
-# captures (including sidebar, endpoint editing, waist assistance, approach recovery,
-# partial-path, tool direction, uniform speed, replay, progress pixels/percentages,
-# constraint layout and per-segment start-pose ghosts) use test-artifacts/polyline-*/.
+# The persistent web service uses build/service/.
+# Surface-polyline UI artifacts (selection/new drafts, constraints, tool/pose
+# editing, planning, progress/replay and start-pose ghosts) belong in
+# test-artifacts/polyline-*/; maintained regression runners stay in tests/.
 dist/
 build/
 out/
