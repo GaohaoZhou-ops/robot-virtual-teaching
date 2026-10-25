@@ -88,8 +88,10 @@ def run(mount):
             assert len(saved) == 1 and saved[0]['toolAxisMode'] == 'manual'
             assert saved[0]['side'] == 'right' and saved[0]['tcpOffset'] == [.01, -.005, -.175]
             panel.get_by_role('button', name='新建', exact=True).click()
-            expect(side).to_have_value('left'); expect(direction).to_have_value('-1')
-            side.select_option('right'); expect(direction).to_have_value('-1'); expect(distance).to_have_value('200')
+            expect(side).to_have_value('right'); expect(direction).to_have_value('-1'); expect(distance).to_have_value('175')
+            for axis, value in [('X', '10'), ('Y', '-5'), ('Z', '-175')]:
+                expect(panel.get_by_role('spinbutton', name=f'笔尖偏移 {axis} mm', exact=True)).to_have_value(value)
+            expect(panel).to_have_attribute('data-path-id', ''); expect(panel).to_have_attribute('data-point-count', '0')
             page.reload(wait_until='networkidle')
             page.locator('[data-session-state=ready]').wait_for()
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded')

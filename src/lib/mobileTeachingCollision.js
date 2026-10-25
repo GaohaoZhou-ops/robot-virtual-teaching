@@ -193,7 +193,20 @@ async function buildEnvironmentIndex(environment, checkpoint) {
   return { intersects, encloses, intersectsSegment, kind: mesh ? 'mesh' : 'points', count };
 }
 
-export async function createMobileCollisionChecker(robot, environment, checkpoint = async () => {}, { armBodyClearance = 0 } = {}) {
+const preparedEnvironments = new WeakMap();
+
+// Scoped to one planning request with immutable transferred geometry. Reuse
+// only the workpiece index; robot transforms, boxes and collision results are
+// private to each checker. The token cannot be applied to another environment.
+export async function prepareMobileCollisionEnvironment(environment, checkpoint = async () => {}) {
+  const started = performance.now();
+  const index = await buildEnvironmentIndex(environment, checkpoint);
+  const token = Object.freeze({ buildMs: performance.now() - started });
+  preparedEnvironments.set(token, { environment, index });
+  return token;
+}
+
+export async function createMobileCollisionChecker(robot, environment, checkpoint = async () => {}, { armBodyClearance = 0, preparedEnvironment = null } = {}) {
   const proxies = [];
   const branches = armJointBranches(robot);
   robot.traverse((node) => {
@@ -210,7 +223,9 @@ export async function createMobileCollisionChecker(robot, environment, checkpoin
       localObb: new OBB(center, half), obb: new OBB(), worldBox: new THREE.Box3(), inverse: new THREE.Matrix4() });
   });
   if (!proxies.length) throw new Error('机器人缺少碰撞检测体，请重新加载模型或关闭碰撞筛选');
-  const index = await buildEnvironmentIndex(environment, checkpoint);
+  const prepared = preparedEnvironment && preparedEnvironments.get(preparedEnvironment);
+  if (preparedEnvironment && prepared?.environment !== environment) throw new Error('碰撞索引与本次工件不匹配，请重新检查');
+  const index = prepared ? prepared.index : await buildEnvironmentIndex(environment, checkpoint);
   const pairs = [];
   for (let i = 0; i < proxies.length; i += 1) for (let j = 0; j < i; j += 1) {
     if (proxies[i].linkName !== proxies[j].linkName && !adjacent(proxies[i], proxies[j])) pairs.push([proxies[i], proxies[j]]);

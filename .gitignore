@@ -44,8 +44,9 @@ node_modules/
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
 # browser/native captures, readiness markers, device reports and deployment logs.
 # The persistent web service uses build/service/.
-# Surface-polyline UI artifacts (selection/new drafts, constraints, tool/pose
-# editing, planning, progress/replay and start-pose ghosts) belong in
+# Surface-polyline UI artifacts (selection/new drafts, constraint/help dialogs,
+# tool/pose editing, undo, planning, progress/replay and start-pose ghosts),
+# solver A/B source snapshots and service-index backups belong in
 # test-artifacts/polyline-*/; maintained regression runners stay in tests/.
 dist/
 build/
@@ -240,6 +241,15 @@ playwright/.auth/
 /tests/polyline-*-trace.json
 /polyline-*-profile.json
 /tests/polyline-*-profile.json
+# Search diagnostics and A/B benchmark reports copied out of test-artifacts/.
+# Match only named output files at root/tests; source parameters, preferences
+# and regression inputs under tests/fixtures/ remain visible.
+/polyline-*-diagnostics.json
+/tests/polyline-*-diagnostics.json
+/polyline-*-benchmark.json
+/tests/polyline-*-benchmark.json
+/polyline-*-metrics.json
+/tests/polyline-*-metrics.json
 # Ad-hoc polyline/approach/posture-search workspaces and diagnostic snapshots
 # copied from temporary directories. JSON can contain full robot/scene state.
 # Restrict these to root/tests output locations; maintained test scripts and

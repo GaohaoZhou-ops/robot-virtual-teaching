@@ -39,7 +39,9 @@ for (const [source, stop] of [[path, null], [path, { index: 1, fraction: .4 }], 
     const progress = polylineDrawingProgress(source, sample);
     assert.equal(progress.total, total);
     assert.ok(Math.abs(progress.completed - completed) < 1e-6, 'percentage follows the orange boundary independently of preview visibility');
-    assert.ok(Math.abs(progress.fraction - completed / total) < 1e-6);
+    // The preview omits pieces shorter than 1 µm. Convert that absolute
+    // render tolerance to a fraction, including faster boundary samples.
+    assert.ok(Math.abs(progress.fraction - completed / total) < 1e-6 / total);
     assert.ok(completed >= previous - 1e-10, 'orange progress must be monotonic along the authored order'); previous = completed;
     assert.ok(Math.abs(completed + sum(parts, false) - total) < 1e-6,
       `splitting must conserve the line within the render tolerance: ${completed + sum(parts, false)} / ${total}`);

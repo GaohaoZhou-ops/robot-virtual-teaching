@@ -113,9 +113,13 @@ for (const sync of [false, true]) {
   assert.ok(Math.abs(result.plan.coverage - 1) < 1e-10);
   await audit(result, path);
 }
-{
-  const path = makePath([bent[0], [.5, .3, .7]]), result = await solve(path);
-  assert.ok(Math.abs(result.plan.speedProfile.cruiseSpeed - path.settings.speed) < 1e-5, 'a simple reachable line achieves the selected speed');
+for (const speed of [.05, .3]) {
+  // Leave enough length for acceleration/deceleration and a cruise interval
+  // even when the requested 300 mm/s is capped by the 100 mm/s joint limit.
+  const path = makePath([[.3, .3, .7], [.5, .3, .7]], { settings: { speed } }), result = await solve(path);
+  assert.equal(result.plan.speedProfile.requestedSpeed, speed);
+  assert.ok(Math.abs(result.plan.speedProfile.cruiseSpeed - Math.min(speed, .1)) < 1e-5,
+    `requested ${speed}, planned ${result.plan.speedProfile.cruiseSpeed}; simple line is subject to the 100 mm/s joint limit`);
   await audit(result, path);
 }
 {
@@ -135,7 +139,9 @@ for (const sync of [false, true]) {
   await audit(result, path);
 }
 {
-  const path = makePath([bent[0], bent[1], bent[0]]), result = await solve(path);
+  // These 50 mm reversal legs need a lower request to include a cruise;
+  // at 300 mm/s the acceleration limits correctly leave only start/stop ramps.
+  const path = makePath([bent[0], bent[1], bent[0]], { settings: { speed: .05 } }), result = await solve(path);
   assert.equal(result.plan.segments.length, 2); assert.equal(result.plan.speedProfile.cornerStops, 1);
   await audit(result, path);
 }

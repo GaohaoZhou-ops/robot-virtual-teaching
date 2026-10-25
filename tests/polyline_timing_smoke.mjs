@@ -39,7 +39,7 @@ function checkRates(plan, definitions, steps = 20000) {
   const samples = preparePolylineInterpolation([0, 0.2, 0.499, 0.5, 0.501, 0.8, 1].map((u) => ({ u,
     joints: { angle: 160 + 10 * u + (u > 0.5 ? 0.2 : 0), slide: 0.04 * u },
     base: { x: 0.12 * u, y: 0.08 * u * u, yaw: 20 * u } })));
-  const settings = { speed: 0.2, acceleration: 0.5 };
+  const settings = { speed: 0.3, acceleration: 0.5 };
   const timing = preparePolylineTiming(samples, 0.3, settings, {
     angle: { type: 'revolute', velocity: 8 }, slide: { type: 'prismatic', velocity: 0.04 },
   });

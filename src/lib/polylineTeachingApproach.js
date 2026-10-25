@@ -4,13 +4,18 @@ import { restoreMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { isPolylinePlanExecutable, normalizePolyline, readPolylineTcp } from './polylineTeaching.js';
 import { isPolylineWaistJoint, polylineJointExclusions } from './polylineTeachingJoints.js';
 import { planPolyline } from './polylineTeachingSolver.js';
+import { prepareMobileCollisionEnvironment } from './mobileTeachingCollision.js';
+import { polylineApproachTrialKey,
+  polylineApproachFailureSeed, polylineDeepApproachTrials } from './polylineTeachingDeepSearch.js';
 
 function postureTrials(controller, action, lockedJointNames, collision) {
   const excluded = polylineJointExclusions(controller, action, lockedJointNames);
   const movable = controller.joints.filter((joint) => !excluded.has(joint));
   const waist = movable.filter(isPolylineWaistJoint).map((joint) => joint.name);
   const groups = [waist, waist.filter((name) => /yaw/i.test(name)), waist.filter((name) => !/yaw/i.test(name))];
-  const links = new Set(collision.selfPairs.flat());
+  // A redundant arm posture can cause workpiece interference too, especially
+  // on an intermediate link. Include environment hits, not just self pairs.
+  const links = new Set([...collision.selfPairs.flat(), ...collision.environmentLinks]);
   // Hold the implicated arm joint, or its preceding joint, to try a different
   // redundant posture without seeding a discontinuous jump in joint space.
   controller.robot.traverse((node) => {
@@ -50,11 +55,21 @@ function detourTrials(start, goal, origin, normal) {
 // Bounded, deterministic recovery for fixed-base approach collisions. Each
 // trial starts at the original pose and validates the entire transit, stroke
 // (or allowed continuous prefix), and the interpolation actually played back.
-export async function planPolylineWithApproach({ snapshot, checkpoint = async () => {}, onProgress = () => {}, ...options }) {
-  const run = (trial = {}, progress = onProgress) => planPolyline({ ...options, ...trial,
-    robot: restoreMobileTeachingRobot(snapshot), checkpoint, onProgress: progress });
-  const original = await run();
+export async function planPolylineWithApproach({ snapshot, approachGuides = [], successfulGuides = [], recoverLocal = true,
+  deepBudgetMs,
+  now = () => performance.now(), checkpoint = async () => {}, onProgress = () => {}, ...options }) {
+  const started = now();
   const action = normalizePolyline(options.path);
+  if (!action) throw new Error('折线或算法参数无效，请调整后重新检查');
+  const preparedEnvironment = await prepareMobileCollisionEnvironment(options.environment, checkpoint);
+  const validPoints = (points, allowEmpty = false) => Array.isArray(points) && (allowEmpty || points.length > 0) && points.length <= 64
+    && points.every((point) => Array.isArray(point) && point.length === 3 && point.every(Number.isFinite));
+  const memories = successfulGuides.filter((guide) => validPoints(guide?.waypoints, true)
+    && Array.isArray(guide.referenceSamples) && guide.referenceSamples.length <= 256).slice(0, 3);
+  const referenceSamples = memories.flatMap((guide) => guide.referenceSamples);
+  const run = (trial = {}, progress = onProgress, visit = checkpoint) => planPolyline({ ...options, recoverLocal, referenceSamples, ...trial,
+    robot: restoreMobileTeachingRobot(snapshot), preparedEnvironment, checkpoint: visit, onProgress: progress });
+  const original = await run();
   if (isPolylinePlanExecutable(original) || action.base.sync || action.base.search
     || original.issue?.phase !== 'approach' || !original.issue.collision) return original;
 
@@ -72,24 +87,93 @@ export async function planPolylineWithApproach({ snapshot, checkpoint = async ()
   if (postures.length) for (const approachWaypoints of detours.filter((_, index) => index >= 6)) {
     trials.push({ approachWaypoints, approachLockedJointNames: postures[0] });
   }
-  let attempts = 0, best = null;
-  for (const trial of trials.slice(0, 35)) {
-    await checkpoint(); attempts += 1;
-    const progress = (value = {}) => onProgress({ ...value, phase: 'approach-search',
-      stage: trial.approachWaypoints ? '搜索绕行接近路线' : '尝试替代接近姿态',
-      fraction: value.fraction ?? 0, candidate: attempts, candidates: Math.min(35, trials.length) });
-    progress();
-    const result = await run(trial, progress);
-    if (!isPolylinePlanExecutable(result)) continue;
-    const candidate = { ...result, approachSearch: { attempts, found: true,
-      mode: trial.approachWaypoints ? 'detour' : 'posture',
-      waypoints: trial.approachWaypoints || [], heldJoints: trial.approachLockedJointNames || [],
-      originalIssue: original.issue } };
-    if (result.complete) return candidate;
-    // With maximum protection, prefer the longest verified drawing prefix
-    // among the bounded candidates. A short approach is never a drawn prefix.
+  const guides = approachGuides.filter((guide) => validPoints(guide?.waypoints)).slice(0, 8);
+  // Keep the original generic search budget. Saved paths add bounded hints;
+  // they never replace collision checks or suppress existing detour options.
+  const candidates = [...memories.map((memory) => ({ approachWaypoints: memory.waypoints, memory, referenceKey: memory.referenceKey,
+    referenceSamples: memory.referenceSamples, preferReference: true })),
+  ...guides.map((guide) => ({ approachWaypoints: guide.waypoints, guide })), ...trials.slice(0, 35)];
+  const budget = Math.max(0, Math.min(60000, Number.isFinite(deepBudgetMs) ? deepBudgetMs : action.settings.deepSearchSeconds * 1000));
+  const candidateLimit = action.settings.deepSearchCandidates;
+  const budgetExpired = Symbol('approach-search-budget');
+  const seen = new Set([polylineApproachTrialKey({})]);
+  let attempts = 0, guideAttempts = 0, memoryAttempts = 0, quickAttempts = 0, deepAttempts = 0, best = null;
+  let furthestFailure = original, reachedStart = false;
+  let seed = polylineApproachFailureSeed(start, goal, {}, original.issue);
+  let searchStage = 'quick', deepStarted = null, currentTrial = null, currentIndex = 0, currentTotal = candidates.length;
+  let lastProgress = { fraction: 0 }, lastReported = started;
+  const elapsed = () => ({ elapsedMs: Math.max(0, now() - started),
+    deepElapsedMs: deepStarted === null ? 0 : Math.max(0, now() - deepStarted), deepBudgetMs: budget, deepCandidateLimit: candidateLimit });
+  const progress = (value = lastProgress) => {
+    lastProgress = value; lastReported = now();
+    const stage = searchStage === 'deep'
+      ? ({ 'axis-order': '分方向接近起点', 'local-detour': '碰撞附近多段绕行',
+        'expanded-detour': '扩大绕行方向和距离', 'axis-posture': '调整关节配合接近' }[currentTrial?.deepStrategy] || '准备深入搜索')
+      : currentTrial?.memory ? '参考最近成功姿态接近' : currentTrial?.guide ? '参考已保存折线接近'
+        : currentTrial?.approachWaypoints ? '搜索绕行接近路线' : '尝试替代接近姿态';
+    onProgress({ ...value, phase: 'approach-search', searchStage, stage, ...elapsed(),
+      fraction: value.fraction ?? 0, candidate: currentIndex, candidates: currentTotal, attempts, quickAttempts, deepAttempts });
+  };
+  const visit = async () => {
+    await checkpoint();
+    if (now() - lastReported >= 250) progress();
+    if (deepStarted !== null && now() - deepStarted >= budget) throw budgetExpired;
+  };
+  const finish = (result, stopReason) => ({ ...result, approachSearch: {
+    ...result.approachSearch, found: isPolylinePlanExecutable(result), attempts, guideAttempts, memoryAttempts, quickAttempts, deepAttempts,
+    lastStage: searchStage, reachedStart, stopReason, ...elapsed(), environmentBuildMs: preparedEnvironment.buildMs,
+    environmentBuilds: 1, originalIssue: original.issue } });
+  const evaluate = async (trial, index, total) => {
+    currentTrial = trial; currentIndex = index; currentTotal = total;
+    attempts += 1;
+    if (searchStage === 'deep') deepAttempts += 1; else quickAttempts += 1;
+    if (trial.guide) guideAttempts += 1;
+    if (trial.memory) memoryAttempts += 1;
+    progress({ fraction: 0 }); await visit();
+    const result = await run(trial, progress, visit);
+    if (result.issue?.phase === 'drawing') {
+      reachedStart = true;
+      // Do not keep saying P0 could not be reached when a checked transit did
+      // reach it and the failure is actually in the new drawing segment.
+      const score = (value) => value.issue.phase === 'drawing' ? value.issue.segmentIndex + value.issue.progress : -1;
+      if (score(result) > score(furthestFailure)) furthestFailure = result;
+    }
+    const nextSeed = polylineApproachFailureSeed(start, goal, trial, result.issue);
+    if (nextSeed && (!seed || nextSeed.remaining < seed.remaining - .005)) seed = nextSeed;
+    if (!isPolylinePlanExecutable(result)) return null;
+    reachedStart = true;
+    const candidate = { ...result, approachSearch: { stage: searchStage, deepStrategy: trial.deepStrategy,
+      mode: trial.memory ? 'successful-path' : trial.guide ? 'saved-path' : trial.approachWaypoints ? 'detour' : 'posture',
+      ...(trial.memory || trial.guide ? { sourcePathId: (trial.memory || trial.guide).sourcePathId,
+        sourcePathName: (trial.memory || trial.guide).sourcePathName } : {}),
+      waypoints: trial.approachWaypoints || [], heldJoints: trial.approachLockedJointNames || [] } };
+    // Only fully validated drawing prefixes are retained. A timeout inside a
+    // later candidate cannot publish any of that candidate's unfinished work.
     if (!best || result.distance > best.distance + 1e-8) best = candidate;
+    return candidate;
+  };
+  for (let i = 0; i < candidates.length; i += 1) {
+    seen.add(polylineApproachTrialKey(candidates[i]));
+    const result = await evaluate(candidates[i], i + 1, candidates.length);
+    if (result?.complete) return finish(result, 'complete');
   }
-  if (best) return { ...best, approachSearch: { ...best.approachSearch, attempts } };
-  return { ...original, approachSearch: { attempts, found: false, originalIssue: original.issue } };
+  if (!budget) return finish(best || furthestFailure, 'disabled');
+  searchStage = 'deep'; deepStarted = now(); currentTrial = null; currentIndex = 0; currentTotal = candidateLimit;
+  progress({ fraction: 0 });
+  let stopReason = 'exhausted';
+  try {
+    for (const trial of polylineDeepApproachTrials(start, goal, () => seed, postures)) {
+      await visit();
+      if (deepAttempts >= candidateLimit) { stopReason = 'candidate-limit'; break; }
+      const key = polylineApproachTrialKey(trial);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const result = await evaluate(trial, deepAttempts + 1, candidateLimit);
+      if (result?.complete) return finish(result, 'complete');
+    }
+  } catch (error) {
+    if (error !== budgetExpired) throw error;
+    stopReason = 'time-budget';
+  }
+  return finish(best || furthestFailure, stopReason);
 }

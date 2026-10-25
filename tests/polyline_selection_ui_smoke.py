@@ -1,4 +1,4 @@
-"""Deselect saved polylines without leaving teaching or changing saved records."""
+"""New strokes retain planning/tool settings without changing saved records."""
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -26,8 +26,13 @@ def run():
         page.on('pageerror', lambda error: errors.append(str(error)))
         descriptor = dict(id='polyline-test.urdf', relativePath='polyline-test.urdf', name='polyline_test_robot', fileName='polyline-test.urdf',
                           format='urdf', url='/__atlas/robot-files/polyline-test.urdf', packageName='', packagePath='', packageBaseUrl='/__atlas/robot-files/', manifestUrl=None)
+        urdf = (ROOT / 'tests/fixtures/polyline-robot.urdf').read_text()
+        urdf = urdf.replace('<parent link="base_link"/>', '<parent link="waist_L"/>')
+        urdf = urdf.replace('</robot>', '''<link name="waist_L"/>
+          <joint name="waist_lift_J" type="prismatic"><parent link="base_link"/><child link="waist_L"/>
+          <axis xyz="0 0 1"/><limit lower="-0.25" upper="0.25" effort="10" velocity="0.1"/></joint></robot>''')
         page.route('**/__atlas/robots', lambda route: route.fulfill(json={'robots': [descriptor]}))
-        page.route('**/__atlas/robot-files/polyline-test.urdf', lambda route: route.fulfill(content_type='application/xml', body=(ROOT / 'tests/fixtures/polyline-robot.urdf').read_text()))
+        page.route('**/__atlas/robot-files/polyline-test.urdf', lambda route: route.fulfill(content_type='application/xml', body=urdf))
         try:
             page.goto(BASE + '/workbench', wait_until='networkidle')
             page.locator('[data-session-state=ready]').wait_for()
@@ -45,8 +50,27 @@ def run():
             panel = page.get_by_role('region', name='表面折线示教', exact=True)
             cancel_selection = panel.get_by_role('button', name='取消选择并新建折线', exact=True)
             library = panel.locator('.polyline-teaching__library')
+            distance = panel.get_by_role('spinbutton', name='末端距线段 mm', exact=True)
+            speed = panel.get_by_role('spinbutton', name='折线速度 mm/s', exact=True)
+            direction = panel.get_by_role('combobox', name='末端距线段方向', exact=True)
+            waist = panel.get_by_role('checkbox', name='协同', exact=True)
+            maximum = panel.get_by_role('checkbox', name='最大保障', exact=True)
+            uniform = panel.get_by_role('checkbox', name='匀速划线', exact=True)
+            expect(speed).to_have_value('300')
+            expect(speed).to_have_attribute('max', '300')
+            distance.fill('250'); distance.press('Enter')
+            speed.fill('80'); speed.press('Enter')
+            waist.check(); maximum.check(); uniform.uncheck()
+            def expect_settings():
+                expect(distance).to_have_value('250'); expect(speed).to_have_value('80')
+                expect(direction).to_have_value('-1')
+                expect(waist).to_be_checked(); expect(maximum).to_be_checked(); expect(uniform).not_to_be_checked()
+                expect(panel.get_by_role('checkbox', name='静止', exact=True)).to_be_checked()
+                expect(canvas).to_have_attribute('data-robot-joint-locked-names', '["waist_lift_J"]')
             for vertex in [[.4, .3, .55], [.5, .3, .55]]:
                 point = project_point(page, vertex); page.mouse.click(point['x'], point['y'])
+            panel.get_by_role('button', name='检查路径', exact=True).click()
+            expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
             panel.get_by_role('textbox', name='折线名称', exact=True).fill('已保存基准折线')
             panel.get_by_role('button', name='保存', exact=True).click()
             expect(panel).to_contain_text('已保存至当前示教任务')
@@ -63,6 +87,7 @@ def run():
             expect(panel).to_have_attribute('data-point-count', '0')
             expect(first).to_have_attribute('aria-pressed', 'false')
             expect(cancel_selection).to_have_count(0)
+            expect_settings()
             expect(panel.get_by_role('button', name='连续点选', exact=True)).to_have_attribute('aria-pressed', 'true')
             for vertex in [[.45, .4, .55], [.55, .4, .55]]:
                 point = project_point(page, vertex); page.mouse.click(point['x'], point['y'])
@@ -79,6 +104,8 @@ def run():
             assert first_id and second_id and first_id != second_id
             baseline = saved_records(page)
             assert len(baseline) == 2 and all(len(path['points']) == 2 for path in baseline)
+            for key in ['side', 'tcpOffset', 'toolAxisDirection', 'settings', 'base']:
+                assert baseline[0][key] == baseline[1][key], f'new nearby stroke changed {key}'
             first.click()
             page.set_viewport_size({'width': 1200, 'height': 760})
             expect(cancel_selection).to_be_in_viewport()
@@ -87,6 +114,7 @@ def run():
             cancel_selection.click()
             expect(panel).to_have_attribute('data-path-id', '')
             expect(panel).to_have_attribute('data-point-count', '0')
+            expect_settings()
             panel.get_by_role('button', name='撤销', exact=True).click()
             expect(panel).to_have_attribute('data-path-id', first_id)
             expect(panel).to_have_attribute('data-point-count', '2')
@@ -102,6 +130,7 @@ def run():
             expect(panel).to_be_visible()
             expect(panel).to_have_attribute('data-path-id', '')
             expect(panel).to_have_attribute('data-point-count', '0')
+            expect_settings()
             if not library.evaluate('element => element.open'):
                 library.locator('summary').click()
             library.get_by_role('button').filter(has_text='新绘制折线').click()
@@ -116,6 +145,49 @@ def run():
             page.keyboard.press('Escape')
             expect(panel).to_have_attribute('data-path-id', '')
             expect(panel).to_have_attribute('data-point-count', '0')
+            expect_settings()
+            # New also preserves combined base modes/ranges and the selected
+            # positive axis at zero distance, including disabled preferences.
+            for mode in ['移动', '自搜索']:
+                panel.get_by_role('checkbox', name=mode, exact=True).check()
+            for name, value in [('底盘水平范围 m', '1.3'), ('底盘转向范围 °', '75')]:
+                field = panel.get_by_role('spinbutton', name=name, exact=True)
+                field.fill(value); field.press('Enter')
+            direction.select_option('1'); distance.fill('0'); distance.press('Enter')
+            panel.get_by_role('button', name='新建', exact=True).click()
+            for mode in ['移动', '自搜索']:
+                expect(panel.get_by_role('checkbox', name=mode, exact=True)).to_be_checked()
+            expect(panel.get_by_role('spinbutton', name='底盘水平范围 m', exact=True)).to_have_value('1.3')
+            expect(panel.get_by_role('spinbutton', name='底盘转向范围 °', exact=True)).to_have_value('75')
+            expect(direction).to_have_value('1'); expect(distance).to_have_value('0')
+            expect(waist).to_be_checked(); expect(maximum).to_be_checked()
+            expect(uniform).not_to_be_checked(); expect(speed).to_have_value('80')
+            # Committed parameters survive a refresh without saving a new line.
+            # Uncommitted text, points, names and selected record IDs do not.
+            speed.fill('275'); speed.press('Enter')
+            panel.get_by_role('textbox', name='折线名称', exact=True).fill('未保存草稿')
+            for vertex in [[.4, .3, .55], [.5, .3, .55]]:
+                point = project_point(page, vertex); page.mouse.click(point['x'], point['y'])
+            expect(panel).to_have_attribute('data-point-count', '2')
+            speed.fill('125')
+            page.reload(wait_until='networkidle')
+            page.locator('[data-session-state=ready]').wait_for()
+            expect(canvas).to_have_attribute('data-robot-model-state', 'loaded')
+            page.get_by_role('button', name='表面折线示教', exact=True).click()
+            expect(panel).to_have_attribute('data-path-id', '')
+            expect(panel).to_have_attribute('data-point-count', '0')
+            expect(panel.get_by_role('textbox', name='折线名称', exact=True)).to_have_value('表面折线')
+            expect(speed).to_have_value('275')
+            expect(direction).to_have_value('1'); expect(distance).to_have_value('0')
+            for mode in ['移动', '自搜索']:
+                expect(panel.get_by_role('checkbox', name=mode, exact=True)).to_be_checked()
+            expect(panel.get_by_role('spinbutton', name='底盘水平范围 m', exact=True)).to_have_value('1.3')
+            expect(panel.get_by_role('spinbutton', name='底盘转向范围 °', exact=True)).to_have_value('75')
+            expect(waist).to_be_checked(); expect(maximum).to_be_checked(); expect(uniform).not_to_be_checked()
+            # Opening a saved record explicitly adopts its own configuration.
+            library.locator('summary').click()
+            library.get_by_role('button').filter(has_text='已保存基准折线').click()
+            expect_settings()
             assert saved_records(page) == baseline, 'deselect/new/undo/replay must never overwrite or delete saved records'
             panel.get_by_role('button', name='关闭折线示教', exact=True).click()
             expect(panel).to_be_hidden()
@@ -125,7 +197,7 @@ def run():
             raise
         finally:
             browser.close()
-    print('Selection UI: Esc/button deselect, immediate new points, unique records, highlight, narrow layout, undo, input priority, external open and stop-before-deselect passed.')
+    print('Selection UI: 300 mm/s default; new/Esc/reload retain committed parameters; saved-record priority, nearby stroke planning, record isolation, narrow layout, undo and stop-before-deselect passed.')
 
 
 if __name__ == '__main__':

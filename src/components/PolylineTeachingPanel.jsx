@@ -4,19 +4,25 @@ import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-import { Check, MousePointer2, Pause, Play, Plus, RotateCcw, Save, Square, Trash2, X } from 'lucide-react';
+import { Check, CircleHelp, MousePointer2, Pause, Play, Plus, RotateCcw, Save, Square, Trash2, X } from 'lucide-react';
 import { getRobotEndEffector, readRobotJointValues } from '../lib/robotLoader.js';
-import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_BASE_DEFAULTS, POLYLINE_MAX_POINTS, polylineVertices, polylineDrawingProgress, polylineSegmentStartPoses, samplePolylinePlan, readPolylineTcp, polylineBasePose, isPolylinePlanExecutable, repeatPolylinePlan } from '../lib/polylineTeaching.js';
+import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_BASE_DEFAULTS, POLYLINE_MAX_POINTS, POLYLINE_MAX_SPEED, polylineVertices, polylineDrawingProgress, polylineSegmentStartPoses, samplePolylinePlan, readPolylineTcp, polylineBasePose, isPolylinePlanExecutable, repeatPolylinePlan } from '../lib/polylineTeaching.js';
+import { loadPolylinePreferences, savePolylinePreferences } from '../lib/polylineTeachingPreferences.js';
+import { POLYLINE_ALGORITHM_DEFAULTS, POLYLINE_ALGORITHM_FIELDS, POLYLINE_ALGORITHM_GROUPS } from '../lib/polylineTeachingParameters.js';
 import { planPolylineInWorker } from '../lib/polylineTeachingWorker.js';
 import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, writePolylinePreview } from '../lib/polylineTeachingPreview.js';
 import { VIEWPORT_DRAG_THRESHOLD } from '../lib/viewportNavigation.js';
 import { isPolylineWaistJoint } from '../lib/polylineTeachingJoints.js';
 import { polylineWithSide } from '../lib/polylineTeachingTool.js';
+import PolylineSearchExplanationDialog from './PolylineSearchExplanationDialog.jsx';
+import PolylineAlgorithmHelpDialog from './PolylineAlgorithmHelpDialog.jsx';
 import './PolylineTeachingPanel.css';
 
-const fresh = () => ({ id: '', name: '表面折线', side: 'left', closed: false, points: [], quaternion: null,
-  tcpOffset: [0, 0, -0.2], toolAxisMode: 'manual', toolAxisDirection: -1,
-  settings: { ...POLYLINE_DEFAULTS }, base: { ...POLYLINE_BASE_DEFAULTS } });
+// A new stroke resets geometry/identity, not the selected tool or planning
+// constraints. Otherwise nearby points silently get a different IK problem.
+const fresh = (previous) => ({ id: '', name: '表面折线', side: previous?.side || 'left', closed: false, points: [], quaternion: null,
+  tcpOffset: [...(previous?.tcpOffset || [0, 0, -0.2])], toolAxisMode: 'manual', toolAxisDirection: previous?.toolAxisDirection ?? -1,
+  settings: { ...POLYLINE_DEFAULTS, ...previous?.settings }, base: { ...POLYLINE_BASE_DEFAULTS, ...previous?.base } });
 const sameJoints = (a, b) => a && b && Object.keys(a).every((name) => Math.abs(a[name] - (b[name] ?? Infinity)) < 1e-6)
   && Object.keys(b).every((name) => name in a);
 const disposeLayer = (group) => {
@@ -33,7 +39,7 @@ const partialSummary = (plan) => `${(plan.distance * 1000).toFixed(1)} / ${(plan
 
 const formatNumber = (value) => String(Number(value.toFixed(6)));
 
-function PolylineNumberInput({ value, onCommit, min, max, ...props }) {
+function PolylineNumberInput({ value, onCommit, min, max, integer = false, ...props }) {
   // Without a draft, reflect linked fields/undo directly. Once typing starts,
   // a linked value update must not overwrite the text the user is entering.
   const [draft, setDraft] = useState(null);
@@ -44,7 +50,8 @@ function PolylineNumberInput({ value, onCommit, min, max, ...props }) {
     setDraft(null);
     if (text === formatNumber(value)) return;
     const parsed = text.trim() ? Number(text) : NaN;
-    const next = Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : value;
+    const bounded = Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : value;
+    const next = integer ? Math.round(bounded) : bounded;
     if (next !== value) onCommit(next);
   };
   return <input {...props} type="number" min={min} max={max} value={draft ?? formatNumber(value)}
@@ -59,12 +66,14 @@ function PolylineNumberInput({ value, onCommit, min, max, ...props }) {
 }
 
 export default function PolylineTeachingPanel({ open, active, container, getContext, savedPaths, onSave, onDelete, onClose, onBusyChange, sceneRevision, openRequest, onRequestHandled, onSuggestionChange, onExecutionGhostsChange, showRobot }) {
-  const [path, setPath] = useState(fresh);
+  const [path, setPath] = useState(() => fresh(loadPolylinePreferences()));
   const [selected, setSelected] = useState(-1);
   const [operation, setOperation] = useState('append');
   const [status, setStatus] = useState('editing');
   const [message, setMessage] = useState('');
   const [plan, setPlan] = useState(null);
+  const [explanationOpen, setExplanationOpen] = useState(false);
+  const [algorithmHelpOpen, setAlgorithmHelpOpen] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [travel, setTravel] = useState({ tool: 0, base: 0 });
   const [progress, setProgress] = useState(null);
@@ -74,7 +83,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const [executionGhosts, setExecutionGhosts] = useState([]);
   const bodyRef = useRef(null);
   const live = useRef({});
-  live.current = { path, plan, status, selected, operation, getContext, open, active };
+  live.current = { path, plan, status, selected, operation, history, getContext, open, active };
   const abortRef = useRef(null), runtimeRef = useRef(null), animationRef = useRef(null), snapshotRef = useRef(null);
   const savingRef = useRef(false);
   const autoPlayRef = useRef(false), handledOpenRequestRef = useRef(null);
@@ -83,17 +92,25 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const busy = busyStatuses.includes(status);
   const warnings = plan?.warnings || [];
   const executable = isPolylinePlanExecutable(plan);
+  const canExplain = status === 'failed' && !executable && plan?.approachSearch?.lastStage === 'deep' && Boolean(plan?.issue);
   const playbackDuration = executable ? (runtimeRef.current?.plan || executedRef.current?.plan || plan).durationMs : 0;
   const previewPlan = plan || executedRef.current?.plan;
   const toolZ = path.tcpOffset?.[2] || 0;
   const toolDirection = Math.sign(toolZ) || (path.toolAxisDirection === 1 ? 1 : -1);
   const baseOptions = { ...POLYLINE_BASE_DEFAULTS, ...path.base };
   const baseMoving = baseOptions.sync || baseOptions.search;
+  const algorithmSettings = { ...POLYLINE_DEFAULTS, ...path.settings };
+  const modifiedParameters = POLYLINE_ALGORITHM_FIELDS.filter((field) => algorithmSettings[field.key] !== field.default).length;
   const currentContext = getContext();
   const waistJoints = getRobotEndEffector(currentContext.robot, path.side)?.joints.filter(isPolylineWaistJoint) || [];
   const selectedBasePose = plan?.baseSearch ? polylineBasePose(plan.baseReference, plan.selectedBase) : null;
   const selectedHeading = selectedBasePose ? new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().fromArray(selectedBasePose.quaternion)) : null;
+  useEffect(() => {
+    if (open && active) savePolylinePreferences(path);
+  }, [open, active, path.side, path.tcpOffset, path.toolAxisDirection, path.settings, path.base]);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
+  useEffect(() => { setExplanationOpen(false); }, [plan, status, open, active]);
+  useEffect(() => { if (!open || !active) setAlgorithmHelpOpen(false); }, [open, active]);
   const clearTrace = (preserveExecutionGhosts = false) => {
     executedRef.current = null;
     if (!preserveExecutionGhosts) setExecutionGhosts([]);
@@ -133,9 +150,16 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     setPath(next); setSelected(nextSelected); setPlan(null); setStatus('editing'); clearTrace();
     setMessage('路线已更新，请检查后执行。');
   };
+  const undo = () => {
+    const { history: items, status: currentStatus } = live.current;
+    if (busyStatuses.includes(currentStatus) || !items.length) return;
+    const previous = items.at(-1);
+    setHistory(items.slice(0, -1)); setPath(previous); setSelected(-1); setPlan(null); setStatus('editing'); clearTrace();
+    setMessage('已撤销上一步，可继续点选或检查路径。');
+  };
   const startNewPolyline = () => {
     if (busyStatuses.includes(live.current.status)) return;
-    edit(fresh(), -1); setOperation('append'); setElapsed(0); setMessage('');
+    edit(fresh(live.current.path), -1); setOperation('append'); setElapsed(0); setMessage('');
     bodyRef.current?.scrollTo({ top: 0 });
   };
   const setToolDistance = (distance, direction = toolDirection) => {
@@ -314,8 +338,22 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       stopEvent(event);
     };
     const key = (event) => {
-      if (event.key !== 'Escape' || /INPUT|TEXTAREA|SELECT/.test(event.target.tagName)) return;
-      if (event.target.closest?.('[role="dialog"], [role="menu"]')) return;
+      const target = event.target;
+      if (event.defaultPrevented || event.isComposing || target?.isContentEditable || /INPUT|TEXTAREA|SELECT/.test(target?.tagName)) return;
+      if (target?.closest?.('[role="dialog"], [role="menu"], [aria-modal="true"], dialog[open]')) return;
+      const undoKey = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
+        && (event.code === 'KeyZ' || event.key?.toLowerCase() === 'z');
+      if (undoKey) {
+        // Preserve the space-ball's drag undo while editing an end effector.
+        // Otherwise consume the shortcut even with an empty point history, so
+        // it cannot fall through to the viewer and move the robot unexpectedly.
+        if (live.current.getContext().endEffectorEditing) return;
+        stopEvent(event);
+        if (busyStatuses.includes(live.current.status) || savingRef.current || event.repeat) return;
+        if (gesture) { cancelled({ pointerId: gesture.id }); return; }
+        undo(); return;
+      }
+      if (event.key !== 'Escape') return;
       // Escape first cancels the arm adjustment via the viewer's handler;
       // the polyline panel and its authored points remain open.
       if (live.current.getContext().endEffectorEditing) return;
@@ -351,7 +389,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     const { scene, camera, canvas } = getContext();
     if (!scene || !canvas) return undefined;
     const group = new THREE.Group(); scene.add(group); overlayRef.current = group;
-    const showApproach = previewVisible && isPolylinePlanExecutable(plan) && plan.approachSearch?.mode === 'detour';
+    const showApproach = previewVisible && isPolylinePlanExecutable(plan) && plan.approachSearch?.waypoints?.length > 0;
     canvas.dataset.polylineApproachVisible = String(Boolean(showApproach));
     if (showApproach) {
       const segments = plan.segments.filter((segment) => segment.index < 0);
@@ -445,26 +483,37 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     const controllerAbort = new AbortController(); abortRef.current = controllerAbort;
     try {
       const result = await planPolylineInWorker({ robot: context.robot, geometry: context.geometry, path: withOrientation,
+        savedPaths: savedPaths.map(({ path: saved }) => saved),
         lockedJointNames: context.lockedJointNames, signal: controllerAbort.signal, onProgress: (value) => {
           setProgress(value);
           if (value.phase === 'suggestion') setMessage('到起点的连续逆解失败，正在寻找可行参考姿态…');
-          if (value.phase === 'approach-search') setMessage('直线接近发生碰撞，正在尝试替代姿态与绕行路线…');
+          if (value.phase === 'approach-search') setMessage(value.searchStage === 'deep'
+            ? '快速搜索未找到完整路线，正在深入搜索接近方案…'
+            : '直线接近发生碰撞，正在快速搜索替代姿态与绕行路线…');
         } });
       if (controllerAbort.signal.aborted) return;
       if (!contextMatches(getContext())) { cancel('机器人或约束已改变，请重新检查。'); return; }
       const canExecute = isPolylinePlanExecutable(result);
+      const search = result.approachSearch;
+      const searchHint = search ? ` · 接近搜索：快速 ${search.quickAttempts} 种${search.lastStage === 'deep' ? ` + 深入 ${search.deepAttempts} 种` : ''}，耗时 ${(search.elapsedMs / 1000).toFixed(1)} s${search.stopReason === 'time-budget'
+        ? `；深入搜索达到 ${(search.deepBudgetMs / 1000).toFixed(0)} s 时限${canExecute ? '，保留已检查的可执行部分' : ''}`
+        : search.stopReason === 'candidate-limit' ? '；已达深入搜索方案上限' : ''}` : '';
       const approachHint = result.issue?.phase === 'approach'
         ? `。直线前往 P0 约 ${((result.issue.distanceFromStart || 0) * 1000).toFixed(1)} mm 处未通过检查；${result.approachSearch
-          ? `已尝试 ${result.approachSearch.attempts} 种接近方案，未找到可执行路线，不代表全局不可达` : '尚未进行接近路线绕障搜索'}${action.base.allowPartial && !action.base.sync && !action.base.search
+          ? '当前搜索未找到可执行路线，不代表全局不可达' : '尚未进行接近路线绕障搜索'}${action.base.allowPartial && !action.base.sync && !action.base.search
           ? '；最大保障需先到达 P0，尚未开始划线' : ''}` : '';
       const recoveredHint = result.approachSearch?.found
-        ? result.approachSearch.mode === 'detour' ? ' · 已规划绕行到 P0，紫色虚线为接近路线' : ' · 已采用无碰撞的替代接近姿态' : '';
+        ? `${search.stage === 'deep' ? ' · 深入搜索找到接近路线' : ''}${search.mode === 'successful-path'
+          ? ` · 已参考最近成功轨迹「${search.sourcePathName}」接近 P0${search.waypoints?.length ? '，紫色虚线为接近路线' : ''}` : search.mode === 'saved-path'
+          ? ` · 已参考「${search.sourcePathName}」接近 P0，紫色虚线为接近路线`
+          : search.mode === 'detour' ? ' · 已规划绕行到 P0，紫色虚线为接近路线' : ' · 已采用无碰撞的替代接近姿态'}`
+        : search?.reachedStart ? '。接近路线已验证到达 P0，但划线未通过；当前搜索结果不代表全局不可达' : '';
       autoPlayRef.current = autoPlay && canExecute ? result : false;
       setPlan(result); setStatus(canExecute ? 'ready' : 'failed');
-      setMessage(result.partial ? `最大保障：可执行 ${partialSummary(result)}，将在已检查部分的终点停止。${recoveredHint}`
+      setMessage((result.partial ? `最大保障：可执行 ${partialSummary(result)}，将在已检查部分的终点停止。${recoveredHint}`
         : result.complete ? `${result.warnings?.length ? `检查通过 · ${result.warnings.length} 项表面警告，可执行划线` : '检查通过'} · 最大采样误差 ${(result.maximumError * 1000).toFixed(2)} mm · ${result.checks} 次姿态检查${recoveredHint}`
-        : `${checkLocation(result.issue, withOrientation.points.length)}：${result.issue.message}${approachHint}${result.suggestionSearch && !result.suggestion
-          ? '。在当前搜索范围内未找到通过完整路线验证的参考姿态。' : ''}`);
+        : `${checkLocation(result.issue, withOrientation.points.length)}：${result.issue.message}${approachHint}${recoveredHint}${result.suggestionSearch && !result.suggestion
+          ? '。在当前搜索范围内未找到通过完整路线验证的参考姿态。' : ''}`) + searchHint);
     } catch (error) {
       if (error.name !== 'AbortError') { setStatus('failed'); setMessage(error.message); }
     } finally { if (abortRef.current === controllerAbort) abortRef.current = null; }
@@ -587,6 +636,8 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     aria-label="表面折线示教" data-path-id={path.id} data-status={status} data-point-count={path.points.length} data-undo-count={history.length} data-warning-count={warnings.length}
     data-plan-partial={Boolean(plan?.partial)} data-plan-executable={executable} data-planned-distance={plan?.distance || 0}
     data-approach-mode={plan?.approachSearch?.mode || ''}
+    data-approach-stage={status === 'checking' ? progress?.searchStage || '' : plan?.approachSearch?.stage || plan?.approachSearch?.lastStage || ''}
+    data-approach-stop-reason={plan?.approachSearch?.stopReason || ''}
     data-suggestion-found={Boolean(plan?.suggestion)}
     data-planned-end={plan?.stoppedAt ? JSON.stringify(plan.stoppedAt.position) : ''}
     data-elapsed-ms={elapsed} data-duration-ms={playbackDuration} data-tool-travel-mm={travel.tool * 1000} data-base-travel-mm={travel.base * 1000}>
@@ -624,12 +675,12 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         <label className="polyline-teaching__field">名称<input aria-label="折线名称" value={path.name} disabled={busy} maxLength={80}
           onChange={(event) => setPath({ ...path, name: event.target.value })} /></label>
         {path.id && <button type="button" disabled={busy} aria-label="取消选择并新建折线"
-          title="保留已保存记录，开始点选新折线 · Esc" onClick={startNewPolyline}>取消选择 <kbd>Esc</kbd></button>}
+          title="保留当前参数与已保存记录，开始点选新折线 · Esc" onClick={startNewPolyline}>取消选择 <kbd>Esc</kbd></button>}
       </div>
       <div className="polyline-teaching__columns">
         <label className="polyline-teaching__field">执行机械臂<select aria-label="折线执行机械臂" disabled={busy} value={path.side}
           onChange={(event) => edit(polylineWithSide(path, event.target.value))}><option value="left">左臂 · tool_left</option><option value="right">右臂 · tool_right</option></select></label>
-        <label className="polyline-teaching__field">速度上限 · mm/s<PolylineNumberInput aria-label="折线速度 mm/s" min={1} max={200} step="5" disabled={busy}
+        <label className="polyline-teaching__field">速度上限 · mm/s<PolylineNumberInput aria-label="折线速度 mm/s" min={1} max={POLYLINE_MAX_SPEED * 1000} step="5" disabled={busy}
           value={path.settings.speed * 1000} onCommit={(value) => edit({ ...path, settings: { ...path.settings, speed: value / 1000 } })} /></label>
       </div>
       <div className="polyline-teaching__columns">
@@ -641,6 +692,9 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         </select></label>
       </div>
       <p className="polyline-teaching__hint">沿所选工具轴保留 0–1000 mm 的距离，切换方向自动更新偏移。距离以工具末端原点为准，可按末端工具的安装位置调整。</p>
+      <div className="polyline-teaching__constraints">
+      <button type="button" className="polyline-teaching__constraints-help" aria-label="查看算法约束说明" title="勾选项与参数说明"
+        aria-haspopup="dialog" onClick={() => setAlgorithmHelpOpen(true)}><CircleHelp size={16} /></button>
       <fieldset className="polyline-teaching__base" disabled={busy}><legend>算法约束</legend>
         <div className="polyline-teaching__base-modes">
           <div className="polyline-teaching__constraint-row" role="group" aria-label="底盘">
@@ -670,26 +724,39 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
             </div>
           </div>
         </div>
-        <p className="polyline-teaching__hint">{path.settings.uniformSpeed !== false
-          ? '划线中保持统一速度，在精度容差内平滑过弯；起终点平滑加减速，受关节与转弯限制时降低整体速度。'
-          : '按各段运动限制调整速度，严格经过折线顶点，拐角减速到停。'}</p>
-        {plan?.speedProfile && <p className="polyline-teaching__hint" aria-label="匀速划线结果">
-          规划划线速度：{(plan.speedProfile.cruiseSpeed * 1000).toFixed(1)} mm/s · 圆角偏移 ≤ {(plan.speedProfile.blendTolerance * 1000).toFixed(2)} mm
-          {plan.speedProfile.cornerStops > 0 && `；${plan.speedProfile.cornerStops} 处折返需停车换向。`}
-        </p>}
-        <p className="polyline-teaching__hint">{baseOptions.search
-          ? baseOptions.sync ? '先搜索合适的起始位置，再由底盘与机械臂同步沿线运动。' : '先搜索并预定位，划线期间底盘位置与姿态保持不变。'
-          : baseOptions.sync ? '从当前位置开始，底盘平移、转向与机械臂联合规划。'
-            : baseOptions.allowPartial ? '底盘保持不动；无法完整划线时，执行从起点连续通过检查的部分，到可达终点停止。'
-              : '严格保持当前底盘位置与姿态；可勾选最大保障，保留从起点可执行的部分。'}</p>
-        {!baseMoving && baseOptions.waistAssist && <p className="polyline-teaching__hint">腰部仅在折线规划中临时参与，全局关节锁定保持不变；另一臂保持关节角并随腰部移动，仍检查整机碰撞。</p>}
-        {baseMoving && <><div className="polyline-teaching__columns">
+        {baseMoving && <div className="polyline-teaching__columns">
           <label className="polyline-teaching__field">水平范围 · m<PolylineNumberInput aria-label="底盘水平范围 m" min={0.05} max={10} step="0.1" value={baseOptions.range}
             onCommit={(value) => edit({ ...path, base: { ...baseOptions, range: value } })} /></label>
           <label className="polyline-teaching__field">转向范围 · ±°<PolylineNumberInput aria-label="底盘转向范围 °" min={0} max={180} step="15" value={baseOptions.yawRange}
             onCommit={(value) => edit({ ...path, base: { ...baseOptions, yawRange: value } })} /></label>
-        </div><p className="polyline-teaching__hint">范围以检查时的底盘位置和朝向为中心；保持高度和倾斜。平移上限 100 mm/s，转向上限 15°/s。预定位不划线。</p></>}
+        </div>}
+        <details className="polyline-teaching__algorithm">
+          <summary>高级参数<span>{modifiedParameters ? `${modifiedParameters} 项已调整` : '默认配置'}</span></summary>
+          {POLYLINE_ALGORITHM_GROUPS.map((group) => <div key={group.key} className="polyline-teaching__parameter-group"
+            role="group" aria-label={group.label} data-inactive={group.fixedBaseOnly && baseMoving}>
+            <div className="polyline-teaching__parameter-title">{group.label}{group.fixedBaseOnly && <small>{baseMoving ? '当前不生效' : '底盘静止'}</small>}</div>
+            <div className="polyline-teaching__columns">{group.fields.map((field) => {
+              const scale = field.scale || 1;
+              const inactive = (group.fixedBaseOnly && baseMoving)
+                || (field.key === 'deepSearchCandidates' && !algorithmSettings.deepSearchSeconds)
+                || (field.key === 'postureSamples' && !algorithmSettings.postureRetries);
+              return <label key={field.key} className="polyline-teaching__field">{field.label} · {field.unit}
+                <PolylineNumberInput aria-label={`${field.label} ${field.unit}`} min={field.min * scale} max={field.max * scale}
+                  step={field.step} integer={field.integer} disabled={inactive} value={algorithmSettings[field.key] * scale}
+                  onCommit={(value) => edit({ ...path, settings: { ...path.settings, [field.key]: value / scale } })} />
+              </label>;
+            })}</div>
+          </div>)}
+          <button type="button" className="polyline-teaching__parameter-reset" disabled={!modifiedParameters}
+            onClick={() => edit({ ...path, settings: { ...path.settings, ...POLYLINE_ALGORITHM_DEFAULTS } })}>
+            <RotateCcw size={12} />恢复高级参数默认值</button>
+        </details>
       </fieldset>
+      </div>
+      {plan?.speedProfile && <p className="polyline-teaching__hint" aria-label="匀速划线结果">
+        规划划线速度：{(plan.speedProfile.cruiseSpeed * 1000).toFixed(1)} mm/s · 圆角偏移 ≤ {(plan.speedProfile.blendTolerance * 1000).toFixed(2)} mm
+        {plan.speedProfile.cornerStops > 0 && `；${plan.speedProfile.cornerStops} 处折返需停车换向。`}
+      </p>}
       {plan?.partial && <div className="polyline-teaching__partial-result" role="note" aria-label="最大保障结果">
         <strong>最大保障 · 部分轨迹可执行</strong>
         <span>可划线 {partialSummary(plan)}</span>
@@ -722,9 +789,9 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         <button type="button" disabled={busy} aria-label={`删除折线点 P${index}`} onClick={() => edit({ ...path, closed: path.closed && path.points.length > 3, points: path.points.filter((_, i) => i !== index) }, -1)}><Trash2 size={12} /></button>
       </li>)}</ol> : <div className="polyline-teaching__empty"><MousePointer2 size={24} /><strong>在物体上点出第一条路线</strong><span>单击添加点，拖动已有点重新吸附表面。</span></div>}
       <div className="polyline-teaching__row"><label><input type="checkbox" checked={path.closed} disabled={busy || path.points.length < 3}
-        onChange={(event) => edit({ ...path, closed: event.target.checked })} />闭合折线</label><button type="button" disabled={busy || !history.length} onClick={() => {
-          const previous = history.at(-1); setHistory(history.slice(0, -1)); setPath(previous); setSelected(-1); setPlan(null); setStatus('editing'); clearTrace();
-        }}><RotateCcw size={12} />撤销</button><button type="button" disabled={busy} onClick={startNewPolyline}>新建</button></div>
+        onChange={(event) => edit({ ...path, closed: event.target.checked })} />闭合折线</label><button type="button" disabled={busy || !history.length}
+          title="撤销上一步 · Ctrl+Z / ⌘Z" aria-keyshortcuts="Control+Z Meta+Z" onClick={undo}>
+          <RotateCcw size={12} />撤销</button><button type="button" disabled={busy} title="保留当前工具与算法参数，重新点选折线" onClick={startNewPolyline}>新建</button></div>
       <p className="polyline-teaching__hint">{path.settings.uniformSpeed !== false ? '容差内平滑过弯' : '严格直线连接 · 拐角停顿'} · 橘黄色为已执行部分；{previewPlan?.partial ? '绿色为待执行的可达部分，红色为不可执行部分。' : '未执行部分保持青绿色；表面警告见提示列表。'}{baseMoving && '紫色为底盘计划路径，箭头表示搜索选中的起始朝向。'}</p>
       <details className="polyline-teaching__library"><summary>已保存折线 <b>{savedPaths.length}</b></summary>
         {savedPaths.length ? savedPaths.map(({ taskId, taskName, path: saved }) => <div key={`${taskId}:${saved.id}`}>
@@ -737,9 +804,15 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       </details>
     </div>
     <footer className="polyline-teaching__footer">
-      {message && <div className="polyline-teaching__message" role="status" data-error={status === 'failed'}>{message}
-        {status === 'checking' && progress && <small>{['search', 'suggestion', 'approach-search'].includes(progress.phase) ? `${progress.stage} ${progress.candidate}/${progress.candidates}`
-          : progress.phase === 'positioning' ? '底盘预定位' : progress.segmentIndex < 0 ? '到起点' : `线段 ${progress.segmentIndex + 1}/${progress.total}`} · {Math.round(progress.fraction * 100)}%</small>}</div>}
+      {message && <div className="polyline-teaching__message" role="status" data-error={status === 'failed'}
+        data-has-help={canExplain} data-warning={status === 'checking' && progress?.phase === 'approach-search' && progress.searchStage === 'deep'}>{message}
+        {canExplain && <button type="button" className="polyline-teaching__explain" aria-label="查看深入搜索失败说明" title="查看原因与调整建议"
+          aria-haspopup="dialog" onClick={() => setExplanationOpen(true)}><CircleHelp size={16} /></button>}
+        {status === 'checking' && progress && <small>{progress.phase === 'approach-search'
+          ? `${progress.searchStage === 'deep' ? '深入搜索' : '快速搜索'} ${progress.candidate}/${progress.candidates} · ${progress.stage} · 本方案 ${Math.round(progress.fraction * 100)}% · 已耗时 ${(progress.elapsedMs / 1000).toFixed(1)} s${progress.searchStage === 'deep'
+            ? `（深入 ${(progress.deepElapsedMs / 1000).toFixed(1)}/${(progress.deepBudgetMs / 1000).toFixed(0)} s）` : ''}`
+          : `${['search', 'suggestion'].includes(progress.phase) ? `${progress.stage} ${progress.candidate}/${progress.candidates}`
+            : progress.phase === 'positioning' ? '底盘预定位' : progress.segmentIndex < 0 ? '到起点' : `线段 ${progress.segmentIndex + 1}/${progress.total}`} · ${Math.round(progress.fraction * 100)}%`}</small>}</div>}
       {executable && <div className="polyline-teaching__progress"><progress max={playbackDuration} value={elapsed} /><span>{(elapsed / 1000).toFixed(1)} / {(playbackDuration / 1000).toFixed(1)} s</span></div>}
       {executable && <div className="polyline-teaching__motion" aria-label="划线实际移动距离">
         <span>末端已移动 <b>{(travel.tool * 1000).toFixed(1)}</b> mm
@@ -752,8 +825,11 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         {status === 'playing' ? <button type="button" onClick={pause}><Pause size={14} />暂停</button>
           : <button type="button" disabled={!executable || !['ready', 'paused', 'completed'].includes(status)} onClick={play}><Play size={14} />{status === 'paused' ? '继续' : plan?.partial ? '执行可达部分' : '执行划线'}</button>}
         {busy && status !== 'saving' && <button type="button" aria-label="停止折线任务" onClick={() => cancel()}><Square size={12} /></button>}
-        <button type="button" disabled={busy || path.points.length < 2} onClick={save}><Save size={14} />保存</button>
+        {!['checking', 'playing', 'paused'].includes(status) && <button type="button" disabled={busy || path.points.length < 2} onClick={save}><Save size={14} />保存</button>}
       </div>
     </footer>
+    {canExplain && explanationOpen && <PolylineSearchExplanationDialog plan={plan} path={path} waistAvailable={waistJoints.length > 0}
+      onClose={() => setExplanationOpen(false)} />}
+    {algorithmHelpOpen && <PolylineAlgorithmHelpDialog path={path} onClose={() => setAlgorithmHelpOpen(false)} />}
   </section>, container);
 }

@@ -4,7 +4,7 @@ import { restoreMobileTeachingRobot } from './mobileTeachingKinematics.js';
 import { getRobotJointLimits } from './robotJointLimits.js';
 import { polylineJointExclusions } from './polylineTeachingJoints.js';
 import { solveEndEffectorIk } from './robotEndEffectorIk.js';
-import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
+import { createMobileCollisionChecker, prepareMobileCollisionEnvironment } from './mobileTeachingCollision.js';
 import { normalizePolyline, polylineBasePose, polylineVertices } from './polylineTeaching.js';
 import { polylineBaseCandidates } from './polylineTeachingBase.js';
 import { planPolyline } from './polylineTeachingSolver.js';
@@ -75,7 +75,8 @@ export async function planPolylineWithSuggestion({ snapshot, checkpoint = async 
   const candidates = polylineBaseCandidates(polylineVertices(action), tcp.getWorldPosition(new THREE.Vector3()), reference, action.base)
     .filter((candidate) => Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8)
     .sort((a, b) => Math.hypot(a.x, a.y) - Math.hypot(b.x, b.y) || Math.abs(a.yaw) - Math.abs(b.yaw)).slice(0, 24);
-  const checker = await createMobileCollisionChecker(robot, options.environment, checkpoint);
+  const preparedEnvironment = await prepareMobileCollisionEnvironment(options.environment, checkpoint);
+  const checker = await createMobileCollisionChecker(robot, options.environment, checkpoint, { preparedEnvironment });
   const seen = new Set();
   let attempts = 0, checked = 0;
   for (const movedBase of [false, true]) {
@@ -111,7 +112,7 @@ export async function planPolylineWithSuggestion({ snapshot, checkpoint = async 
       // Use the achieved orientation, just as a later user-initiated check will.
       const validationRobot = restoreMobileTeachingRobot(snapshot);
       applyRobotJointValues(validationRobot, joints);
-      const verified = await planPolyline({ ...options, robot: validationRobot, parentMatrix: layer.matrixWorld.toArray(), checkpoint,
+      const verified = await planPolyline({ ...options, robot: validationRobot, parentMatrix: layer.matrixWorld.toArray(), checkpoint, preparedEnvironment,
         path: { ...action, quaternion, base: { ...action.base, search: false, allowPartial: false } },
         onProgress: (progress) => onProgress({ ...progress, phase: 'suggestion', stage: '验证参考姿态的完整路线',
           candidate: checked, candidates: checked }) });

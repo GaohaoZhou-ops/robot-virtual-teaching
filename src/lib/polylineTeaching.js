@@ -1,9 +1,10 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { samplePolylineProgress } from './polylineTeachingTiming.js';
 import { samplePolylineCurve } from './polylineTeachingCurve.js';
+import { POLYLINE_ALGORITHM_DEFAULTS, POLYLINE_ALGORITHM_FIELDS } from './polylineTeachingParameters.js';
 
-export const POLYLINE_DEFAULTS = Object.freeze({ speed: 0.05, acceleration: 0.2,
-  step: 0.004, tolerance: 0.001, rotationTolerance: 0.5, uniformSpeed: true });
+export const POLYLINE_MAX_SPEED = 0.3;
+export const POLYLINE_DEFAULTS = Object.freeze({ speed: 0.3, uniformSpeed: true, ...POLYLINE_ALGORITHM_DEFAULTS });
 export const POLYLINE_MAX_POINTS = 500;
 export const POLYLINE_BASE_DEFAULTS = Object.freeze({ sync: false, search: false, allowPartial: false, waistAssist: false, range: 2, yawRange: 180 });
 const finiteVector = (value, size) => Array.isArray(value) && value.length === size && value.every(Number.isFinite);
@@ -25,10 +26,9 @@ export function normalizePolyline(value) {
     yawRange: Number(value.base?.yawRange ?? POLYLINE_BASE_DEFAULTS.yawRange) };
   if (!Number.isFinite(base.range) || base.range < 0.05 || base.range > 10
     || !Number.isFinite(base.yawRange) || base.yawRange < 0 || base.yawRange > 180) return null;
-  for (const [key, low, high] of [['speed', 0.001, 0.2], ['acceleration', 0.01, 0.5],
-    ['step', 0.0005, 0.01], ['tolerance', 0.0002, 0.003], ['rotationTolerance', 0.1, 1]]) {
+  for (const { key, min: low, max: high, integer } of [{ key: 'speed', min: .001, max: POLYLINE_MAX_SPEED }, ...POLYLINE_ALGORITHM_FIELDS]) {
     const number = Number(value.settings?.[key] ?? POLYLINE_DEFAULTS[key]);
-    if (!Number.isFinite(number) || number < low || number > high) return null;
+    if (!Number.isFinite(number) || number < low || number > high || (integer && !Number.isInteger(number))) return null;
     settings[key] = number;
   }
   return { id: String(value.id || ''), name: String(value.name || '表面折线'), version: 1,

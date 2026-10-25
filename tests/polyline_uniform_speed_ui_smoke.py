@@ -83,7 +83,7 @@ def run():
             saved = [path for task in exported['virtualTeaching']['tasks'] for path in task.get('polylines', [])]
             assert len(saved) == 1 and saved[0]['settings']['uniformSpeed'] is False
             panel.get_by_role('button', name='新建', exact=True).click()
-            expect(uniform).to_be_checked()
+            expect(uniform).not_to_be_checked()
             page.reload(wait_until='networkidle')
             page.locator('[data-session-state=ready]').wait_for()
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded')

@@ -1,0 +1,45 @@
+.polyline-search-explanation { width:min(740px, calc(100vw - 32px)); max-height:calc(100dvh - 40px); padding:0; border:1px solid #73504b; border-radius:8px; background:#0c1821; color:#dbe9ef; box-shadow:0 24px 80px #0009; font-size:12px; }
+.polyline-search-explanation[open] { display:flex; flex-direction:column; }
+.polyline-search-explanation::backdrop { background:#02090db8; backdrop-filter:blur(3px); }
+.polyline-search-explanation header { display:flex; align-items:center; gap:12px; padding:18px 22px; border-bottom:1px solid #3d3438; flex-shrink:0; }
+.polyline-search-explanation header>svg { color:var(--amber); }
+.polyline-search-explanation header>div { flex:1; }
+.polyline-search-explanation header span { font-size:10px; color:#b99891; letter-spacing:1px; }
+.polyline-search-explanation h2 { margin:3px 0 0; font-size:17px; font-weight:600; }
+.polyline-search-explanation button { display:inline-flex; align-items:center; justify-content:center; padding:8px 14px; border:1px solid #417a86; border-radius:5px; background:#172d39; color:#b4e9ed; cursor:pointer; font:inherit; }
+.polyline-search-explanation header button { padding:5px; background:transparent; border-color:transparent; color:#a8c0cb; }
+.polyline-search-explanation button:hover { border-color:#60cbd8; color:#ecf8fc; }
+.polyline-search-explanation button:focus-visible,.polyline-search-explanation summary:focus-visible { outline:2px solid #6ae0e2; outline-offset:3px; }
+.polyline-search-explanation__body { padding:18px 22px; overflow:auto; min-height:0; line-height:1.8; overflow-wrap:anywhere; }
+.polyline-search-explanation__body>section { margin:18px 0; }
+.polyline-search-explanation h3 { margin:0 0 10px; color:#c5dde5; font-size:13px; font-weight:600; }
+.polyline-search-explanation p { margin:8px 0; color:#b7cbd5; }
+.polyline-search-explanation small { font-size:11px; color:#8faab7; line-height:1.7; }
+.polyline-search-explanation__conclusion { padding:11px 14px; border-left:2px solid #ff8b79; background:#34272b; }
+.polyline-search-explanation__conclusion p { margin:0 0 6px; color:#ffb4a8; }
+.polyline-search-explanation__conclusion small { color:#c5afb0; }
+.polyline-search-explanation__stats { display:grid; grid-template-columns:repeat(3,1fr); margin:0; border:1px solid #2a414d; border-radius:5px; background:#10232d; }
+.polyline-search-explanation__stats>div { padding:10px 14px; border-right:1px solid #2a414d; }
+.polyline-search-explanation__stats>div:last-child { border-right:0; }
+.polyline-search-explanation dt { color:#8faab7; font-size:11px; }
+.polyline-search-explanation dd { margin:0; }
+.polyline-search-explanation__stats dd { color:#dbe9ef; font-size:18px; font-variant-numeric:tabular-nums; }
+.polyline-search-explanation p.polyline-search-explanation__location { color:#f0d49f; font-size:11px; }
+.polyline-search-explanation p.polyline-search-explanation__cause { padding:10px 12px; border:1px solid #59413e; background:#241f24; color:#ffb4a8; }
+.polyline-search-explanation p.polyline-search-explanation__note { border-left:2px solid #746144; padding-left:10px; color:#d4c393; }
+.polyline-search-explanation ol { margin:0; padding-left:22px; }
+.polyline-search-explanation li { padding-left:5px; margin:12px 0; }
+.polyline-search-explanation li::marker { color:#70bdc8; font-variant-numeric:tabular-nums; }
+.polyline-search-explanation li strong { color:#d5e8ee; font-size:12px; font-weight:500; }
+.polyline-search-explanation li p { margin:3px 0; }
+.polyline-search-explanation details { border-top:1px solid #2a3b45; padding:10px 0; }
+.polyline-search-explanation summary { cursor:pointer; color:#9dc8d2; }
+.polyline-search-explanation__constraints { margin:10px 0 0; }
+.polyline-search-explanation__constraints>div { display:grid; grid-template-columns:130px 1fr; gap:12px; padding:5px 0; }
+.polyline-search-explanation__constraints dd { font-size:11px; color:#bdd3dc; }
+.polyline-search-explanation footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 22px; border-top:1px solid #2a414d; flex-shrink:0; }
+@media (max-width:520px) {
+  .polyline-search-explanation header,.polyline-search-explanation__body,.polyline-search-explanation footer { padding:14px; }
+  .polyline-search-explanation__stats>div { padding:8px; }
+  .polyline-search-explanation__constraints>div { grid-template-columns:108px 1fr; gap:8px; }
+}
