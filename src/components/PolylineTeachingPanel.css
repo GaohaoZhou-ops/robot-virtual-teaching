@@ -35,10 +35,13 @@
 .polyline-teaching__columns { display:grid; grid-template-columns:1.1fr 1fr; gap:10px; }
 .polyline-teaching__base { margin:0; min-width:0; padding:10px; border:1px solid #36505c; border-radius:7px; display:flex; flex-direction:column; gap:9px; }
 .polyline-teaching__base legend { color:#b7d9df; padding:0 5px; }
-.polyline-teaching__base-modes { display:flex; flex-wrap:wrap; gap:9px; }
-.polyline-teaching__base-fixed { display:flex; flex-basis:100%; gap:16px; }
+.polyline-teaching__base-modes { display:grid; gap:9px; font-size:11px; }
+.polyline-teaching__constraint-row { display:grid; grid-template-columns:4em minmax(0,1fr); align-items:center; gap:10px; }
+.polyline-teaching__constraint-label { display:flex; gap:4px; color:#9cb6c2; white-space:nowrap; }
+.polyline-teaching__constraint-label>span { flex:1; text-align-last:justify; }
+.polyline-teaching__constraint-options { display:flex; align-items:center; flex-wrap:wrap; gap:9px 12px; }
 .polyline-teaching__base-modes label.is-disabled { opacity:.45; cursor:default; }
-.polyline-teaching__base-modes label { display:flex; align-items:center; gap:3px; font-size:11px; cursor:pointer; }
+.polyline-teaching__base-modes label { display:flex; align-items:center; gap:3px; font-size:11px; white-space:nowrap; cursor:pointer; }
 .polyline-teaching__base-modes input { margin:0; accent-color:#50dce6; }
 .polyline-teaching__base-result { display:flex; flex-direction:column; gap:6px; padding:10px; background:#143137; border:1px solid #32626b; border-radius:7px; font-size:11px; line-height:1.6; }
 .polyline-teaching__base-result small { color:#9dbec5; }
@@ -48,7 +51,8 @@
 .polyline-teaching__suggestion small { color:#9dbec5; }
 .polyline-teaching__suggestion label,.polyline-teaching__suggestion>div { display:flex; align-items:center; gap:6px; }
 .polyline-teaching__suggestion button { font-size:10px; }
-.polyline-teaching__motion { display:flex; justify-content:space-between; gap:8px; color:#9cb6c2; font-size:10px; font-variant-numeric:tabular-nums; }
+.polyline-teaching__motion { display:flex; justify-content:space-between; flex-wrap:wrap; gap:4px 8px; color:#9cb6c2; font-size:10px; font-variant-numeric:tabular-nums; }
+.polyline-teaching__motion>span { white-space:nowrap; }
 .polyline-teaching__motion b { color:#dbe9ef; font-weight:500; }
 .polyline-teaching__tcp summary { color:#dbc998; cursor:pointer; font-size:11px; }
 .polyline-teaching__tcp-fields { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0; }
@@ -70,8 +74,6 @@
 .polyline-teaching input[type=checkbox] { accent-color:#4cb6c3; }
 .polyline-teaching__row button { padding:5px 7px; font-size:10px; }
 .polyline-teaching__hint { color:#8aa7b5; font-size:10px; line-height:1.8; margin:0; }
-.polyline-teaching__tool-direction { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px; color:#9cb6c2; font-size:10px; }
-.polyline-teaching__tool-direction button { padding:4px 7px; font-size:10px; }
 .polyline-teaching__message { font-size:11px; line-height:1.7; background:#142b36; border-left:2px solid #4a8d9f; padding:8px 10px; }
 .polyline-teaching__message[data-error=true] { color:#ffb4a8; background:#34272b; border-color:#ff8b79; }
 .polyline-teaching__message small { display:block; color:#a5d4df; }

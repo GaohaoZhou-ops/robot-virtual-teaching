@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { setRobotJointValue } from '../src/lib/robotLoader.js';
 import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { normalizePolyline, repeatPolylinePlan, samplePolylinePlan } from '../src/lib/polylineTeaching.js';
+import { normalizePolyline, repeatPolylinePlan, samplePolylinePlan, polylineSegmentStartPoses, polylineVertices } from '../src/lib/polylineTeaching.js';
 import { polylinePreviewParts, POLYLINE_EXECUTED_COLOR } from '../src/lib/polylineTeachingPreview.js';
 
 const far = { kind: 'mesh', positions: new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]), indices: new Uint32Array([0, 1, 2]) };
@@ -39,6 +39,22 @@ for (const { partial, ...options } of cases) {
   const original = JSON.stringify(plan), drawing = plan.segments.filter((segment) => segment.index >= 0);
   const startMs = drawing[0].startMs, drawingMs = plan.durationMs - startMs;
   const replay = repeatPolylinePlan(plan);
+  const fixedBase = { position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+  const starts = polylineSegmentStartPoses(plan, fixedBase), repeatedStarts = polylineSegmentStartPoses(replay, fixedBase);
+  const vertices = polylineVertices(path);
+  assert.deepEqual(starts.map((pose) => pose.segmentIndex), vertices.slice(1).map((_, index) => index));
+  assert.deepEqual(repeatedStarts.map((pose) => pose.segmentIndex), starts.map((pose) => pose.segmentIndex));
+  starts.forEach((pose, i) => {
+    const sample = samplePolylinePlan(plan, pose.startMs);
+    assert.deepEqual(pose.joints, sample.joints);
+    assert.deepEqual(pose.basePose, sample.basePose || fixedBase);
+    assert.ok(new THREE.Vector3().fromArray(pose.target).distanceTo(vertices[pose.segmentIndex]) <= path.settings.tolerance,
+      'a rounded edge starts on the checked blend near the authored vertex');
+    for (const key of Object.keys(pose.joints)) assert.ok(Math.abs(pose.joints[key] - repeatedStarts[i].joints[key]) < 1e-8);
+    assert.notEqual(pose.basePose.position, fixedBase.position, 'snapshots own their base position');
+  });
+  assert.ok(starts[0].startMs >= startMs, 'approach is not a drawing segment');
+  assert.ok(repeatedStarts[0].startMs + 1e-6 >= drawingMs, 'return legs do not produce extra ghosts');
   assert.equal(JSON.stringify(plan), original, 'cached geometry, timing and diagnostics must remain intact');
   assert.equal(replay.segments.length, drawing.length * 2);
   assert.ok(Math.abs(replay.durationMs - drawingMs * 2) < 1e-9);
@@ -72,6 +88,7 @@ for (const { partial, ...options } of cases) {
 }
 assert.equal(repeatPolylinePlan(null), null);
 assert.equal(repeatPolylinePlan({ complete: false, executable: false }), null);
+assert.deepEqual(polylineSegmentStartPoses(null), []);
 // A closed stroke with identical final joints/base needs no return movement.
 const exactLoop = { complete: true, durationMs: 1000, segments: [{ index: 0, durationMs: 1000,
   samples: [{ u: 0, joints: { slide: 0 }, base: { x: 0, y: 0, yaw: 0 } }, { u: 1, joints: { slide: 0 }, base: { x: 0, y: 0, yaw: 0 } }] }] };

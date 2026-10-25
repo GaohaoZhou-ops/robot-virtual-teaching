@@ -35,10 +35,10 @@ def run():
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded')
             page.get_by_role('button', name='表面折线示教', exact=True).click()
             panel = page.get_by_role('region', name='表面折线示教', exact=True)
-            fixed = panel.get_by_role('checkbox', name='底盘静止', exact=True)
+            fixed = panel.get_by_role('checkbox', name='静止', exact=True)
             maximum = panel.get_by_role('checkbox', name='最大保障', exact=True)
-            sync = panel.get_by_role('checkbox', name='底盘同步', exact=True)
-            search = panel.get_by_role('checkbox', name='底盘自搜索', exact=True)
+            sync = panel.get_by_role('checkbox', name='移动', exact=True)
+            search = panel.get_by_role('checkbox', name='自搜索', exact=True)
             expect(fixed).to_be_checked(); expect(maximum).not_to_be_checked(); expect(maximum).to_be_enabled()
             assert abs(fixed.bounding_box()['y'] - maximum.bounding_box()['y']) < 1
             assert sync.bounding_box()['y'] > fixed.bounding_box()['y'] + 10

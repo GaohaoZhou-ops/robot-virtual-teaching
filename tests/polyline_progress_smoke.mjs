@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { Color, Vector3 } from 'three';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
-import { normalizePolyline, polylineVertices, preparePolylineInterpolation, samplePolylinePlan } from '../src/lib/polylineTeaching.js';
+import { normalizePolyline, polylineVertices, polylineDrawingProgress, preparePolylineInterpolation, samplePolylinePlan } from '../src/lib/polylineTeaching.js';
 import { preparePolylineTiming } from '../src/lib/polylineTeachingTiming.js';
 import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, writePolylinePreview } from '../src/lib/polylineTeachingPreview.js';
 
@@ -36,6 +36,10 @@ for (const [source, stop] of [[path, null], [path, { index: 1, fraction: .4 }], 
     const sample = samplePolylinePlan(plan, plan.durationMs * i / 100);
     const parts = polylinePreviewParts(source, plan, sample);
     const completed = sum(parts, true);
+    const progress = polylineDrawingProgress(source, sample);
+    assert.equal(progress.total, total);
+    assert.ok(Math.abs(progress.completed - completed) < 1e-6, 'percentage follows the orange boundary independently of preview visibility');
+    assert.ok(Math.abs(progress.fraction - completed / total) < 1e-6);
     assert.ok(completed >= previous - 1e-10, 'orange progress must be monotonic along the authored order'); previous = completed;
     assert.ok(Math.abs(completed + sum(parts, false) - total) < 1e-6,
       `splitting must conserve the line within the render tolerance: ${completed + sum(parts, false)} / ${total}`);
@@ -51,11 +55,24 @@ for (const [source, stop] of [[path, null], [path, { index: 1, fraction: .4 }], 
   }
   const completed = polylinePreviewParts(source, plan, samplePolylinePlan(plan, plan.durationMs));
   if (stop) {
+    assert.ok(Math.abs(polylineDrawingProgress(source, samplePolylinePlan(plan, plan.durationMs)).fraction - .7) < 1e-9,
+      'completing a partial plan must not report the entire requested line as 100%');
     assert.ok(Math.abs(sum(completed, true) - .28) < 1e-9);
     assert.ok(Math.abs(sum(completed, false) - .12) < 1e-9);
     assert.ok(completed.filter((part) => !part.completed).every((part) => part.color === 0xff796b), 'unreachable remainder stays red');
-  } else assert.equal(sum(completed, false), 0);
+  } else {
+    assert.equal(sum(completed, false), 0);
+    assert.equal(polylineDrawingProgress(source, samplePolylinePlan(plan, plan.durationMs)).fraction, 1);
+  }
 }
+const unequal = normalizePolyline({ points: [[0, 0, 0], [.1, 0, 0], [.1, .3, 0]].map((position) => ({ position })) });
+assert.equal(polylineDrawingProgress(unequal).fraction, 0);
+assert.equal(polylineDrawingProgress(unequal, { drawing: false, segmentIndex: 1, segmentProgress: .5 }).fraction, 0,
+  'returning along the drawing curve does not count as drawing');
+assert.equal(polylineDrawingProgress(unequal, { drawing: true, segmentIndex: 0, segmentProgress: 1 }).fraction, .25);
+assert.equal(polylineDrawingProgress(unequal, { drawing: true, segmentIndex: 1, segmentProgress: .5 }).fraction, .625);
+assert.equal(polylineDrawingProgress({ points: [] }).fraction, 0);
+assert.equal(polylineDrawingProgress({ points: [unequal.points[0], unequal.points[0]] }).fraction, 0);
 const plan = makePlan(path);
 const sample = samplePolylinePlan(plan, plan.segments[1].startMs + plan.segments[1].durationMs / 2);
 const pending = polylinePreviewParts(path, plan, sample).filter((part) => !part.completed);
@@ -69,4 +86,4 @@ for (const progress of [0, .01, .25, .5, .99, 1]) {
 }
 assert.deepEqual(plan.warnings, [{ segmentIndex: 1 }], 'progress colors must not discard warning diagnostics');
 geometry.dispose();
-console.log('Polyline progress: timed intra-segment orange/cyan boundary, warnings never precolor an entire edge, approach exclusion, closed paths, partial endpoints and GPU buffer reuse passed.');
+console.log('Polyline progress: length-weighted percentages, approach/return exclusion, closed/partial paths, zero length, timed orange/cyan boundary, warning colors and GPU buffer reuse passed.');

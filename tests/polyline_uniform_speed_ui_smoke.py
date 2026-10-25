@@ -39,10 +39,10 @@ def run():
             uniform = constraints.get_by_role('checkbox', name='匀速划线', exact=True)
             expect(uniform).to_be_checked()
             expect(panel.get_by_role('group', name='底盘规划', exact=True)).to_have_count(0)
-            for mode in ['底盘同步', '底盘自搜索']:
+            for mode in ['移动', '自搜索']:
                 constraints.get_by_role('checkbox', name=mode, exact=True).check()
                 expect(uniform).to_be_enabled(); expect(uniform).to_be_checked()
-            constraints.get_by_role('checkbox', name='底盘静止', exact=True).check()
+            constraints.get_by_role('checkbox', name='静止', exact=True).check()
             expect(uniform).to_be_checked()
             for point in [[.4, .3, .55], [.6, .3, .55], [.6, .5, .55]]:
                 target = project_point(page, point); page.mouse.click(target['x'], target['y'])

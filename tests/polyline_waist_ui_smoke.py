@@ -65,7 +65,7 @@ end_header
             display.get_by_role('button', name='关闭显示设置', exact=True).click()
             page.get_by_role('button', name='表面折线示教', exact=True).click()
             panel = page.get_by_role('region', name='表面折线示教', exact=True)
-            waist = panel.get_by_role('checkbox', name='腰部协同', exact=True)
+            waist = panel.get_by_role('checkbox', name='协同', exact=True)
             maximum = panel.get_by_role('checkbox', name='最大保障', exact=True)
             expect(waist).not_to_be_checked()
             maximum.check()
@@ -97,10 +97,10 @@ end_header
             assert abs(float(panel.get_attribute('data-planned-distance')) - first_distance) < 1e-8
             waist.check()
             # Mode switches retain the preference, but it only applies to a fixed base.
-            for mode in ['底盘同步', '底盘自搜索']:
+            for mode in ['移动', '自搜索']:
                 panel.get_by_role('checkbox', name=mode, exact=True).check()
                 expect(waist).to_be_disabled(); expect(waist).to_be_checked()
-                panel.get_by_role('checkbox', name='底盘静止', exact=True).check()
+                panel.get_by_role('checkbox', name='静止', exact=True).check()
                 expect(waist).to_be_enabled()
                 expect(canvas).to_have_attribute('data-robot-joint-locked-names', initial_locks)
 

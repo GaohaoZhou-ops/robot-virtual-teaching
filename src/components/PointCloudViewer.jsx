@@ -990,6 +990,15 @@ const clearRobotParkingGhostLayer = (layer) => {
   layer.userData.ownedResources = new Set();
 };
 
+const writePolylineExecutionGhostDataset = (canvas, entries) => {
+  if (!canvas) return;
+  const ghosts = [...entries.values()];
+  canvas.dataset.polylineExecutionGhostState = ghosts.some(({ layer }) => layer.visible) ? 'visible' : 'hidden';
+  canvas.dataset.polylineExecutionGhostCount = String(ghosts.length);
+  canvas.dataset.polylineExecutionGhostMeshCount = String(ghosts.reduce((sum, { visual }) => sum + visual.meshCount, 0));
+  canvas.dataset.polylineExecutionGhosts = JSON.stringify(ghosts.map(({ snapshot }) => snapshot));
+};
+
 const writeRobotParkingGhostHiddenDataset = (canvas) => {
   if (!canvas) return;
   canvas.dataset.parkingGhostState = 'hidden';
@@ -1476,6 +1485,7 @@ export default function PointCloudViewer({
     && polylineRequest?.robotId === (robotDescriptor?.id || robotDescriptor?.relativePath) ? polylineRequest : null;
   const [robotOpacity, setRobotOpacity] = useState(1);
   const [polylineSuggestion, setPolylineSuggestion] = useState(null);
+  const [polylineExecutionGhosts, setPolylineExecutionGhosts] = useState([]);
   const robotOpacityRef = useRef(robotOpacity);
   robotOpacityRef.current = robotOpacity;
   const polylineOpenRef = useRef(polylineOpen);
@@ -1510,6 +1520,7 @@ export default function PointCloudViewer({
   const robotParkingGhostLayerRef = useRef(null);
   const robotParkingGhostVisualRef = useRef(null);
   const polylineGhostRef = useRef(null);
+  const polylineExecutionGhostsRef = useRef(new Map());
   const robotChassisHandleRef = useRef(null);
   const robotControlInteractionRef = useRef(null);
   const chassisDragInteractionRef = useRef(null);
@@ -5962,9 +5973,45 @@ export default function PointCloudViewer({
   }, [polylineSuggestion, polylineOpen, isActive, mapData?.geometry, robotDescriptor, robotLoadState?.status]);
 
   useEffect(() => {
+    const canvas = controlsRef.current?.domElement, entries = polylineExecutionGhostsRef.current;
+    return () => {
+      entries.forEach(({ layer }) => { clearRobotParkingGhostLayer(layer); layer.removeFromParent(); });
+      entries.clear(); writePolylineExecutionGhostDataset(canvas, entries);
+    };
+  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status]);
+
+  useEffect(() => {
+    const scene = sceneRef.current, robot = loadedRobotRef.current, canvas = controlsRef.current?.domElement;
+    const entries = polylineExecutionGhostsRef.current;
+    const snapshots = scene && robot && polylineOpen && isActive ? polylineExecutionGhosts.filter((pose) =>
+      pose.robotId === robot.uuid && pose.sceneId === mapData?.geometry?.uuid) : [];
+    const wanted = new Map(snapshots.map((pose) => [pose.segmentIndex, pose]));
+    // Keep previous segments' visuals intact as each new segment finishes.
+    for (const [index, entry] of entries) if (wanted.get(index) !== entry.snapshot) {
+      clearRobotParkingGhostLayer(entry.layer); entry.layer.removeFromParent(); entries.delete(index);
+    }
+    for (const snapshot of snapshots) {
+      if (entries.has(snapshot.segmentIndex)) continue;
+      const rotation = new THREE.Euler().setFromQuaternion(new THREE.Quaternion().fromArray(snapshot.basePose.quaternion), 'XYZ');
+      const [x, y, z] = snapshot.basePose.position;
+      const visual = createRobotParkingGhostVisual(robot, { parkingPointName: `P${snapshot.segmentIndex} 划线起始`, jointValues: snapshot.joints,
+        targetPose: { position: { x, y, z }, rpy: { roll: THREE.MathUtils.radToDeg(rotation.x),
+          pitch: THREE.MathUtils.radToDeg(rotation.y), yaw: THREE.MathUtils.radToDeg(rotation.z) } } });
+      const layer = new THREE.Group(); layer.name = `polyline-segment-start:${snapshot.segmentIndex}`;
+      layer.userData.ownedResources = visual.resources;
+      // Retain only the robot pose, without parking arrows or camera refocusing.
+      layer.add(visual.poseRoot); layer.visible = showRobotRef.current; scene.add(layer);
+      applyRobotModelOpacity(visual.ghostRobot, robotOpacityRef.current);
+      entries.set(snapshot.segmentIndex, { layer, visual, snapshot });
+    }
+    writePolylineExecutionGhostDataset(canvas, entries);
+  }, [polylineExecutionGhosts, polylineOpen, isActive, mapData?.geometry, robotDescriptor, robotLoadState?.status]);
+
+  useEffect(() => {
     applyRobotModelOpacity(loadedRobotRef.current, robotOpacity);
     applyRobotModelOpacity(robotParkingGhostVisualRef.current?.ghostRobot, robotOpacity);
     applyRobotModelOpacity(polylineGhostRef.current?.visual.ghostRobot, robotOpacity);
+    polylineExecutionGhostsRef.current.forEach(({ visual }) => applyRobotModelOpacity(visual.ghostRobot, robotOpacity));
     const canvas = controlsRef.current?.domElement;
     if (canvas) {
       canvas.dataset.robotModelOpacity = String(robotOpacity);
@@ -5976,11 +6023,13 @@ export default function PointCloudViewer({
     if (robotLayerRef.current) robotLayerRef.current.visible = showRobot;
     if (robotParkingGhostLayerRef.current) robotParkingGhostLayerRef.current.visible = showRobot;
     if (polylineGhostRef.current) polylineGhostRef.current.layer.visible = showRobot;
+    polylineExecutionGhostsRef.current.forEach(({ layer }) => { layer.visible = showRobot; });
     const canvas = controlsRef.current?.domElement;
     if (canvas) {
       canvas.dataset.robotLayerVisible = String(showRobot);
       canvas.dataset.parkingGhostState = showRobot && robotParkingGhostVisualRef.current ? 'visible' : 'hidden';
       canvas.dataset.polylineGhostState = showRobot && polylineGhostRef.current ? 'visible' : 'hidden';
+      writePolylineExecutionGhostDataset(canvas, polylineExecutionGhostsRef.current);
     }
     if (!showRobot) {
       chassisDragInteractionRef.current?.exit?.('robot-hidden');
@@ -7808,6 +7857,7 @@ export default function PointCloudViewer({
             onSave={onSavePolyline} onDelete={onDeletePolyline} onClose={() => onPolylineOpenChange?.(false)}
             openRequest={pendingPolylineRequest} onRequestHandled={onPolylineRequestHandled}
             onSuggestionChange={setPolylineSuggestion} showRobot={showRobot}
+            onExecutionGhostsChange={setPolylineExecutionGhosts}
             onBusyChange={onPolylineBusyChange || (() => {})} />
           {canShowSurfaceCoverage && showSurfaceCoverage && (
             <TeachingSurfaceCoverage geometry={mapData.geometry} tasks={teachingTasks} />

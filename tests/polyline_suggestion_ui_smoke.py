@@ -103,7 +103,7 @@ def run():
                     note.get_by_role('button', name='采用虚影并重新检查', exact=True).click()
                     expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
                     expect(canvas).to_have_attribute('data-polyline-ghost-state', 'hidden')
-                    expect(panel.get_by_role('checkbox', name='底盘静止', exact=True)).to_be_checked()
+                    expect(panel.get_by_role('checkbox', name='静止', exact=True)).to_be_checked()
                     adopted_base = base_pose(canvas)
                     assert math.dist(adopted_base[:3], ghost_pose['position']) < 1e-6, (adopted_base, ghost_pose)
                     panel.get_by_role('button', name='执行划线', exact=True).click()

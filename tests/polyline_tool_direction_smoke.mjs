@@ -5,54 +5,35 @@ import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
 import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
 import { normalizePolyline, readPolylineTcp, samplePolylinePlan, transformPolyline } from '../src/lib/polylineTeaching.js';
-import { polylineCameraDirection, polylineWithSide } from '../src/lib/polylineTeachingTool.js';
+import { polylineWithSide } from '../src/lib/polylineTeachingTool.js';
 import { planPolylineWithApproach } from '../src/lib/polylineTeachingApproach.js';
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8')).robot;
-const robot = restoreMobileTeachingRobot(fixture), layer = new THREE.Group(); layer.add(robot);
-assert.equal(polylineCameraDirection(robot, 'left'), -1);
-assert.equal(polylineCameraDirection(robot, 'right'), 1);
-layer.rotation.set(.3, -.5, .8); layer.position.set(1, 2, 3);
-assert.equal(polylineCameraDirection(robot, 'left'), -1, 'local mounting direction cannot depend on world pose');
-assert.equal(polylineCameraDirection(robot, 'right'), 1);
-assert.equal(polylineCameraDirection(null, 'right'), null);
-
-const automatic = normalizePolyline({ side: 'left', toolAxisMode: 'camera', tcpOffset: [.01, -.02, -.2],
-  points: [{ position: [1, 2, 3] }, { position: [1.1, 2, 3] }] });
-const right = polylineWithSide(automatic, robot, 'right');
-assert.deepEqual(right.tcpOffset, [.01, -.02, .2]);
-assert.deepEqual(right.points, automatic.points);
-assert.deepEqual(polylineWithSide(right, robot, 'left').tcpOffset, automatic.tcpOffset);
-assert.deepEqual(polylineWithSide(automatic, null, 'right').tcpOffset, automatic.tcpOffset);
-const zero = polylineWithSide({ ...automatic, tcpOffset: [0, 0, 0] }, robot, 'right');
-assert.equal(zero.toolAxisDirection, 1);
-assert.equal(normalizePolyline(zero).toolAxisDirection, 1);
-const legacy = normalizePolyline({ ...right, tcpOffset: [.01, -.02, -.2], toolAxisMode: undefined });
-assert.equal(legacy.toolAxisMode, 'manual');
-assert.deepEqual(polylineWithSide(legacy, robot, 'right').tcpOffset, legacy.tcpOffset);
-assert.deepEqual(polylineWithSide(legacy, robot, 'left').tcpOffset, legacy.tcpOffset);
-for (const path of [right, legacy]) {
+// Older camera preferences must not flip saved offsets on load or arm switch.
+// Zero-distance paths also retain the explicit direction for the next edit.
+for (const mode of [undefined, 'manual', 'camera']) for (const direction of [-1, 1]) for (const distance of [0, .2]) {
+  const saved = { side: 'left', toolAxisMode: mode, toolAxisDirection: direction,
+    tcpOffset: [.01, -.02, direction * distance], quaternion: [0, 0, 0, 1],
+    points: [{ position: [1, 2, 3] }, { position: [1.1, 2, 3] }] };
+  const path = normalizePolyline(saved);
+  assert.equal(path.toolAxisMode, 'manual');
+  assert.deepEqual(path.tcpOffset, saved.tcpOffset);
+  for (const side of ['right', 'left']) {
+    const switched = polylineWithSide(path, side);
+    assert.equal(switched.side, side);
+    assert.equal(switched.quaternion, null);
+    assert.equal(switched.toolAxisDirection, direction);
+    assert.deepEqual(switched.tcpOffset, saved.tcpOffset);
+    assert.deepEqual(switched.points, saved.points.map((point, index) => ({ ...point, id: `p${index}` })));
+  }
   const restored = normalizePolyline(JSON.parse(JSON.stringify(path)));
-  assert.equal(restored.toolAxisMode, path.toolAxisMode);
-  assert.deepEqual(restored.tcpOffset, path.tcpOffset);
+  assert.equal(restored.toolAxisDirection, direction);
+  assert.deepEqual(restored.tcpOffset, [.01, -.02, distance ? direction * distance : 0]);
   const transformed = transformPolyline(restored, new THREE.Matrix4().makeRotationZ(.5));
-  assert.equal(transformed.toolAxisMode, path.toolAxisMode);
-  assert.deepEqual(transformed.tcpOffset, path.tcpOffset);
-}
-
-// Direction comes from the model, not a hardcoded left/right table. Reject
-// missing, unrelated, angled and articulated optical frames as defaults.
-{
-  const model = new THREE.Group(), tool = new THREE.Group(), optical = new THREE.Object3D();
-  tool.name = 'tool_right'; optical.name = 'zivid_right_optical_frame'; model.add(tool); tool.add(optical);
-  optical.rotation.x = Math.PI;
-  assert.equal(polylineCameraDirection(model, 'right'), -1);
-  optical.rotation.x = .2;
-  assert.equal(polylineCameraDirection(model, 'right'), null);
-  optical.rotation.x = 0; optical.userData.jointType = 'revolute';
-  assert.equal(polylineCameraDirection(model, 'right'), null);
-  delete optical.userData.jointType; model.add(optical);
-  assert.equal(polylineCameraDirection(model, 'right'), null);
+  assert.equal(transformed.toolAxisMode, 'manual');
+  assert.equal(transformed.toolAxisDirection, direction);
+  assert.deepEqual(transformed.tcpOffset, restored.tcpOffset);
+  assert.equal(saved.toolAxisMode, mode, 'normalization must not mutate imported records');
 }
 
 // Actual BOTX kinematics and collision boxes, with mirrored arm poses,
@@ -97,4 +78,4 @@ for (const [side, direction] of [['left', -1], ['right', -1], ['right', 1]]) {
   geometry.dispose();
 }
 solid.dispose();
-console.log('Polyline tool direction: model-derived mirrored defaults, manual/legacy preservation, zero distance, transfer and actual BOTX mirrored camera-clearance failure/recovery with full playback verified.');
+console.log('Polyline tool direction: explicit axes, legacy camera-offset preservation, arm switching, zero distance, transfer and actual BOTX mirrored collision failure/recovery with full playback verified.');

@@ -1,4 +1,4 @@
-"""Per-camera defaults, explicit overrides, undo and saved-path restoration."""
+"""Immediate tool-axis configuration with camera/probe models and saved offsets."""
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -10,14 +10,20 @@ ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / 'test-artifacts/polyline-tool-direction'
 
 
-def run():
+def run(mount):
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     urdf = (ROOT / 'tests/fixtures/polyline-robot.urdf').read_text()
-    cameras = ''.join(f'''<link name="zivid_{side}_optical_frame"/>
-      <joint name="zivid_{side}_optical_joint" type="fixed"><parent link="tool_{side}"/>
-      <child link="zivid_{side}_optical_frame"/><origin rpy="{angle} 0 0"/></joint>'''
-      for side, angle in [('left', '3.141592653589793'), ('right', '0')])
-    urdf = urdf.replace('</robot>', cameras + '</robot>')
+    if mount == 'camera':
+        attachments = ''.join(f'''<link name="zivid_{side}_optical_frame"/>
+          <joint name="zivid_{side}_optical_joint" type="fixed"><parent link="tool_{side}"/>
+          <child link="zivid_{side}_optical_frame"/><origin rpy="{angle} 0 0"/></joint>'''
+          for side, angle in [('left', '3.141592653589793'), ('right', '0')])
+    else:
+        attachments = ''.join(f'''<link name="probe_{side}"><visual><origin xyz="0 0 0.15"/>
+          <geometry><cylinder radius="0.005" length="0.3"/></geometry></visual></link>
+          <joint name="probe_{side}_mount" type="fixed"><parent link="tool_{side}"/>
+          <child link="probe_{side}"/></joint>''' for side in ['left', 'right'])
+    urdf = urdf.replace('</robot>', attachments + '</robot>')
     descriptor = dict(id='polyline-test.urdf', relativePath='polyline-test.urdf', name='polyline_test_robot', fileName='polyline-test.urdf',
                       format='urdf', url='/__atlas/robot-files/polyline-test.urdf', packageName='', packagePath='', packageBaseUrl='/__atlas/robot-files/', manifestUrl=None)
     with sync_playwright() as p:
@@ -45,20 +51,20 @@ def run():
             side = panel.get_by_role('combobox', name='折线执行机械臂', exact=True)
             direction = panel.get_by_role('combobox', name='末端距线段方向', exact=True)
             distance = panel.get_by_role('spinbutton', name='末端距线段 mm', exact=True)
-            adopt = panel.get_by_role('button', name='采用相机朝向', exact=True)
+            expect(panel.get_by_role('button', name='采用相机朝向', exact=True)).to_have_count(0)
+            expect(panel).not_to_contain_text('相机朝向')
             expect(direction).to_have_value('-1'); expect(distance).to_have_value('200')
             side.select_option('right')
-            expect(direction).to_have_value('1'); expect(panel).to_contain_text('相机朝向：工具 +Z')
-            distance.fill('150'); distance.press('Tab')
-            direction.select_option('-1')
-            expect(adopt).to_be_visible()
-            side.select_option('left'); side.select_option('right')
-            expect(direction).to_have_value('-1'); expect(distance).to_have_value('150')
-            adopt.click(); expect(direction).to_have_value('1')
-            panel.get_by_role('button', name='撤销', exact=True).click()
             expect(direction).to_have_value('-1')
-            adopt.click(); expect(direction).to_have_value('1')
+            distance.fill('150'); distance.press('Tab')
             panel.locator('summary').filter(has_text='虚拟笔尖偏移').click()
+            offset_z = panel.get_by_role('spinbutton', name='笔尖偏移 Z mm', exact=True)
+            direction.select_option('1'); expect(offset_z).to_have_value('150')
+            side.select_option('left'); side.select_option('right')
+            expect(direction).to_have_value('1'); expect(distance).to_have_value('150')
+            direction.select_option('-1'); expect(offset_z).to_have_value('-150')
+            panel.get_by_role('button', name='撤销', exact=True).click()
+            expect(direction).to_have_value('1'); expect(offset_z).to_have_value('150')
             for axis, value in [('X', '10'), ('Y', '-5'), ('Z', '-175')]:
                 field = panel.get_by_role('spinbutton', name=f'笔尖偏移 {axis} mm', exact=True)
                 field.fill(value); field.press('Tab')
@@ -83,7 +89,7 @@ def run():
             assert saved[0]['side'] == 'right' and saved[0]['tcpOffset'] == [.01, -.005, -.175]
             panel.get_by_role('button', name='新建', exact=True).click()
             expect(side).to_have_value('left'); expect(direction).to_have_value('-1')
-            side.select_option('right'); expect(direction).to_have_value('1'); expect(distance).to_have_value('200')
+            side.select_option('right'); expect(direction).to_have_value('-1'); expect(distance).to_have_value('200')
             page.reload(wait_until='networkidle')
             page.locator('[data-session-state=ready]').wait_for()
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded')
@@ -91,23 +97,25 @@ def run():
             panel.locator('summary').filter(has_text='已保存折线').click()
             panel.locator('.polyline-teaching__library button').filter(has_text='右臂自定偏移').click()
             expect(side).to_have_value('right'); expect(direction).to_have_value('-1'); expect(distance).to_have_value('175')
-            expect(adopt).to_be_visible()
-            adopt.click(); expect(direction).to_have_value('1')
+            expect(panel).not_to_contain_text('相机朝向')
+            direction.select_option('1'); expect(direction).to_have_value('1')
             panel.locator('summary').filter(has_text='虚拟笔尖偏移').click()
+            expect(panel.get_by_role('spinbutton', name='笔尖偏移 Z mm', exact=True)).to_have_value('175')
             expect(panel.get_by_role('spinbutton', name='笔尖偏移 X mm', exact=True)).to_have_value('10')
             expect(panel.get_by_role('spinbutton', name='笔尖偏移 Y mm', exact=True)).to_have_value('-5')
             panel.get_by_role('button', name='撤销', exact=True).click(); expect(direction).to_have_value('-1')
             side.select_option('left'); side.select_option('right'); expect(direction).to_have_value('-1')
-            page.screenshot(path=str(ARTIFACTS / 'manual-right-offset.png'), full_page=True)
+            page.screenshot(path=str(ARTIFACTS / f'{mount}-right-offset.png'), full_page=True)
             assert not errors, errors
         except Exception:
-            page.screenshot(path=str(ARTIFACTS / 'failure.png'), full_page=True)
+            page.screenshot(path=str(ARTIFACTS / f'failure-{mount}.png'), full_page=True)
             print(page.locator('.polyline-teaching').inner_text() if page.locator('.polyline-teaching').count() else errors)
             raise
         finally:
             browser.close()
-    print('Polyline tool direction UI: per-camera defaults, distance/side changes, manual/advanced/zero offsets, explicit adoption, undo, export and reload passed.')
+    print(f'Polyline tool direction UI ({mount}): immediate axis changes, preserved distance/XY, arm switching, advanced/zero offsets, undo, export and reload passed.')
 
 
 if __name__ == '__main__':
-    run()
+    for mount in ['camera', 'probe']:
+        run(mount)

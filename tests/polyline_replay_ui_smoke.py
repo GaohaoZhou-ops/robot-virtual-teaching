@@ -40,6 +40,10 @@ def run():
                 display.get_by_role('button', name='关闭显示设置', exact=True).click()
                 page.get_by_role('button', name='表面折线示教', exact=True).click()
                 panel = page.get_by_role('region', name='表面折线示教', exact=True)
+                # Keep a nonzero approach so its travel can be distinguished
+                # from the authored stroke's completion percentage.
+                offset = panel.get_by_role('spinbutton', name='末端距线段 mm', exact=True)
+                offset.fill('250'); offset.press('Tab')
                 if partial:
                     panel.get_by_role('checkbox', name='最大保障', exact=True).check()
                 for point in [[.4, .3, .55], [.6, .3, .55]]:
@@ -50,10 +54,20 @@ def run():
                 assert len(workers) == 1
                 pending_colors = json.loads(canvas.get_attribute('data-polyline-preview-colors'))
                 execute = panel.get_by_role('button', name='执行可达部分' if partial else '执行划线', exact=True)
+                percentage = panel.get_by_label('已划线比例', exact=True).locator('b')
+                expect(percentage).to_have_text('0.0%')
                 execute.click()
+                page.wait_for_function('Number(document.querySelector(".polyline-teaching").dataset.toolTravelMm) > 5')
+                panel.get_by_role('button', name='暂停', exact=True).click()
+                expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
+                expect(percentage).to_have_text('0.0%')
+                panel.get_by_role('button', name='继续', exact=True).click()
                 expect(panel).to_have_attribute('data-status', 'completed', timeout=30000)
                 assert int(canvas.get_attribute('data-polyline-trace-points')) > 10
                 assert float(canvas.get_attribute('data-polyline-completed-mm')) > 100
+                completed_percentage = float(percentage.inner_text().rstrip('%'))
+                assert abs(completed_percentage - float(canvas.get_attribute('data-polyline-completed-mm')) / 200 * 100) < .06
+                assert (0 < completed_percentage < 100) if partial else completed_percentage == 100
                 expect(execute).to_be_enabled()
                 last_pose = json.loads(canvas.get_attribute('data-robot-joint-values'))
                 # Observe the synchronous reset before the next animation frame.
@@ -71,6 +85,7 @@ def run():
                 expect(panel).to_have_attribute('data-status', 'paused')
                 expect(canvas).to_have_attribute('data-polyline-trace-points', '0')
                 expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
+                expect(percentage).to_have_text('0.0%')
                 assert float(panel.get_attribute('data-elapsed-ms')) < 1000
                 assert float(panel.get_attribute('data-tool-travel-mm')) < 30, 'distance restarts from zero without counting an artificial jump'
                 preview = panel.get_by_role('checkbox', name='显示笔尖路径预览', exact=True)
@@ -85,18 +100,31 @@ def run():
                 colors = json.loads(canvas.get_attribute('data-polyline-preview-colors'))
                 assert 'ffb02e' in colors and set(pending_colors).issubset(set(colors))
                 assert 20 < float(progress) < 100
+                paused_percentage = percentage.inner_text()
+                assert abs(float(paused_percentage.rstrip('%')) - float(progress) / 200 * 100) < .06
+                preview.uncheck()
+                expect(percentage).to_have_text(paused_percentage)
+                preview.check()
+                expect(percentage).to_have_text(paused_percentage)
+                page.set_viewport_size({'width': 1200, 'height': 760})
+                expect(percentage).to_be_in_viewport()
+                assert panel.evaluate('el => el.scrollWidth <= el.clientWidth'), 'distance/percentage row must fit a narrow sidebar'
+                page.screenshot(path=str(ARTIFACTS / f'percentage-partial-{partial}.png'), full_page=True)
+                page.set_viewport_size({'width': 1680, 'height': 1100})
                 continued = panel.get_by_role('button', name='继续', exact=True).evaluate('''button => {
                     button.click(); const data = document.querySelector('.three-canvas').dataset;
                     return [data.polylineCompletedMm, data.polylineTracePoints];
                 }''')
                 assert continued == [progress, trace], 'resume must preserve this run’s orange progress'
                 expect(panel).to_have_attribute('data-status', 'completed', timeout=30000)
+                assert float(percentage.inner_text().rstrip('%')) == completed_percentage
                 assert len(workers) == 1, 'repeat and resume must reuse the checked plan'
                 end_pose = json.loads(canvas.get_attribute('data-robot-joint-values'))
                 assert all(abs(end_pose[key] - value) < 1e-9 for key, value in last_pose.items())
                 execute.click()
                 expect(canvas).to_have_attribute('data-polyline-completed-mm', '0')
                 expect(canvas).to_have_attribute('data-polyline-trace-points', '0')
+                expect(percentage).to_have_text('0.0%')
                 assert len(workers) == 1, 'a third run also needs no planning'
                 expect(panel).to_have_attribute('data-status', 'completed', timeout=30000)
                 expect(execute).to_be_enabled()
@@ -112,7 +140,7 @@ def run():
             finally:
                 page.close()
         browser.close()
-    print('Repeat UI: completed/full and partial runs, immediate cyan/green reset, erased orange trace, no teleport/replanning, return without ink, progressive orange, pause/resume and invalidation passed.')
+    print('Repeat UI: full/partial length percentages, no approach/return contribution, reset/pause/resume/hidden-preview progress, narrow sidebar, erased trace, no teleport/replanning and invalidation passed.')
 
 
 if __name__ == '__main__':

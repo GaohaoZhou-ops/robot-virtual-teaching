@@ -37,8 +37,9 @@ export function normalizePolyline(value) {
     // The sign of Z is authoritative for old records; retain the selected
     // direction explicitly when the distance is zero.
     toolAxisDirection: Math.sign(tcpOffset[2]) || (value.toolAxisDirection === 1 ? 1 : -1),
-    // Older records are explicit manual settings, never migrated by arm name.
-    toolAxisMode: value.toolAxisMode === 'camera' ? 'camera' : 'manual',
+    // Retain the archive field, but all offsets are now explicit tool-local
+    // settings. Old camera-mode records keep their exact saved offset.
+    toolAxisMode: 'manual',
     points: value.points.map((point, index) => ({ id: String(point.id || `p${index}`),
       position: [...point.position], ...(finiteVector(point.normal, 3) ? { normal: [...point.normal] } : {}) })),
     quaternion: quaternion?.normalize().toArray() || null, settings, base,
@@ -63,6 +64,21 @@ export function transformPolyline(value, matrix) {
 export function polylineVertices(value) {
   const points = value.points.map((point) => new Vector3().fromArray(point.position));
   return value.closed && points.length > 2 ? [...points, points[0].clone()] : points;
+}
+
+// Measure progress along the authored edges, including the closing edge.
+// Approach/return motion contributes nothing, and a partial plan still uses
+// the full requested line as its denominator. Rounded paths retain edge progress.
+export function polylineDrawingProgress(path, playback = null) {
+  const vertices = polylineVertices(path);
+  let total = 0, completed = 0;
+  for (let i = 1; i < vertices.length; i += 1) {
+    const length = vertices[i].distanceTo(vertices[i - 1]);
+    total += length;
+    if (playback?.drawing) completed += length * (i - 1 < playback.segmentIndex ? 1
+      : i - 1 === playback.segmentIndex ? Math.max(0, Math.min(1, playback.segmentProgress)) : 0);
+  }
+  return { total, completed, fraction: total > 0 ? Math.min(1, completed / total) : 0 };
 }
 
 export function isPolylinePlanExecutable(plan) {
@@ -149,4 +165,30 @@ export function samplePolylinePlan(plan, elapsedMs) {
     segmentProgress: curve?.segmentProgress ?? progress * (segment.endFraction ?? 1),
     drawing: segment.index >= 0, done: elapsed >= plan.durationMs,
     target: curve ? curve.target.toArray() : new Vector3().fromArray(segment.from).lerp(new Vector3().fromArray(segment.to), progress).toArray() };
+}
+
+// Snapshot each authored edge at its exact playback boundary. A rounded block
+// can contain many edges, and a display frame can skip a short edge entirely.
+// Sampling the checked interpolation avoids capturing a late animation frame
+// or doing new IK. Return/approach legs are deliberately excluded.
+export function polylineSegmentStartPoses(plan, fixedBasePose) {
+  if (!isPolylinePlanExecutable(plan)) return [];
+  const poses = [];
+  for (const segment of plan.segments.filter((part) => part.index >= 0)) {
+    const local = { ...plan, segments: [segment], durationMs: segment.endMs };
+    const first = samplePolylinePlan(local, segment.startMs), last = samplePolylinePlan(local, segment.endMs);
+    for (let index = first.segmentIndex; index <= last.segmentIndex; index += 1) {
+      let low = segment.startMs, high = segment.endMs;
+      if (index === first.segmentIndex) high = low;
+      else for (let i = 0; i < 42; i += 1) {
+        const mid = (low + high) / 2;
+        if (samplePolylinePlan(local, mid).segmentIndex < index) low = mid; else high = mid;
+      }
+      const sample = samplePolylinePlan(local, high);
+      if (sample.segmentIndex !== index || (index === last.segmentIndex && last.segmentProgress <= 0)) continue;
+      poses.push({ segmentIndex: index, startMs: high, joints: { ...sample.joints },
+        basePose: structuredClone(sample.basePose || fixedBasePose), target: [...sample.target] });
+    }
+  }
+  return poses;
 }

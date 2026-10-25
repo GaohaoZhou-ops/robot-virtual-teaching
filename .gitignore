@@ -45,8 +45,8 @@ node_modules/
 # browser/native captures, readiness markers, device reports and deployment logs.
 # The persistent web service uses build/service/; surface-polyline browser
 # captures (including sidebar, endpoint editing, waist assistance, approach recovery,
-# partial-path, camera direction, uniform speed, replay and progress pixel checks)
-# use test-artifacts/polyline-*/.
+# partial-path, tool direction, uniform speed, replay, progress pixels/percentages,
+# constraint layout and per-segment start-pose ghosts) use test-artifacts/polyline-*/.
 dist/
 build/
 out/
@@ -232,6 +232,8 @@ playwright/.auth/
 /tests/polyline-*.[mM][pP]4
 # Standalone diagnostics may contain full candidate poses and execution traces.
 # Keep these named output copies local without hiding authored JSON or fixtures.
+# Store copied segment-start joint/base snapshots as polyline-*-state.json
+# or inside test-artifacts/polyline-segment-ghost/.
 /polyline-*-state.json
 /tests/polyline-*-state.json
 /polyline-*-trace.json
