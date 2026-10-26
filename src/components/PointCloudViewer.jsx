@@ -38,6 +38,7 @@ import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
 import ViewerDisplaySettings from './ViewerDisplaySettings.jsx';
+import RobotCoordinateSettings from './RobotCoordinateSettings.jsx';
 import TeachingSurfaceCoverage from './TeachingSurfaceCoverage.jsx';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
@@ -48,7 +49,7 @@ import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
 import { RobotJointCouplingContext, RobotJointLimitContext, RobotJointSoftRangesContext } from './RobotJointLimitContext.js';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
 import { applyRobotModelOpacity } from '../lib/robotDisplay.js';
-import { createRobotOpticalAxes, updateRobotOpticalAxes } from '../lib/robotOpticalAxes.js';
+import { createRobotCoordinateAxes, updateRobotCoordinateAxes, clearRobotCoordinateAxes, getRobotCoordinateFrames } from '../lib/robotCoordinateAxes.js';
 import {
   createUniformMeshIndex,
   MESH_RENDER_QUALITY_OPTIONS,
@@ -1491,9 +1492,9 @@ export default function PointCloudViewer({
     && polylineRequest?.robotId === (robotDescriptor?.id || robotDescriptor?.relativePath) ? polylineRequest : null;
   const [robotOpacity, setRobotOpacity] = useState(1);
   const [displaySettingsSection, setDisplaySettingsSection] = useState('robot');
-  const [showZividOpticalAxes, setShowZividOpticalAxes] = useState(false);
-  const showZividOpticalAxesRef = useRef(showZividOpticalAxes);
-  showZividOpticalAxesRef.current = showZividOpticalAxes;
+  const [visibleRobotFrames, setVisibleRobotFrames] = useState(() => new Set());
+  const visibleRobotFramesRef = useRef(visibleRobotFrames);
+  visibleRobotFramesRef.current = visibleRobotFrames;
   const [polylineSuggestion, setPolylineSuggestion] = useState(null);
   const [polylineExecutionGhosts, setPolylineExecutionGhosts] = useState([]);
   const robotOpacityRef = useRef(robotOpacity);
@@ -1636,6 +1637,8 @@ export default function PointCloudViewer({
   const [collisionJointSettingsOpen, setCollisionJointSettingsOpen] = useState(false);
   const collisionJointOptions = useMemo(() => robotLoadState?.status === 'loaded'
     ? getRobotCollisionJointOptions(loadedRobotRef.current) : [], [robotDescriptor, robotLoadState?.status]);
+  const robotCoordinateFrames = useMemo(() => robotLoadState?.status === 'loaded'
+    ? getRobotCoordinateFrames(loadedRobotRef.current) : [], [mapData?.geometry, robotDescriptor, robotLoadState?.status]);
   const [visionCoverageStats, setVisionCoverageStats] = useState(
     EMPTY_VISION_COVERAGE_STATS,
   );
@@ -3750,7 +3753,7 @@ export default function PointCloudViewer({
     const visionCoverageGroup = new THREE.Group();
     const robotLayer = new THREE.Group();
     const robotParkingGhostLayer = new THREE.Group();
-    const zividOpticalAxes = createRobotOpticalAxes();
+    const robotCoordinateAxes = createRobotCoordinateAxes();
     routeGroup.name = 'directed-route-edges';
     waypointGroup.name = 'navigation-waypoint-markers';
     visionCoverageGroup.name = 'independent-teaching-vision-coverage';
@@ -3765,7 +3768,7 @@ export default function PointCloudViewer({
       visionCoverageGroup,
       robotLayer,
       robotParkingGhostLayer,
-      zividOpticalAxes.root,
+      robotCoordinateAxes.root,
       routeGroup,
       waypointGroup,
     );
@@ -5270,7 +5273,7 @@ export default function PointCloudViewer({
       }
 
       camera.updateMatrixWorld(true);
-      updateRobotOpticalAxes(zividOpticalAxes, zividCameraFramesRef.current, camera, renderer.domElement, showZividOpticalAxesRef.current);
+      updateRobotCoordinateAxes(robotCoordinateAxes, loadedRobotRef.current, camera, renderer.domElement, visibleRobotFramesRef.current);
       const focalPixels =
         (Math.max(renderer.domElement.clientHeight, 1) / 2)
         / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -5601,7 +5604,7 @@ export default function PointCloudViewer({
       disposeObject(routeGroup);
       disposeObject(waypointGroup);
       disposeObject(visionCoverageGroup);
-      disposeObject(zividOpticalAxes.root);
+      clearRobotCoordinateAxes(robotCoordinateAxes);
       clearRobotParkingGhostLayer(robotParkingGhostLayer);
       renderer.dispose();
       if (viewportCanvasRef?.current === renderer.domElement) {
@@ -5719,6 +5722,7 @@ export default function PointCloudViewer({
     robotChassisHandleRef.current = null;
     loadedRobotRef.current = null;
     canvas.dataset.chassisDragHandleReady = 'false';
+    setVisibleRobotFrames(new Set());
     canvas.dataset.robotChassisScreenVisible = 'false';
     canvas.dataset.chassisControlGuideVisible = 'false';
     endEffectorInteractionRef.current?.exit?.();
@@ -8306,7 +8310,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`机器人模型、Zivid 光学坐标系、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`机器人模型、全身坐标系、Zivid 光学坐标系、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
               panelClassName="viewer-display-menu"
@@ -8314,7 +8318,7 @@ export default function PointCloudViewer({
               <ViewerDisplaySettings expanded={displaySettingsSection} onExpandedChange={setDisplaySettingsSection}
                 sections={[
                   { id: 'robot', label: '机器人与相机', icon: Bot,
-                    description: '模型显示 · 透明度 · 光学坐标系', content: <>
+                    description: '模型显示 · 透明度 · 全身坐标系', content: <>
                       <div className="viewer-display-settings__robot">
                         <span><Bot size={13} /> 机器人模型</span>
                         <button
@@ -8342,18 +8346,7 @@ export default function PointCloudViewer({
                           onChange={(event) => setRobotOpacity(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
                         <output>{Math.round(robotOpacity * 100)}%</output>
                       </label>
-                      <div className="viewer-display-settings__layer">
-                        <span><Camera size={13} /> Zivid 光学坐标系</span>
-                        <button type="button" role="switch" className="viewer-display-settings__toggle"
-                          aria-label="显示 Zivid 光学坐标系" aria-checked={showZividOpticalAxes}
-                          disabled={robotLoadState?.status !== 'loaded' || !(zividCameraFramesRef.current.left || zividCameraFramesRef.current.right)}
-                          title="显示左右相机的 XYZ 光学坐标轴，蓝色 +Z 为拍摄方向"
-                          onClick={() => setShowZividOpticalAxes(value => !value)}>
-                          {showZividOpticalAxes ? <Eye size={12} /> : <EyeOff size={12} />}
-                          <span>{showZividOpticalAxes ? '显示' : '隐藏'}</span>
-                        </button>
-                      </div>
-                      {showZividOpticalAxes && <p className="viewer-display-settings__layer-notice">红 X：画面向右 · 绿 Y：画面向下 · 蓝 +Z：拍摄方向。坐标轴随相机移动，独立于机器人模型显示。</p>}
+                      <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames} />
                   </> },
                   { id: 'map', label: '地图与对象', icon: Palette,
                     description: hasObjectColorControl ? '地图颜色 · 对象颜色 · 高程色卡' : '点云颜色 · 高程色卡', content: <>

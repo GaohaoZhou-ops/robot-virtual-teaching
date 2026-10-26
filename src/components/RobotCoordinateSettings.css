@@ -1,0 +1,24 @@
+.robot-coordinate-settings { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); }
+.robot-coordinate-settings__check { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 5px 4px; color: var(--text); font-size: 10px; cursor: pointer; }
+.robot-coordinate-settings__check:hover { background: #59dbe80a; }
+.robot-coordinate-settings__check input { flex: 0 0 auto; width: 13px; height: 13px; margin: 0; accent-color: var(--cyan); cursor: inherit; }
+.robot-coordinate-settings__check input:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
+.robot-coordinate-settings__check > span { min-width: 0; overflow-wrap: anywhere; }
+.robot-coordinate-settings__check small { margin-left: auto; flex-shrink: 0; color: var(--muted); font-size: 9px; font-variant-numeric: tabular-nums; }
+.robot-coordinate-settings__check:has(input:disabled) { opacity: .4; cursor: default; }
+.robot-coordinate-settings__details { margin-top: 5px; border-top: 1px solid var(--line); }
+.robot-coordinate-settings__details > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; padding: 7px 4px; color: var(--muted); font-size: 10px; cursor: pointer; list-style: none; }
+.robot-coordinate-settings__details > summary::-webkit-details-marker { display: none; }
+.robot-coordinate-settings__details > summary:hover { color: var(--cyan); }
+.robot-coordinate-settings__details > summary:focus-visible { outline: 1px solid var(--cyan); outline-offset: -1px; }
+.robot-coordinate-settings__details[open] > summary > svg { transform: rotate(180deg); }
+.robot-coordinate-settings__groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 10px; padding-bottom: 6px; }
+.robot-coordinate-settings__list { max-height: 220px; overflow: auto; overscroll-behavior: contain; padding: 0 4px; border: 1px solid var(--line); scrollbar-width: thin; scrollbar-color: #294247 transparent; }
+.robot-coordinate-settings__list fieldset { min-width: 0; margin: 0; padding: 0 2px 5px; border: 0; }
+.robot-coordinate-settings__list legend { padding: 10px 4px 3px; color: var(--muted-2); font-size: 9px; }
+.robot-coordinate-settings__list .robot-coordinate-settings__check { font-family: "SFMono-Regular", Menlo, monospace; font-size: 9px; }
+.robot-coordinate-settings > p { margin: 9px 4px 0; color: var(--muted); font-size: 9px; line-height: 1.7; }
+.robot-coordinate-settings i { font-style: normal; font-weight: 600; }
+.robot-coordinate-settings__x { color: #ff706e; }
+.robot-coordinate-settings__y { color: #5ee59a; }
+.robot-coordinate-settings__z { color: #77aaff; }
