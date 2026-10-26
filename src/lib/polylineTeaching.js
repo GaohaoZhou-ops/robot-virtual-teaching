@@ -5,7 +5,7 @@ import { spatialCurveGeometry, spatialCurveVertices, spatialCurveBoundsPoints } 
 import { POLYLINE_ALGORITHM_DEFAULTS, POLYLINE_ALGORITHM_FIELDS } from './polylineTeachingParameters.js';
 
 export const POLYLINE_MAX_SPEED = 0.3;
-export const POLYLINE_DEFAULTS = Object.freeze({ speed: 0.3, uniformSpeed: true, ...POLYLINE_ALGORITHM_DEFAULTS });
+export const POLYLINE_DEFAULTS = Object.freeze({ speed: 0.3, uniformSpeed: true, perpendicularTool: false, ...POLYLINE_ALGORITHM_DEFAULTS });
 export const POLYLINE_MAX_POINTS = 500;
 export const POLYLINE_BASE_DEFAULTS = Object.freeze({ sync: false, search: false, allowPartial: false, waistAssist: false, range: 2, yawRange: 180 });
 const finiteVector = (value, size) => Array.isArray(value) && value.length === size && value.every(Number.isFinite);
@@ -20,7 +20,7 @@ export function normalizePolyline(value) {
   if (quaternion && quaternion.lengthSq() < 1e-12) return null;
   const tcpOffset = value.tcpOffset ?? [0, 0, 0];
   if (!finiteVector(tcpOffset, 3) || tcpOffset.some((value) => Math.abs(value) > 1)) return null;
-  const settings = { uniformSpeed: value.settings?.uniformSpeed !== false };
+  const settings = { uniformSpeed: value.settings?.uniformSpeed !== false, perpendicularTool: value.settings?.perpendicularTool === true };
   const base = { sync: Boolean(value.base?.sync), search: Boolean(value.base?.search),
     allowPartial: value.base?.allowPartial === true,
     waistAssist: value.base?.waistAssist === true,
@@ -91,7 +91,7 @@ export function polylineDrawingProgress(path, playback = null) {
 
 export function isPolylinePlanExecutable(plan) {
   return Boolean((plan?.complete || (plan?.partial && plan?.executable))
-    && plan.segments?.some((segment) => segment.index >= 0)
+    && plan.segments?.some((segment) => segment.index >= 0 && !segment.rotationOnly)
     && Number.isFinite(plan.durationMs) && plan.durationMs > 0);
 }
 
@@ -188,7 +188,7 @@ export function samplePolylinePlan(plan, elapsedMs) {
   const curve = segment.curve ? samplePolylineCurve(segment.curve, progress * (segment.endFraction ?? 1)) : null;
   return { ...state, ...(state.base ? { basePose: polylineBasePose(plan.baseReference, state.base) } : {}),
     phase: segment.phase || (segment.index < 0 ? 'approach' : 'drawing'), segmentIndex: curve?.segmentIndex ?? segment.index,
-    segmentProgress: curve?.segmentProgress ?? progress * (segment.endFraction ?? 1),
+    segmentProgress: segment.rotationOnly ? 0 : curve?.segmentProgress ?? progress * (segment.endFraction ?? 1),
     drawing: segment.index >= 0, done: elapsed >= plan.durationMs,
     target: curve ? curve.target.toArray() : new Vector3().fromArray(segment.from).lerp(new Vector3().fromArray(segment.to), progress).toArray() };
 }

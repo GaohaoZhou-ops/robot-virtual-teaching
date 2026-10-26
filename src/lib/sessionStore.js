@@ -50,6 +50,15 @@ const MAX_INLINE_MAP_BYTES = 64 * 1024 * 1024;
 const binaryByteLength = (value) => value instanceof ArrayBuffer || ArrayBuffer.isView(value)
   ? value.byteLength : 0;
 
+// A normalized catalog selection explicitly has portableResourceId: null.
+// Archive/legacy descriptors omit it, so their bundled resources stay portable.
+const catalogRobotPath = (config) => {
+  const selected = config?.ui?.selectedRobot;
+  const robot = config?.project?.robot || selected;
+  return selected?.portableResourceId === null && selected.relativePath === robot?.relativePath
+    ? selected.relativePath : null;
+};
+
 const packMapRecord = (record) => {
   const files = record?.portableRobotPackage?.files || [];
   const byteLength = MAP_BUFFER_FIELDS.reduce((sum, key) => sum + binaryByteLength(record?.[key]), 0)
@@ -366,6 +375,7 @@ const summarizeWorkspace = (mode, map, config, previous = null) => {
     robotName: project
       ? project.robot?.name || snapshot?.ui?.selectedRobot?.name || ''
       : previous?.robotName || '',
+    catalogRobotPath: snapshot ? catalogRobotPath(snapshot) : previous?.catalogRobotPath || null,
     savedAt: Math.max(
       Number(map?.savedAt) || 0,
       Number(config?.savedAt) || 0,
@@ -591,7 +601,7 @@ export async function prepareWorkspaceSession(sessionId, { preserveExisting = fa
     };
   }
 
-  const map = records.map?.sessionId === sessionId ? records.map : null;
+  let map = records.map?.sessionId === sessionId ? records.map : null;
   const config = records.config?.sessionId === sessionId ? records.config : null;
   const activeMode = inferWorkspaceMode(
     map,
@@ -625,6 +635,18 @@ export async function prepareWorkspaceSession(sessionId, { preserveExisting = fa
     store.put(workspaceIndex);
     store.put({ ...meta, key: 'meta', sessionId, activeMode });
     await transactionComplete(transaction);
+  }
+
+  // Older versions saved the new selection but left the previous archive's
+  // robot attached to the geometry. Repair that mismatch before creating blob
+  // URLs or unpacking large mesh buffers, without replacing any map/teaching data.
+  if (map?.portableRobotPackage && config?.mapId === map.mapId) {
+    const snapshot = config.config;
+    const robot = snapshot?.project?.robot || snapshot?.ui?.selectedRobot;
+    if (catalogRobotPath(snapshot) || map.portableRobotPackage.relativePath !== robot?.relativePath) {
+      await saveWorkspaceConfig(sessionId, map.mapId, snapshot, activeMode, { clearRobotPackage: true });
+      map = { ...map, portableRobotPackage: null };
+    }
   }
 
   return {
@@ -784,7 +806,7 @@ export async function saveWorkspaceMap(sessionId, mapId, name, mapCache, mode = 
   return modes[workspaceMode];
 }
 
-export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null, { presetLibrary } = {}) {
+export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null, { presetLibrary, clearRobotPackage = false } = {}) {
   const database = await openDatabase();
   const workspaceMode = normalizeWorkspaceMode(
     mode
@@ -817,6 +839,19 @@ export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null,
       }
     }
     if (library) config = withSharedRobotPresetConfig(config, library.poses);
+    const catalogPath = catalogRobotPath(config);
+    const previousSummary = workspaceIndex?.modes?.[workspaceMode];
+    if (clearRobotPackage || (catalogPath && (previousSummary?.mapId !== mapId
+      || previousSummary?.catalogRobotPath !== catalogPath))) {
+      if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
+      // Read/rewrite geometry only when the model source changes, never on
+      // ordinary joint/pose autosaves. Selection and resource removal are atomic.
+      const map = await requestResult(store.get(workspaceMapKey(workspaceMode)));
+      if (map && (map.sessionId !== sessionId || map.mapId !== mapId)) {
+        throw new Error('地图已变化，请重新选择机器人');
+      }
+      if (map?.portableRobotPackage) store.put({ ...map, portableRobotPackage: null });
+    }
     const configRecord = {
       key: workspaceConfigKey(workspaceMode), sessionId, mapId, config,
       teachingSpaceMode: workspaceMode, savedAt,

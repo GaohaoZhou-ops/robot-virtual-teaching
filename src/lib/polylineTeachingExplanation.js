@@ -10,7 +10,7 @@ const constraintsFor = (path, waistAvailable) => [
   ['末端距线段', `${mm(Math.abs(path.tcpOffset[2]))} mm · 工具 ${path.toolAxisDirection === 1 ? '+Z' : '−Z'}`],
   ['工具 XYZ 偏移', `${path.tcpOffset.map(mm).join(' / ')} mm`],
   ['位置 / 朝向容差', `${mm(path.settings.tolerance)} mm / ${path.settings.rotationTolerance.toFixed(2)}°`],
-  ['工具朝向', '采用检查时的朝向，并沿线保持'],
+  ['工具朝向', path.settings.perpendicularTool ? '垂直法向量 · 工具轴垂直于路线方向，随线转动' : '采用检查时的朝向，并沿线保持'],
   ['最大保障', path.base.allowPartial ? '已开启' : '未开启'],
 ];
 
@@ -22,7 +22,8 @@ function explainStartTool(plan, path, waistAvailable) {
   suggestions.push({ title: '核对工具偏移与安装方向',
     text: '“从末端指向线段”表示虚拟笔尖相对于工具坐标系原点的方向。不同机械臂、不同工具的坐标轴可能不同；请核对方向、末端距线段及高级 XYZ 偏移。' },
   { title: '调整工具朝向或起点位置',
-    text: '可在折线示教中双击末端调整朝向，或调整 P0。重新检查时会采用当前工具朝向。仅改变肘部、腰部或底盘位置，同时保持 P0 的工具朝向和偏移不变，无法消除这一固定安装部件的干涉。' });
+    text: `可在折线示教中双击末端调整朝向，或调整 P0。${path.settings.perpendicularTool
+      ? '重新检查时会从当前姿态重新选择与起始路线垂直的朝向。' : '重新检查时会采用当前工具朝向。'}仅改变肘部、腰部或底盘位置，同时保持 P0 的工具朝向和偏移不变，无法消除这一固定安装部件的干涉。` });
   const physical = collision.environmentIntersectingLinks || [], clearance = collision.environmentClearanceLinks || [];
   const details = [];
   if (physical.length) details.push(`${physical.join('、')} 与工件存在碰撞体重叠；本次并非只触及预留区。`);
@@ -85,7 +86,9 @@ export function explainPolylineSearch(plan, value, { waistAvailable = false } = 
   });
   if (self.length || issue.code === 'continuous-ik' || !drawing) suggestions.push({
     title: '调整机械臂的起始姿态或工具朝向',
-    text: '可在折线示教中双击末端调整姿态，尽量让手臂避开躯干和工件。再次检查会采用调整后的当前工具朝向，并沿线保持；手动拖动成功仍需重新验证整条路线。',
+    text: path.settings.perpendicularTool
+      ? '可在折线示教中双击末端调整姿态，尽量让手臂避开躯干和工件。再次检查会从调整后的姿态选择最接近的垂直方向，并随路线转动；也可调整点位以缓和方向变化。手动拖动成功仍需重新验证整条路线。'
+      : '可在折线示教中双击末端调整姿态，尽量让手臂避开躯干和工件。再次检查会采用调整后的当前工具朝向，并沿线保持；手动拖动成功仍需重新验证整条路线。',
   });
   if (ground.length) suggestions.push({ title: '调整接近高度', text: '检查命中部件与支撑平面的关系，抬高或调整起始姿态后重新检查，避免接近时向下绕行。' });
   if (waistAvailable && !path.base.waistAssist) suggestions.push({

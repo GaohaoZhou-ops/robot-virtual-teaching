@@ -28,7 +28,10 @@ export async function preparePolylineArcMapping(samples, applyState, frame, chec
     const left = from.distanceTo(mid), right = mid.distanceTo(to), sum = left + right;
     // Resolve both geometric bending and rapid changes in du/ds, including
     // the low-speed portions of nearly singular joint interpolation.
-    if (depth < 12 && (Math.max(left, right) > 1.02 * Math.min(left, right)
+    // Near a zero derivative, repeated bisection eventually resolves floating
+    // point noise rather than motion. A nanometre is already far below every
+    // supported path tolerance; genuine stationary intervals still fail above.
+    if (depth < 12 && sum > 1e-9 && (Math.max(left, right) > 1.02 * Math.min(left, right)
       || sum - from.distanceTo(to) > Math.max(1e-11, sum * 1e-6))) {
       refine(a, midU, from, mid, depth + 1); refine(midU, b, mid, to, depth + 1);
     } else { append(midU, mid); append(b, to); }

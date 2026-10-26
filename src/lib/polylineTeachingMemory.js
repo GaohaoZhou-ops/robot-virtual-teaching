@@ -44,6 +44,7 @@ export function createPolylineSuccessMemory() {
       const guides = [];
       for (const entry of entries) {
         if (entry.path.side !== path.side || entry.path.base.waistAssist !== path.base.waistAssist
+          || entry.path.settings.perpendicularTool !== path.settings.perpendicularTool
           || entry.path.tcpOffset.some((value, i) => Math.abs(value - path.tcpOffset[i]) > 1e-6)
           || !entry.quaternion || orientation.angleTo(new Quaternion().fromArray(entry.quaternion)) > Math.PI / 36) continue;
         const nearest = (target) => entry.samples.reduce((best, sample, index) => {

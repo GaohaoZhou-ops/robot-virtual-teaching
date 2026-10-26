@@ -7,8 +7,8 @@ import { solveEndEffectorIk } from './robotEndEffectorIk.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
 import { normalizePolyline, polylineVertices, polylineGeometryVertices, polylineDrawingProgress, preparePolylineInterpolation, samplePolylineState } from './polylineTeaching.js';
 import { preparePolylineTiming } from './polylineTeachingTiming.js';
-import { buildPolylineDrawingEdges, samplePolylineCurve } from './polylineTeachingCurve.js';
-import { spatialCurveDrawingEdges } from './polylineTeachingSpatialCurve.js';
+import { samplePolylineCurve } from './polylineTeachingCurve.js';
+import { polylineDrawingEdges, polylineEdgeTarget, samplePolylineOrientation } from './polylineTeachingOrientation.js';
 import { preparePolylineArcMapping } from './polylineTeachingSpeed.js';
 import { createPolylineBase, polylineBaseCandidates, polylinePostureCost } from './polylineTeachingBase.js';
 import { canRecoverPolylinePosture, nearestPolylineReference, polylineRecoveryPolicies } from './polylineTeachingRecovery.js';
@@ -61,9 +61,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const allowPartial = action.base.allowPartial && !action.base.sync && !action.base.search;
   const requestedDistance = polylineDrawingProgress(action).total;
   if (requestedDistance < 1e-9) throw new Error('路线点重合，请增加有长度的线段');
-  const drawingEdges = action.pathType === 'spline' ? spatialCurveDrawingEdges(action)
-    : settings.uniformSpeed ? buildPolylineDrawingEdges(vertices, settings)
-      : vertices.slice(1).map((to, index) => ({ from: vertices[index], to, index }));
+  const drawingEdges = polylineDrawingEdges(action, targetQuaternion);
+  if (!drawingEdges.length) throw new Error('路线点重合，请增加有长度的线段');
+  const drawingStartQuaternion = samplePolylineOrientation(drawingEdges[0], 0, targetQuaternion);
+  let activeOrientation = () => targetQuaternion;
   const start = controller.frame.getWorldPosition(new THREE.Vector3());
   let approachOffset = 0, approachLength = start.distanceTo(vertices[0]), activeCurve = null;
   const issue = (message, index, u, details = {}) => {
@@ -85,10 +86,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   };
   const referenceValues = (state) => ({ ...initialJoints, ...state.joints, ...(base ? Object.fromEntries(base.joints.map((joint, i) =>
     [joint.name, state.base[['x', 'y', 'yaw'][i]]])) : {}) });
-  const solveTarget = (target, exclusions, reference, repeats = 1, precise = false) => {
+  const solveTarget = (target, exclusions, reference, repeats = 1, precise = false, orientation = targetQuaternion) => {
     const positionTolerance = precise ? 2e-7 : undefined;
     for (let i = 0; i < repeats; i += 1) {
-      const result = solveEndEffectorIk(controller, target, targetQuaternion, exclusions, {
+      const result = solveEndEffectorIk(controller, target, orientation, exclusions, {
         referenceJointValues: reference, positionTolerance, refineOnly: precise,
       });
       if (result.positionError <= (positionTolerance ?? settings.tolerance) && result.rotationError <= settings.rotationTolerance) break;
@@ -102,6 +103,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const buildPlan = async (candidate = zeroBase, reportProgress = onProgress) => {
     applyState(initialState);
     activeCurve = null;
+    activeOrientation = () => targetQuaternion;
     approachOffset = 0; approachLength = start.distanceTo(vertices[0]);
     const segments = [];
     const position = new THREE.Vector3(), quaternion = new THREE.Quaternion();
@@ -131,9 +133,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       const error = position.distanceTo(target);
       const sourcePosition = index >= 0 && activeCurve ? samplePolylineCurve(activeCurve, u).sourcePosition : target;
       const sourceError = position.distanceTo(sourcePosition);
-      const angular = THREE.MathUtils.radToDeg(quaternion.angleTo(targetQuaternion));
+      const angular = THREE.MathUtils.radToDeg(quaternion.angleTo(activeOrientation(u)));
       const trackingTolerance = settings.tolerance - target.distanceTo(sourcePosition);
-      if (error > trackingTolerance || sourceError > settings.tolerance || angular > settings.rotationTolerance) return issue('未找到满足沿线精度和固定朝向的连续逆解', index, u,
+      if (error > trackingTolerance || sourceError > settings.tolerance || angular > settings.rotationTolerance) return issue(settings.perpendicularTool
+        ? '未找到满足沿线精度和垂直朝向的连续逆解' : '未找到满足沿线精度和固定朝向的连续逆解', index, u,
         { code: 'continuous-ik', positionError: error, sourceError, rotationError: angular });
       maximumError = Math.max(maximumError, sourceError);
       // Surface imperfections and intended tip contact are advisory in virtual
@@ -161,12 +164,13 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         { curvature: Math.max(edge.curve?.curvature || 0, arcMapping?.curvature || 0), arcMapping });
       segments.push({ index: edge.index, phase: edge.index === -2 ? 'positioning' : edge.index < 0 ? 'approach' : 'drawing',
         from: edge.from.toArray(), to: edge.to.toArray(), samples, ...timed, endFraction,
+        ...(edge.orientation ? { orientation: edge.orientation } : {}), ...(edge.rotationOnly ? { rotationOnly: true } : {}),
         ...(edge.curve ? { curve: edge.curve, arcMapping } : {}),
         durationMs: segmentDuration, startMs: durationMs, endMs: durationMs + segmentDuration });
       durationMs += segmentDuration;
     };
     const finish = (problem = null) => {
-      const drawing = segments.filter((segment) => segment.index >= 0);
+      const drawing = segments.filter((segment) => segment.index >= 0 && !segment.rotationOnly);
       if (problem && (!allowPartial || problem.phase !== 'drawing' || !drawing.length)) return fail(problem);
       if (!drawing.length) throw new Error('折线点重合，请增加有长度的线段');
       if (settings.uniformSpeed && drawing.length > 1) {
@@ -197,25 +201,49 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     const reposition = base && (Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8);
     let reference = referenceValues({ base: candidate });
     // Prescribe a continuous base transit and solve the arm along the matching
-    // TCP line to P0. This keeps world tool orientation even during positioning.
+    // TCP line to P0. Optional perpendicular tracking reaches its first
+    // orientation gradually during approach, including an in-place P0 turn.
     // Its interpolation receives the same refinement/collision checks as drawing.
     const approach = [start, ...approachWaypoints.map((point) => new THREE.Vector3().fromArray(point)), vertices[0]];
-    const edges = [...approach.slice(1).map((to, index) => ({ from: approach[index], to, index: reposition ? -2 : -1,
-      ...(reposition ? { baseTarget: candidate } : {}) })),
-      ...drawingEdges];
+    const totalApproach = approach.slice(1).reduce((sum, to, i) => sum + approach[i].distanceTo(to), 0);
+    let approachDistance = 0;
+    const edges = approach.slice(1).map((to, i) => {
+      const from = approach[i], length = from.distanceTo(to), before = approachDistance;
+      approachDistance += length;
+      const orientation = settings.perpendicularTool ? {
+        from: targetQuaternion.clone().slerp(drawingStartQuaternion, totalApproach > 1e-9 ? before / totalApproach : 0).toArray(),
+        to: targetQuaternion.clone().slerp(drawingStartQuaternion, totalApproach > 1e-9 ? approachDistance / totalApproach : 1).toArray(),
+      } : null;
+      return { from, to, index: reposition ? -2 : -1, ...(orientation ? { orientation } : {}),
+        ...(reposition ? { baseTarget: candidate } : {}) };
+    });
+    let previousOrientation = drawingStartQuaternion;
+    for (const edge of drawingEdges) {
+      const first = samplePolylineOrientation(edge, 0, targetQuaternion);
+      if (settings.perpendicularTool && first.angleTo(previousOrientation) > 1e-7) {
+        // Strict corners have two distinct tangents. Keep the TCP at the
+        // vertex and turn after stopping; never jump to the next tool pose.
+        edges.push({ from: edge.from, to: edge.from, index: edge.index, rotationOnly: true,
+          orientation: { from: previousOrientation.toArray(), to: first.toArray() } });
+      }
+      edges.push(edge); previousOrientation = samplePolylineOrientation(edge, 1, targetQuaternion);
+    }
     let approachTravel = 0;
     for (const edge of edges) {
       const { from, to, index } = edge, distance = edge.distance ?? from.distanceTo(to);
       activeCurve = edge.curve || null;
-      const targetAt = (u) => edge.curve ? samplePolylineCurve(edge.curve, u).target : from.clone().lerp(to, u);
+      activeOrientation = (u) => samplePolylineOrientation(edge, u, targetQuaternion);
+      const targetAt = (u) => polylineEdgeTarget(edge, u);
       // Once recovery reaches P0, keep its achieved posture as the drawing
       // reference. Releasing held joints must not pull them abruptly back
       // toward the pre-approach configuration via IK regularization.
       if (index >= 0 && !segments.some((segment) => segment.index >= 0) && (approachLocks.size || approachWaypoints.length)) reference = referenceValues(readState());
-      if (distance < 0.00001 && !edge.baseTarget) continue;
+      const orientationAngle = settings.perpendicularTool ? activeOrientation(0).angleTo(activeOrientation(1)) : 0;
+      const orientationSteps = orientationAngle > 1e-7 ? Math.ceil(orientationAngle / (Math.PI / 90)) : 0;
+      if (distance < 0.00001 && !edge.baseTarget && !orientationSteps) continue;
       if (index < 0) { approachOffset = approachTravel; approachLength = distance; approachTravel += distance; }
       if (!edge.curve && checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
-      const count = edge.sampleCount ?? Math.max(1, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
+      const count = edge.sampleCount ?? Math.max(1, orientationSteps, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
         ? Math.max(Math.hypot(candidate.x, candidate.y) / 0.002, Math.abs(candidate.yaw) / 0.5) : 0)));
       const sampleLimit = Math.min(count, edge.curve ? 30000 : 10000, 30000 - segments.reduce((sum, item) => sum + item.samples.length, 0));
       if (count > sampleLimit && (!allowPartial || index < 0 || !Number.isFinite(count) || sampleLimit < 1)) {
@@ -233,7 +261,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
           if (localRecovery.checks >= settings.postureSamples) return { problem: issue('局部姿态重试达到预算', index, u, { code: 'recovery-budget' }) };
           localRecovery.checks += 1;
         }
-        const target = targetAt(u), precise = settings.uniformSpeed && (index >= 0 || u === 1);
+        const target = targetAt(u), orientation = activeOrientation(u), precise = settings.uniformSpeed && (index >= 0 || u === 1);
         const normalExclusions = edge.baseTarget ? fixedBaseExcluded : index < 0 ? approachExcluded : solvingExcluded;
         const exclusions = policy?.heldJoints?.length
           ? new Set([...normalExclusions, ...controller.joints.filter((joint) => policy.heldJoints.includes(joint.name))]) : normalExclusions;
@@ -257,14 +285,14 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         resetSeed();
         // Select the alternative posture first, then refine its TCP residual.
         // Every alternative starts from a checked sample, never a cached jump.
-        if (policy) solveTarget(target, exclusions, postureReference);
-        if (precise || !policy) solveTarget(target, exclusions, postureReference, precise ? 3 : 1, precise);
+        if (policy) solveTarget(target, exclusions, postureReference, 1, false, orientation);
+        if (precise || !policy) solveTarget(target, exclusions, postureReference, precise ? 3 : 1, precise, orientation);
         // Extra numerical precision is a preference, never a reason to reject
         // an otherwise valid posture within the user's geometric tolerance.
         // A residual correction near a singularity may choose a colliding pose;
         // retry the regularized seed and subject it to all the same checks.
         if (precise && (jumpIssue(readState(), seed, u) || collisionIssue(index, u))) {
-          resetSeed(); solveTarget(target, exclusions, postureReference);
+          resetSeed(); solveTarget(target, exclusions, postureReference, 1, false, orientation);
         }
         const problem = validState(target, index, u);
         if (problem) return { problem };
@@ -354,7 +382,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
               applyState(samplePolylineState(checked, u));
               const problem = validState(targetAt(u), index, u);
               if (!problem) continue;
-              if (problem.collision || !problem.positionError || pass === 6) {
+              if (problem.collision || problem.code !== 'continuous-ik' || pass === 6) {
                 return { samples: checked, problem, beforeU: checked[i].u };
               }
               const result = solve(u, checked[i], policy);
@@ -399,7 +427,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const searchVertices = polylineGeometryVertices(action);
   const candidates = polylineBaseCandidates(searchVertices, start, base.reference, action.base);
   const ranked = [];
-  const probePoints = searchVertices.filter((_, i) => i === 0 || i === searchVertices.length - 1 || i % Math.max(1, Math.ceil(searchVertices.length / 16)) === 0);
+  const probes = settings.perpendicularTool ? drawingEdges.flatMap((edge) => [0, .25, .5, .75, 1].map((u) => ({
+    position: polylineEdgeTarget(edge, u), orientation: samplePolylineOrientation(edge, u, targetQuaternion),
+  }))) : searchVertices.map((position) => ({ position, orientation: targetQuaternion }));
+  const probePoints = probes.filter((_, i) => i === 0 || i === probes.length - 1 || i % Math.max(1, Math.ceil(probes.length / 16)) === 0);
   for (let i = 0; i < candidates.length; i += 1) {
     await checkpoint(); applyState(initialState); base.apply(candidates[i]);
     const reference = referenceValues({ base: candidates[i] });
@@ -408,9 +439,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       await checkpoint();
       // Even in combined mode P0 must be reachable at the selected parking
       // pose. After that, synchronized probes may use all three base axes.
-      solveTarget(probePoints[j], j === 0 ? fixedBaseExcluded : solvingExcluded, reference, 6);
-      const positionError = controller.frame.getWorldPosition(new THREE.Vector3()).distanceTo(probePoints[j]);
-      const rotationError = THREE.MathUtils.radToDeg(controller.frame.getWorldQuaternion(new THREE.Quaternion()).angleTo(targetQuaternion));
+      const { position: target, orientation } = probePoints[j];
+      solveTarget(target, j === 0 ? fixedBaseExcluded : solvingExcluded, reference, 6, false, orientation);
+      const positionError = controller.frame.getWorldPosition(new THREE.Vector3()).distanceTo(target);
+      const rotationError = THREE.MathUtils.radToDeg(controller.frame.getWorldQuaternion(new THREE.Quaternion()).angleTo(orientation));
       if (positionError > settings.tolerance || rotationError > settings.rotationTolerance
         || Math.hypot(base.read().x, base.read().y) > action.base.range + 1e-7 || collisionIssue(-2, 1)) { valid = false; break; }
       cost += polylinePostureCost(movable) / probePoints.length;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createMobileCollisionChecker, MOBILE_ENVIRONMENT_MARGIN } from './mobileTeachingCollision.js';
+import { polylineStartQuaternion } from './polylineTeachingOrientation.js';
 
 const moving = (node) => ['revolute', 'continuous', 'prismatic'].includes(node.userData?.jointType);
 const rigidRoot = (node) => {
@@ -26,7 +27,8 @@ export async function checkPolylineStartTool({ robot, frame, path, environment, 
   if (Math.min(scale.x, scale.y, scale.z) <= 1e-9
     || tcpMatrix.elements.some((value, i) => !Number.isFinite(value) || Math.abs(value - recomposed.elements[i]) > 1e-8)) return null;
   const position = new THREE.Vector3().fromArray(path.points[0].position);
-  const quaternion = path.quaternion ? new THREE.Quaternion().fromArray(path.quaternion).normalize() : currentQ;
+  const reference = path.quaternion ? new THREE.Quaternion().fromArray(path.quaternion).normalize() : currentQ;
+  const quaternion = path.settings.perpendicularTool ? polylineStartQuaternion(path, reference) : reference;
   const desired = new THREE.Matrix4().compose(position, quaternion, scale);
   const transform = desired.multiply(tcpMatrix.clone().invert());
   const layer = new THREE.Group(), tool = new THREE.Group();

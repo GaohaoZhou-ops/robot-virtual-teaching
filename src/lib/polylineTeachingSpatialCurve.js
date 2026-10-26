@@ -99,13 +99,29 @@ export function spatialCurveGeometry(path) {
   return result;
 }
 
-export function sampleSpatialPart(part, fraction) {
+function spatialPartParameter(part, fraction) {
   const s = Math.max(0, Math.min(1, fraction)) * part.length;
   let lo = 0, hi = part.arc.length - 1;
   while (hi - lo > 1) { const mid = (lo + hi) >>> 1; if (part.arc[mid][1] > s) hi = mid; else lo = mid; }
   const a = part.arc[lo], b = part.arc[hi];
   const t = a[0] + (b[0] - a[0]) * Math.max(0, Math.min(1, (s - a[1]) / (b[1] - a[1] || 1)));
-  return spatialPartPoint(part, t);
+  return t;
+}
+
+export function sampleSpatialPart(part, fraction) {
+  return spatialPartPoint(part, spatialPartParameter(part, fraction));
+}
+
+export function spatialPartTangent(part, fraction) {
+  const t = spatialPartParameter(part, fraction);
+  const a = vector(part.from), b = vector(part.controls[0]), c = vector(part.controls[1]), d = vector(part.to);
+  const derivative = (u) => b.clone().sub(a).multiplyScalar((1 - u) ** 2)
+    .addScaledVector(c.clone().sub(b), 2 * (1 - u) * u).addScaledVector(d.clone().sub(c), u ** 2);
+  let tangent = derivative(t);
+  // A stopped reversal has a one-sided tangent on each adjoining span.
+  if (tangent.lengthSq() < 1e-20) tangent = derivative(t < .5 ? t + 1e-6 : t - 1e-6);
+  if (tangent.lengthSq() < 1e-20) tangent = d.sub(a);
+  return tangent.normalize();
 }
 
 export function sampleSpatialCurve(curve, progress) {
@@ -114,7 +130,7 @@ export function sampleSpatialCurve(curve, progress) {
   while (lo < hi) { const mid = (lo + hi) >>> 1; if (distance < curve.parts[mid].endS) hi = mid; else lo = mid + 1; }
   const part = curve.parts[lo], segmentProgress = Math.max(0, Math.min(1, (distance - part.startS) / part.length));
   const target = sampleSpatialPart(part, segmentProgress);
-  return { target, sourcePosition: target, sourceDistance: (curve.sourceOffset || 0) + distance,
+  return { target, tangent: spatialPartTangent(part, segmentProgress), sourcePosition: target, sourceDistance: (curve.sourceOffset || 0) + distance,
     segmentIndex: part.index, segmentProgress };
 }
 

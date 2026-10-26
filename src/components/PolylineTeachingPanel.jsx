@@ -748,6 +748,8 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
                   onChange={(event) => edit({ ...path, base: { ...baseOptions, allowPartial: event.target.checked } })} />最大保障</label>
               <label><input type="checkbox" checked={path.settings.uniformSpeed !== false}
                 onChange={(event) => edit({ ...path, settings: { ...path.settings, uniformSpeed: event.target.checked } })} />匀速划线</label>
+              <label title="工具轴与路线当前方向成 90°，随路线转弯调整姿态"><input type="checkbox" checked={path.settings.perpendicularTool === true}
+                onChange={(event) => edit({ ...path, settings: { ...path.settings, perpendicularTool: event.target.checked } })} />垂直法向量</label>
             </div>
           </div>
           <div className="polyline-teaching__constraint-row" role="group" aria-label="腰部">

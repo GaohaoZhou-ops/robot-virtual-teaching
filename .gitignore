@@ -53,6 +53,12 @@ node_modules/
 # test-artifacts/polyline-*/; maintained regression runners stay in tests/.
 # Spatial-curve previews, playback captures and service-index backups use
 # test-artifacts/polyline-spatial-curve/ under the same ignored output root.
+# Perpendicular-tool planning checks use test-artifacts/polyline-perpendicular/.
+# Live Zivid axes and robot-resource reload checks keep browser captures,
+# temporary runners and service-index backups in
+# test-artifacts/{zivid-optical-axes,robot-resource-persistence}/.
+# Maintained polyline_perpendicular_* and robot_resource_persistence_* tests
+# remain trackable alongside the source modules.
 # Reset-confirmation backup checks keep screenshots and service-index backups
 # in test-artifacts/global-reset-export/; exported ZIPs use temporary workspaces.
 # Shared-preset migration and map-origin navigation checks use
@@ -1139,11 +1145,14 @@ Desktop.ini
 /robots/
 /robots.[zZ][iI][pP]
 /robots-*.[zZ][iI][pP]
-# Vendor model bundles, unpacked copies and dated revisions stay local.
+# Vendor model bundles, unpacked copies, dated revisions and duplicate downloads
+# stay local. Anchor these rules so nested reusable fixtures remain trackable.
 /botx-multi-descriptions/
 /botx-multi-descriptions-*/
+/botx-multi-descriptions (*)/
 /botx-multi-descriptions.[zZ][iI][pP]
 /botx-multi-descriptions-*.[zZ][iI][pP]
+/botx-multi-descriptions (*).[zZ][iI][pP]
 
 # Read-only robot workspace references for the ABX importer contract tests.
 # Keep these large deployment snapshots local; nested source/fixture paths

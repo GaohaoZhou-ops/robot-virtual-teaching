@@ -100,5 +100,7 @@ export function samplePolylineCurve(curve, progress) {
   const sourcePosition = vector(curve.vertices[segmentIndex]).lerp(vector(curve.vertices[segmentIndex + 1]), segmentProgress);
   const sourceDistance = curve.cumulative[segmentIndex]
     + (curve.cumulative[segmentIndex + 1] - curve.cumulative[segmentIndex]) * segmentProgress;
-  return { target: pointOnPart(part, t), segmentIndex, segmentProgress, sourcePosition, sourceDistance };
+  const tangent = part.control ? vector(part.control).sub(vector(part.from)).multiplyScalar(1 - t)
+    .addScaledVector(vector(part.to).sub(vector(part.control)), t).normalize() : vector(part.to).sub(vector(part.from)).normalize();
+  return { target: pointOnPart(part, t), tangent, segmentIndex, segmentProgress, sourcePosition, sourceDistance };
 }

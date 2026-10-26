@@ -812,7 +812,7 @@ const createRecordedOpticalAxisLabel = (text, color, size) => {
   return label;
 };
 
-const createRecordedOpticalCoordinateFrame = (far) => {
+export const createOpticalCoordinateFrame = (far, { label: frameLabel } = {}) => {
   const axisLength = THREE.MathUtils.clamp(finiteNumber(far, 1.3) * 0.13, 0.12, 0.2);
   const shaftRadius = axisLength * 0.025;
   const group = new THREE.Group();
@@ -841,6 +841,10 @@ const createRecordedOpticalCoordinateFrame = (far) => {
       group.add(label);
     }
   });
+  if (frameLabel) {
+    const label = createRecordedOpticalAxisLabel(frameLabel, '#e0eeed', axisLength * .32);
+    if (label) { label.position.set(0, -axisLength * .35, 0); group.add(label); }
+  }
   return group;
 };
 
@@ -870,7 +874,7 @@ export const createTeachingVisionCoverageVolume = (record, options = {}) => {
   opticalMarker.name = 'captured-optical-center';
   opticalMarker.renderOrder = 10;
 
-  const opticalCoordinateFrame = createRecordedOpticalCoordinateFrame(grid.far);
+  const opticalCoordinateFrame = createOpticalCoordinateFrame(grid.far);
 
   const group = new THREE.Group();
   group.name = `teaching-vision-coverage:${record.key || record.side}`;
