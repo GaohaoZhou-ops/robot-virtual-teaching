@@ -5,6 +5,7 @@ import ImageIO
 
 private let screenProtocol = "atlas-ipad-screen/1"
 private let screenAccent = Color(red: 0.35, green: 0.86, blue: 0.91)
+private let screenHeaderControlHeight: CGFloat = 44
 
 struct ScreenJoint: Decodable, Identifiable, Equatable {
     let name: String
@@ -833,6 +834,8 @@ private struct ScreenInvitationButtonStyle: ButtonStyle {
 private struct ScreenCollaborationView: View {
     @ObservedObject var screen: ScreenCollaboration
     @State private var selection = "both"
+    @State private var leftCameraView = ScreenCameraViewState()
+    @State private var rightCameraView = ScreenCameraViewState()
     var body: some View {
         GeometryReader { viewport in
             let landscape = viewport.size.width > viewport.size.height
@@ -856,8 +859,6 @@ private struct ScreenCollaborationView: View {
                     if selection != "right" { camera(screen.left, side: "left", title: "左臂", color: screenAccent) }
                     if selection != "left" { camera(screen.right, side: "right", title: "右臂", color: Color(red: 1, green: 0.74, blue: 0.38)) }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                Text(selection == "both" ? "轻点画面，放大查看单臂" : "轻点画面，返回双臂视图")
-                    .font(.caption).foregroundStyle(.secondary)
                 }
             }.padding(.horizontal, padding).padding(.top, padding).padding(.bottom, bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -871,7 +872,7 @@ private struct ScreenCollaborationView: View {
         if width >= 680 {
             let pickerWidth = min(280, width - 480)
             let sideWidth = (width - pickerWidth - 32) / 2
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 connectionTitle.frame(width: sideWidth, alignment: .leading)
                 pagePicker(width: pickerWidth)
                 ScreenPoseCaptureButton(screen: screen).frame(width: sideWidth, alignment: .trailing)
@@ -879,7 +880,7 @@ private struct ScreenCollaborationView: View {
         } else {
             // Keep all controls reachable in a narrow split-screen or phone window.
             VStack(spacing: 12) {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     connectionTitle
                     Spacer(minLength: 8)
                     ScreenPoseCaptureButton(screen: screen)
@@ -889,25 +890,23 @@ private struct ScreenCollaborationView: View {
         }
     }
     private var connectionTitle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
-                HStack(spacing: 8) {
-                    Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
-                    Text("画面协作").font(.headline).accessibilityIdentifier("screen-collaboration-title")
-                }
-                stopButton
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: screen.connectionKind == "Wi-Fi" ? "wifi" : "cable.connector").foregroundStyle(screenAccent)
+                Text("画面协作").font(.headline).accessibilityIdentifier("screen-collaboration-title")
             }
-            Text("\(screen.connectionKind) 已连接 · \(screen.page == "joints" ? "关节与姿态同步" : screen.stale ? "等待画面更新" : "末端相机仿真画面")")
-                .font(.caption).foregroundStyle(screen.stale ? .orange : screenAccent)
+            stopButton
         }.lineLimit(1)
     }
     private var stopButton: some View {
-        Button("结束协作", systemImage: "xmark", action: screen.finish)
-            .font(.subheadline).buttonStyle(.bordered).controlSize(.small)
+        Button(role: .destructive, action: screen.finish) {
+            Label("结束协作", systemImage: "xmark")
+        }
+            .buttonStyle(ScreenHeaderButtonStyle(background: .red, foreground: .white))
             .accessibilityIdentifier("screen-collaboration-stop")
     }
     private func pagePicker(width: CGFloat) -> some View {
-        ScreenCollaborationPagePicker(selection: $screen.page).frame(width: width, height: 44)
+        ScreenCollaborationPagePicker(selection: $screen.page).frame(width: width, height: screenHeaderControlHeight)
     }
     private func camera(_ image: UIImage?, side: String, title: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -916,15 +915,19 @@ private struct ScreenCollaborationView: View {
                 Text(title).font(.headline)
                 Spacer()
                 Text("ZIVID 2 M70").font(.caption.monospaced()).foregroundStyle(.secondary)
-            }
+            }.contentShape(Rectangle())
+                .onTapGesture { selection = selection == "both" ? side : "both" }
             ZStack {
                 Color.black.opacity(0.35)
-                if let image { Image(uiImage: image).resizable().scaledToFit() }
+                ScreenCameraViewport(image: image, state: side == "left" ? leftCameraView : rightCameraView,
+                    side: side, title: title, expanded: selection != "both") {
+                    selection = selection == "both" ? side : "both"
+                }
                 if image == nil {
                     VStack(spacing: 10) {
                         Image(systemName: "cable.connector").font(.title2)
                         Text("正在连接相机画面").font(.callout)
-                    }.foregroundStyle(.secondary)
+                    }.foregroundStyle(.secondary).allowsHitTesting(false)
                 }
             }.clipShape(RoundedRectangle(cornerRadius: 10)).frame(maxWidth: .infinity, maxHeight: .infinity)
             if screen.stale && image != nil {
@@ -932,13 +935,169 @@ private struct ScreenCollaborationView: View {
             }
         }.padding(16).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.25)))
-            .contentShape(Rectangle())
-            .onTapGesture { selection = selection == "both" ? side : "both" }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(title)末端相机画面").accessibilityIdentifier("screen-camera-\(side)")
-            .accessibilityAddTraits(.isButton)
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.25)).allowsHitTesting(false))
+            .accessibilityElement(children: .contain).accessibilityIdentifier("screen-camera-card-\(side)")
     }
+}
+
+// Store image-space framing per camera, independently of incoming JPEG frames
+// and of whether the camera is currently visible in the single/dual layout.
+private final class ScreenCameraViewState {
+    var zoom: CGFloat = 1
+    var center = CGPoint(x: 0.5, y: 0.5)
+}
+
+private struct ScreenCameraViewport: UIViewRepresentable {
+    let image: UIImage?
+    let state: ScreenCameraViewState
+    let side: String
+    let title: String
+    let expanded: Bool
+    let onTap: () -> Void
+
+    func makeUIView(context: Context) -> ScreenCameraImageView { ScreenCameraImageView(state: state) }
+    func updateUIView(_ view: ScreenCameraImageView, context: Context) {
+        view.onTap = onTap
+        view.update(image: image, side: side, title: title, expanded: expanded)
+    }
+}
+
+private final class ScreenCameraScrollView: UIScrollView {
+    var onActivate: (() -> Void)?
+    override func accessibilityActivate() -> Bool {
+        guard let onActivate else { return false }
+        onActivate(); return true
+    }
+}
+
+private final class ScreenCameraImageView: UIView, UIScrollViewDelegate {
+    var onTap: (() -> Void)?
+    private let state: ScreenCameraViewState
+    private let scroll = ScreenCameraScrollView()
+    private let imageView = UIImageView()
+    private let restoreButton = UIButton(type: .system)
+    private var tap: UITapGestureRecognizer!
+    private var viewportSize = CGSize.zero
+    private var fittedSize = CGSize.zero
+    private var applyingLayout = false
+
+    init(state: ScreenCameraViewState) {
+        self.state = state
+        super.init(frame: .zero)
+        clipsToBounds = true
+        scroll.delegate = self
+        scroll.minimumZoomScale = 1; scroll.maximumZoomScale = 8
+        scroll.bounces = false; scroll.bouncesZoom = false
+        scroll.showsHorizontalScrollIndicator = false; scroll.showsVerticalScrollIndicator = false
+        scroll.contentInsetAdjustmentBehavior = .never
+        scroll.scrollsToTop = false; scroll.decelerationRate = .fast
+        scroll.backgroundColor = .clear
+        imageView.contentMode = .scaleAspectFit
+        imageView.isUserInteractionEnabled = true
+        imageView.isAccessibilityElement = false
+        scroll.addSubview(imageView); addSubview(scroll)
+
+        tap = UITapGestureRecognizer(target: self, action: #selector(tapped))
+        tap.require(toFail: scroll.panGestureRecognizer)
+        if let pinch = scroll.pinchGestureRecognizer { tap.require(toFail: pinch) }
+        scroll.addGestureRecognizer(tap)
+        scroll.isAccessibilityElement = true; scroll.accessibilityTraits = [.image, .button]
+        scroll.onActivate = { [weak self] in self?.onTap?() }
+        scroll.accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: "放大画面", actionHandler: { [weak self] _ in self?.zoom(by: 1.5); return self != nil }),
+            UIAccessibilityCustomAction(name: "缩小画面", actionHandler: { [weak self] _ in self?.zoom(by: 1 / 1.5); return self != nil }),
+            UIAccessibilityCustomAction(name: "恢复画面", actionHandler: { [weak self] _ in self?.restorePicture(); return self != nil })
+        ]
+
+        restoreButton.setImage(UIImage(systemName: "arrow.counterclockwise",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .medium)), for: .normal)
+        restoreButton.tintColor = .white.withAlphaComponent(0.85)
+        restoreButton.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        restoreButton.layer.cornerRadius = 12
+        restoreButton.layer.borderWidth = 1
+        restoreButton.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
+        restoreButton.accessibilityHint = "恢复适应窗口的默认缩放和位置"
+        restoreButton.addTarget(self, action: #selector(restorePicture), for: .touchUpInside)
+        // A sibling overlay stays fixed while the image moves. Its touches never
+        // reach the scroll view's tap recognizer or change the single/dual mode.
+        addSubview(restoreButton)
+        accessibilityElements = [scroll, restoreButton]
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func update(image: UIImage?, side: String, title: String, expanded: Bool) {
+        let sizeChanged = imageView.image?.size != image?.size
+        if imageView.image !== image { imageView.image = image }
+        if sizeChanged { setNeedsLayout() }
+        let available = image != nil
+        if scroll.isScrollEnabled != available { scroll.isScrollEnabled = available }
+        if scroll.pinchGestureRecognizer?.isEnabled != available { scroll.pinchGestureRecognizer?.isEnabled = available }
+        if tap.isEnabled != available { tap.isEnabled = available }
+        restoreButton.isHidden = !available
+        scroll.accessibilityIdentifier = "screen-camera-\(side)"
+        scroll.accessibilityLabel = "\(title)末端相机画面"
+        scroll.accessibilityHint = "双指缩放，单指拖动；轻点\(expanded ? "返回双臂视图" : "放大查看单臂")"
+        restoreButton.accessibilityIdentifier = "screen-camera-reset-\(side)"
+        restoreButton.accessibilityLabel = "恢复\(title)画面"
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        restoreButton.frame = CGRect(x: max(0, bounds.width - 56), y: 12, width: 44, height: 44)
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        let source = imageView.image?.size ?? bounds.size
+        let fit = min(bounds.width / max(1, source.width), bounds.height / max(1, source.height))
+        let size = CGSize(width: source.width * fit, height: source.height * fit)
+        guard viewportSize != bounds.size || fittedSize != size else { return }
+        let zoom = state.zoom, center = state.center
+        applyingLayout = true
+        scroll.setContentOffset(scroll.contentOffset, animated: false)
+        scroll.setZoomScale(1, animated: false)
+        scroll.frame = bounds
+        imageView.frame = CGRect(origin: .zero, size: size)
+        scroll.contentSize = size
+        viewportSize = bounds.size; fittedSize = size
+        apply(zoom: zoom, center: center)
+    }
+
+    private func updateInsets() {
+        let horizontal = max(0, (scroll.bounds.width - scroll.contentSize.width) / 2)
+        let vertical = max(0, (scroll.bounds.height - scroll.contentSize.height) / 2)
+        let inset = UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+        if scroll.contentInset != inset { scroll.contentInset = inset }
+    }
+
+    private func apply(zoom: CGFloat, center: CGPoint) {
+        applyingLayout = true
+        scroll.setContentOffset(scroll.contentOffset, animated: false)
+        scroll.setZoomScale(min(8, max(1, zoom)), animated: false)
+        updateInsets()
+        let inset = scroll.contentInset, size = scroll.contentSize
+        scroll.contentOffset = CGPoint(
+            x: min(max(center.x * size.width - scroll.bounds.width / 2, -inset.left), max(-inset.left, size.width - scroll.bounds.width + inset.right)),
+            y: min(max(center.y * size.height - scroll.bounds.height / 2, -inset.top), max(-inset.top, size.height - scroll.bounds.height + inset.bottom)))
+        applyingLayout = false
+        saveFraming()
+    }
+
+    private func saveFraming() {
+        guard !applyingLayout, scroll.contentSize.width > 0, scroll.contentSize.height > 0 else { return }
+        state.zoom = scroll.zoomScale
+        state.center = CGPoint(x: (scroll.contentOffset.x + scroll.bounds.width / 2) / scroll.contentSize.width,
+                               y: (scroll.contentOffset.y + scroll.bounds.height / 2) / scroll.contentSize.height)
+        scroll.accessibilityValue = String(format: "%.0f%%，水平 %.0f%%，垂直 %.0f%%",
+            state.zoom * 100, (state.center.x - 0.5) * 100, (state.center.y - 0.5) * 100)
+    }
+
+    @objc private func tapped() { onTap?() }
+    @objc private func restorePicture() { apply(zoom: 1, center: CGPoint(x: 0.5, y: 0.5)) }
+    private func zoom(by factor: CGFloat) { apply(zoom: state.zoom * factor, center: state.center) }
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        guard !applyingLayout else { return }
+        updateInsets(); saveFraming()
+    }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) { saveFraming() }
 }
 
 // Give the native segments a full 44-point touch surface without scaling their text.
@@ -958,7 +1117,7 @@ private struct ScreenCollaborationPagePicker: UIViewRepresentable {
         control.setTitleTextAttributes([.font: UIFont.preferredFont(forTextStyle: .subheadline)], for: .normal)
     }
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 280, height: 44)
+        CGSize(width: proposal.width ?? 280, height: screenHeaderControlHeight)
     }
     final class Coordinator: NSObject {
         var selection: Binding<String>
@@ -967,6 +1126,21 @@ private struct ScreenCollaborationPagePicker: UIViewRepresentable {
             guard control.selectedSegmentIndex == 0 || control.selectedSegmentIndex == 1 else { return }
             selection.wrappedValue = control.selectedSegmentIndex == 1 ? "joints" : "cameras"
         }
+    }
+}
+
+private struct ScreenHeaderButtonStyle: ButtonStyle {
+    let background: Color
+    let foreground: Color
+    @Environment(\.isEnabled) private var enabled
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold)).lineLimit(1)
+            .padding(.horizontal, 16).frame(height: screenHeaderControlHeight)
+            .foregroundStyle(foreground)
+            .background(background, in: Capsule())
+            .contentShape(Capsule())
+            .opacity(enabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
     }
 }
 
@@ -982,8 +1156,8 @@ private struct ScreenPoseCaptureButton: View {
                 if screen.awaitingCapture { ProgressView().tint(.black) }
                 else { Image(systemName: "square.and.arrow.down") }
                 Text(screen.awaitingCapture ? "正在记录…" : "记录姿态").fontWeight(.semibold)
-            }.frame(minHeight: 24)
-        }.buttonStyle(.borderedProminent).tint(screenAccent).foregroundStyle(.black).controlSize(.large)
+            }
+        }.buttonStyle(ScreenHeaderButtonStyle(background: screenAccent, foreground: .black))
             .fixedSize(horizontal: true, vertical: true)
             .disabled(screen.awaitingCapture || screen.awaitingControl)
             .accessibilityIdentifier("screen-record-pose")

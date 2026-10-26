@@ -50,7 +50,7 @@ final class AtlasTeachingUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 3)
         accept.tap()
         XCTAssertTrue(stop.waitForExistence(timeout: 30))
-        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["screen-collaboration-title"].waitForExistence(timeout: 30))
         Thread.sleep(forTimeInterval: 4)
         let connected = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         connected.name = "USB collaboration after acceptance"; connected.lifetime = .keepAlways; add(connected)
@@ -121,7 +121,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertTrue(field.waitForExistence(timeout: 10)); field.typeText(code)
             let stop = app.buttons["screen-collaboration-stop"]
             XCTAssertTrue(stop.waitForExistence(timeout: 20), app.debugDescription)
-            XCTAssertTrue(app.staticTexts["Wi-Fi 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 30))
+            XCTAssertTrue(app.staticTexts["screen-collaboration-title"].waitForExistence(timeout: 30))
         } else if environment["ATLAS_SCREEN_ATTACH"] == "1" { app.activate() }
         else { app.launch() }
         return app
@@ -205,7 +205,7 @@ final class AtlasTeachingUITests: XCTestCase {
         else { app.launch() }
         acceptFixtureUSBInvitation(app)
         XCTAssertTrue(app.buttons["screen-collaboration-stop"].waitForExistence(timeout: 180))
-        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["screen-collaboration-title"].waitForExistence(timeout: 40))
         XCUIDevice.shared.orientation = .landscapeLeft
         app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
         let viewport = app.otherElements["screen-viewport-gestures"]
@@ -240,7 +240,7 @@ final class AtlasTeachingUITests: XCTestCase {
         acceptFixtureUSBInvitation(app)
         let record = app.buttons["screen-record-pose"]
         XCTAssertTrue(record.waitForExistence(timeout: 180))
-        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["screen-collaboration-title"].waitForExistence(timeout: 40))
         let title = app.staticTexts["screen-collaboration-title"]
         let stop = app.buttons["screen-collaboration-stop"]
         let window = app.windows.firstMatch.frame
@@ -355,22 +355,90 @@ final class AtlasTeachingUITests: XCTestCase {
         acceptFixtureUSBInvitation(app)
         let view = app.buttons["screen-collaboration-stop"]
         XCTAssertTrue(view.waitForExistence(timeout: 150))
-        XCTAssertTrue(app.staticTexts["USB 已连接 · 末端相机仿真画面"].waitForExistence(timeout: 40))
+        XCTAssertTrue(app.staticTexts["screen-collaboration-title"].waitForExistence(timeout: 40))
+        func framing(_ element: XCUIElement) -> [Double] {
+            let text = element.value as? String ?? ""
+            let values = text.components(separatedBy: CharacterSet(charactersIn: "0123456789.-").inverted).compactMap(Double.init)
+            XCTAssertEqual(values.count, 3, "Camera framing should be accessible: \(text)")
+            return values.count == 3 ? values : [0, 0, 0]
+        }
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
             let left = app.descendants(matching: .any)["screen-camera-left"].firstMatch
             let right = app.descendants(matching: .any)["screen-camera-right"].firstMatch
+            let resetLeft = app.buttons["screen-camera-reset-left"]
+            let resetRight = app.buttons["screen-camera-reset-right"]
             XCTAssertTrue(left.waitForExistence(timeout: 10)); XCTAssertTrue(right.exists)
+            XCTAssertTrue(resetLeft.waitForExistence(timeout: 15)); XCTAssertTrue(resetRight.exists)
             XCTAssertTrue(app.windows.firstMatch.frame.contains(left.frame))
             XCTAssertTrue(app.windows.firstMatch.frame.contains(right.frame))
+            let leftFrame = left.frame, rightFrame = right.frame, resetFrame = resetLeft.frame
+            XCTAssertTrue(leftFrame.contains(resetFrame), "Restore overlays the image without taking layout space")
+            XCTAssertTrue(resetLeft.isHittable); XCTAssertTrue(resetRight.isHittable)
+            XCTAssertEqual(framing(left)[0], 100, accuracy: 1)
+            XCTAssertEqual(framing(right)[0], 100, accuracy: 1)
             let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             capture.name = "USB stereo cameras - \(orientation.rawValue)"; capture.lifetime = .keepAlways; add(capture)
+
+            // XCTest starts its two touches only a few points apart. As in the
+            // Pose image test, travel far enough to engage native scroll zoom.
+            left.pinch(withScale: 4, velocity: 1)
+            XCTAssertGreaterThan(framing(left)[0], 140)
+            XCTAssertTrue(right.exists, "Pinching must not switch to the single-camera layout")
+            XCTAssertEqual(framing(right)[0], 100, accuracy: 1)
+            let beforePan = framing(left)
+            let dragStart = left.coordinate(withNormalizedOffset: CGVector(dx: 0.68, dy: 0.5))
+            let dragEnd = left.coordinate(withNormalizedOffset: CGVector(dx: 0.32, dy: 0.6))
+            dragStart.press(forDuration: 0.05, thenDragTo: dragEnd, withVelocity: .slow, thenHoldForDuration: 0.2)
+            let moved = framing(left)
+            XCTAssertGreaterThan(abs(moved[1] - beforePan[1]), 1, "One finger pans the zoomed image")
+            XCTAssertTrue(right.exists)
+            // Incoming live JPEGs must not reset the user's framing.
+            Thread.sleep(forTimeInterval: 1)
+            XCTAssertEqual(framing(left)[0], moved[0], accuracy: 1)
+            XCTAssertEqual(framing(left)[1], moved[1], accuracy: 1)
+            XCTAssertEqual(left.frame, leftFrame); XCTAssertEqual(right.frame, rightFrame)
+            XCTAssertEqual(resetLeft.frame, resetFrame, "The overlay stays in its corner while the image moves")
+            let zoomed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            zoomed.name = "USB camera pinch and pan - \(orientation.rawValue)"; zoomed.lifetime = .keepAlways; add(zoomed)
+
+            left.pinch(withScale: 0.65, velocity: -1)
+            XCTAssertLessThan(framing(left)[0], moved[0] - 10, "Pinching inward zooms back out")
+            XCTAssertGreaterThanOrEqual(framing(left)[0], 100)
+
+            right.pinch(withScale: 4, velocity: 1)
+            let rightZoom = framing(right)[0]
+            XCTAssertGreaterThan(rightZoom, 120)
+            resetLeft.tap()
+            XCTAssertEqual(framing(left), [100, 0, 0])
+            XCTAssertEqual(framing(right)[0], rightZoom, accuracy: 1, "Restoring one camera leaves the other unchanged")
+            XCTAssertTrue(right.exists, "Restore must not activate the image's single-tap action")
+            resetRight.tap()
+            XCTAssertEqual(framing(right), [100, 0, 0])
+            XCTAssertEqual(left.frame, leftFrame); XCTAssertEqual(right.frame, rightFrame)
+
             left.tap()
             XCTAssertFalse(right.exists)
+            left.pinch(withScale: 4, velocity: 1)
+            XCTAssertGreaterThan(framing(left)[0], 120)
+            resetLeft.tap()
+            XCTAssertEqual(framing(left), [100, 0, 0])
+            XCTAssertFalse(right.exists, "Restore keeps the selected single-camera layout")
             let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             expanded.name = "USB left camera expanded - \(orientation.rawValue)"; expanded.lifetime = .keepAlways; add(expanded)
             left.tap(); XCTAssertTrue(right.waitForExistence(timeout: 5))
         }
+        let left = app.descendants(matching: .any)["screen-camera-left"].firstMatch
+        left.pinch(withScale: 4, velocity: 1)
+        let zoom = framing(left)[0]
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertEqual(framing(left)[0], zoom, accuracy: 1, "Rotation preserves image zoom")
+        app.segmentedControls["screen-page-tabs"].buttons["关节控制"].tap()
+        app.segmentedControls["screen-page-tabs"].buttons["相机画面"].tap()
+        XCTAssertTrue(left.waitForExistence(timeout: 10))
+        XCTAssertEqual(framing(left)[0], zoom, accuracy: 1, "Returning to cameras preserves their framing")
+        app.buttons["screen-camera-reset-left"].tap()
+        XCTAssertEqual(framing(left), [100, 0, 0])
         app.buttons["screen-collaboration-stop"].tap()
         XCTAssertTrue(view.waitForNonExistence(timeout: 10))
         XCTAssertTrue(app.otherElements["library-content"].exists)
