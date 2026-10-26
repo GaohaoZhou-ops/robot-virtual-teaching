@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 import json
 import os
 import subprocess
@@ -70,8 +71,8 @@ def run():
                 display_button = page.get_by_role('button', name='显示设置', exact=True)
                 display_button.click()
                 display_menu = page.get_by_role('dialog', name='3D 显示设置', exact=True)
-                expect(display_menu.get_by_role('button', name='切换点云颜色模式')).to_be_visible()
-                expect(display_menu.get_by_role('combobox', name='点云显示密度')).to_be_visible()
+                expect(display_settings_section(page, '地图与对象').get_by_role('button', name='切换点云颜色模式')).to_be_visible()
+                expect(display_settings_section(page, '显示质量').get_by_role('combobox', name='点云显示密度')).to_be_visible()
                 expect(display_menu.get_by_role('switch', name='显示距离警告')).to_have_count(0)
                 expect(display_menu.get_by_role('button', name='设置忽略关节')).to_have_count(0)
                 distance_button.click()

@@ -78,6 +78,7 @@ export default function ViewerMenu({
     updatePosition();
     const observer = new ResizeObserver(updatePosition);
     observer.observe(triggerRef.current);
+    observer.observe(menuRef.current);
     if (viewport) observer.observe(viewport);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);

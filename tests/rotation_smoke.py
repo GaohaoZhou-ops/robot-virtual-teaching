@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 import math
 import os
 from pathlib import Path
@@ -519,8 +520,8 @@ def run():
 
         assert viewer_tool(page, name="重置3D视角").is_visible()
         page.get_by_role("button", name="显示设置", exact=True).click()
-        resolution = page.get_by_role("group", name="点云显示分辨率")
-        point_density = page.get_by_label("点云显示密度")
+        resolution = display_settings_section(page, '显示质量').get_by_role("group", name="点云显示分辨率")
+        point_density = display_settings_section(page, '显示质量').get_by_label("点云显示密度")
         assert page.get_by_role("button", name="重置全部视角").count() == 0
         assert page.get_by_role("button", name="重置2D视角").is_visible()
         assert resolution.is_visible()
@@ -536,7 +537,7 @@ def run():
         assert canvas.get_attribute("data-resolution-percent") == "100"
         assert canvas.get_attribute("data-resolution-selection") == "native"
 
-        color_toggle = page.get_by_role("button", name="切换点云颜色模式")
+        color_toggle = display_settings_section(page, '地图与对象').get_by_role("button", name="切换点云颜色模式")
         assert color_toggle.get_attribute("data-color-mode") == "height"
         elevation_scale = page.get_by_label("点云高程比例尺")
         assert elevation_scale.is_visible()

@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 from topbar_tools_helpers import topbar_action
 
 import os
@@ -134,7 +135,7 @@ def run():
         canvas = page.locator(".three-canvas")
         assert canvas.get_attribute("data-vision-coverage-state") == "empty"
         page.get_by_role("button", name="显示设置", exact=True).click()
-        page.get_by_role("button", name="显示表面覆盖率", exact=True).click()
+        display_settings_section(page, '覆盖与投影').get_by_role("button", name="显示表面覆盖率", exact=True).click()
         page.get_by_role("button", name="关闭显示设置", exact=True).click()
         assert surface_coverage(page, 0) == 0
         topbar_action(page, name="加载机器人", exact=True).click()
@@ -301,7 +302,7 @@ def run():
         assert page.locator(".vision-coverage-readout").count() == 0
         page.get_by_role("button", name="显示设置", exact=True).click()
         display_settings = page.get_by_role("dialog", name="3D 显示设置", exact=True)
-        opacity_slider = display_settings.get_by_role(
+        opacity_slider = display_settings_section(page, '覆盖与投影').get_by_role(
             "slider", name="表面贴图渲染透明度", exact=True
         )
         assert opacity_slider.input_value() == "5"
@@ -355,7 +356,7 @@ def run():
 
         visible_projection_frame = canvas.screenshot()
         page.get_by_role("button", name="显示设置", exact=True).click()
-        disable_projection = display_settings.get_by_role(
+        disable_projection = display_settings_section(page, '覆盖与投影').get_by_role(
             "button", name="关闭投影渲染", exact=True
         )
         assert disable_projection.get_attribute("aria-pressed") == "true"
@@ -384,7 +385,7 @@ def run():
             disabled_metrics["optical_pose_signature"]
             == captured_optical_pose_signature
         )
-        assert display_settings.get_by_role("button", name="开启投影渲染", exact=True).get_attribute("aria-pressed") == "false"
+        assert display_settings_section(page, '覆盖与投影').get_by_role("button", name="开启投影渲染", exact=True).get_attribute("aria-pressed") == "false"
         display_settings.get_by_role("button", name="关闭显示设置").click()
         assert (
             canvas.get_attribute("data-teaching-surface-tint-render-enabled")
@@ -403,7 +404,7 @@ def run():
         assert projection_toggle_difference["maximum"] > 10
 
         page.get_by_role("button", name="显示设置", exact=True).click()
-        enable_projection = display_settings.get_by_role(
+        enable_projection = display_settings_section(page, '覆盖与投影').get_by_role(
             "button", name="开启投影渲染", exact=True
         )
         assert enable_projection.get_attribute("aria-pressed") == "false"
@@ -424,7 +425,7 @@ def run():
             restored_toggle_metrics["optical_pose_signature"]
             == captured_optical_pose_signature
         )
-        assert display_settings.get_by_role("button", name="关闭投影渲染", exact=True).get_attribute("aria-pressed") == "true"
+        assert display_settings_section(page, '覆盖与投影').get_by_role("button", name="关闭投影渲染", exact=True).get_attribute("aria-pressed") == "true"
         display_settings.get_by_role("button", name="关闭显示设置").click()
         robot_position_before_move = (
             float(canvas.get_attribute("data-robot-x") or 0),
@@ -455,11 +456,11 @@ def run():
         assert moved_metrics["coordinate_axes"] == 12
 
         page.get_by_role('button', name='显示设置', exact=True).click()
-        display_settings.get_by_role('combobox', name='网格渲染质量').select_option('performance')
-        display_settings.get_by_role('combobox', name='点云显示密度').select_option('0')
+        display_settings_section(page, '显示质量').get_by_role('combobox', name='网格渲染质量').select_option('performance')
+        display_settings_section(page, '显示质量').get_by_role('combobox', name='点云显示密度').select_option('0')
         assert surface_coverage(page, 4) == first_area_coverage
-        display_settings.get_by_role('combobox', name='网格渲染质量').select_option('auto')
-        display_settings.get_by_role('combobox', name='点云显示密度').select_option('auto')
+        display_settings_section(page, '显示质量').get_by_role('combobox', name='网格渲染质量').select_option('auto')
+        display_settings_section(page, '显示质量').get_by_role('combobox', name='点云显示密度').select_option('auto')
         display_settings.get_by_role('button', name='关闭显示设置').click()
 
         # Playback immediately restores the first recording and its projection,
@@ -582,7 +583,7 @@ def run():
         )
         restored = coverage_metrics(page.locator(".three-canvas"))
         page.get_by_role("button", name="显示设置", exact=True).click()
-        page.get_by_role("button", name="显示表面覆盖率", exact=True).click()
+        display_settings_section(page, '覆盖与投影').get_by_role("button", name="显示表面覆盖率", exact=True).click()
         page.get_by_role("button", name="关闭显示设置", exact=True).click()
         assert surface_coverage(page, 4) == first_area_coverage
         assert restored["state"] == "visible"

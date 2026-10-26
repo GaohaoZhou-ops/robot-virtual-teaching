@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 from topbar_tools_helpers import topbar_action
 
 import os
@@ -97,7 +98,7 @@ def run():
         page.locator(".projection-status").wait_for(state="hidden")
 
         page.get_by_role("button", name="显示设置", exact=True).click()
-        color_toggle = page.get_by_role("button", name="切换点云颜色模式")
+        color_toggle = display_settings_section(page, '地图与对象').get_by_role("button", name="切换点云颜色模式")
         assert color_toggle.get_attribute("data-color-mode") == "height"
         color_toggle.click()
         color_toggle.click()
@@ -270,7 +271,7 @@ def run():
         viewer_tool(page, name="显示3D路径点").click()
         assert page.locator(".three-canvas").get_attribute("data-waypoints-visible") == "true"
         page.get_by_role("button", name="显示设置", exact=True).click()
-        assert page.get_by_role("button", name="切换点云颜色模式").get_attribute("data-color-mode") == "white"
+        assert display_settings_section(page, '地图与对象').get_by_role("button", name="切换点云颜色模式").get_attribute("data-color-mode") == "white"
         page.get_by_role("button", name="关闭显示设置", exact=True).click()
         assert page.get_by_label("二维矢量点云截面").get_attribute("data-color-mode") == "white"
         assert page.get_by_label("点云高程比例尺").count() == 0

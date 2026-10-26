@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 from topbar_tools_helpers import topbar_action
 
 import json
@@ -69,9 +70,9 @@ def run():
         assert three_canvas.get_attribute("data-keyboard-mode") == "always-on"
         assert page.get_by_role("button", name="键盘", exact=True).count() == 0
         page.get_by_role("button", name="显示设置", exact=True).click()
-        assert "自动" in page.get_by_role("group", name="点云显示分辨率").inner_text()
+        assert "自动" in display_settings_section(page, '显示质量').get_by_role("group", name="点云显示分辨率").inner_text()
         vector_canvas = page.get_by_label("二维矢量点云截面")
-        color_toggle = page.get_by_role("button", name="切换点云颜色模式")
+        color_toggle = display_settings_section(page, '地图与对象').get_by_role("button", name="切换点云颜色模式")
         assert color_toggle.get_attribute("data-color-mode") == "height"
         assert vector_canvas.get_attribute("data-color-mode") == "height"
         assert page.get_by_label("点云高程比例尺").is_visible()
@@ -87,7 +88,7 @@ def run():
         assert three_canvas.get_attribute("data-color-mode") == "height"
         assert vector_canvas.get_attribute("data-color-mode") == "height"
         projection_before_resolution = page.locator(".slice-badge strong").inner_text()
-        point_density = page.get_by_label("点云显示密度")
+        point_density = display_settings_section(page, '显示质量').get_by_label("点云显示密度")
         assert point_density.is_visible()
         assert point_density.input_value() == "auto"
         assert page.get_by_role("button", name="重置点云分辨率").count() == 0

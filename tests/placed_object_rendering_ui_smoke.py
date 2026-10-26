@@ -1,4 +1,5 @@
 """Verify separate map/object GPU colors, shared legend and portable preferences."""
+from viewer_tools_helpers import display_settings_section
 import base64
 import json
 import subprocess
@@ -63,7 +64,7 @@ console.log(JSON.stringify(positions.map(([x,y])=>{const i=(Math.round(y)*im.wid
 
 
 def select_color(page, layer, mode):
-    panel = display_settings(page)
+    panel = display_settings_section(page, '地图与对象')
     button = panel.get_by_role('button', name=f'切换{layer}颜色模式', exact=True)
     for _ in range(3):
         if button.get_attribute('data-color-mode') == mode:
@@ -112,10 +113,10 @@ def run():
                 # Object-only elevation still has one shared, hideable legend.
                 select_color(page, '独立对象', 'height')
                 panel = display_settings(page)
-                panel.get_by_role('button', name='隐藏高程色卡', exact=True).click()
+                display_settings_section(page, '地图与对象').get_by_role('button', name='隐藏高程色卡', exact=True).click()
                 expect(page.locator('.height-color-legend')).to_have_count(0)
                 check_layout(page)
-                panel.get_by_role('button', name='显示高程色卡', exact=True).click()
+                display_settings_section(page, '地图与对象').get_by_role('button', name='显示高程色卡', exact=True).click()
                 expect(page.locator('.height-color-legend')).to_have_count(1)
                 page.screenshot(path=f'/tmp/atlas-layer-colors-settings-{points}.png', full_page=True)
                 page.keyboard.press('Escape')

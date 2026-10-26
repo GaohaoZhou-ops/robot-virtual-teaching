@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 from topbar_tools_helpers import topbar_action
 
 import base64
@@ -302,7 +303,7 @@ def run():
 
             writable_page.evaluate("window.__atlasWrittenPaths.length = 0")
             writable_page.get_by_role("button", name="显示设置", exact=True).click()
-            writable_page.get_by_role("button", name="切换点云颜色模式").click()
+            display_settings_section(writable_page, '地图与对象').get_by_role("button", name="切换点云颜色模式").click()
             writable_page.wait_for_function(
                 "window.__atlasWrittenPaths.includes('config/project.json') "
                 "&& window.__atlasWrittenPaths.includes('manifest.json')",

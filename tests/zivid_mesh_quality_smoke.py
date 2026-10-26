@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 from topbar_tools_helpers import topbar_action
 
 import os
@@ -77,7 +78,7 @@ def run():
         panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         canvas = camera_canvas(panel)
         page.get_by_role("button", name="显示设置", exact=True).click()
-        assert page.get_by_label("网格渲染质量", exact=True).input_value() == "balanced"
+        assert display_settings_section(page, '显示质量').get_by_label("网格渲染质量", exact=True).input_value() == "balanced"
         page.get_by_role("button", name="关闭显示设置", exact=True).click()
         assert canvas.get_attribute("data-rgb-mesh-visible") == "true"
 

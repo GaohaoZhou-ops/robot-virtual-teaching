@@ -1,4 +1,5 @@
 """3D navigation names follow the camera and retain independent display preferences."""
+from viewer_tools_helpers import display_settings_section
 import tempfile
 from pathlib import Path
 
@@ -127,8 +128,8 @@ def run():
             path_names = page.locator('.path-name-label')
             expect(path_names).to_have_count(0)
             settings = display_settings(page)
-            expect(settings.get_by_role('button', name='显示路径名', exact=True)).to_have_attribute('aria-pressed', 'false')
-            settings.get_by_role('button', name='显示路径名', exact=True).click()
+            expect(display_settings_section(page, '路径与标注').get_by_role('button', name='显示路径名', exact=True)).to_have_attribute('aria-pressed', 'false')
+            display_settings_section(page, '路径与标注').get_by_role('button', name='显示路径名', exact=True).click()
             expect(path_names).to_have_count(1)
             expect(path_names).to_have_text('停车点一 → 检修区 B')
             expect(path_names).to_have_css('visibility', 'visible')
@@ -170,18 +171,18 @@ def run():
 
             settings = display_settings(page)
             assert path_names.evaluate('el => el.style.transform') != path_transform
-            expect(settings.get_by_role('button', name='隐藏路径名', exact=True)).to_have_attribute('aria-pressed', 'true')
-            settings.get_by_role('button', name='隐藏路径名', exact=True).click()
+            expect(display_settings_section(page, '路径与标注').get_by_role('button', name='隐藏路径名', exact=True)).to_have_attribute('aria-pressed', 'true')
+            display_settings_section(page, '路径与标注').get_by_role('button', name='隐藏路径名', exact=True).click()
             expect(path_names).to_have_count(0)
             expect(page.locator('.waypoint-name-label')).to_have_count(4)
-            settings.get_by_role('button', name='显示路径名', exact=True).click()
+            display_settings_section(page, '路径与标注').get_by_role('button', name='显示路径名', exact=True).click()
             expect(path_names).to_have_count(1)
-            expect(settings.get_by_role("button", name="隐藏停车点名")).to_have_attribute("aria-pressed", "true")
+            expect(display_settings_section(page, '路径与标注').get_by_role("button", name="隐藏停车点名")).to_have_attribute("aria-pressed", "true")
             page.screenshot(path="/tmp/atlas-waypoint-names.png", full_page=True)
-            settings.get_by_role("button", name="隐藏停车点名", exact=True).click()
+            display_settings_section(page, '路径与标注').get_by_role("button", name="隐藏停车点名", exact=True).click()
             expect(page.locator(".waypoint-name-label")).to_have_count(0)
             expect(path_names).to_have_count(1)
-            expect(settings.get_by_role("button", name="显示停车点名")).to_have_attribute("aria-pressed", "false")
+            expect(display_settings_section(page, '路径与标注').get_by_role("button", name="显示停车点名")).to_have_attribute("aria-pressed", "false")
             expect(canvas).to_have_attribute("data-waypoints-visible", "true")
             expect(canvas).to_have_attribute("data-route-edge-count", "1")
             page.keyboard.press("Escape")
@@ -191,7 +192,7 @@ def run():
             check_projection(page, "independent")
             expect(path_names).to_have_count(0)
             settings = display_settings(page)
-            settings.get_by_role('button', name='显示路径名', exact=True).click()
+            display_settings_section(page, '路径与标注').get_by_role('button', name='显示路径名', exact=True).click()
             expect(path_names).to_have_text('停车点一 → 检修区 B')
             page.keyboard.press('Escape')
             # This fixture's default close-up puts the route below the viewport.
@@ -204,7 +205,7 @@ def run():
             expect(path_names).to_have_css('visibility', 'visible')
             page.screenshot(path='/tmp/atlas-path-names-independent.png', full_page=True)
             settings = display_settings(page)
-            settings.get_by_role('button', name='隐藏路径名', exact=True).click()
+            display_settings_section(page, '路径与标注').get_by_role('button', name='隐藏路径名', exact=True).click()
             expect(path_names).to_have_count(0)
             page.keyboard.press('Escape')
             switch_mode(page, "map")
@@ -233,7 +234,7 @@ def run():
             load_project(imported, "map", archive)
             expect(imported.locator(".waypoint-name-label")).to_have_count(0)
             expect(imported.locator('.path-name-label')).to_have_text('停车点一 → 检修区 B')
-            display_settings(imported).get_by_role("button", name="显示停车点名", exact=True).click()
+            display_settings_section(imported, '路径与标注').get_by_role("button", name="显示停车点名", exact=True).click()
             check_projection(imported, "map")
             assert not errors, errors
             print("Waypoint/path names: default visibility, independent toggles, camera projection, picking, both workspaces, reload and ZIP round-trip passed")

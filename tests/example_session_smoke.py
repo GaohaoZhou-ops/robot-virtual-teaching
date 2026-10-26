@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 from topbar_tools_helpers import topbar_action
 
 import os
@@ -76,7 +77,7 @@ def run():
         assert page.locator(".three-canvas").get_attribute("data-render-point-count") == EXPECTED_RENDERED_POINTS
         assert page.locator(".three-canvas").get_attribute("data-resolution-selection") == "auto"
         page.get_by_role("button", name="显示设置", exact=True).click()
-        assert "自动" in page.get_by_role("group", name="点云显示分辨率").inner_text()
+        assert "自动" in display_settings_section(page, '显示质量').get_by_role("group", name="点云显示分辨率").inner_text()
 
         page.reload(wait_until="domcontentloaded")
         wait_for_session(page)

@@ -1,4 +1,5 @@
 """Verify the distance ruler against independently projected world coordinates."""
+from viewer_tools_helpers import display_settings_section
 import math
 
 from playwright.sync_api import expect, sync_playwright
@@ -80,7 +81,7 @@ def check_layout(page):
 
 def check_legend_toggle(page, mode):
     settings = display_settings(page)
-    color = settings.get_by_role('button', name='切换点云颜色模式', exact=True)
+    color = display_settings_section(page, '地图与对象').get_by_role('button', name='切换点云颜色模式', exact=True)
     for _ in range(3):
         if color.get_attribute('data-color-mode') == 'height':
             break
@@ -89,8 +90,8 @@ def check_legend_toggle(page, mode):
     rows = settings.locator('.viewer-display-settings__color, .viewer-display-settings__height-legend, .viewer-display-settings__waypoint-names')
     assert rows.evaluate_all('els => els.map(el => el.firstElementChild.textContent.trim())') == ['点云颜色', '高程色卡', '停车点名']
     before = page.locator('.viewport-distance-scale').bounding_box()
-    settings.get_by_role('button', name='隐藏高程色卡', exact=True).click()
-    expect(settings.get_by_role('button', name='显示高程色卡', exact=True)).to_have_attribute('aria-pressed', 'false')
+    display_settings_section(page, '地图与对象').get_by_role('button', name='隐藏高程色卡', exact=True).click()
+    expect(display_settings_section(page, '地图与对象').get_by_role('button', name='显示高程色卡', exact=True)).to_have_attribute('aria-pressed', 'false')
     expect(page.locator('.height-color-legend')).to_have_count(0)
     expect(color).to_have_attribute('data-color-mode', 'height')
     check_layout(page)
@@ -120,7 +121,7 @@ def check_legend_toggle(page, mode):
 
 def show_legend(page):
     settings = display_settings(page)
-    settings.get_by_role('button', name='显示高程色卡', exact=True).click()
+    display_settings_section(page, '地图与对象').get_by_role('button', name='显示高程色卡', exact=True).click()
     expect(page.locator('.height-color-legend')).to_be_visible()
     page.keyboard.press('Escape')
     check_layout(page)

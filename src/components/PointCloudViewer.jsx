@@ -37,6 +37,7 @@ import PolylineTeachingPanel from './PolylineTeachingPanel.jsx';
 import TorsoControlPanel from './TorsoControlPanel.jsx';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../lib/robotTorsoControl.js';
 import ViewerMenu from './ViewerMenu.jsx';
+import ViewerDisplaySettings from './ViewerDisplaySettings.jsx';
 import TeachingSurfaceCoverage from './TeachingSurfaceCoverage.jsx';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
@@ -1489,6 +1490,7 @@ export default function PointCloudViewer({
   const pendingPolylineRequest = polylineRequest?.sceneId === mapData?.geometry?.uuid
     && polylineRequest?.robotId === (robotDescriptor?.id || robotDescriptor?.relativePath) ? polylineRequest : null;
   const [robotOpacity, setRobotOpacity] = useState(1);
+  const [displaySettingsSection, setDisplaySettingsSection] = useState('robot');
   const [showZividOpticalAxes, setShowZividOpticalAxes] = useState(false);
   const showZividOpticalAxesRef = useRef(showZividOpticalAxes);
   showZividOpticalAxesRef.current = showZividOpticalAxes;
@@ -8307,267 +8309,285 @@ export default function PointCloudViewer({
               title={`机器人模型、Zivid 光学坐标系、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
+              panelClassName="viewer-display-menu"
             >
-              <div className="viewer-display-settings__robot">
-                <span><Bot size={13} /> 机器人模型</span>
-                <button
-                  type="button"
-                  role="switch"
-                  className="viewer-display-settings__toggle"
-                  aria-label="显示机器人模型"
-                  aria-checked={showRobot}
-                  disabled={!onShowRobotChange || teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
-                  title={robotLoadState?.status !== 'loaded' ? '加载机器人后可切换显示' : showRobot ? '隐藏机器人模型，方便点选附近表面' : '显示机器人模型'}
-                  onClick={() => onShowRobotChange?.(!showRobot)}
-                >
-                  {showRobot ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showRobot ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              <label className="viewer-display-settings__opacity">
-                <span>机器人模型透明度</span>
-                <input type="range" min="0" max="100" step="1"
-                  value={Math.round(robotOpacity * 100)} aria-label="机器人模型透明度"
-                  aria-valuetext={`${Math.round(robotOpacity * 100)}%`}
-                  title="100% 为完全不透明，调低可透过机器人观察表面"
-                  disabled={teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
-                  style={{ '--vision-coverage-opacity': `${Math.round(robotOpacity * 100)}%` }}
-                  onChange={(event) => setRobotOpacity(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
-                <output>{Math.round(robotOpacity * 100)}%</output>
-              </label>
-              <div className="viewer-display-settings__layer">
-                <span><Camera size={13} /> Zivid 光学坐标系</span>
-                <button type="button" role="switch" className="viewer-display-settings__toggle"
-                  aria-label="显示 Zivid 光学坐标系" aria-checked={showZividOpticalAxes}
-                  disabled={robotLoadState?.status !== 'loaded' || !(zividCameraFramesRef.current.left || zividCameraFramesRef.current.right)}
-                  title="显示左右相机的 XYZ 光学坐标轴，蓝色 +Z 为拍摄方向"
-                  onClick={() => setShowZividOpticalAxes(value => !value)}>
-                  {showZividOpticalAxes ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showZividOpticalAxes ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              {showZividOpticalAxes && <p className="viewer-display-settings__layer-notice">红 X：画面向右 · 绿 Y：画面向下 · 蓝 +Z：拍摄方向。坐标轴随相机移动，独立于机器人模型显示。</p>}
-              <div className="viewer-display-settings__color">
-                <span><Palette size={13} /> {hasObjectColorControl ? '地图颜色' : '点云颜色'}</span>
-                <button
-                  type="button"
-                  className={`height-color-toggle mode-${colorModeMeta.id}`}
-                  aria-label={hasObjectColorControl ? '切换地图颜色模式' : '切换点云颜色模式'}
-                  data-color-mode={colorModeMeta.id}
-                  title={`当前为${colorModeMeta.label}，点击切换为${nextColorMode.label}`}
-                  onClick={() => onColorModeChange?.(nextColorMode.id)}
-                >
-                  <i aria-hidden="true" />
-                  <span>{colorModeMeta.label}</span>
-                </button>
-              </div>
-              {hasObjectColorControl && <div className="viewer-display-settings__color">
-                <span><Box size={13} /> 独立对象颜色</span>
-                <button type="button" className={`height-color-toggle mode-${objectColorModeMeta.id}`}
-                  aria-label="切换独立对象颜色模式" data-color-mode={objectColorModeMeta.id}
-                  disabled={!placedObjectPointCount}
-                  title={placedObjectPointCount ? `当前为${objectColorModeMeta.label}，点击切换为${nextObjectColorMode.label}`
-                    : '尚未识别出独立对象，请加载包含原独立示教缓存的完整工程以恢复分组'}
-                  onClick={() => onPlacedObjectColorModeChange?.(nextObjectColorMode.id)}>
-                  <i aria-hidden="true" /><span>{objectColorModeMeta.label}</span>
-                </button>
-              </div>}
-              {hasObjectColorControl && !objectLayers?.complete && <p className="viewer-display-settings__layer-notice">
-                旧工程中未识别的对象沿用地图颜色；加载含原独立示教缓存的完整工程可恢复分组。
-              </p>}
-              {isHeightColor && <div className="viewer-display-settings__height-legend">
-                <span><Palette size={13} /> 高程色卡</span>
-                <button
-                  type="button"
-                  className="viewer-display-settings__toggle"
-                  aria-label={showHeightLegend ? '隐藏高程色卡' : '显示高程色卡'}
-                  aria-pressed={showHeightLegend}
-                  title={showHeightLegend ? '隐藏3D窗口右下角的高程色卡' : '显示3D窗口右下角的高程色卡'}
-                  onClick={() => onShowHeightLegendChange?.(!showHeightLegend)}
-                >
-                  {showHeightLegend ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showHeightLegend ? '显示' : '隐藏'}</span>
-                </button>
-              </div>}
-              <div className="viewer-display-settings__layer">
-                <span><MapPin size={13} /> 停车点</span>
-                <button type="button" role="switch" className="viewer-display-settings__toggle"
-                  aria-label="显示停车点" aria-checked={showParkingPoints}
-                  title={showParkingPoints ? '隐藏3D停车点标记及名称，保留路径连线' : '显示3D停车点，恢复原有标记及名称设置'}
-                  onClick={() => onShowParkingPointsChange?.(!showParkingPoints)}>
-                  {showParkingPoints ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showParkingPoints ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              <div className="viewer-display-settings__waypoint-names">
-                <span><MapPin size={13} /> 停车点名</span>
-                <button
-                  type="button"
-                  className="viewer-display-settings__toggle"
-                  aria-label={showWaypointNames ? '隐藏停车点名' : '显示停车点名'}
-                  aria-pressed={showWaypointNames}
-                  disabled={!showParkingPoints}
-                  title={!showParkingPoints ? '请先开启停车点显示；名称偏好已保留' : showWaypointNames ? '隐藏3D导航点名称' : '显示3D导航点名称'}
-                  onClick={() => onShowWaypointNamesChange?.(!showWaypointNames)}
-                >
-                  {showWaypointNames ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showWaypointNames ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              <div className="viewer-display-settings__layer">
-                <span><Route size={13} /> 路径</span>
-                <button type="button" role="switch" className="viewer-display-settings__toggle"
-                  aria-label="显示路径" aria-checked={showPaths}
-                  title={showPaths ? '隐藏3D路径连线、方向箭头及名称，保留停车点' : '显示3D路径连线及方向箭头，恢复原有名称设置'}
-                  onClick={() => onShowPathsChange?.(!showPaths)}>
-                  {showPaths ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showPaths ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              <div className="viewer-display-settings__path-names">
-                <span><Route size={13} /> 路径名</span>
-                <button
-                  type="button"
-                  className="viewer-display-settings__toggle"
-                  aria-label={showPathNames ? '隐藏路径名' : '显示路径名'}
-                  aria-pressed={showPathNames}
-                  disabled={!showPaths}
-                  title={!showPaths ? '请先开启路径显示；名称偏好已保留' : showPathNames ? '隐藏3D路径名称' : '显示3D路径的起点与终点名称'}
-                  onClick={() => onShowPathNamesChange?.(!showPathNames)}
-                >
-                  {showPathNames ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showPathNames ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              {canShowSurfaceCoverage && <div className="viewer-display-settings__coverage">
-                <span><Gauge size={13} /> 表面覆盖率</span>
-                <button
-                  type="button"
-                  className="viewer-display-settings__toggle"
-                  aria-label={showSurfaceCoverage ? '隐藏表面覆盖率' : '显示表面覆盖率'}
-                  aria-pressed={showSurfaceCoverage}
-                  title={showSurfaceCoverage ? '隐藏3D窗口左上角的表面覆盖率浮窗' : '显示3D窗口左上角的表面覆盖率浮窗'}
-                  onClick={() => setShowSurfaceCoverage((current) => !current)}
-                >
-                  {showSurfaceCoverage ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showSurfaceCoverage ? '显示' : '隐藏'}</span>
-                </button>
-              </div>}
-              {showVisionCoverageControls && <>
-                <div className="viewer-display-settings__coverage">
-                  <span><Camera size={13} /> 投影渲染</span>
-                  <button
-                    type="button"
-                    className="viewer-display-settings__toggle"
-                    aria-label={visionCoverageRenderingEnabled ? '关闭投影渲染' : '开启投影渲染'}
-                    aria-pressed={visionCoverageRenderingEnabled}
-                    title={visionCoverageRenderingEnabled
-                      ? '隐藏视域体、光学坐标轴和表面染色'
-                      : '显示视域体、光学坐标轴和表面染色'}
-                    onClick={() => setVisionCoverageRenderingEnabled((current) => !current)}
-                  >
-                    {visionCoverageRenderingEnabled ? <Eye size={12} /> : <EyeOff size={12} />}
-                    <span>{visionCoverageRenderingEnabled ? '显示' : '隐藏'}</span>
-                  </button>
-                </div>
-                <label className="viewer-display-settings__opacity">
-                  <span>表面透明度</span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(teachingSurfaceTintOpacity * 100)}
-                    aria-label="表面贴图渲染透明度"
-                    aria-valuetext={`${Math.round(teachingSurfaceTintOpacity * 100)}%`}
-                    title="调整物体表面绿色覆盖贴图的透明度"
-                    style={{
-                      '--vision-coverage-opacity': `${Math.round(
-                        teachingSurfaceTintOpacity * 100,
-                      )}%`,
-                    }}
-                    onChange={(event) => {
-                      const percentage = Math.max(
-                        0,
-                        Math.min(100, Number(event.target.value) || 0),
-                      );
-                      setTeachingSurfaceTintOpacity(percentage / 100);
-                    }}
-                  />
-                  <output>{Math.round(teachingSurfaceTintOpacity * 100)}%</output>
-                </label>
-              </>}
-              <div
-                className="viewer-resolution-control"
-                role="group"
-                aria-label="点云显示分辨率"
-                title={
-                  !hasManualResolution
-                    ? `自动档会在源点数超过 ${AUTO_POINT_BUDGET.toLocaleString('zh-CN')} 时选择合适密度；可用下拉框手动覆盖`
-                    : '仅调整 3D 显示采样，不改变 2D 截面和导航数据'
-                }
-              >
-                <p className="viewer-display-settings__section-title">显示质量</p>
-                <label
-                  className={`mesh-quality-control point-density-control tone-${resolution.tone} ${!hasManualResolution ? 'is-auto' : ''}`}
-                  title={`${hasManualResolution ? '手动' : '自动'}档：当前渲染 ${renderedPointCount.toLocaleString('zh-CN')} / ${renderablePointCount.toLocaleString('zh-CN')} 个点`}
-                >
-                  <Gauge size={13} />
-                  <span>
-                    <small>点云密度</small>
-                    <select
-                      aria-label="点云显示密度"
-                      value={hasManualResolution ? String(resolutionIndex) : 'auto'}
-                      onChange={(event) => chooseResolutionMode(event.target.value)}
-                    >
-                      <option value="auto">
-                        自动 · {suggestedResolution.label} {Math.round(suggestedResolution.ratio * 100)}%（推荐）
-                      </option>
-                      {RESOLUTION_LEVELS.map((option, index) => (
-                        <option key={option.ratio} value={index}>
-                          {option.label} · {Math.round(option.ratio * 100)}%
-                        </option>
-                      ))}
-                    </select>
-                  </span>
-                  <em>{Math.round(resolution.ratio * 100)}% · {formatPointCount(renderedPointCount)} 点</em>
-                </label>
-                {hasEmbeddedMesh && (
-                  <label
-                    className={`mesh-quality-control tone-${meshQualityPlan.effectiveId}`}
-                    title={`${meshQualityPlan.requestedLabel}：当前渲染 ${meshQualityPlan.renderedFaceCount.toLocaleString('zh-CN')} / ${meshQualityPlan.faceCount.toLocaleString('zh-CN')} 个三角面`}
-                  >
-                    <Gauge size={13} />
-                    <span>
-                      <small>网格质量</small>
-                      <select
-                        aria-label="网格渲染质量"
-                        value={meshQualityPlan.requestedId}
-                        onChange={(event) => onMeshRenderQualityChange?.(event.target.value)}
+              <ViewerDisplaySettings expanded={displaySettingsSection} onExpandedChange={setDisplaySettingsSection}
+                sections={[
+                  { id: 'robot', label: '机器人与相机', icon: Bot,
+                    description: '模型显示 · 透明度 · 光学坐标系', content: <>
+                      <div className="viewer-display-settings__robot">
+                        <span><Bot size={13} /> 机器人模型</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          className="viewer-display-settings__toggle"
+                          aria-label="显示机器人模型"
+                          aria-checked={showRobot}
+                          disabled={!onShowRobotChange || teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
+                          title={robotLoadState?.status !== 'loaded' ? '加载机器人后可切换显示' : showRobot ? '隐藏机器人模型，方便点选附近表面' : '显示机器人模型'}
+                          onClick={() => onShowRobotChange?.(!showRobot)}
+                        >
+                          {showRobot ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showRobot ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                      <label className="viewer-display-settings__opacity">
+                        <span>机器人模型透明度</span>
+                        <input type="range" min="0" max="100" step="1"
+                          value={Math.round(robotOpacity * 100)} aria-label="机器人模型透明度"
+                          aria-valuetext={`${Math.round(robotOpacity * 100)}%`}
+                          title="100% 为完全不透明，调低可透过机器人观察表面"
+                          disabled={teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
+                          style={{ '--vision-coverage-opacity': `${Math.round(robotOpacity * 100)}%` }}
+                          onChange={(event) => setRobotOpacity(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
+                        <output>{Math.round(robotOpacity * 100)}%</output>
+                      </label>
+                      <div className="viewer-display-settings__layer">
+                        <span><Camera size={13} /> Zivid 光学坐标系</span>
+                        <button type="button" role="switch" className="viewer-display-settings__toggle"
+                          aria-label="显示 Zivid 光学坐标系" aria-checked={showZividOpticalAxes}
+                          disabled={robotLoadState?.status !== 'loaded' || !(zividCameraFramesRef.current.left || zividCameraFramesRef.current.right)}
+                          title="显示左右相机的 XYZ 光学坐标轴，蓝色 +Z 为拍摄方向"
+                          onClick={() => setShowZividOpticalAxes(value => !value)}>
+                          {showZividOpticalAxes ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showZividOpticalAxes ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                      {showZividOpticalAxes && <p className="viewer-display-settings__layer-notice">红 X：画面向右 · 绿 Y：画面向下 · 蓝 +Z：拍摄方向。坐标轴随相机移动，独立于机器人模型显示。</p>}
+                  </> },
+                  { id: 'map', label: '地图与对象', icon: Palette,
+                    description: hasObjectColorControl ? '地图颜色 · 对象颜色 · 高程色卡' : '点云颜色 · 高程色卡', content: <>
+                      <div className="viewer-display-settings__color">
+                        <span><Palette size={13} /> {hasObjectColorControl ? '地图颜色' : '点云颜色'}</span>
+                        <button
+                          type="button"
+                          className={`height-color-toggle mode-${colorModeMeta.id}`}
+                          aria-label={hasObjectColorControl ? '切换地图颜色模式' : '切换点云颜色模式'}
+                          data-color-mode={colorModeMeta.id}
+                          title={`当前为${colorModeMeta.label}，点击切换为${nextColorMode.label}`}
+                          onClick={() => onColorModeChange?.(nextColorMode.id)}
+                        >
+                          <i aria-hidden="true" />
+                          <span>{colorModeMeta.label}</span>
+                        </button>
+                      </div>
+                      {hasObjectColorControl && <div className="viewer-display-settings__color">
+                        <span><Box size={13} /> 独立对象颜色</span>
+                        <button type="button" className={`height-color-toggle mode-${objectColorModeMeta.id}`}
+                          aria-label="切换独立对象颜色模式" data-color-mode={objectColorModeMeta.id}
+                          disabled={!placedObjectPointCount}
+                          title={placedObjectPointCount ? `当前为${objectColorModeMeta.label}，点击切换为${nextObjectColorMode.label}`
+                            : '尚未识别出独立对象，请加载包含原独立示教缓存的完整工程以恢复分组'}
+                          onClick={() => onPlacedObjectColorModeChange?.(nextObjectColorMode.id)}>
+                          <i aria-hidden="true" /><span>{objectColorModeMeta.label}</span>
+                        </button>
+                      </div>}
+                      {hasObjectColorControl && !objectLayers?.complete && <p className="viewer-display-settings__layer-notice">
+                        旧工程中未识别的对象沿用地图颜色；加载含原独立示教缓存的完整工程可恢复分组。
+                      </p>}
+                      {isHeightColor && <div className="viewer-display-settings__height-legend">
+                        <span><Palette size={13} /> 高程色卡</span>
+                        <button
+                          type="button"
+                          className="viewer-display-settings__toggle"
+                          aria-label={showHeightLegend ? '隐藏高程色卡' : '显示高程色卡'}
+                          aria-pressed={showHeightLegend}
+                          title={showHeightLegend ? '隐藏3D窗口右下角的高程色卡' : '显示3D窗口右下角的高程色卡'}
+                          onClick={() => onShowHeightLegendChange?.(!showHeightLegend)}
+                        >
+                          {showHeightLegend ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showHeightLegend ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>}
+                  </> },
+                  { id: 'routes', label: '路径与标注', icon: Route,
+                    description: '路径 · 停车点 · 名称标注', content: <>
+                      <div className="viewer-display-settings__layer">
+                        <span><MapPin size={13} /> 停车点</span>
+                        <button type="button" role="switch" className="viewer-display-settings__toggle"
+                          aria-label="显示停车点" aria-checked={showParkingPoints}
+                          title={showParkingPoints ? '隐藏3D停车点标记及名称，保留路径连线' : '显示3D停车点，恢复原有标记及名称设置'}
+                          onClick={() => onShowParkingPointsChange?.(!showParkingPoints)}>
+                          {showParkingPoints ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showParkingPoints ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                      <div className="viewer-display-settings__waypoint-names">
+                        <span><MapPin size={13} /> 停车点名</span>
+                        <button
+                          type="button"
+                          className="viewer-display-settings__toggle"
+                          aria-label={showWaypointNames ? '隐藏停车点名' : '显示停车点名'}
+                          aria-pressed={showWaypointNames}
+                          disabled={!showParkingPoints}
+                          title={!showParkingPoints ? '请先开启停车点显示；名称偏好已保留' : showWaypointNames ? '隐藏3D导航点名称' : '显示3D导航点名称'}
+                          onClick={() => onShowWaypointNamesChange?.(!showWaypointNames)}
+                        >
+                          {showWaypointNames ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showWaypointNames ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                      <div className="viewer-display-settings__layer">
+                        <span><Route size={13} /> 路径</span>
+                        <button type="button" role="switch" className="viewer-display-settings__toggle"
+                          aria-label="显示路径" aria-checked={showPaths}
+                          title={showPaths ? '隐藏3D路径连线、方向箭头及名称，保留停车点' : '显示3D路径连线及方向箭头，恢复原有名称设置'}
+                          onClick={() => onShowPathsChange?.(!showPaths)}>
+                          {showPaths ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showPaths ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                      <div className="viewer-display-settings__path-names">
+                        <span><Route size={13} /> 路径名</span>
+                        <button
+                          type="button"
+                          className="viewer-display-settings__toggle"
+                          aria-label={showPathNames ? '隐藏路径名' : '显示路径名'}
+                          aria-pressed={showPathNames}
+                          disabled={!showPaths}
+                          title={!showPaths ? '请先开启路径显示；名称偏好已保留' : showPathNames ? '隐藏3D路径名称' : '显示3D路径的起点与终点名称'}
+                          onClick={() => onShowPathNamesChange?.(!showPathNames)}
+                        >
+                          {showPathNames ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showPathNames ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                  </> },
+                  ...(canShowSurfaceCoverage || showVisionCoverageControls ? [{ id: 'coverage', label: '覆盖与投影', icon: Camera,
+                    description: showVisionCoverageControls ? '覆盖率 · 投影渲染 · 表面透明度' : '表面覆盖率', content: <>
+                      {canShowSurfaceCoverage && <div className="viewer-display-settings__coverage">
+                        <span><Gauge size={13} /> 表面覆盖率</span>
+                        <button
+                          type="button"
+                          className="viewer-display-settings__toggle"
+                          aria-label={showSurfaceCoverage ? '隐藏表面覆盖率' : '显示表面覆盖率'}
+                          aria-pressed={showSurfaceCoverage}
+                          title={showSurfaceCoverage ? '隐藏3D窗口左上角的表面覆盖率浮窗' : '显示3D窗口左上角的表面覆盖率浮窗'}
+                          onClick={() => setShowSurfaceCoverage((current) => !current)}
+                        >
+                          {showSurfaceCoverage ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showSurfaceCoverage ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>}
+                      {showVisionCoverageControls && <>
+                        <div className="viewer-display-settings__coverage">
+                          <span><Camera size={13} /> 投影渲染</span>
+                          <button
+                            type="button"
+                            className="viewer-display-settings__toggle"
+                            aria-label={visionCoverageRenderingEnabled ? '关闭投影渲染' : '开启投影渲染'}
+                            aria-pressed={visionCoverageRenderingEnabled}
+                            title={visionCoverageRenderingEnabled
+                              ? '隐藏视域体、光学坐标轴和表面染色'
+                              : '显示视域体、光学坐标轴和表面染色'}
+                            onClick={() => setVisionCoverageRenderingEnabled((current) => !current)}
+                          >
+                            {visionCoverageRenderingEnabled ? <Eye size={12} /> : <EyeOff size={12} />}
+                            <span>{visionCoverageRenderingEnabled ? '显示' : '隐藏'}</span>
+                          </button>
+                        </div>
+                        <label className="viewer-display-settings__opacity">
+                          <span>表面透明度</span>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={Math.round(teachingSurfaceTintOpacity * 100)}
+                            aria-label="表面贴图渲染透明度"
+                            aria-valuetext={`${Math.round(teachingSurfaceTintOpacity * 100)}%`}
+                            title="调整物体表面绿色覆盖贴图的透明度"
+                            style={{
+                              '--vision-coverage-opacity': `${Math.round(
+                                teachingSurfaceTintOpacity * 100,
+                              )}%`,
+                            }}
+                            onChange={(event) => {
+                              const percentage = Math.max(
+                                0,
+                                Math.min(100, Number(event.target.value) || 0),
+                              );
+                              setTeachingSurfaceTintOpacity(percentage / 100);
+                            }}
+                          />
+                          <output>{Math.round(teachingSurfaceTintOpacity * 100)}%</output>
+                        </label>
+                      </>}
+                  </> }] : []),
+                  { id: 'quality', label: '显示质量', icon: Gauge,
+                    description: hasEmbeddedMesh ? '点云密度 · 网格质量' : '点云密度', content: <>
+                      <div
+                        className="viewer-resolution-control"
+                        role="group"
+                        aria-label="点云显示分辨率"
+                        title={
+                          !hasManualResolution
+                            ? `自动档会在源点数超过 ${AUTO_POINT_BUDGET.toLocaleString('zh-CN')} 时选择合适密度；可用下拉框手动覆盖`
+                            : '仅调整 3D 显示采样，不改变 2D 截面和导航数据'
+                        }
                       >
-                        {MESH_RENDER_QUALITY_OPTIONS.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.label}{option.id === 'auto' ? '（推荐）' : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </span>
-                    <em>{formatPointCount(meshQualityPlan.renderedFaceCount)} 面</em>
-                  </label>
-                )}
-              </div>
-              {hasEmbeddedMesh && (
-                <div
-                  className="mesh-topology-readout"
-                  role="status"
-                  aria-label={`PLY 内嵌网格 ${meshInfo.faceCount.toLocaleString('zh-CN')} 个三角面，另有 ${renderablePointCount.toLocaleString('zh-CN')} 个未成面点`}
-                  title="PLY 自带 face 索引：成面区域以实体网格显示，未被引用的顶点继续显示为点云"
-                >
-                  <Box size={12} />
-                  <span>内嵌网格</span>
-                  <strong>{formatPointCount(meshInfo.faceCount)} 面</strong>
-                </div>
-              )}
+                        <label
+                          className={`mesh-quality-control point-density-control tone-${resolution.tone} ${!hasManualResolution ? 'is-auto' : ''}`}
+                          title={`${hasManualResolution ? '手动' : '自动'}档：当前渲染 ${renderedPointCount.toLocaleString('zh-CN')} / ${renderablePointCount.toLocaleString('zh-CN')} 个点`}
+                        >
+                          <Gauge size={13} />
+                          <span>
+                            <small>点云密度</small>
+                            <select
+                              aria-label="点云显示密度"
+                              value={hasManualResolution ? String(resolutionIndex) : 'auto'}
+                              onChange={(event) => chooseResolutionMode(event.target.value)}
+                            >
+                              <option value="auto">
+                                自动 · {suggestedResolution.label} {Math.round(suggestedResolution.ratio * 100)}%（推荐）
+                              </option>
+                              {RESOLUTION_LEVELS.map((option, index) => (
+                                <option key={option.ratio} value={index}>
+                                  {option.label} · {Math.round(option.ratio * 100)}%
+                                </option>
+                              ))}
+                            </select>
+                          </span>
+                          <em>{Math.round(resolution.ratio * 100)}% · {formatPointCount(renderedPointCount)} 点</em>
+                        </label>
+                        {hasEmbeddedMesh && (
+                          <label
+                            className={`mesh-quality-control tone-${meshQualityPlan.effectiveId}`}
+                            title={`${meshQualityPlan.requestedLabel}：当前渲染 ${meshQualityPlan.renderedFaceCount.toLocaleString('zh-CN')} / ${meshQualityPlan.faceCount.toLocaleString('zh-CN')} 个三角面`}
+                          >
+                            <Gauge size={13} />
+                            <span>
+                              <small>网格质量</small>
+                              <select
+                                aria-label="网格渲染质量"
+                                value={meshQualityPlan.requestedId}
+                                onChange={(event) => onMeshRenderQualityChange?.(event.target.value)}
+                              >
+                                {MESH_RENDER_QUALITY_OPTIONS.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}{option.id === 'auto' ? '（推荐）' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </span>
+                            <em>{formatPointCount(meshQualityPlan.renderedFaceCount)} 面</em>
+                          </label>
+                        )}
+                      </div>
+                      {hasEmbeddedMesh && (
+                        <div
+                          className="mesh-topology-readout"
+                          role="status"
+                          aria-label={`PLY 内嵌网格 ${meshInfo.faceCount.toLocaleString('zh-CN')} 个三角面，另有 ${renderablePointCount.toLocaleString('zh-CN')} 个未成面点`}
+                          title="PLY 自带 face 索引：成面区域以实体网格显示，未被引用的顶点继续显示为点云"
+                        >
+                          <Box size={12} />
+                          <span>内嵌网格</span>
+                          <strong>{formatPointCount(meshInfo.faceCount)} 面</strong>
+                        </div>
+                      )}
+                  </> },
+                ]} />
             </ViewerMenu></>, displaySettingsContainer)}
           <aside
             ref={distanceScaleRef}

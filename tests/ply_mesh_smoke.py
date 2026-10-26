@@ -1,3 +1,4 @@
+from viewer_tools_helpers import display_settings_section
 import os
 from pathlib import Path
 
@@ -87,7 +88,7 @@ def run():
         page.locator(".loading-curtain").wait_for(state="hidden")
         assert_hybrid_geometry(page, canvas, "ply-parse")
         assert canvas.get_attribute("data-ply-mesh-color-mode") == "height"
-        quality_select = page.get_by_label("网格渲染质量", exact=True)
+        quality_select = display_settings_section(page, '显示质量').get_by_label("网格渲染质量", exact=True)
         assert quality_select.input_value() == "auto"
         quality_select.select_option("performance")
         page.wait_for_function(
@@ -95,7 +96,7 @@ def run():
         )
         assert canvas.get_attribute("data-mesh-face-budget") == "180000"
 
-        color_button = page.get_by_role("button", name="切换点云颜色模式")
+        color_button = display_settings_section(page, '地图与对象').get_by_role("button", name="切换点云颜色模式")
         color_button.click()
         page.wait_for_function(
             "document.querySelector('.three-canvas')?.dataset.plyMeshColorMode === 'source'"
@@ -115,7 +116,7 @@ def run():
         canvas.wait_for()
         page.locator(".loading-curtain").wait_for(state="hidden")
         assert_hybrid_geometry(page, canvas, "session-cache", "performance")
-        assert page.get_by_label("网格渲染质量", exact=True).input_value() == "performance"
+        assert display_settings_section(page, '显示质量').get_by_label("网格渲染质量", exact=True).input_value() == "performance"
 
         print("hybrid_cache=", cache)
         print("page_errors=", page_errors)

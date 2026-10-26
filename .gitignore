@@ -59,6 +59,8 @@ node_modules/
 # test-artifacts/{zivid-optical-axes,robot-resource-persistence}/.
 # Maintained polyline_perpendicular_* and robot_resource_persistence_* tests
 # remain trackable alongside the source modules.
+# Display-settings hierarchy checks use test-artifacts/display-settings-groups/
+# for responsive captures, temporary runners and service-index backups.
 # Reset-confirmation backup checks keep screenshots and service-index backups
 # in test-artifacts/global-reset-export/; exported ZIPs use temporary workspaces.
 # Shared-preset migration and map-origin navigation checks use
@@ -232,6 +234,12 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Standalone copies of display-settings hierarchy captures and review bundles.
+# Keep component source, maintained test helpers and nested fixtures visible.
+/display-settings-groups/
+/tests/display-settings-groups/
+/display-settings-groups.[zZ][iI][pP]
+/tests/display-settings-groups.[zZ][iI][pP]
 # Standalone copies of surface-polyline validation output and packed reports,
 # including screenshots/videos copied out of their original artifact directory
 # and JPEG/WebP copies of browser screenshots.

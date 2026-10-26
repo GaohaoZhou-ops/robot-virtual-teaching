@@ -1,4 +1,5 @@
 """Repeated route/teaching labels in isolated map and independent workspaces."""
+from viewer_tools_helpers import display_settings_section
 import json
 
 from playwright.sync_api import expect, sync_playwright
@@ -79,9 +80,9 @@ def check_labels(page, mode):
     page.get_by_label('搜索导航点', exact=True).select_option(route_id)
     expect(label).to_have_class('waypoint-name-label is-selected')
     settings = display_settings(page)
-    settings.get_by_role('button', name='隐藏停车点名', exact=True).click()
+    display_settings_section(page, '路径与标注').get_by_role('button', name='隐藏停车点名', exact=True).click()
     expect(labels).to_have_count(0)
-    settings.get_by_role('button', name='显示停车点名', exact=True).click()
+    display_settings_section(page, '路径与标注').get_by_role('button', name='显示停车点名', exact=True).click()
     expect(labels).to_have_count(3)
     page.keyboard.press('Escape')
 

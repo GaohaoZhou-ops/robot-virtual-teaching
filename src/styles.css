@@ -3737,6 +3737,50 @@ code {
   background: rgba(89, 219, 232, 0.08);
 }
 
+.viewer-display-menu > .viewer-menu__heading {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #0d1e23;
+}
+
+.viewer-display-section + .viewer-display-section { border-top: 1px solid var(--line); }
+.viewer-display-section__heading {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr) 13px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 59px;
+  padding: 12px 14px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.viewer-display-section__heading > span { display: grid; gap: 5px; }
+.viewer-display-section__heading strong { color: var(--text); font-size: 11px; font-weight: 500; }
+.viewer-display-section__heading small { color: var(--muted-2); font-size: 9px; line-height: 1.5; }
+.viewer-display-section__heading:hover,
+.viewer-display-section__heading[aria-expanded="true"] { color: var(--cyan); background: rgba(89, 219, 232, .045); }
+.viewer-display-section__heading[aria-expanded="true"] strong { color: var(--cyan); }
+.viewer-display-section__chevron { transition: transform 130ms ease; }
+.viewer-display-section__heading[aria-expanded="true"] .viewer-display-section__chevron { transform: rotate(90deg); }
+.viewer-display-section__content {
+  margin: 0 10px 12px 21px;
+  border: 1px solid var(--line);
+  border-left: 2px solid rgba(89, 219, 232, .35);
+  background: rgba(4, 14, 17, .35);
+}
+.viewer-display-section__content[hidden] { display: none; }
+.viewer-display-section__content > :last-child { border-bottom: 0; }
+.viewer-display-section__content .viewer-display-settings__opacity { gap: 8px; padding: 10px; }
+.viewer-display-section__content .viewer-resolution-control { padding: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .viewer-display-section__chevron { transition: none; }
+}
+
 .viewer-display-settings__color,
 .viewer-display-settings__robot,
 .viewer-display-settings__layer,
@@ -3921,12 +3965,6 @@ code {
   display: grid;
   gap: 10px;
   padding: 12px 14px 14px;
-}
-
-.viewer-display-settings__section-title {
-  margin: 0;
-  color: var(--muted-2);
-  font-size: 9px;
 }
 
 .mesh-quality-control {
