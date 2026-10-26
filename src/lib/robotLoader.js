@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
-import { getRobotJointLimits, normalizeArmSoftLimitRatio } from './robotJointLimits.js';
+import { getRobotJointLimits, normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from './robotJointLimits.js';
 
 const ROBOT_FILE_PREFIX = '/__atlas/robot-files/';
 const SUPPORTED_FORMATS = new Set(['urdf', 'glb', 'gltf', 'stl']);
@@ -875,19 +875,23 @@ const robotJointDefinition = (joint) => {
     lower: convert(limit.lower), upper: convert(limit.upper),
     hardLower: convert(limit.hardLower), hardUpper: convert(limit.hardUpper),
     softLimitRatio: limit.softLimitRatio,
+    softLimitRange: limit.softLimitRange, softLimitCustom: limit.softLimitCustom,
     axis: [...(joint.userData.jointAxis || [0, 0, 1])],
   };
 };
 
 // Update the live model without reloading meshes or modifying URDF hard limits.
 // Store the ratio on each arm joint so clones and worker snapshots are independent.
-export function configureRobotArmSoftLimits(robot, ratio) {
+export function configureRobotArmSoftLimits(robot, ratio, overrides = {}) {
   const normalized = normalizeArmSoftLimitRatio(ratio);
+  const ranges = normalizeArmSoftLimitOverrides(overrides);
   const definitions = new Map();
   robot.traverse((joint) => {
     if (!movableJointTypes.has(joint.userData?.jointType)) return;
     if (getRobotJointLimits(joint).softLimited) {
       joint.userData.armSoftLimitRatio = normalized;
+      if (ranges[joint.name]) joint.userData.armSoftLimitRange = { ...ranges[joint.name] };
+      else delete joint.userData.armSoftLimitRange;
       setRobotJointValue(joint, joint.userData.jointValue);
     }
     definitions.set(joint.name, robotJointDefinition(joint));

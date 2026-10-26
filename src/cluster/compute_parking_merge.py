@@ -318,10 +318,12 @@ class RobotModel:
         progress: Optional[TerminalProgress] = None,
         arm_soft_limit_ratio: float = ARM_SOFT_LIMIT_RATIO,
         arm_joint_coupling_enabled: bool = True,
+        arm_soft_limit_overrides: Optional[dict] = None,
     ):
         self.job_root = job_root
         ratio = arm_soft_limit_ratio if type(arm_soft_limit_ratio) in (int, float) and math.isfinite(arm_soft_limit_ratio) else ARM_SOFT_LIMIT_RATIO
         ratio = max(0.01, min(1.0, ratio))
+        overrides = arm_soft_limit_overrides if isinstance(arm_soft_limit_overrides, dict) else {}
         progress and progress.update(0.11, "读取机器人模型", urdf_path.name)
         root = ET.parse(urdf_path).getroot()
         self.links = [node.get("name", "") for node in root.findall("link")]
@@ -346,8 +348,15 @@ class RobotModel:
             # Match robotJointLimits.js using this job's configured arm range.
             if (kind == "revolute" and re.fullmatch(r"(?:left|right)[_-]J\d+", name, re.IGNORECASE)
                     and math.isfinite(lower) and math.isfinite(upper) and upper > lower):
-                margin = (upper - lower) * (1 - ratio) / 2
-                lower, upper = lower + margin, upper - margin
+                start, end = (1 - ratio) / 2, 1 - (1 - ratio) / 2
+                custom = overrides.get(name)
+                if (isinstance(custom, dict) and all(type(custom.get(key)) in (int, float)
+                        and math.isfinite(custom[key]) for key in ("lower", "upper"))
+                        and custom["lower"] < custom["upper"]):
+                    start = max(0.0, min(0.99, custom["lower"]))
+                    end = max(start + 0.01, min(1.0, custom["upper"]))
+                span = upper - lower
+                lower, upper = lower + span * start, lower + span * end
             joint = Joint(
                 name=name,
                 kind=kind,
@@ -802,7 +811,7 @@ def analyze(
 ) -> dict:
     robot_file = job_root / manifest["binding"]["robot"]["primaryFile"]
     model = RobotModel(robot_file, job_root, progress, config.get("armSoftLimitRatio", ARM_SOFT_LIMIT_RATIO),
-                       config.get("armJointCouplingEnabled", True))
+                       config.get("armJointCouplingEnabled", True), config.get("armSoftLimitOverrides", {}))
     environment_meta = read_json(job_root / manifest["environmentFile"])
     collision_config = config.get("environmentCollision", {})
     collision = EnvironmentCollision(
@@ -963,6 +972,8 @@ def analyze(
         "analyzedAt": utc_now(), "method": "server-xy-single-link+common-base-dual-optical-dls+final-pose-environment-obb",
         "distanceThreshold": threshold, "positionTolerance": position_tolerance, "rotationTolerance": rotation_tolerance,
         "armJointCouplingEnabled": config.get("armJointCouplingEnabled", True) is not False,
+        "armSoftLimitRatio": config.get("armSoftLimitRatio", ARM_SOFT_LIMIT_RATIO),
+        "armSoftLimitOverrides": config.get("armSoftLimitOverrides", {}),
         "environmentCollision": {"enabled": collision.enabled, "mode": "final-pose-obb", "safetyDistance": collision.safety, "contactMargin": collision.margin},
         "clusters": plans, "nearbyPairs": nearby_pairs, "isolatedParkingPointIds": isolated,
         "feasibleClusterCount": sum(1 for item in plans if item["feasible"]),

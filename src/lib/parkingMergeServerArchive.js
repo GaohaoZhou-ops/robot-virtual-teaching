@@ -10,7 +10,7 @@ import {
 } from './parkingPointMerge.js';
 import { sha256Bytes } from './hash.js';
 import { resolveRobotResourceUrl } from './robotLoader.js';
-import { normalizeArmSoftLimitRatio } from './robotJointLimits.js';
+import { normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from './robotJointLimits.js';
 import { normalizeArmJointCouplingEnabled } from './robotJointCoupling.js';
 
 export const PARKING_MERGE_SERVER_JOB_FORMAT = 'atlas-parking-merge-server-job';
@@ -399,6 +399,7 @@ const triggerDownload = (blob, filename) => {
 
 const defaultServerConfig = (overrides = {}) => ({
   armSoftLimitRatio: normalizeArmSoftLimitRatio(overrides.armSoftLimitRatio),
+  armSoftLimitOverrides: normalizeArmSoftLimitOverrides(overrides.armSoftLimitOverrides),
   armJointCouplingEnabled: normalizeArmJointCouplingEnabled(overrides.armJointCouplingEnabled),
   distanceThreshold: finite(overrides.distanceThreshold, DEFAULT_PARKING_CLUSTER_DISTANCE),
   positionTolerance: finite(overrides.positionTolerance, DEFAULT_PARKING_MERGE_XYZ_TOLERANCE),
@@ -664,6 +665,11 @@ export async function readParkingMergeServerResult(file, context, onProgress) {
   }
   if (analysis.armJointCouplingEnabled !== normalizeArmJointCouplingEnabled(context?.armJointCouplingEnabled)) {
     throw new Error('关节6–7角度耦合设置与 Server 结果不一致，请重新导出计算包');
+  }
+  if (normalizeArmSoftLimitRatio(analysis.armSoftLimitRatio) !== normalizeArmSoftLimitRatio(context?.armSoftLimitRatio)
+    || JSON.stringify(normalizeArmSoftLimitOverrides(analysis.armSoftLimitOverrides))
+      !== JSON.stringify(normalizeArmSoftLimitOverrides(context?.armSoftLimitOverrides))) {
+    throw new Error('关节软限位设置与 Server 结果不一致，请重新导出计算包');
   }
   onProgress?.({ phase: '校验机器人资源', detail: '正在核对 URDF 与碰撞网格摘要' });
   const robotBundle = await collectParkingMergeRobotResources(robot, onProgress);

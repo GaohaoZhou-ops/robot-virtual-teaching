@@ -16,7 +16,7 @@ export function RobotJointCouplingSettings({ enabled, onChange, disabledReason =
   </section>;
 }
 
-export default function RobotJointLimitSettings({ ratio, onChange, disabledReason = '' }) {
+export default function RobotJointLimitSettings({ ratio, onChange, onReset, onOpenDetails, customCount = 0, disabledReason = '' }) {
   const descriptionId = useId();
   const percent = armSoftLimitPercent(ratio);
   const minimum = MIN_ARM_SOFT_LIMIT_RATIO * 100;
@@ -25,8 +25,9 @@ export default function RobotJointLimitSettings({ ratio, onChange, disabledReaso
 
   const commit = () => {
     if (disabledReason) return;
+    if (draft === String(percent)) return;
     const value = draft.trim() ? Number(draft) : NaN;
-    const next = Number.isFinite(value) ? Math.max(minimum, Math.min(100, Math.round(value))) : percent;
+    const next = Number.isFinite(value) ? Math.max(minimum, Math.min(100, Math.round(value * 100) / 100)) : percent;
     setDraft(String(next));
     if (next !== percent) onChange(next / 100);
   };
@@ -35,8 +36,8 @@ export default function RobotJointLimitSettings({ ratio, onChange, disabledReaso
     data-workbench-menu-keep-open title={disabledReason || undefined}>
     <div className="robot-joint-limit-settings__heading">
       <span><SlidersHorizontal size={14} />关节软限位</span>
-      <button type="button" aria-label="恢复默认软限位 95%" disabled={Boolean(disabledReason) || ratio === ARM_SOFT_LIMIT_RATIO}
-        onClick={() => { setDraft('95'); onChange(ARM_SOFT_LIMIT_RATIO); }}>
+      <button type="button" aria-label="恢复默认软限位 95%" disabled={Boolean(disabledReason) || (ratio === ARM_SOFT_LIMIT_RATIO && !customCount)}
+        onClick={() => { setDraft('95'); if (onReset) onReset(); else onChange(ARM_SOFT_LIMIT_RATIO); }}>
         <RotateCcw size={11} />恢复 95%
       </button>
     </div>
@@ -45,7 +46,7 @@ export default function RobotJointLimitSettings({ ratio, onChange, disabledReaso
         aria-label="关节软限位比例滑块" aria-valuetext={`${percent}%`} aria-describedby={descriptionId}
         disabled={Boolean(disabledReason)} onChange={(event) => onChange(Number(event.target.value) / 100)} />
       <label className="robot-joint-limit-settings__value">
-        <input type="number" min={minimum} max="100" step="1" value={draft}
+        <input type="number" min={minimum} max="100" step="0.1" value={draft}
           aria-label="关节软限位百分比" aria-describedby={descriptionId} disabled={Boolean(disabledReason)}
           onChange={(event) => setDraft(event.target.value)} onBlur={commit}
           onKeyDown={(event) => {
@@ -56,7 +57,10 @@ export default function RobotJointLimitSettings({ ratio, onChange, disabledReaso
       </label>
     </div>
     <p id={descriptionId} className="robot-joint-limit-settings__description">
-      {disabledReason || `保留双臂硬限位的中间 ${percent}%，两端各预留 ${Number(((100 - percent) / 2).toFixed(2))}%。`}
+      {disabledReason || (customCount ? `统一比例 ${percent}% · ${customCount} 个关节使用单独设置的范围。`
+        : `保留双臂硬限位的中间 ${percent}%，两端各预留 ${Number(((100 - percent) / 2).toFixed(2))}%。`)}
     </p>
+    {onOpenDetails && <button type="button" className="robot-joint-limit-settings__details" disabled={Boolean(disabledReason)}
+      aria-label="关节软限位详细设置" onClick={onOpenDetails}><SlidersHorizontal size={13} />详细设置<span>范围与动画预览</span></button>}
   </section>;
 }

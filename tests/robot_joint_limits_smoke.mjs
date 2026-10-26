@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { getRobotJointLimits, normalizeArmSoftLimitRatio } from '../src/lib/robotJointLimits.js';
-import { applyRobotJointValues, configureRobotArmSoftLimits, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { getRobotJointLimits, getArmSoftLimitRange, normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from '../src/lib/robotJointLimits.js';
+import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { solveEndEffectorIk } from '../src/lib/robotEndEffectorIk.js';
 import { buildExport, normalizeProject } from '../src/lib/io.js';
 import { jointPresetErrors } from '../src/lib/robotJointPresets.js';
 import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
@@ -127,4 +128,56 @@ for (const ratio of [undefined, 0.8, 1, 0.01]) {
   assert.equal(restored.robot.armSoftLimitRatio, ratio ?? 0.95);
 }
 assert.equal(normalizeProject({ robot: { relativePath: 'legacy.urdf' } }).robot.armSoftLimitRatio, 0.95);
-console.log('PASS: default/custom ratios, all 14 BOTX joints, live clamping, hard-limit preservation, worker isolation, references, dynamic validation and project round trips');
+
+// Independently set the two endpoints. Percentages are positions in the hard
+// interval (including asymmetric joints), not scaled signed joint angles.
+const ranges = { left_J2: { lower: 0.2, upper: 0.9 }, right_J2: { lower: 0.1, upper: 0.7 } };
+const customRobot = restoreMobileTeachingRobot(fixture.robot);
+const definitions = configureRobotArmSoftLimits(customRobot, 0.8, ranges);
+for (const name of Object.keys(ranges)) {
+  const node = customRobot.getObjectByName(name), limits = getRobotJointLimits(node);
+  const hardSpan = limits.hardUpper - limits.hardLower;
+  close(limits.lower, limits.hardLower + hardSpan * ranges[name].lower);
+  close(limits.upper, limits.hardLower + hardSpan * ranges[name].upper);
+  assert.equal(limits.softLimitCustom, true);
+  const definition = definitions.find((joint) => joint.name === name);
+  assert.equal(definition.softLimitCustom, true);
+  close(definition.softLimitRatio, ranges[name].upper - ranges[name].lower);
+  assert.match(jointPresetErrors([definition], { [name]: 999 })[name], /自定义范围/);
+  assert.ok(!jointPresetErrors([definition], { [name]: (definition.lower + definition.upper) / 2 })[name]);
+  close(setRobotJointValue(node, -999), limits.lower);
+  close(setRobotJointValue(node, 999), limits.upper);
+}
+assert.equal(getRobotJointLimits(customRobot.getObjectByName('left_J1')).softLimitRatio, 0.8);
+assert.equal(getRobotJointLimits(customRobot.getObjectByName('waist_yaw_J')).softLimitCustom, false);
+const customCopy = restoreMobileTeachingRobot(serializeMobileTeachingRobot(customRobot));
+configureRobotArmSoftLimits(customRobot, 1);
+assert.equal(getRobotJointLimits(customRobot.getObjectByName('left_J2')).softLimitCustom, false);
+assert.deepEqual(getRobotJointLimits(customCopy.getObjectByName('left_J2')).softLimitRange, ranges.left_J2);
+assert.deepEqual(getRobotJointLimits(customCopy.clone(true).getObjectByName('right_J2')).softLimitRange, ranges.right_J2);
+assert.deepEqual(normalizeArmSoftLimitOverrides({ ...ranges, waist_yaw_J: ranges.left_J2,
+  left_J3: { lower: 0.9, upper: 0.1 }, left_J4: { lower: '0', upper: 1 }, right_J3: { lower: 0, upper: Infinity },
+}), ranges);
+assert.deepEqual(normalizeArmSoftLimitOverrides(null), {});
+assert.deepEqual(normalizeArmSoftLimitOverrides({ left_J1: { lower: -10, upper: 10 } }), { left_J1: { lower: 0, upper: 1 } });
+close(getArmSoftLimitRange(0.95).lower, 0.025);
+close(getArmSoftLimitRange(0.95, { lower: 0.8, upper: 0.801 }).upper, 0.81);
+const customExport = buildExport({ mapData: { name: 'custom-limits.ply' }, heightRange: [0, 1], waypoints: [], edges: [],
+  robot: { id: 'botx.urdf', relativePath: 'botx.urdf' }, robotArmSoftLimitRatio: 0.8, robotArmSoftLimitOverrides: ranges });
+assert.deepEqual(normalizeProject(JSON.parse(JSON.stringify(customExport))).robot.armSoftLimitOverrides, ranges);
+assert.deepEqual(normalizeProject({ robot: { relativePath: 'legacy.urdf' } }).robot.armSoftLimitOverrides, {});
+
+// A reachable orientation becomes unreachable when an asymmetric custom end
+// is tightened. Exercise the actual IK on a worker-restored kinematic model.
+const arm = new THREE.Group(), joint = makeJoint('left_J1', -Math.PI, Math.PI), tool = new THREE.Object3D();
+tool.name = 'tool_left'; arm.add(joint); joint.add(tool); arm.updateMatrixWorld(true);
+configureRobotArmSoftLimits(arm, 1, { left_J1: { lower: 0.4, upper: 0.6 } });
+const constrained = restoreMobileTeachingRobot(serializeMobileTeachingRobot(arm));
+const controller = getRobotEndEffector(constrained, 'left');
+const orientation = (degrees) => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), THREE.MathUtils.degToRad(degrees));
+assert.equal(solveEndEffectorIk(controller, new THREE.Vector3(), orientation(60)).status, 'limited');
+assert.ok(THREE.MathUtils.radToDeg(controller.joints[0].userData.jointValue) <= 36 + 1e-7);
+assert.equal(solveEndEffectorIk(controller, new THREE.Vector3(), orientation(20)).status, 'tracking');
+configureRobotArmSoftLimits(constrained, 1, { left_J1: { lower: 0.4, upper: 0.8 } });
+assert.equal(solveEndEffectorIk(controller, new THREE.Vector3(), orientation(60)).status, 'tracking');
+console.log('PASS: default/custom ratios and endpoints, 14 BOTX joints, asymmetric bounds, actual IK, clamping, worker/clone isolation, references, validation and project round trips');

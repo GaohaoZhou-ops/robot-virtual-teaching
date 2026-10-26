@@ -46,4 +46,22 @@ for ratio in [0.8, 0.5, 1.0, 0.01, None, float('nan'), -1, 2]:
         assert math.isclose(joint.lower, lower, abs_tol=1e-10), (ratio, name)
         assert math.isclose(joint.upper, upper, abs_tol=1e-10), (ratio, name)
 assert module.ALGORITHM_VERSION == '1.2.0'
-print('PASS offline URDF parser: default/custom ratios and invalid settings; 14 arm limits; body/head unchanged')
+custom = {'left_J2': {'lower': 0.2, 'upper': 0.9}, 'right_J2': {'lower': 0.1, 'upper': 0.7},
+          'waist_yaw_J': {'lower': 0.2, 'upper': 0.9}, 'left_J3': {'lower': 0.9, 'upper': 0.1},
+          'right_J3': {'lower': '0', 'upper': 1}}
+with patch.object(module.RobotModel, '_read_collision_proxies', return_value=[]):
+    configured = module.RobotModel(urdf, ROOT, arm_soft_limit_ratio=0.8, arm_soft_limit_overrides=custom)
+for node in ET.parse(urdf).findall('joint'):
+    name = node.get('name')
+    if name not in configured.movable or node.find('limit') is None:
+        continue
+    lower, upper = [float(node.find('limit').get(key)) for key in ['lower', 'upper']]
+    if name.startswith(('left_J', 'right_J')):
+        start, end = (custom[name]['lower'], custom[name]['upper']) if name in ['left_J2', 'right_J2'] else (0.1, 0.9)
+        lower, upper = lower + (upper - lower) * start, lower + (upper - lower) * end
+    joint = configured.movable[name]
+    assert math.isclose(joint.lower, lower, abs_tol=1e-10), name
+    assert math.isclose(joint.upper, upper, abs_tol=1e-10), name
+    assert math.isclose(joint.clamp(-999), lower, abs_tol=1e-10), name
+    assert math.isclose(joint.clamp(999), upper, abs_tol=1e-10), name
+print('PASS offline URDF parser: ratios/custom asymmetric endpoints, invalid settings, 14 arm limits; body/head unchanged')

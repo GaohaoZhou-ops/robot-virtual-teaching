@@ -1,6 +1,6 @@
 import { configureRobotJointCoupling } from '../lib/robotJointCoupling.js';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { RobotJointCouplingContext, RobotJointLimitContext } from './RobotJointLimitContext.js';
+import { RobotJointCouplingContext, RobotJointLimitContext, RobotJointSoftRangesContext } from './RobotJointLimitContext.js';
 import * as THREE from 'three';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 import {
@@ -98,6 +98,7 @@ export default function TeachingPoseRobotPreview({
 }) {
   const viewportRef = useRef(null);
   const robotArmSoftLimitRatio = useContext(RobotJointLimitContext);
+  const robotArmSoftLimitOverrides = useContext(RobotJointSoftRangesContext);
   const robotArmJointCouplingEnabled = useContext(RobotJointCouplingContext);
   const canvasRef = useRef(null);
   const sceneContextRef = useRef(null);
@@ -345,7 +346,7 @@ export default function TeachingPoseRobotPreview({
     const canvas = canvasRef.current;
     if (!loadedRobot || !canvas) return;
     configureRobotJointCoupling(loadedRobot, robotArmJointCouplingEnabled);
-    configureRobotArmSoftLimits(loadedRobot, robotArmSoftLimitRatio);
+    configureRobotArmSoftLimits(loadedRobot, robotArmSoftLimitRatio, robotArmSoftLimitOverrides);
     loadedRobot.visible = Boolean(pose);
     if (!pose) {
       canvas.dataset.appliedJointValues = '{}';
@@ -417,6 +418,7 @@ export default function TeachingPoseRobotPreview({
     jointValues,
     modelRevision,
     robotArmSoftLimitRatio,
+    robotArmSoftLimitOverrides,
     robotArmJointCouplingEnabled,
     pose,
     recordedPose,

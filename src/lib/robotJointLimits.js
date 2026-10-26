@@ -8,6 +8,30 @@ export function normalizeArmSoftLimitRatio(value) {
 
 export const armSoftLimitPercent = (ratio) => Number((normalizeArmSoftLimitRatio(ratio) * 100).toFixed(2));
 
+// Endpoints are fractions of the original hard range, not multipliers of the
+// signed angles. This also describes asymmetric joints such as [-176°, 8°].
+export function normalizeArmSoftLimitRange(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || !Number.isFinite(value.lower) || !Number.isFinite(value.upper)
+    || value.lower >= value.upper) return null;
+  const lower = Math.max(0, Math.min(1 - MIN_ARM_SOFT_LIMIT_RATIO, value.lower));
+  const upper = Math.max(lower + MIN_ARM_SOFT_LIMIT_RATIO, Math.min(1, value.upper));
+  return { lower, upper };
+}
+
+export function normalizeArmSoftLimitOverrides(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).flatMap(([name, range]) => {
+    const normalized = /^(left|right)[_-]J\d+$/i.test(name) ? normalizeArmSoftLimitRange(range) : null;
+    return normalized ? [[name, normalized]] : [];
+  }));
+}
+
+export function getArmSoftLimitRange(ratio, override) {
+  const margin = (1 - normalizeArmSoftLimitRatio(ratio)) / 2;
+  return normalizeArmSoftLimitRange(override) || { lower: margin, upper: 1 - margin };
+}
+
 // The workbench's numbered left/right joints are the two arm chains.
 // Keep the URDF limits untouched: clones and worker snapshots carry the hard
 // limits and the configured ratio, so every consumer derives the operating
@@ -19,7 +43,12 @@ export function getRobotJointLimits(joint) {
   const softLimited = data.jointType === 'revolute'
     && /^(left|right)[_-]J\d+$/i.test(joint?.name || '')
     && Number.isFinite(hardLower) && Number.isFinite(hardUpper) && hardUpper > hardLower;
-  const softLimitRatio = softLimited ? normalizeArmSoftLimitRatio(data.armSoftLimitRatio) : null;
-  const margin = softLimited ? (hardUpper - hardLower) * (1 - softLimitRatio) / 2 : 0;
-  return { lower: hardLower + margin, upper: hardUpper - margin, hardLower, hardUpper, softLimited, softLimitRatio };
+  const override = softLimited ? normalizeArmSoftLimitRange(data.armSoftLimitRange) : null;
+  const softLimitRatio = softLimited ? override ? override.upper - override.lower : normalizeArmSoftLimitRatio(data.armSoftLimitRatio) : null;
+  const softLimitRange = softLimited ? getArmSoftLimitRange(data.armSoftLimitRatio, override) : null;
+  return {
+    lower: softLimited ? hardLower + (hardUpper - hardLower) * softLimitRange.lower : hardLower,
+    upper: softLimited ? hardLower + (hardUpper - hardLower) * softLimitRange.upper : hardUpper,
+    hardLower, hardUpper, softLimited, softLimitRatio, softLimitRange, softLimitCustom: Boolean(override),
+  };
 }

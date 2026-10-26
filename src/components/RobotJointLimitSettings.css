@@ -59,6 +59,13 @@
   line-height: 1.7;
   letter-spacing: 0;
 }
+.robot-joint-limit-settings__details {
+  display: flex; align-items: center; gap: 7px; width: 100%; margin-top: 10px; padding: 8px;
+  border: 1px solid #365451; border-radius: 3px; background: #59dbe80a; color: #bce4df; font: inherit; font-size: 11px; cursor: pointer;
+}
+.robot-joint-limit-settings__details span { margin-left: auto; color: #78918f; font-size: 10px; }
+.robot-joint-limit-settings__details:hover:not(:disabled) { border-color: var(--cyan); }
+.robot-joint-limit-settings__details:disabled { opacity: .45; cursor: default; }
 
 .robot-joint-coupling-settings__switch {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;

@@ -39,6 +39,8 @@ node_modules/
 # Adjustable joint-limit checks use build/robot-soft-limits/ for menu captures,
 # collaboration credentials and simulated device command/state files.
 # Coupled-wrist UI checks use build/robot-joint-coupling/ for browser captures.
+# Detailed joint-limit checks keep animation captures, responsive-layout reviews
+# and service-index backups in test-artifacts/joint-limit-details/.
 # Mac/iPad realtime checks use build/ipad-realtime-*/ and ipad/build/realtime-testing/;
 # performance samples, device/signing settings, captures and Python environments stay local.
 # Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
@@ -360,6 +362,17 @@ playwright/.auth/
 /robot-soft-limits-*.[zZ][iI][pP]
 /tests/robot-soft-limits.[zZ][iI][pP]
 /tests/robot-soft-limits-*.[zZ][iI][pP]
+# Standalone copies of detailed joint-limit review output and packed reports.
+# Scope to root/tests output directories; robot_joint_limit_* runners and nested
+# regression fixtures remain trackable.
+/joint-limit-details/
+/tests/joint-limit-details/
+/joint-limit-details-*/
+/tests/joint-limit-details-*/
+/joint-limit-details.[zZ][iI][pP]
+/tests/joint-limit-details.[zZ][iI][pP]
+/joint-limit-details-*.[zZ][iI][pP]
+/tests/joint-limit-details-*.[zZ][iI][pP]
 # Coupled-wrist validation copies and per-run bundles exported from build/.
 # Limit these to root/tests output paths; keep solver sources, maintained
 # robot_joint_coupling_* tests, artwork and nested regression fixtures visible.

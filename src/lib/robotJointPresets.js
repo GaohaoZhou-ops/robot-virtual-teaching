@@ -84,7 +84,7 @@ export function jointPresetErrors(joints, values) {
     if ((Number.isFinite(joint.lower) && value < joint.lower - tolerance)
       || (Number.isFinite(joint.upper) && value > joint.upper + tolerance)) {
       return [[joint.name, joint.softLimitRatio
-        ? `超出关节软限位（硬限位中间 ${Number((joint.softLimitRatio * 100).toFixed(2))}%）` : '超出关节限位']];
+        ? `超出关节软限位（${joint.softLimitCustom ? '自定义范围，占硬限位' : '硬限位中间'} ${Number((joint.softLimitRatio * 100).toFixed(2))}%）` : '超出关节限位']];
     }
     return [];
   }));

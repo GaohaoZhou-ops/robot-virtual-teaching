@@ -44,7 +44,7 @@ import { applyScreenViewportGesture } from '../lib/ipadScreenViewport.js';
 import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
 import RobotDistanceWarning from './RobotDistanceWarning.jsx';
 import RobotCollisionJointSettings from './RobotCollisionJointSettings.jsx';
-import { RobotJointCouplingContext, RobotJointLimitContext } from './RobotJointLimitContext.js';
+import { RobotJointCouplingContext, RobotJointLimitContext, RobotJointSoftRangesContext } from './RobotJointLimitContext.js';
 import { normalizeIgnoredCollisionJoints } from '../lib/robotCollisionSettings.js';
 import { applyRobotModelOpacity } from '../lib/robotDisplay.js';
 import {
@@ -1035,6 +1035,7 @@ const copyRobotJointMetadata = (source, clone) => {
     clone.userData.jointAxis = [...(source.userData.jointAxis || [0, 0, 1])];
     clone.userData.jointLimit = { ...(source.userData.jointLimit || {}) };
     clone.userData.armSoftLimitRatio = source.userData.armSoftLimitRatio;
+    clone.userData.armSoftLimitRange = source.userData.armSoftLimitRange ? { ...source.userData.armSoftLimitRange } : undefined;
     clone.userData.restPosition = [...(source.userData.restPosition || source.position.toArray())];
     clone.userData.restQuaternion = [
       ...(source.userData.restQuaternion || source.quaternion.toArray()),
@@ -1592,6 +1593,9 @@ export default function PointCloudViewer({
   const robotPoseRef = useRef(normalizeRobotPose(robotPose));
   const robotJointValuesRef = useRef(normalizeRobotJointValues(robotJointValues));
   const robotArmSoftLimitRatio = useContext(RobotJointLimitContext);
+  const robotArmSoftLimitOverrides = useContext(RobotJointSoftRangesContext);
+  const robotArmSoftLimitOverridesRef = useRef(robotArmSoftLimitOverrides);
+  robotArmSoftLimitOverridesRef.current = robotArmSoftLimitOverrides;
   const robotArmJointCouplingEnabled = useContext(RobotJointCouplingContext);
   const robotArmSoftLimitRatioRef = useRef(robotArmSoftLimitRatio);
   robotArmSoftLimitRatioRef.current = robotArmSoftLimitRatio;
@@ -1865,7 +1869,7 @@ export default function PointCloudViewer({
       },
       configurationKey: robot ? JSON.stringify([robot.userData.armJointCouplingEnabled,
         ['left', 'right'].flatMap((side) => getRobotEndEffector(robot, side)?.joints.map((joint) =>
-          [joint.name, joint.userData.jointLimit, joint.userData.armSoftLimitRatio, joint.userData.armJointCouplingEnabled]) || [])]) : '',
+          [joint.name, joint.userData.jointLimit, joint.userData.armSoftLimitRatio, joint.userData.armSoftLimitRange, joint.userData.armJointCouplingEnabled]) || [])]) : '',
       applyState: ({ joints, basePose }) => {
         if (basePose) {
           const layer = robotLayerRef.current;
@@ -3104,11 +3108,11 @@ export default function PointCloudViewer({
     clearRobotDragHistory();
     cameraIkReferencesRef.current = { left: null, right: null };
     configureRobotJointCoupling(robot, robotArmJointCouplingEnabled);
-    const movableJoints = configureRobotArmSoftLimits(robot, robotArmSoftLimitRatio);
+    const movableJoints = configureRobotArmSoftLimits(robot, robotArmSoftLimitRatio, robotArmSoftLimitOverrides);
     onRobotLoadStateRef.current?.({ ...robotLoadStateRef.current, movableJoints });
     reportRobotJointValues(true);
     reportZividCameraPoses(true);
-  }, [robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
+  }, [robotArmSoftLimitRatio, robotArmSoftLimitOverrides, robotArmJointCouplingEnabled]);
 
   useLayoutEffect(() => {
     const changed = !sameNumericValues(normalizeRobotJointValues(robotJointValues), robotJointValuesRef.current);
@@ -5760,7 +5764,7 @@ export default function PointCloudViewer({
         }
         loadedRobot = robot;
         configureRobotJointCoupling(robot, robotArmJointCouplingEnabledRef.current);
-        configureRobotArmSoftLimits(robot, robotArmSoftLimitRatioRef.current);
+        configureRobotArmSoftLimits(robot, robotArmSoftLimitRatioRef.current, robotArmSoftLimitOverridesRef.current);
         layer.add(robot);
         loadedRobotRef.current = robot;
         applyRobotModelOpacity(robot, robotOpacityRef.current);
@@ -5964,7 +5968,7 @@ export default function PointCloudViewer({
         writeRobotParkingGhostHiddenDataset(canvas);
       }
     };
-  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio, robotArmJointCouplingEnabled]);
+  }, [mapData?.geometry, robotDescriptor, robotLoadState?.status, robotParkingGhost, robotArmSoftLimitRatio, robotArmSoftLimitOverrides, robotArmJointCouplingEnabled]);
 
   useEffect(() => {
     const scene = sceneRef.current, robot = loadedRobotRef.current, canvas = controlsRef.current?.domElement;

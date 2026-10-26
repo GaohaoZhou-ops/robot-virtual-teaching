@@ -88,7 +88,7 @@ function JointValueRow({ joint, value, locked, onChange, onToggleLock }) {
     >
       <div className="joint-value-row__name">
         <strong title={joint.softLimitRatio
-          ? `${joint.name} · 软限位 ${formatValue(explicitLower, prismatic)} ～ ${formatValue(explicitUpper, prismatic)} ${unit}（硬限位中间 ${armSoftLimitPercent(joint.softLimitRatio)}%）`
+          ? `${joint.name} · 软限位 ${formatValue(explicitLower, prismatic)} ～ ${formatValue(explicitUpper, prismatic)} ${unit}（${joint.softLimitCustom ? '自定义范围，占硬限位' : '硬限位中间'} ${armSoftLimitPercent(joint.softLimitRatio)}%）`
           : joint.name}>{joint.name}</strong>
         <small>{String(joint.type || 'joint').toUpperCase()}</small>
       </div>

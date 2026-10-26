@@ -1,7 +1,7 @@
 import { calculatePathDistances } from './pathMetrics.js';
 import { normalizeRobotJointLocks } from './robotJointLocks.js';
 import { normalizeIgnoredCollisionJoints } from './robotCollisionSettings.js';
-import { normalizeArmSoftLimitRatio } from './robotJointLimits.js';
+import { normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from './robotJointLimits.js';
 import { normalizeArmJointCouplingEnabled } from './robotJointCoupling.js';
 import { getSliceControlBounds } from './sliceRange.js';
 import { validateIPadResult, withoutDesktopPoseReferences } from './ipadProtocol.js';
@@ -668,6 +668,7 @@ export function normalizeProject(payload) {
         ),
         collisionIgnoredJoints: normalizeIgnoredCollisionJoints(rawRobot.collisionIgnoredJoints),
         armSoftLimitRatio: normalizeArmSoftLimitRatio(rawRobot.armSoftLimitRatio),
+        armSoftLimitOverrides: normalizeArmSoftLimitOverrides(rawRobot.armSoftLimitOverrides),
         armJointCouplingEnabled: normalizeArmJointCouplingEnabled(rawRobot.armJointCouplingEnabled),
         heightLocked: booleanOr(
           rawRobot.heightLocked ?? rawRobot.lockHeight ?? rawRobot.zLocked,
@@ -784,6 +785,7 @@ export function buildExport({
   lockedRobotJointNames = [],
   ignoredRobotCollisionJointNames = [],
   robotArmSoftLimitRatio = robot?.armSoftLimitRatio,
+  robotArmSoftLimitOverrides = robot?.armSoftLimitOverrides,
   robotArmJointCouplingEnabled = robot?.armJointCouplingEnabled,
   robotHeightLocked = false,
   teachingTasks = [],
@@ -907,6 +909,7 @@ export function buildExport({
           lockedJoints: normalizeRobotJointLocks(lockedRobotJointNames),
           collisionIgnoredJoints: normalizeIgnoredCollisionJoints(ignoredRobotCollisionJointNames),
           armSoftLimitRatio: normalizeArmSoftLimitRatio(robotArmSoftLimitRatio),
+          armSoftLimitOverrides: normalizeArmSoftLimitOverrides(robotArmSoftLimitOverrides),
           armJointCouplingEnabled: normalizeArmJointCouplingEnabled(robotArmJointCouplingEnabled),
           heightLocked: robotHeightLocked === true,
           origin: {
