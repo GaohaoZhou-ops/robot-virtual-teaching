@@ -60,9 +60,11 @@ def run():
                 page.get_by_label('新增独立示教模型', exact=True).set_input_files(str(PLY))
                 choose_new_matrix(page, dialog, MATRIX)
                 route, place = options(dialog)
-                route.click()
-                if place_map:
+                expect(route).to_have_attribute('aria-pressed', 'true')
+                expect(place).to_have_attribute('aria-pressed', 'true')
+                if not place_map:
                     place.click()
+                if place_map:
                     # Abort after both workspaces' writes were queued, then retry.
                     page.evaluate("""() => {
                       const put = IDBObjectStore.prototype.put;

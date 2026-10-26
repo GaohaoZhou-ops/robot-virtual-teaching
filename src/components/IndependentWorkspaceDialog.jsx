@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowRight, Clock3, LoaderCircle, ScanLine, X } from 'lucide-react';
+import { ArrowRight, Clock3, LoaderCircle, Plus, ScanLine, X } from 'lucide-react';
 import { independentWorkspaceLabel } from '../lib/independentTeachingName.js';
 
 const savedTime = (value) => {
@@ -11,7 +11,7 @@ const savedTime = (value) => {
     }).format(date) : '保存时间未知';
 };
 
-export default function IndependentWorkspaceDialog({ state, disabled = false, onSelect, onClose }) {
+export default function IndependentWorkspaceDialog({ state, disabled = false, onSelect, onCreate, onClose }) {
   const panelRef = useRef(null);
   const firstButtonRef = useRef(null);
   const { entries, busy = false, selectedId, error } = state;
@@ -54,7 +54,9 @@ export default function IndependentWorkspaceDialog({ state, disabled = false, on
           <div>
             <small>INDEPENDENT TEACHING</small>
             <h2 id="independent-workspace-picker-title">选择独立示教</h2>
-            <p id="independent-workspace-picker-description">选择要进入的工程，地图中已完成的示教结果会继续保留。</p>
+            <p id="independent-workspace-picker-description">{onCreate
+              ? '选择已有工程，或新增独立示教；地图中已完成的示教结果会继续保留。'
+              : '选择要进入的工程，地图中已完成的示教结果会继续保留。'}</p>
           </div>
           <span className="project-load-dialog__mode">{entries.length} 份工程</span>
           <button type="button" aria-label="关闭独立示教选择" disabled={busy} onClick={onClose}>
@@ -91,6 +93,10 @@ export default function IndependentWorkspaceDialog({ state, disabled = false, on
           </div>
         </div>
         <footer className="project-load-dialog__footer">
+          {onCreate && <button type="button" className="independent-workspace-picker__create"
+            disabled={busy || disabled} onClick={onCreate}>
+            <Plus size={14} />新增独立示教
+          </button>}
           <span>切换前自动保存工作现场</span>
           <button type="button" disabled={busy} onClick={onClose}>取消</button>
         </footer>

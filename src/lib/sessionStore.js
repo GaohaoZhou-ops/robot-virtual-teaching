@@ -1,7 +1,7 @@
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
 import { normalizeIndependentTeachingName, validateIndependentTeachingName } from './independentTeachingName.js';
 import { matchesPlacedSource } from './placedObjectRendering.js';
-import { sharedRobotPresetEntries, withSharedRobotPresetConfig, mergeImportedRobotPresets } from './sharedRobotPresets.js';
+import { sharedRobotPresetEntries, withSharedRobotPresetConfig, mergeImportedRobotPresets, mergeLegacyJointConsolePresets } from './sharedRobotPresets.js';
 
 const DATABASE_NAME = 'atlas-route-studio';
 const DATABASE_VERSION = 1;
@@ -178,7 +178,7 @@ const openDatabase = () => {
   return databasePromise;
 };
 
-const emptyPresetLibrary = () => ({ key: SHARED_ROBOT_PRESETS_KEY, version: 1, revision: 0, poses: [] });
+const emptyPresetLibrary = () => ({ key: SHARED_ROBOT_PRESETS_KEY, version: 2, revision: 0, poses: [] });
 const samePresets = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const presetConfigKey = key => typeof key === 'string' && (key === 'config' || key === 'recovery-config'
   || key.startsWith('workspace-config:') || key.startsWith('independent-history-config:'));
@@ -217,8 +217,18 @@ export async function loadSharedRobotPresets() {
         || available.find(record => record.key === 'config') || available[0];
       if (source) {
         library = { ...library, revision: 1, poses: sharedRobotPresetEntries(source.config.project), savedAt: Date.now() };
-        store.put(library);
       }
+    }
+    if (library.revision && (!existing || existing.version < 2)) {
+      const priority = (record) => record.key === workspaceConfigKey('map') ? 0
+        : record.key === workspaceConfigKey('independent') ? 1 : record.key === 'config' ? 2
+          : record.key === 'recovery-config' ? 4 : 3;
+      const sources = [...records].sort((a, b) => priority(a) - priority(b)
+        || (Number(b.savedAt) || 0) - (Number(a.savedAt) || 0));
+      library = { ...library, version: 2, revision: library.revision + Number(Boolean(existing)),
+        poses: mergeLegacyJointConsolePresets(library.poses, sources.map(record => record.config?.project)),
+        savedAt: Date.now() };
+      store.put(library);
     }
     if (library.revision) writePresetSnapshots(store, records, library);
   } catch (error) {

@@ -780,6 +780,12 @@ playwright/.auth/
 /tests/atlas-preset-manager-*/
 /atlas-preset-manager-*.[zZ][iI][pP]
 /tests/atlas-preset-manager-*.[zZ][iI][pP]
+# Console-preset export tests download joint values and robot teaching archives.
+# Cover repository-local TMPDIR overrides and packed copies; keep fixtures visible.
+/joint-console-presets-*/
+/tests/joint-console-presets-*/
+/joint-console-presets-*.[zZ][iI][pP]
+/tests/joint-console-presets-*.[zZ][iI][pP]
 # Shared-preset and map-origin review folders copied out of test-artifacts/.
 # Include dated copies and ZIPs without hiding source modules or nested fixtures.
 /shared-robot-presets/

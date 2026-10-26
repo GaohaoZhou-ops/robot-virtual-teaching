@@ -89,6 +89,41 @@ def run():
               map.config.config.project.virtualTeaching.jointPoses.pop();
               await seed();
               check((await s.loadSharedRobotPresets()).poses.length === 0, 'an explicitly empty map library wins over independent presets during migration');
+              // Simulate the already-deployed v1 shared library plus console
+              // records that were still stored locally in both workspaces/history.
+              const legacy = (id, angle) => ({...make(id, '同名关节记录'),
+                joints: {source: 'joint-console', angularUnit: 'degree', linearUnit: 'meter', values: {left_J1: angle}}});
+              const currentMap = structuredClone(map.config.config);
+              currentMap.project.virtualTeaching.jointPoses.push(mapPreset, legacy('console-map', 12));
+              const currentIndependent = structuredClone(independent.config.config);
+              currentIndependent.project.virtualTeaching.jointPoses.push(legacy('console-independent', 34));
+              const older = structuredClone(currentMap);
+              older.project.virtualTeaching.jointPoses = [legacy('console-map', 99), legacy('console-history', 56)];
+              const db = await new Promise(resolve => { const r=indexedDB.open('atlas-route-studio'); r.onsuccess=()=>resolve(r.result); });
+              await new Promise((resolve, reject) => {
+                const tx=db.transaction('workspace-session','readwrite'), store=tx.objectStore('workspace-session');
+                store.put({key:'shared-robot-presets', version:1, revision:7, poses:[mapPreset]});
+                for (const [key, config] of [['workspace-config:map',currentMap], ['workspace-config:independent',currentIndependent],
+                  ['independent-history-config:legacy',older]]) store.put({key, sessionId:session, mapId:key.includes('independent') ? independent.map.mapId : map.map.mapId, config});
+                tx.oncomplete=resolve; tx.onabort=()=>reject(tx.error);
+              }); db.close();
+              const v1 = await raw();
+              await failPut(() => s.loadSharedRobotPresets());
+              check(equal(await raw(), v1), 'console migration failure rolls back v1 library and all snapshots');
+              const upgraded = await s.loadSharedRobotPresets();
+              check(upgraded.version === 2 && upgraded.revision === 8, 'existing libraries upgrade once');
+              check(equal(upgraded.poses.map(p=>p.id), ['canonical','console-map','console-independent','console-history']),
+                'console poses from both modes/history join without reviving discarded independent robot presets');
+              check(equal(upgraded.poses.slice(1).map(p=>p.joints.values.left_J1), [12,34,56]),
+                'same-name poses retain distinct values and current snapshots take priority');
+              check(equal(await s.loadSharedRobotPresets(), upgraded), 'migration is idempotent');
+              const afterUpgrade = await raw();
+              check(afterUpgrade.slice(1).every(r => r.config.project.virtualTeaching.jointPoses.length === 5), 'console poses reach both workspace caches');
+              const deleted = structuredClone(afterUpgrade[1].config);
+              deleted.project.virtualTeaching.jointPoses = deleted.project.virtualTeaching.jointPoses.filter(p => p.joints.source !== 'joint-console');
+              await s.saveWorkspaceConfig(session, map.map.mapId, deleted, 'map', {presetLibrary:upgraded});
+              check(equal((await s.loadSharedRobotPresets()).poses.map(p=>p.id), ['canonical']),
+                'deleted migrated console records must not reappear from history on reload');
               return 'Shared preset storage: map-priority migration, atomic rollback, stale-writer protection, empty deletion, imports and global reset passed.';
             }''')
             print(result, flush=True)

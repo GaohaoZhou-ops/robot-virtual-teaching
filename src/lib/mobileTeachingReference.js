@@ -1,6 +1,6 @@
 import { applyRobotJointValues, readRobotJointValues } from './robotLoader.js';
 import { getRobotJointLimits } from './robotJointLimits.js';
-import { presetMatchesRobot } from './robotJointPresets.js';
+import { isRobotJointPreset, presetMatchesRobot } from './robotJointPresets.js';
 import { MOBILE_TORSO_PITCH_JOINTS } from './mobileTeachingChest.js';
 
 export function mobileUpperBodyJoints(robot) {
@@ -48,7 +48,7 @@ export function normalizeMobileReferencePose(value = { type: 'current' }) {
 }
 
 export function mobileReferenceFromPreset(preset, robot) {
-  if (preset?.joints?.source !== 'robot-preset' || !presetMatchesRobot(preset, robot)) {
+  if (!isRobotJointPreset(preset) || !presetMatchesRobot(preset, robot)) {
     throw new Error('参考预设已不存在或不属于当前机器人，请重新选择');
   }
   return normalizeMobileReferencePose({ type: 'preset', id: preset.id, name: preset.name,

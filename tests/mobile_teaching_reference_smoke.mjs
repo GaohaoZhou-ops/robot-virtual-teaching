@@ -30,6 +30,8 @@ const preset = { id: 'preset-a', name: '准备姿态 A', robot: descriptor,
   joints: { source: 'robot-preset', angularUnit: 'degree', linearUnit: 'meter',
     values: { left_slider_a: 0.6, left_slider_b: -0.1, head_yaw_J: 30, right_J1: -35 } } };
 const reference = mobileReferenceFromPreset(preset, descriptor);
+const consoleReference = mobileReferenceFromPreset({ ...preset, joints: { ...preset.joints, source: 'joint-console' } }, descriptor);
+assert.deepEqual(consoleReference, reference, 'console records are reusable reference postures');
 const original = structuredClone({ task, preset, values: readRobotJointValues(robot) });
 const run = (options = {}, extra = {}) => solveMobileTeaching({ robot, task,
   mapPose: { position: { x: 0, y: 0, z: 0.25 }, rpy: { roll: 0, pitch: 0, yaw: 0 } },

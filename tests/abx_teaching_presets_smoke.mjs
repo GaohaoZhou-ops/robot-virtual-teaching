@@ -28,6 +28,12 @@ assert.deepEqual(tasks[1].basics, basics, 'an empty task also carries its robot 
 assert.equal(abxTeachingNeedsRobot(payload), true);
 assert.equal(JSON.stringify(payload), before);
 assert.deepEqual((await buildAbxTeachingArchive(payload, { robotPackage })).files, bundle.files, 'IDs and bytes are stable');
+const consolePayload = structuredClone(payload);
+consolePayload.virtualTeaching.jointPoses.forEach((pose) => {
+  if (pose.joints.source === 'robot-preset') pose.joints.source = 'joint-console';
+});
+assert.deepEqual((await buildAbxTeachingArchive(consolePayload, { robotPackage })).files, bundle.files,
+  'legacy console recordings export the same basic poses, units and robot bindings');
 const reordered = structuredClone(payload);
 reordered.virtualTeaching.jointPoses.reverse().forEach((preset, index) => { preset.sequence = index + 1; });
 const reorderedBundle = await buildAbxTeachingArchive(reordered, { robotPackage });

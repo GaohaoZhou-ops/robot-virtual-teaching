@@ -137,8 +137,9 @@ def run():
                     sync = dialog.get_by_role('button', name='同步路网', exact=True)
                 choose_new_matrix(page, dialog, MATRIX)
                 expect(sync).to_be_enabled()
-                expect(sync).to_have_attribute('aria-pressed', 'false')
-                sync.click()
+                expect(sync).to_have_attribute('aria-pressed', 'true')
+                # Keep this route-import scenario in the independent workspace.
+                dialog.get_by_role('button', name='放置进入地图', exact=True).click()
                 if mode == 'independent':
                     page.screenshot(path='/tmp/atlas-new-independent-loaded-route.png', full_page=True)
                 submit(page, dialog)

@@ -4,6 +4,7 @@ import { ArrowLeftRight, Check, FileText, FolderOpen, LoaderCircle, Map, MapPin,
 import { identityTransferPose, parseTransferMatrixFile, transformTeachingPose } from '../lib/teachingTransfer.js';
 import { defaultIndependentTeachingName, INDEPENDENT_TEACHING_NAME_MAX_LENGTH, validateIndependentTeachingName } from '../lib/independentTeachingName.js';
 import { TEACHING_WAYPOINT_SOURCE, TEMPORARY_MAP_ROUTE_SOURCE } from '../lib/teachingNavigation.js';
+import { loadIndependentCreationPreferences, saveIndependentCreationPreferences } from '../lib/independentCreationPreferences.js';
 import './NewIndependentTeachingDialog.css';
 
 export default function NewIndependentTeachingDialog({ state, progress, onCreate, onClose, onLoadRoute }) {
@@ -20,24 +21,29 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
   const [matrix, setMatrix] = useState(null);
   const [matrixError, setMatrixError] = useState('');
   const [matrixLoading, setMatrixLoading] = useState(false);
-  const [syncRoute, setSyncRoute] = useState(false);
-  const [placeInMap, setPlaceInMap] = useState(false);
+  const [creationPreferences, setCreationPreferences] = useState(loadIndependentCreationPreferences);
   const hasMap = Boolean(state.mapSnapshot);
   const busy = state.busy === true || state.routeLoading === true;
   const hasRoute = Boolean(state.mapSnapshot?.config?.config?.project?.waypoints?.some((point) =>
     point.source !== TEACHING_WAYPOINT_SOURCE && point.source !== TEMPORARY_MAP_ROUTE_SOURCE));
   const canLoadRoute = hasMap && !hasRoute;
-  const canPlace = hasMap && Boolean(matrix) && !matrixError;
+  const canPlace = hasMap && Boolean(modelFile) && !modelError && Boolean(matrix) && !matrixError && !matrixLoading;
   const canSyncRoute = canPlace && hasRoute;
+  const syncRoute = canSyncRoute && creationPreferences.syncRoute;
+  const placeInMap = canPlace && creationPreferences.placeInMap;
   const placementDisabledReason = !hasMap ? '请先加载地图示教工程'
-    : !matrix || matrixError ? '请先加载有效的转换矩阵' : '';
+    : !modelFile || modelError ? '请先选择有效的独立模型'
+      : matrixLoading ? '正在读取转换矩阵'
+        : !matrix || matrixError ? '请先加载有效的转换矩阵' : '';
   const routeDisabledReason = !hasMap ? placementDisabledReason
     : !hasRoute ? '请先在地图示教中导入路网' : placementDisabledReason;
 
-  useEffect(() => {
-    if (!canPlace) setPlaceInMap(false);
-    if (!canSyncRoute) setSyncRoute(false);
-  }, [canPlace, canSyncRoute]);
+  const toggleCreationOption = (key) => {
+    const next = { ...creationPreferences, [key]: !creationPreferences[key] };
+    setCreationPreferences(next);
+    // Only explicit choices change the memory. Missing files merely disable it.
+    saveIndependentCreationPreferences(next);
+  };
 
   useEffect(() => {
     const previous = document.activeElement;
@@ -102,7 +108,7 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
     <form onSubmit={(event) => {
       event.preventDefault();
       if (canCreate) onCreate({ file: modelFile, matrix: hasMap ? matrix : null, name: name.trim(),
-        syncRoute: syncRoute && canSyncRoute, placeInMap: placeInMap && canPlace });
+        syncRoute, placeInMap });
     }}>
       <header className="new-independent-dialog__header">
         <span className="new-independent-dialog__mark"><ScanLine size={24} /></span>
@@ -167,21 +173,25 @@ export default function NewIndependentTeachingDialog({ state, progress, onCreate
             {(matrix || matrixError) && <button type="button" disabled={busy} onClick={clearMatrix}>移除矩阵</button>}
           </div>
           <div className="new-independent-dialog__options" role="group" aria-label="创建时同步与放置">
-            <button type="button" aria-pressed={canLoadRoute ? undefined : syncRoute && canSyncRoute}
+            <button type="button" aria-pressed={canLoadRoute ? undefined : syncRoute}
+              aria-describedby="new-independent-options-note"
               disabled={(canLoadRoute ? !onLoadRoute : !canSyncRoute) || busy || matrixLoading}
               title={canLoadRoute ? '将路网 JSON 加载到当前地图，也可跳过直接创建独立示教'
                 : routeDisabledReason || '创建时将地图路网同步到独立模型坐标系'}
-              onClick={() => canLoadRoute ? routeInputRef.current?.click() : setSyncRoute((selected) => !selected)}>
+              onClick={() => canLoadRoute ? routeInputRef.current?.click() : toggleCreationOption('syncRoute')}>
               {state.routeLoading ? <LoaderCircle size={15} className="transfer-spinner" /> : <Route size={15} />}
-              {canLoadRoute ? '加载路网' : '同步路网'}{syncRoute && canSyncRoute && <Check size={14} />}
+              {canLoadRoute ? '加载路网' : '同步路网'}{syncRoute && <Check size={14} />}
             </button>
-            <button type="button" aria-pressed={placeInMap && canPlace}
+            <button type="button" aria-pressed={placeInMap} aria-describedby="new-independent-options-note"
               disabled={!canPlace || busy || matrixLoading}
               title={placementDisabledReason || '创建时按转换矩阵放置模型，并进入地图示教'}
-              onClick={() => setPlaceInMap((selected) => !selected)}>
-              <MapPin size={15} />放置进入地图{placeInMap && canPlace && <Check size={14} />}
+              onClick={() => toggleCreationOption('placeInMap')}>
+              <MapPin size={15} />放置进入地图{placeInMap && <Check size={14} />}
             </button>
           </div>
+          <p id="new-independent-options-note" className="new-independent-dialog__options-note">
+            条件满足后默认自动开启；可手动关闭，下次沿用上次选择。
+          </p>
           <input ref={routeInputRef} type="file" accept=".route.json,.json,application/json" hidden
             aria-label="新增独立示教地图路网" disabled={!canLoadRoute || busy}
             onChange={(event) => {

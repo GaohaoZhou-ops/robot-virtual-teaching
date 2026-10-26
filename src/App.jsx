@@ -130,7 +130,7 @@ import {
 } from './lib/mapGeometry.js';
 import { createSpaceMouseInputState } from './lib/spaceMouse.js';
 import {
-  buildRobotPresetFile, createRobotJointPreset, presetJointDefinitions, presetMatchesRobot,
+  buildRobotPresetFile, createRobotJointPreset, isRobotJointPreset, presetJointDefinitions, presetMatchesRobot,
   robotPresetValuesForEditing, validateRobotPresetName,
 } from './lib/robotJointPresets.js';
 import { withSharedRobotPresets } from './lib/sharedRobotPresets.js';
@@ -647,7 +647,7 @@ export default function App() {
   const [robotPresetManager, setRobotPresetManager] = useState(null);
   const robotPresetModalOpen = Boolean(robotPresetDraft || robotPresetManager);
   const robotPresetJoints = useMemo(() => presetJointDefinitions(robotLoadState.movableJoints), [robotLoadState.movableJoints]);
-  const projectRobotPresets = useMemo(() => jointPoses.filter((pose) => pose.joints?.source === 'robot-preset'), [jointPoses]);
+  const projectRobotPresets = useMemo(() => jointPoses.filter(isRobotJointPreset), [jointPoses]);
   const robotPresets = useMemo(() => projectRobotPresets.filter((pose) => presetMatchesRobot(pose, selectedRobot)),
     [projectRobotPresets, selectedRobot]);
   const [zividCameraPoses, setZividCameraPoses] = useState({});
@@ -2334,12 +2334,15 @@ export default function App() {
     return { expectedConfig: snapshot.config, currentRobotPackage };
   };
 
-  const openNewIndependentDialog = async () => {
+  const openNewIndependentDialog = async ({ fromPicker = false } = {}) => {
     if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current
-      || newIndependentDialog || !mapData?.geometry) return;
+      || newIndependentDialog || !mapData?.geometry
+      || (fromPicker && (!independentWorkspaceDialog || independentWorkspaceDialog.busy))) return;
     const revision = ++newIndependentDialogRevisionRef.current;
     setRobotControlEnabled(false);
-    setNewIndependentDialog({ sourceMode: teachingSpaceMode, mapLoading: true, mapSnapshot: null, busy: false, error: '' });
+    if (fromPicker) setIndependentWorkspaceDialog(null);
+    setNewIndependentDialog({ sourceMode: teachingSpaceMode, mapLoading: true, mapSnapshot: null,
+      returnToPicker: fromPicker ? independentWorkspaceDialog : null, busy: false, error: '' });
     try {
       if (teachingSpaceMode === 'map') {
         await persistWorkspaceNow();
@@ -2359,6 +2362,9 @@ export default function App() {
   const closeNewIndependentDialog = () => {
     if (independentSwitchBusyRef.current) return;
     newIndependentDialogRevisionRef.current += 1;
+    if (newIndependentDialog?.returnToPicker) {
+      setIndependentWorkspaceDialog({ ...newIndependentDialog.returnToPicker, error: '' });
+    }
     setNewIndependentDialog(null);
   };
 
@@ -5274,7 +5280,7 @@ export default function App() {
   const openRobotPreset = (presetId = null) => {
     if (!robotPresetReady) return;
     const preset = presetId ? latestWorkspaceRef.current.jointPoses.find((pose) => pose.id === presetId) : null;
-    if (presetId && (!preset || preset.joints?.source !== 'robot-preset' || !presetMatchesRobot(preset, selectedRobot))) {
+    if (presetId && (!isRobotJointPreset(preset) || !presetMatchesRobot(preset, selectedRobot))) {
       throw new Error('预设姿态或机器人已变化，请重新选择');
     }
     const values = preset ? robotPresetValuesForEditing(preset, robotPresetJoints) : { ...robotJointValues };
@@ -5313,7 +5319,7 @@ export default function App() {
       || current.teachingSpaceMode !== robotPresetManager.teachingSpaceMode) {
       throw new Error('当前工程已变化或尚未就绪，请重新打开预设姿态管理');
     }
-    const pose = current.jointPoses.find((item) => item.id === id && item.joints?.source === 'robot-preset');
+    const pose = current.jointPoses.find((item) => item.id === id && isRobotJointPreset(item));
     if (!pose) throw new Error('该预设姿态已不存在，请重新选择');
     return { current, pose };
   };
@@ -5340,7 +5346,7 @@ export default function App() {
       throw new Error('当前工程或机器人已变化，请重新打开预设姿态窗口');
     }
     const previous = current.jointPoses.find((pose) => pose.id === robotPresetDraft.id);
-    if (robotPresetDraft.mode === 'edit' && (!previous || previous.joints?.source !== 'robot-preset')) {
+    if (robotPresetDraft.mode === 'edit' && !isRobotJointPreset(previous)) {
       throw new Error('该预设姿态已不存在，请重新选择');
     }
     const pose = { ...previous, ...createRobotJointPreset({
@@ -5369,7 +5375,7 @@ export default function App() {
   const applyRobotPreset = (id, { announce = true } = {}) => {
     const current = latestWorkspaceRef.current;
     if (!robotPresetReady || !sessionReadyRef.current || workspaceSwitchingRef.current
-      || !current.jointPoses.some((pose) => pose.id === id && pose.joints?.source === 'robot-preset'
+      || !current.jointPoses.some((pose) => pose.id === id && isRobotJointPreset(pose)
         && presetMatchesRobot(pose, current.selectedRobot))) return false;
     stopTeachingTaskPlayback(false);
     setRobotParkingGhost(null);
@@ -7541,6 +7547,8 @@ export default function App() {
       state={independentWorkspaceDialog}
       disabled={independentSwitchBlocked}
       onSelect={chooseIndependentWorkspace}
+      onCreate={appPage === APP_PAGE_WORKBENCH && mapData?.geometry
+        ? () => openNewIndependentDialog({ fromPicker: true }) : undefined}
       onClose={() => {
         if (!independentWorkspaceDialog.busy) setIndependentWorkspaceDialog(null);
       }}

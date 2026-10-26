@@ -39,8 +39,12 @@ for (const result of [before, after]) {
   assert.equal(inserted.opticalTargets, undefined);
 }
 assert.equal(JSON.stringify({ task, preset }), snapshot);
+const consolePreset = { ...preset, id: 'console', joints: { ...preset.joints, source: 'joint-console' } };
 assert.deepEqual(teachingActionPresets([preset, { ...preset, id: 'other', robot: { id: 'different' } },
-  { ...preset, id: 'console', joints: { ...preset.joints, source: 'joint-console' } }], task.robot), [preset]);
+  consolePreset, { ...preset, id: 'ordinary', joints: { ...preset.joints, source: 'urdf-movable-joints' } }], task.robot),
+[preset, consolePreset]);
+const consoleInsertion = insertTeachingPreset(task, { ...request, preset: consolePreset, id: 'console-insert', position: 'after' });
+assert.deepEqual(consoleInsertion.parkingPoints[1].poses[1].fullBodyJoints.values, consolePreset.joints.values);
 for (const changes of [
   { preset: undefined }, { preset: { ...preset, robot: { id: 'other' } } }, { poseId: 'gone' },
   { parkingPointId: 'gone' }, { position: 'invalid' }, { id: anchor.id },

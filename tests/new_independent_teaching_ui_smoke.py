@@ -18,6 +18,12 @@ def choose_new_matrix(page, dialog, file=MATRIX):
 
 
 def create(page, dialog):
+    # These cases exercise alignment-only creation; explicitly opt out of the
+    # default synchronization/placement covered by the options smoke test.
+    for name in ('同步路网', '放置进入地图'):
+        button = dialog.get_by_role('button', name=name, exact=True)
+        if button.count() and button.get_attribute('aria-pressed') == 'true':
+            button.click()
     with page.expect_navigation(wait_until="networkidle"):
         dialog.get_by_role("button", name="创建独立示教", exact=True).click()
     ready(page, "independent")

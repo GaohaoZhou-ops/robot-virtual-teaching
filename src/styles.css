@@ -8293,7 +8293,8 @@ input[type="number"]::-webkit-inner-spin-button {
 .independent-workspace-picker__list li b { color: rgb(var(--project-load-accent)); font-weight: 500; }
 .independent-workspace-picker__time { display: inline-flex; align-items: center; gap: 5px; }
 .independent-workspace-picker__error { margin: 0; color: var(--red); font-size: 11px; line-height: 1.6; }
-.independent-workspace-picker .project-load-dialog__footer { min-height: 52px; font-size: 9px; }
+.independent-workspace-picker .project-load-dialog__footer { min-height: 52px; gap: 12px; font-size: 9px; }
+.independent-workspace-picker .project-load-dialog__footer > span { flex: 1; }
 .independent-workspace-picker .project-load-dialog__footer button {
   min-height: 30px;
   padding: 0 16px;
@@ -8308,6 +8309,19 @@ input[type="number"]::-webkit-inner-spin-button {
   outline-offset: 2px;
 }
 .independent-workspace-picker .project-load-dialog__footer button:disabled { opacity: 0.4; cursor: wait; }
+.independent-workspace-picker .project-load-dialog__footer .independent-workspace-picker__create {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: rgb(var(--project-load-accent));
+  border-color: rgba(var(--project-load-accent), 0.55);
+  background: rgba(var(--project-load-accent), 0.12);
+}
+.independent-workspace-picker__create:hover:not(:disabled) { filter: brightness(1.15); }
+@media (max-width: 580px) {
+  .independent-workspace-picker .project-load-dialog__footer > span { display: none; }
+}
 
 .project-load-alternatives > div {
   display: grid;
@@ -8390,6 +8404,7 @@ input[type="number"]::-webkit-inner-spin-button {
   .project-load-default__action { grid-column: 1 / -1; }
   .project-load-history li { grid-template-columns: 20px minmax(0, 1fr); }
   .project-load-history li > .independent-workspace-actions { grid-column: 2; justify-self: end; }
+  .independent-workspace-picker__list li > button { grid-column: 2; justify-self: end; white-space: nowrap; }
   .project-load-alternatives > div { grid-template-columns: 1fr; }
   .project-load-dialog__footer > span:last-child { display: none; }
 }

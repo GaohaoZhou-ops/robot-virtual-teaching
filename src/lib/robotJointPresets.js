@@ -9,6 +9,10 @@ const GROUPS = [
   { id: 'other', label: '其他关节' },
 ];
 
+// Both UI entry points record reusable robot poses. Keep the source marker as
+// provenance, but use the same library/export classification everywhere.
+export const isRobotJointPreset = (pose) => ['robot-preset', 'joint-console'].includes(pose?.joints?.source);
+
 export function presetJointDefinitions(definitions = []) {
   const seen = new Set();
   return definitions.filter((joint) => {

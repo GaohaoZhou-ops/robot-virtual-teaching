@@ -66,11 +66,80 @@ def check_synced_route(page, original_map):
     assert snapshot(page, 'independent')['project']['waypoints'] == []
 
 
+def check_preference_memory(browser, errors):
+    context, page = new_page(browser, errors)
+    seed(page, ['map', 'independent'], 'independent')
+    dialog = open_new_group(page)
+    choose_new_matrix(page, dialog, MATRIX)
+    for button in options(dialog):
+        expect(button).to_be_disabled()  # A matrix alone is not enough.
+        expect(button).to_have_attribute('aria-pressed', 'false')
+    choose_new_model(page, dialog)
+    route, place = options(dialog)
+    for button in (route, place):
+        expect(button).to_have_attribute('aria-pressed', 'true')
+        expect(button).to_have_css('animation-name', 'independent-option-breathe')
+    note = dialog.locator('#new-independent-options-note')
+    expect(note).to_contain_text('默认自动开启')
+    expect(note).to_contain_text('下次沿用上次选择')
+    page.emulate_media(reduced_motion='reduce')
+    for button in (route, place):
+        expect(button).to_have_css('animation-name', 'none')
+    page.emulate_media(reduced_motion='no-preference')
+    route.click()  # Remember a mixed selection, even if the dialog is cancelled.
+    expect(route).to_have_css('animation-name', 'none')
+    dialog.get_by_role('button', name='取消', exact=True).click()
+    dialog = open_new_group(page)
+    for button in options(dialog):
+        expect(button).to_be_disabled()
+        expect(button).to_have_attribute('aria-pressed', 'false')
+    choose_new_model(page, dialog)
+    choose_new_matrix(page, dialog, MATRIX)
+    route, place = options(dialog)
+    expect(route).to_have_attribute('aria-pressed', 'false')
+    expect(place).to_have_attribute('aria-pressed', 'true')
+    place.click()
+    # Removing or replacing a matrix must never overwrite either remembered choice.
+    dialog.get_by_role('button', name='移除矩阵', exact=True).click()
+    choose_new_matrix(page, dialog, {'name': 'invalid.txt', 'mimeType': 'text/plain', 'buffer': b'bad'})
+    expect(dialog.get_by_role('alert')).to_be_visible()
+    for button in options(dialog):
+        expect(button).to_be_disabled()
+    dialog.get_by_role('button', name='移除矩阵', exact=True).click()
+    choose_new_matrix(page, dialog, MATRIX)
+    for button in options(dialog):
+        expect(button).to_have_attribute('aria-pressed', 'false')
+    dialog.get_by_role('button', name='取消', exact=True).click()
+    page.reload(wait_until='networkidle')
+    ready(page, 'independent')
+    dialog = open_new_group(page)
+    choose_new_model(page, dialog)
+    choose_new_matrix(page, dialog, MATRIX)
+    for button in options(dialog):
+        expect(button).to_have_attribute('aria-pressed', 'false')
+    options(dialog)[0].click()
+    dialog.get_by_role('button', name='取消', exact=True).click()
+    topbar_action(page, '切换到地图示教', exact=True).click()
+    ready(page, 'map')
+    topbar_action(page, '切换到独立示教', exact=True).click()
+    ready(page, 'independent')
+    dialog = open_new_group(page)
+    choose_new_model(page, dialog)
+    choose_new_matrix(page, dialog, MATRIX)
+    route, place = options(dialog)
+    expect(route).to_have_attribute('aria-pressed', 'true')
+    expect(place).to_have_attribute('aria-pressed', 'false')
+    context.close()
+    print('preference memory: defaults, matrix-before-model, mixed/off choices, cancel/reopen, '
+          'invalid matrix, refresh, cross-workspace reuse and reduced motion passed', flush=True)
+
+
 def run():
     errors = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, executable_path=str(CHROME))
         try:
+            check_preference_memory(browser, errors)
             context, page = new_page(browser, errors)
             seed(page, ['independent'], 'independent')
             dialog = open_new_group(page)
@@ -93,7 +162,10 @@ def run():
             dialog = open_new_group(page)
             choose_new_matrix(page, dialog, MATRIX)
             expect(dialog.get_by_role('button', name='加载路网', exact=True)).to_be_enabled()
+            expect(dialog.get_by_role('button', name='放置进入地图', exact=True)).to_be_disabled()
+            choose_new_model(page, dialog)
             expect(dialog.get_by_role('button', name='放置进入地图', exact=True)).to_be_enabled()
+            expect(dialog.get_by_role('button', name='放置进入地图', exact=True)).to_have_attribute('aria-pressed', 'true')
             context.close()
 
             for sync_route, place_map in [(False, False), (True, False), (False, True), (True, True)]:
@@ -111,11 +183,10 @@ def run():
                 choose_new_matrix(page, dialog, MATRIX)
                 for button in (route, place):
                     expect(button).to_be_enabled()
-                    expect(button).to_have_attribute('aria-pressed', 'false')
-                    button.click()
+                    expect(button).to_have_attribute('aria-pressed', 'true')
                 page.mouse.move(0, 0)
                 for button in (route, place):
-                    expect(button).to_have_css('color', 'rgb(94, 229, 154)')
+                    expect(button).to_have_css('color', 'rgb(244, 201, 93)')
                 page.set_viewport_size({'width': 430, 'height': 900})
                 left, right = route.bounding_box(), place.bounding_box()
                 assert math.isclose(left['y'], right['y']) and left['x'] + left['width'] < right['x']
@@ -128,9 +199,9 @@ def run():
                     expect(button).to_be_disabled()
                     expect(button).to_have_attribute('aria-pressed', 'false')
                 choose_new_matrix(page, dialog, MATRIX)
-                if sync_route:
+                if not sync_route:
                     route.click()
-                if place_map:
+                if not place_map:
                     place.click()
                 submit(page, dialog, 'map' if place_map else 'independent')
                 local = snapshot(page, 'independent')
@@ -181,7 +252,7 @@ def run():
             choose_new_model(page, dialog)
             choose_new_matrix(page, dialog, MATRIX)
             for button in options(dialog):
-                button.click()
+                expect(button).to_have_attribute('aria-pressed', 'true')
             page.evaluate("""() => {
               const original = IDBObjectStore.prototype.put;
               window.restorePlacementPut = () => { IDBObjectStore.prototype.put = original; };
@@ -203,7 +274,7 @@ def run():
             assert len(history(page)) == 1
             context.close()
             assert not errors, errors
-            print('missing prerequisites, green toggles, narrow layout and atomic placement rollback passed', flush=True)
+            print('missing prerequisites, yellow breathing toggles, narrow layout and atomic placement rollback passed', flush=True)
         finally:
             browser.close()
 

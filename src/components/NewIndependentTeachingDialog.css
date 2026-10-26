@@ -78,9 +78,18 @@
 .new-independent-dialog__matrix-note button { padding: 0; border: 0; background: none; color: #b3a0d0; font-size: 11px; }
 .new-independent-dialog__options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .new-independent-dialog__options button { min-height: 38px; }
-.new-independent-dialog__options button[aria-pressed="true"] { border-color: #5ee59a80; background: #5ee59a18; color: #5ee59a; }
-.new-independent-dialog__options button[aria-pressed="true"]:hover:not(:disabled) { border-color: #5ee59a; color: #a7f5c6; }
-.new-independent-dialog__options button:focus-visible { outline-color: #5ee59a; }
+.new-independent-dialog__options button[aria-pressed="true"] { border-color: #f4c95da6; background: #f4c95d12; color: #f4c95d; }
+.new-independent-dialog__options button[aria-pressed="true"]:not(:disabled) { animation: independent-option-breathe 2.4s ease-in-out infinite; }
+.new-independent-dialog__options button[aria-pressed="true"]:hover:not(:disabled) { background: #f4c95d20; color: #ffe09a; }
+.new-independent-dialog__options button:focus-visible { outline-color: #f4c95d; }
+.new-independent-dialog__options-note { margin: 10px 0 0; color: #b6a77e; font-size: 11px; line-height: 1.8; }
+@keyframes independent-option-breathe {
+  0%, 100% { border-color: #f4c95d70; box-shadow: 0 0 0 1px #f4c95d08, 0 0 5px #f4c95d08; }
+  50% { border-color: #f4c95de6; box-shadow: 0 0 0 2px #f4c95d1a, 0 0 13px #f4c95d30; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .new-independent-dialog__options button[aria-pressed="true"]:not(:disabled) { animation: none; box-shadow: 0 0 0 1px #f4c95d20; }
+}
 .new-independent-dialog__error { margin: 8px 0 0; color: #ffaaa0; font-size: 12px; line-height: 1.7; }
 .new-independent-dialog__route-status { margin: 10px 0 0; color: #8abcb4; font-size: 11px; line-height: 1.7; }
 .new-independent-dialog__progress { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--independent-accent); font-size: 12px; }

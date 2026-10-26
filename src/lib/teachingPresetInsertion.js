@@ -1,8 +1,8 @@
 import { ABX_JOINT_NAMES, abxEqual, abxText } from './abxFormat.js';
-import { presetMatchesRobot } from './robotJointPresets.js';
+import { isRobotJointPreset, presetMatchesRobot } from './robotJointPresets.js';
 
 export const teachingActionPresets = (presets, robot) => (presets || []).filter(
-  (preset) => preset?.joints?.source === 'robot-preset' && presetMatchesRobot(preset, robot),
+  (preset) => isRobotJointPreset(preset) && presetMatchesRobot(preset, robot),
 );
 
 // Native tasks retain camera/navigation/trajectory records outside the pose
