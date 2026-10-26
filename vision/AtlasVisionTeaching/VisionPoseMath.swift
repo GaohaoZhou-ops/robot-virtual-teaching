@@ -71,6 +71,14 @@ struct VisionPlacement {
         return matrix
     }
     var isCalibrated: Bool { calibration != nil }
+    mutating func moveDraft(to matrix: simd_float4x4) {
+        guard !isCalibrated, VisionPoseMath.isRigid(matrix) else { return }
+        hit = (matrix * SIMD4(reference, 1)).xyz
+        yaw = 0; roll = 0; pitch = 0
+        var rotation = matrix; rotation.columns.3 = SIMD4(0, 0, 0, 1)
+        rotationCorrection = rotation * TeachingCoordinates.zUpToAR.inverse
+        lockedTransform = nil
+    }
     mutating func unlock() {
         if let transform {
             hit = (transform * SIMD4(reference, 1)).xyz

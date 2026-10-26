@@ -265,7 +265,7 @@ const compileExport = async (payload, robotPackage) => {
   const nativeTasks = [];
   for (const task of ordered(payload.virtualTeaching?.tasks || [], '任务')) {
     const name = text(task.name, '任务名称');
-    requireExport(!task.mobileCapture?.samples?.length, `任务 ${name}包含 ${task.mobileCapture?.device?.platform === 'visionOS' ? 'Vision Pro 头显 Pose' : 'iPad 相机 Pose'}，尚未转换成机器人关节姿态`);
+    requireExport(!task.mobileCapture?.samples?.length, `任务 ${name}包含 ${task.mobileCapture?.device?.platform === 'visionOS' ? 'Vision Pro 相机目标' : 'iPad 相机 Pose'}，尚未转换成机器人关节姿态`);
     requireExport((task.coordinateFrame || 'map') === 'map' && task.map?.teachingSpaceMode !== 'independent', `任务 ${name}不是地图示教`);
     requireExport(!task.map?.sourceHash || !payload.map?.sourceHash || task.map.sourceHash === payload.map.sourceHash,
       `任务 ${name}与当前地图摘要不一致`);

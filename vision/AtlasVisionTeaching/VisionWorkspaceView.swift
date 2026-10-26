@@ -5,6 +5,8 @@ struct VisionWorkspaceView: View {
     @EnvironmentObject private var spatial: VisionTrackingController
     @Environment(\.openImmersiveSpace) private var openSpace
     @Environment(\.dismissImmersiveSpace) private var dismissSpace
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var discovery = LANServiceDiscovery()
     @StateObject private var pairingAutofill = VisionPairingAutofill()
@@ -48,7 +50,10 @@ struct VisionWorkspaceView: View {
 
     private var observedContent: some View {
         windowContent
-        .task { await session.reload() }
+        .task {
+            await session.reload()
+            if let current = session.current { showingModelPreview = current.result.samples.isEmpty }
+        }
         .onChange(of: session.pendingModel?.id) { _, id in
             modelSyncPresented = id != nil
             if id != nil { pairingAutofill.stop() }
@@ -60,7 +65,7 @@ struct VisionWorkspaceView: View {
             showingModelPreview = true
             addressReplacementID = UUID(); addressError = ""; portFocused = false
             if let model = session.geometry, let current = session.current {
-                spatial.configure(model, samples: current.result.samples, demo: current.result.device.platform == "visionOS-simulator")
+                spatial.configure(model, samples: current.result.samples, demo: current.result.device.platform == "visionOS-simulator", draft: current.spatialCameraDraft, readOnly: current.result.completedAt != nil)
             }
         }
         .onChange(of: discovery.servers.map { $0.id + $0.address }) { _, _ in
@@ -73,6 +78,8 @@ struct VisionWorkspaceView: View {
         .onChange(of: session.serverAddress) { _, address in
             if let server = pairingAutofill.server, server.address != address { pairingAutofill.addressChanged() }
         }
+        .onChange(of: spatial.targetCommit) { _, _ in session.saveSpatialDraft(spatial.cameraTarget?.draft) }
+        .onChange(of: session.current?.result.completedAt) { _, value in spatial.readOnly = value != nil; spatial.refreshManipulation() }
         .onChange(of: sampleIDs) { _, _ in spatial.refreshMarkers(session.current?.result.samples ?? []) }
         .onChange(of: spatial.quality) { _, _ in if let model = session.geometry { spatial.render(model) } }
         .onChange(of: spatial.displayMode) { _, _ in if let model = session.geometry { spatial.render(model) } }
@@ -82,14 +89,12 @@ struct VisionWorkspaceView: View {
         observedContent
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { pairingAutofill.validateExpiration() }
-            if phase == .background {
+            if phase == .background && spaceClosed {
                 session.backgroundSave(); spatial.stop()
-                if !spaceClosed { spatial.spaceState = .closing; Task { await dismissSpace() } }
             }
         }
         .onDisappear {
             discovery.stop(); pairingAutofill.stop(); session.backgroundSave()
-            if !spaceClosed { spatial.stop(); spatial.spaceState = .closing; Task { await dismissSpace() } }
         }
         .confirmationDialog("完成后将锁定当前 Pose，可以稍后重试同步。", isPresented: $finishConfirmation, titleVisibility: .visible) {
             Button(syncOnFinish ? "完成并同步" : "完成并保存在本机") {
@@ -301,13 +306,17 @@ struct VisionWorkspaceView: View {
             discoveryPanel
             Text("在电脑端打开「设备 → Vision Pro」配对窗口，两台设备连接同一局域网。")
                 .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            addressFields
-            VStack(alignment: .leading, spacing: 12) {
+            pairingCodeStatus
+            DisclosureGroup {
+                addressFields
+                VStack(alignment: .leading, spacing: 12) {
                 Text("4 位配对码 · 选择电脑后自动填入").font(.body).foregroundStyle(.secondary)
                 VisionPairingCodeField(code: Binding(get: { pairingAutofill.code }, set: { pairingAutofill.edit($0) }),
                                        replacementID: pairingAutofill.replacementID, onEdit: { pairingAutofill.beginEditing() })
                     .frame(maxWidth: .infinity).frame(height: 68)
-                pairingCodeStatus
+                }
+            } label: {
+                Text("手动连接").accessibilityIdentifier("manual-connection")
             }
             Button {
                 discovery.stop(); pairingAutofill.validateExpiration()
@@ -486,7 +495,7 @@ struct VisionWorkspaceView: View {
             VisionPoseList().frame(height: 240)
             if completed {
                 Divider()
-                addressFields
+                DisclosureGroup("更换接收电脑") { addressFields }
                 Button(session.current?.syncedAt == nil ? "同步到电脑" : "再次同步") { Task { await session.finish(sync: true) } }
                     .disabled(session.busy || spatial.isDemo || !canUseAddress).accessibilityIdentifier("sync-result")
                 if spaceClosed { previewButton }
@@ -563,157 +572,15 @@ struct VisionWorkspaceView: View {
         } else {
             spatial.spaceState = .opening
             switch await openSpace(id: "teaching-space") {
-            case .opened: showingModelPreview = false; spatial.spaceState = .open
+            case .opened:
+                showingModelPreview = false; spatial.spaceState = .open
+                openWindow(id: "spatial-controls", value: "spatial-controls")
+                dismissWindow(id: "workspace")
             case .userCancelled: spatial.spaceState = .closed
             case .error: spatial.spaceState = .closed; session.error = "无法打开空间，请关闭其他沉浸式 App 后重试"
             @unknown default: spatial.spaceState = .closed
             }
         }
-    }
-}
-
-struct VisionTeachingControls: View {
-    @EnvironmentObject private var session: TeachingSession
-    @EnvironmentObject private var spatial: VisionTrackingController
-    @Environment(\.dismissImmersiveSpace) private var dismissSpace
-    @State private var nearby: NearbyPoseConfirmation?
-    let compact: Bool
-    private var readOnly: Bool { session.current?.result.completedAt != nil }
-
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                Label(spatial.tracking, systemImage: spatial.trackingNormal ? "location.fill" : "location.slash")
-                    .foregroundStyle(spatial.trackingNormal ? .green : .orange)
-                Spacer()
-                if compact { Text("\(session.current?.result.samples.count ?? 0) Pose").monospacedDigit() }
-            }.font(.title3)
-            if !spatial.placement.isCalibrated {
-                Text(spatial.message).font(.body).foregroundStyle(.secondary)
-                HStack(spacing: 24) {
-                    Button("放到前方") { spatial.placeInFront() }.accessibilityIdentifier(compact ? "spatial-place-front" : "place-front")
-                    Button(readOnly ? "确认显示位置" : "确认校准") {
-                        Task {
-                            do {
-                                guard readOnly || (session.current?.result.calibrations.count ?? 0) < 1000 else { throw TeachingError("校准段已达上限，请完成此任务") }
-                                let calibration = try await spatial.confirm()
-                                if !readOnly { session.addCalibration(calibration) }
-                            } catch is CancellationError {} catch { session.error = error.localizedDescription }
-                        }
-                    }.buttonStyle(.borderedProminent).tint(.cyan)
-                        .disabled(spatial.placement.transform == nil || !spatial.trackingNormal || spatial.preparing || spatial.calibrating)
-                        .accessibilityIdentifier(compact ? "spatial-confirm-placement" : "confirm-placement")
-                    if spatial.canCancelAdjustment { Button("取消调整") { spatial.cancelAdjustment() }
-                        .accessibilityIdentifier(compact ? "spatial-cancel-adjustment" : "cancel-adjustment") }
-                }.disabled(spatial.calibrating)
-                if !compact && !spatial.isDemo {
-                    Button("沿头部朝向放到水平面") { spatial.placeOnObservedSurface() }
-                        .disabled(spatial.planeCount == 0 || !spatial.trackingNormal || spatial.calibrating)
-                }
-                if !compact && spatial.placement.transform != nil {
-                    HStack(spacing: 32) {
-                        nudge("左右", axis: 0); nudge("高度", axis: 1); nudge("前后", axis: 2)
-                    }
-                    HStack(spacing: 32) {
-                        angle("偏航", axis: 2, value: spatial.placement.yaw)
-                        angle("俯仰", axis: 1, value: spatial.placement.pitch)
-                        angle("翻滚", axis: 0, value: spatial.placement.roll)
-                    }
-                }
-            } else {
-                HStack(spacing: 24) {
-                    if !readOnly { Button { capture() } label: { Label("记录 Pose", systemImage: "plus.circle.fill") }
-                        .buttonStyle(.borderedProminent).tint(.cyan)
-                        .disabled(!spatial.canRecord || (session.current?.result.samples.count ?? 0) >= maximumSamples)
-                        .accessibilityIdentifier(compact ? "spatial-record-pose" : "record-pose")
-                    } else { Label("已完成 · 空间回看", systemImage: "checkmark.seal") }
-                    Button("调整模型") { nearby = nil; spatial.beginAdjustment() }.accessibilityIdentifier(compact ? "spatial-adjust-model" : "adjust-model")
-                }
-            }
-            // A full-width native toggle gives gaze input a generous target and
-            // keeps system pinch, direct-touch and accessibility behavior.
-            Toggle(isOn: Binding(get: { spatial.panelLocked }, set: { spatial.setPanelLocked($0) })) {
-                HStack(spacing: 20) {
-                    Label("锁定当前位置", systemImage: spatial.panelLocked ? "pin.fill" : "pin")
-                    Spacer(minLength: 0)
-                    Text(spatial.panelLocked ? "已锁定" : "自动跟随").foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }
-                .toggleStyle(.button).tint(.cyan)
-                .accessibilityLabel("锁定当前位置")
-                .accessibilityValue(spatial.panelLocked ? "已锁定" : "自动跟随")
-                .accessibilityIdentifier(compact ? "spatial-lock-panel" : "lock-panel")
-            Toggle(isOn: $spatial.showFrustum) {
-                HStack(spacing: 20) {
-                    Label(compact ? "Zivid 视野" : "Zivid 视野 · M70 · 0.3–1.3 m", systemImage: "viewfinder")
-                    Spacer(minLength: 0)
-                    Text(spatial.showFrustum ? "已显示" : "已隐藏").foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, minHeight: 44).contentShape(Rectangle())
-            }
-                .toggleStyle(.button).tint(.cyan)
-                .accessibilityLabel(compact ? "Zivid 视野" : "Zivid 视野 · M70 · 0.3–1.3 m")
-                .accessibilityValue(spatial.showFrustum ? "已显示" : "已隐藏")
-                .accessibilityIdentifier(compact ? "spatial-zivid-fov" : "zivid-fov")
-            if !compact {
-                Text("以头显参考点模拟相机视角，未包含实际相机外参标定。模型始终保持 1:1。")
-                    .font(.body).foregroundStyle(.secondary)
-            }
-            #if targetEnvironment(simulator)
-            if spatial.isDemo { Button("模拟向右移动 20 cm") { spatial.moveDemo() }.accessibilityIdentifier(compact ? "spatial-move-demo" : "move-demo") }
-            #endif
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            VisionInteractionHint()
-            controls.disabled(session.busy || !session.error.isEmpty || spatial.spaceState != .open)
-            if compact {
-                Button("退出示教空间", systemImage: "rectangle.portrait.and.arrow.right") {
-                    guard spatial.spaceState == .open else { return }
-                    nearby = nil
-                    session.backgroundSave()
-                    spatial.spaceState = .closing; spatial.stop()
-                    Task { await dismissSpace() }
-                }
-                .disabled(spatial.spaceState != .open)
-                .accessibilityIdentifier("spatial-exit-space")
-            }
-        }
-        .font(.title3)
-        .controlSize(.extraLarge)
-        .alert("距离上一个 Pose 小于 10 cm", isPresented: Binding(get: { nearby != nil }, set: { if !$0 { nearby = nil } })) {
-            Button("仍然记录") {
-                if let pending = nearby, spatial.canRecord,
-                   pending.sample.segmentId == spatial.placement.calibration?.id { _ = session.addSample(pending.sample) }
-                nearby = nil
-            }
-            Button("取消", role: .cancel) { nearby = nil }
-        } message: { Text(nearby?.message ?? "") }
-    }
-    private func capture() {
-        do {
-            let sample = try spatial.capture()
-            if let confirmation = NearbyPoseConfirmation(sample: sample, previousSample: session.current?.result.samples.last) { nearby = confirmation }
-            else { _ = session.addSample(sample) }
-        } catch { session.error = error.localizedDescription }
-    }
-    private func nudge(_ label: String, axis: Int) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("\(label) · 1 cm").font(.body)
-            HStack(spacing: 20) {
-                Button { spatial.nudge(axis: axis, amount: -0.01) } label: { Image(systemName: "minus") }.accessibilityLabel("\(label)减 1 cm")
-                Button { spatial.nudge(axis: axis, amount: 0.01) } label: { Image(systemName: "plus") }.accessibilityLabel("\(label)加 1 cm")
-            }
-        }.frame(maxWidth: .infinity, alignment: .leading).disabled(spatial.calibrating)
-    }
-    private func angle(_ label: String, axis: Int, value: Float) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("\(label) \(value, specifier: "%.0f")°").font(.body).monospacedDigit()
-            Slider(value: Binding(get: { value }, set: { spatial.setAngle(axis, degrees: $0) }), in: -180...180, step: 1)
-                .frame(minHeight: 64)
-                .accessibilityLabel(label)
-        }.disabled(spatial.calibrating)
     }
 }
 
@@ -732,34 +599,28 @@ struct VisionInteractionHint: View {
 
 struct VisionPoseList: View {
     @EnvironmentObject private var session: TeachingSession
-    @State private var editingID: String?
-    @State private var editedName = ""
+    @EnvironmentObject private var spatial: VisionTrackingController
     @State private var deletingID: String?
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
                 ForEach((session.current?.result.samples ?? []).reversed()) { sample in
                     HStack(spacing: 24) {
-                        Image(systemName: "location.north.circle").foregroundStyle(.yellow)
+                        Button { spatial.selectRecordedTarget(sample.id) } label: { Image(systemName: "camera.fill").foregroundStyle(.yellow) }
+                            .disabled(!spatial.placement.isCalibrated).accessibilityLabel("查看 " + sample.name)
                         VStack(alignment: .leading) {
                             Text(sample.name).font(.title3.weight(.medium))
-                            Text(String(format: "x %.3f   y %.3f   z %.3f m", sample.cameraPose.position.x, sample.cameraPose.position.y, sample.cameraPose.position.z))
+                            Text(sample.cameraPose.frameName == VisionCameraTarget.frameName ? "空间相机视点" : "头显参考视点")
                                 .font(.body.monospaced()).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if session.current?.result.completedAt == nil {
-                            Button { editingID = sample.id; editedName = sample.name } label: { Image(systemName: "pencil") }.accessibilityLabel("重命名 \(sample.name)")
                             Button(role: .destructive) { deletingID = sample.id } label: { Image(systemName: "trash") }.accessibilityLabel("删除 \(sample.name)")
                         }
                     }.padding(12)
                 }
             }
         }.disabled(session.busy)
-        .alert("重命名 Pose", isPresented: Binding(get: { editingID != nil }, set: { if !$0 { editingID = nil } })) {
-            TextField("名称", text: $editedName)
-            Button("保存") { if let id = editingID { session.renameSample(id, name: editedName) }; editingID = nil }
-            Button("取消", role: .cancel) { editingID = nil }
-        }
         .confirmationDialog("删除这个 Pose？", isPresented: Binding(get: { deletingID != nil }, set: { if !$0 { deletingID = nil } }), titleVisibility: .visible) {
             Button("删除", role: .destructive) { if let id = deletingID { session.deleteSample(id) }; deletingID = nil }
             Button("取消", role: .cancel) { deletingID = nil }

@@ -654,6 +654,23 @@ playwright/.auth/
 /tests/atlas-vision-*-shots*.zip
 /tests/atlas-vision-*-attachments*.zip
 
+# Vision spatial-camera checks normally stay in vision/build/spatial-editor/
+# and vision/test-artifacts/spatial-editor*, already covered above. Also ignore
+# xcresulttool attachments and review media copied out of those output roots.
+# Keep source artwork and nested fixture media with the same names trackable.
+/atlas-spatial-*-attachments/
+/atlas-spatial-*-attachments-[0-9]*/
+/tests/atlas-spatial-*-attachments/
+/tests/atlas-spatial-*-attachments-[0-9]*/
+/vision/atlas-spatial-*-attachments/
+/vision/atlas-spatial-*-attachments-[0-9]*/
+/atlas-spatial-*-attachments*.[zZ][iI][pP]
+/tests/atlas-spatial-*-attachments*.[zZ][iI][pP]
+/vision/atlas-spatial-*-attachments*.[zZ][iI][pP]
+/vision/atlas-spatial-*.[pP][nN][gG]
+/vision/atlas-spatial-*.[mM][pP]4
+/vision/atlas-spatial-*.[wW][eE][bB][mM]
+
 # Ad-hoc device snapshots may contain local poses and pairing credentials.
 # Limit these rules to diagnostic filenames, keeping app source/fixtures visible.
 /atlas-ipad-*.json

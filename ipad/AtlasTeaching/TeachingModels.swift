@@ -407,6 +407,12 @@ struct ResultSyncDestination: Codable {
     var serverURL: String
     var session: PairedSession
 }
+// Optional local-only spatial draft. Older iPad/iPhone projects decode unchanged.
+struct SpatialCameraDraft: Codable {
+    var cameraPose: CameraPose
+    var surfacePoint: Point3?
+    var keepFocus: Bool? = nil
+}
 struct LocalProject: Codable, Identifiable {
     var id: String { session.id }
     var serverURL: String
@@ -414,6 +420,7 @@ struct LocalProject: Codable, Identifiable {
     var result: TeachingResult
     var syncedAt: String?
     var displaySettings: ModelDisplaySettings?
+    var spatialCameraDraft: SpatialCameraDraft? = nil
     // Keep the original project and frozen result intact when a new desktop
     // transfer receives an already completed teaching session.
     var resultSyncDestination: ResultSyncDestination?

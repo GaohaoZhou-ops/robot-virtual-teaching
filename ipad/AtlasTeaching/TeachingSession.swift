@@ -270,7 +270,30 @@ final class TeachingSession: ObservableObject {
         var named = sample
         named.origin = .ipad
         named.name = String(format: "Pose %03d", project.result.samples.count + 1)
+        markSpatialSource(named)
         current?.result.samples.append(named); scheduleSave(force: true)
+        return true
+    }
+    private func markSpatialSource(_ sample: TeachingSample) {
+        if current?.result.device.platform == "visionOS",
+           sample.cameraPose.frameName == "visionpro_virtual_camera_optical_frame" {
+            current?.result.device.poseSource = "spatialAuthoring"
+        }
+    }
+    func saveSpatialDraft(_ draft: SpatialCameraDraft?) {
+        guard current?.result.completedAt == nil else { return }
+        current?.spatialCameraDraft = draft; scheduleSave(force: true)
+    }
+    @discardableResult
+    func replaceSpatialSample(_ id: String, with sample: TeachingSample) -> Bool {
+        guard !busy, error.isEmpty, let project = current, project.result.completedAt == nil,
+              project.result.device.platform?.hasPrefix("visionOS") == true,
+              project.result.calibrations.contains(where: { $0.id == sample.segmentId }),
+              let index = project.result.samples.firstIndex(where: { $0.id == id }) else { return false }
+        var edited = sample
+        edited.id = id; edited.name = project.result.samples[index].name; edited.origin = .ipad
+        markSpatialSource(edited)
+        current?.result.samples[index] = edited; scheduleSave(force: true)
         return true
     }
     func renameSample(_ id: String, name: String) {

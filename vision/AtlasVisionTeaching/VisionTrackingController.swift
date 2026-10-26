@@ -9,10 +9,10 @@ final class VisionTrackingController: ObservableObject {
     enum SpaceState { case closed, opening, open, closing }
     @Published var spaceState = SpaceState.closed
     @Published private(set) var placement = VisionPlacement()
-    @Published private(set) var trackingNormal = false
-    @Published private(set) var anchorTracked = false
-    @Published private(set) var preparing = false
-    @Published private(set) var calibrating = false
+    @Published private(set) var trackingNormal = false { didSet { if oldValue != trackingNormal { refreshManipulation() } } }
+    @Published private(set) var anchorTracked = false { didSet { if oldValue != anchorTracked { refreshManipulation() } } }
+    @Published private(set) var preparing = false { didSet { if oldValue != preparing { refreshManipulation() } } }
+    @Published private(set) var calibrating = false { didSet { if oldValue != calibrating { refreshManipulation() } } }
     @Published private(set) var planeCount = 0
     @Published private(set) var message = "进入空间后，选择水平面放置模型"
     @Published private(set) var tracking = "尚未进入空间"
@@ -20,17 +20,36 @@ final class VisionTrackingController: ObservableObject {
     @Published private(set) var renderStatus = ""
     @Published private(set) var renderError = ""
     @Published private(set) var isDemo = false
-    @Published private(set) var panelLocked = false
     @Published private(set) var modelEntity: ModelEntity?
-    @Published var showFrustum = false { didSet { frustum.isEnabled = showFrustum && trackingNormal } }
+    @Published var showFrustum = true { didSet { cameraFrustum.isEnabled = showFrustum } }
+    @Published private(set) var cameraTarget: VisionCameraTarget?
+    @Published private(set) var cameraImage: UIImage?
+    @Published private(set) var cameraPreviewError = ""
+    @Published private(set) var targetCommit = 0
+    @Published private(set) var selectedSampleID: String?
+    @Published private(set) var isManipulating = false
+    @Published private(set) var canUndoTarget = false
+    var keepFocus: Bool { cameraTarget?.focusLocked ?? false }
+    var readOnly = false
+    let cameraRig = Entity()
+    let cameraFrustum = Entity()
+    let focusMarker = ModelEntity(mesh: .generateSphere(radius: 0.012), materials: [UnlitMaterial(color: .systemMint)])
+    var targetHistory = VisionTargetHistory()
+    var gestureTarget: VisionCameraTarget?
+    var gesturePlacement: simd_float4x4?
+    var recordedSamples: [TeachingSample] = []
+    var previewEngine = VisionCameraPreview()
+    var previewPrepareTask: Task<Void, Never>?
+    var previewTask: Task<Void, Never>?
+    var sceneSubscriptions: [any Cancellable] = []
+    var previewGeneration = UUID()
+    var surfacePickError = ""
     @Published var quality = VisionQuality.light
     @Published var displayMode = ModelDisplayMode.mesh
     let root = Entity()
     let objectRoot = Entity()
-    let panelRoot = Entity()
     // Only this hierarchy participates in the immersive placement gesture.
     let planesRoot = Entity()
-    private let frustum = Entity()
     private var markers: Entity?
     private var arSession: ARKitSession?
     private var world: WorldTrackingProvider?
@@ -40,8 +59,6 @@ final class VisionTrackingController: ObservableObject {
     private var generation = UUID()
     private var renderGeneration = UUID()
     private var running = false
-    private var panelPositioned = false
-    private var lastPanelMove: TimeInterval = 0
     private var activeSpaceID: UUID?
     private var editSnapshot: VisionPlacement?
     private var planeEntities: [UUID: Entity] = [:]
@@ -49,28 +66,24 @@ final class VisionTrackingController: ObservableObject {
     private var simulatedDevice = matrix_identity_float4x4
 
     var canRecord: Bool {
-        running && trackingNormal && placement.isCalibrated && anchorTracked && !preparing && !calibrating && renderError.isEmpty
+        canEditTarget && cameraTarget != nil && !isManipulating
     }
+    var canEditTarget: Bool { running && trackingNormal && placement.isCalibrated && anchorTracked && !preparing && !calibrating && renderError.isEmpty && !readOnly }
     var canCancelAdjustment: Bool { editSnapshot != nil }
 
     init() {
-        root.addChild(objectRoot); root.addChild(planesRoot); root.addChild(panelRoot); root.addChild(frustum)
+        root.addChild(objectRoot); root.addChild(planesRoot)
         objectRoot.addChild(VisionModelRenderer.axes()); objectRoot.isEnabled = false
-        // A nominal virtual M70 envelope, co-located with the head reference frame.
-        let x = Float(tan(ZividFieldOfView.horizontalDegrees * .pi / 360))
-        let y = Float(tan(ZividFieldOfView.verticalDegrees * .pi / 360))
-        let corners: [SIMD3<Float>] = [SIMD3(-x, -y, -1), SIMD3(x, -y, -1), SIMD3(x, y, -1), SIMD3(-x, y, -1)]
-        for index in 0..<4 {
-            frustum.addChild(VisionModelRenderer.line(from: corners[index] * 0.3, to: corners[index] * 1.3, color: .systemCyan, width: 0.0015))
-            for depth: Float in [0.3, 1.3] {
-                frustum.addChild(VisionModelRenderer.line(from: corners[index] * depth, to: corners[(index + 1) % 4] * depth, color: .systemCyan, width: 0.0015))
-            }
-        }
-        frustum.isEnabled = false
+        buildCameraRig()
     }
 
-    func configure(_ model: ModelGeometry, samples: [TeachingSample], demo: Bool) {
+    func configure(_ model: ModelGeometry, samples: [TeachingSample], demo: Bool, draft: SpatialCameraDraft? = nil, readOnly: Bool = false) {
         stop(); isDemo = demo; editSnapshot = nil
+        self.readOnly = readOnly; cameraTarget = draft.flatMap { try? VisionCameraTarget(draft: $0) }
+        selectedSampleID = nil; targetHistory.clear(); canUndoTarget = false; cameraImage = nil
+        previewPrepareTask?.cancel(); previewTask?.cancel(); cameraPreviewError = ""
+        let engine = VisionCameraPreview(); previewEngine = engine
+        previewPrepareTask = Task { do { try await engine.prepare(model) } catch { if !Task.isCancelled { cameraPreviewError = "取景预览暂不可用" } } }
         modelEntity?.removeFromParent(); modelEntity = nil
         placement = VisionPlacement(reference: SIMD3((model.minimum.x + model.maximum.x) / 2,
             (model.minimum.y + model.maximum.y) / 2, model.minimum.z))
@@ -93,6 +106,16 @@ final class VisionTrackingController: ObservableObject {
                 let entity = try await VisionModelRenderer.makeEntity(data)
                 guard !Task.isCancelled, generation == renderGeneration else { return }
                 modelEntity?.removeFromParent(); modelEntity = entity; objectRoot.addChild(entity)
+                entity.name = "atlas-workpiece"
+                entity.components.set(VisionSurfaceTarget())
+                entity.components.set(InputTargetComponent())
+                do {
+                    let shape = try await ShapeResource.generateStaticMesh(from: entity.model!.mesh)
+                    guard !Task.isCancelled, generation == renderGeneration else { return }
+                    entity.components.set(CollisionComponent(shapes: [shape], mode: .trigger))
+                    surfacePickError = ""
+                } catch { surfacePickError = "表面点选暂不可用，可直接抓取相机" }
+                configurePlacementManipulation(model)
                 let total = data.isMesh ? model.indices / 3 : model.vertices
                 renderSummary = "\(data.isMesh ? "Mesh" : "点云") · \(quality.label) · \(data.primitiveCount.formatted()) / \(total.formatted()) \(unit) · 1:1"
                 preparing = false; renderStatus = ""
@@ -106,14 +129,14 @@ final class VisionTrackingController: ObservableObject {
     func start() async {
         guard !running else { return }
         generation = UUID(); let token = generation
-        running = true; panelPositioned = false
+        running = true
         #if targetEnvironment(simulator)
         if isDemo {
             simulatedDevice = matrix_identity_float4x4
             simulatedDevice.columns.3 = SIMD4(0, 1.6, 0, 1)
             trackingNormal = true; tracking = "模拟演练 · 不可同步"
             message = "点击「放到前方」演练放置、校准和记录流程"
-            recenterPanel(); return
+            return
         }
         running = false; tracking = "模拟器不提供真实采样"
         message = "请使用本地演练测试空间流程；配对任务需在 Vision Pro 真机上记录"
@@ -209,10 +232,10 @@ final class VisionTrackingController: ObservableObject {
     func spaceDisappeared(_ id: UUID) {
         guard activeSpaceID == id else { return }
         stop(); activeSpaceID = nil; spaceState = .closed
-        panelRoot.children.forEach { $0.removeFromParent() }
     }
 
     func stop() {
+        cancelTargetGesture()
         generation = UUID(); running = false
         tasks.forEach { $0.cancel() }; tasks.removeAll()
         let oldSession = arSession, oldWorld = world, oldAnchor = anchorID
@@ -223,14 +246,15 @@ final class VisionTrackingController: ObservableObject {
             oldSession?.stop()
         }
         invalidatePlacement(); clearPlanes(); tracking = "尚未进入空间"
-        frustum.isEnabled = false; panelPositioned = false; panelLocked = false
-        panelRoot.stopAllAnimations(recursive: false)
+        sceneSubscriptions.forEach { $0.cancel() }; sceneSubscriptions.removeAll(); cameraRig.isEnabled = false; focusMarker.isEnabled = false
     }
 
     func invalidatePlacement() {
         trackingNormal = false; anchorTracked = false; calibrating = false
+        cancelTargetGesture()
         placement = VisionPlacement(reference: placement.reference)
         editSnapshot = nil; objectRoot.isEnabled = false; planesRoot.isEnabled = true
+        refreshManipulation()
     }
 
     private func deviceTransform() -> simd_float4x4? {
@@ -246,49 +270,15 @@ final class VisionTrackingController: ObservableObject {
 
     private func updateDevice() {
         guard let transform = deviceTransform() else {
-            trackingNormal = false; frustum.isEnabled = false; tracking = "正在恢复头显定位"; return
+            trackingNormal = false; tracking = "正在恢复头显定位"; return
         }
         trackingNormal = true; tracking = placement.isCalibrated && !anchorTracked ? "等待模型锚点定位" : "空间定位正常"
-        frustum.transform = Transform(matrix: transform); frustum.isEnabled = showFrustum
-        guard !panelLocked else { return }
-        if !panelPositioned { recenterPanel() }
-        else {
-            // Keep the controls reachable while walking around a workpiece.
-            // Stay world-stable during small head movements; relocate only when
-            // the panel is far away or outside the forward field of view.
-            let delta = panelRoot.position - transform.translation, distance = simd_length(delta)
-            let forward = -transform.columns.2.xyz
-            let alignment = distance > 0.001 ? simd_dot(delta / distance, forward) : 1
-            if CACurrentMediaTime() - lastPanelMove > 1 && (distance > 1.5 || distance < 0.45 || alignment < 0.45) {
-                recenterPanel(animated: true)
-            }
-        }
-    }
-
-    func setPanelLocked(_ locked: Bool) {
-        guard running, panelPositioned, panelLocked != locked else { return }
-        // Freeze at the currently displayed transform, including during a move.
-        let transform = panelRoot.transform
-        panelRoot.stopAllAnimations(recursive: false)
-        panelRoot.transform = transform
-        panelLocked = locked
-        if !locked { recenterPanel(animated: true) }
-    }
-
-    private func recenterPanel(animated: Bool = false) {
-        guard !panelLocked, let device = deviceTransform() else { return }
-        var transform = device
-        transform.columns.3 = device * SIMD4(0, -0.25, -0.85, 1)
-        panelRoot.stopAllAnimations(recursive: false)
-        if animated { panelRoot.move(to: Transform(matrix: transform), relativeTo: root, duration: 0.35, timingFunction: .easeInOut) }
-        else { panelRoot.transform = Transform(matrix: transform) }
-        panelPositioned = true; lastPanelMove = CACurrentMediaTime()
     }
 
     func placeInFront() {
         guard !placement.isCalibrated, !calibrating, let device = deviceTransform() else { return }
-        place(at: (device * SIMD4(0, -0.55, -1.2, 1)).xyz)
-        message = "已手动放到前方，可微调位置与角度，再确认校准"
+        place(at: (device * SIMD4(0, -0.55, -1.6, 1)).xyz)
+        message = "捏住工件移动或转动，满意后确认摆放"
     }
     func placeOnObservedSurface() {
         guard let device = deviceTransform(), !placement.isCalibrated, !calibrating else { return }
@@ -305,26 +295,20 @@ final class VisionTrackingController: ObservableObject {
         guard !placement.isCalibrated, !calibrating, deviceTransform() != nil,
               (0..<3).allSatisfy({ position[$0].isFinite }) else { return }
         placement.hit = position; updateObject()
-        message = "模型已放置，确认位置和方向后点击「确认校准」"
-    }
-    func nudge(axis: Int, amount: Float) {
-        guard !placement.isCalibrated, !calibrating, var hit = placement.hit, (0..<3).contains(axis) else { return }
-        hit[axis] += amount; placement.hit = hit; updateObject()
-    }
-    func setAngle(_ axis: Int, degrees: Float) {
-        guard !placement.isCalibrated, !calibrating, degrees.isFinite else { return }
-        switch axis { case 0: placement.roll = degrees; case 1: placement.pitch = degrees; default: placement.yaw = degrees }
-        updateObject()
+        refreshManipulation()
+        message = "捏住工件移动或转动，满意后确认摆放"
     }
     func beginAdjustment() {
-        guard placement.isCalibrated, !calibrating else { return }
+        guard placement.isCalibrated, !calibrating, !isManipulating else { return }
         editSnapshot = placement
         placement.unlock(); planesRoot.isEnabled = true
+        cameraRig.isEnabled = false; focusMarker.isEnabled = false; refreshManipulation()
         message = "调整完成后重新确认校准，已有 Pose 保持原模型坐标"
     }
     func cancelAdjustment() {
         guard let snapshot = editSnapshot, !calibrating else { return }
         placement = snapshot; editSnapshot = nil; planesRoot.isEnabled = false; updateObject()
+        refreshManipulation(); refreshTarget()
         #if targetEnvironment(simulator)
         anchorTracked = isDemo
         #else
@@ -348,7 +332,7 @@ final class VisionTrackingController: ObservableObject {
         defer { if generation == token { calibrating = false } }
         let calibration = try placement.confirm()
         #if targetEnvironment(simulator)
-        if isDemo { anchorTracked = true; editSnapshot = nil; planesRoot.isEnabled = false; return calibration }
+        if isDemo { anchorTracked = true; editSnapshot = nil; planesRoot.isEnabled = false; placementConfirmed(); return calibration }
         #endif
         guard let world else { placement.unlock(); throw TeachingError("空间定位尚未启动") }
         let oldID = anchorID
@@ -363,7 +347,7 @@ final class VisionTrackingController: ObservableObject {
             if let oldID { try? await world.removeAnchor(forID: oldID) }
             guard generation == token else { throw CancellationError() }
             editSnapshot = nil; planesRoot.isEnabled = false
-            message = "校准完成，移动到目标视角并逐个记录 Pose"
+            placementConfirmed()
             return calibration
         } catch {
             if generation == token { placement.unlock(); anchorID = oldID; anchorTracked = false }
@@ -371,19 +355,36 @@ final class VisionTrackingController: ObservableObject {
         }
     }
     func capture() throws -> TeachingSample {
-        guard canRecord, let device = deviceTransform(), let transform = placement.transform,
+        guard canRecord, let target = cameraTarget,
               let calibration = placement.calibration else { throw TeachingError("请先确认校准，并等待头显与模型定位正常") }
-        // The model uses the latest tracked anchor update on this actor. Query
-        // the device at the button event, never reuse a cached UI device pose.
-        return try VisionPoseMath.sample(device: device, worldFromModel: transform, segmentID: calibration.id)
+        return try target.sample(segmentID: calibration.id)
     }
     func refreshMarkers(_ samples: [TeachingSample]) {
+        recordedSamples = samples
+        if let id = selectedSampleID, !samples.contains(where: { $0.id == id }) { selectedSampleID = nil }
         markers?.removeFromParent(); let entity = VisionModelRenderer.markers(samples)
         markers = entity; objectRoot.addChild(entity)
     }
-    private func updateObject() {
+    func updateObject() {
         guard let transform = placement.transform else { objectRoot.isEnabled = false; return }
         objectRoot.transform = Transform(matrix: transform); objectRoot.isEnabled = true
+    }
+
+    func setCameraTarget(_ target: VisionCameraTarget?, selectedID: String? = nil, commit: Bool = true) {
+        let lockChanged = cameraTarget?.focusLocked != target?.focusLocked
+        cameraTarget = target; selectedSampleID = selectedID
+        if commit { targetCommit += 1 }
+        canUndoTarget = !targetHistory.entries.isEmpty
+        refreshTarget()
+        if lockChanged && !isManipulating { refreshManipulation() }
+    }
+    func setGestureActive(_ active: Bool) { isManipulating = active }
+    func setCameraPreview(_ image: UIImage?) { cameraImage = image }
+    func targetMessage(_ value: String) { message = value }
+    func applyPlacementGesture(_ matrix: simd_float4x4) { placement.moveDraft(to: matrix); updateObject() }
+    func modelDeviceTransform() -> simd_float4x4? {
+        guard let model = placement.transform, let device = deviceTransform() else { return nil }
+        return model.inverse * device
     }
     private func clearPlanes() {
         planeEntities.values.forEach { $0.removeFromParent() }; planeEntities.removeAll(); planeMeshes.removeAll(); planeCount = 0
@@ -426,7 +427,6 @@ final class VisionTrackingController: ObservableObject {
     func moveDemo() {
         guard isDemo else { return }
         simulatedDevice.columns.3.x += 0.2
-        frustum.transform = Transform(matrix: simulatedDevice)
     }
     #endif
 }

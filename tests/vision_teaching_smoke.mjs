@@ -36,7 +36,7 @@ try {
   await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift', 'ipad/AtlasTeaching/LANClient.swift',
     'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/AtlasTeaching/ModelGeometry.swift', 'vision/AtlasVisionTeaching/VisionPoseMath.swift',
     'vision/AtlasVisionTeaching/VisionMeshData.swift', 'vision/AtlasVisionTeaching/VisionPreviewPose.swift',
-    'vision/Tests/VisionCoreTests.swift', '-o', binary]);
+    'vision/AtlasVisionTeaching/VisionCameraTarget.swift', 'vision/Tests/VisionCoreTests.swift', '-o', binary]);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const resultFile = path.join(directory, 'result.json');
   await run(binary, [`http://127.0.0.1:${server.address().port}`, fixture, path.join(directory, 'device'), resultFile]);
@@ -44,6 +44,15 @@ try {
   const result = JSON.parse(await readFile(resultFile, 'utf8'));
   const validate = value => validateIPadResult(value, packed.manifest, result.sessionId);
   assert.doesNotThrow(() => validate(result));
+  assert.equal(result.device.poseSource, 'spatialAuthoring');
+  assert.equal(result.samples[1].cameraPose.frameName, 'visionpro_virtual_camera_optical_frame');
+  const legacy = structuredClone(result);
+  legacy.device.poseSource = 'deviceAnchor';
+  legacy.samples = [legacy.samples[0]];
+  assert.doesNotThrow(() => validate(legacy), 'existing head-only recordings remain compatible');
+  const mislabeled = structuredClone(result);
+  mislabeled.device.poseSource = 'deviceAnchor';
+  assert.throws(() => validate(mislabeled), 'authored targets must not masquerade as head tracking');
   for (const mutate of [
     r => { r.device.platform = 'visionOS-simulator'; },
     r => { r.device.poseSource = 'eyeGaze'; },

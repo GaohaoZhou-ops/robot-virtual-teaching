@@ -5,6 +5,7 @@ export const MAX_MODEL_VERTICES = 5000000;
 export const MAX_MODEL_INDICES = 30000000;
 export const MAX_SAMPLES = 50000;
 export const VISION_HEAD_FRAME = 'visionpro_head_optical_frame';
+export const VISION_TARGET_FRAME = 'visionpro_virtual_camera_optical_frame';
 export const mobileDeviceKey = (result) => result?.device?.platform === 'visionOS' ? 'vision' : 'ipad';
 export const mobileDeviceLabel = (result) => mobileDeviceKey(result) === 'vision' ? 'Vision Pro'
   : result?.device?.platform === 'iOS' ? 'iPhone' : 'iPad';
@@ -55,7 +56,7 @@ export function validateIPadResult(result, manifest, sessionId) {
   const vision = result.device?.platform === 'visionOS';
   check(typeof result.device?.model === 'string' && result.device.model.length > 0 && result.device.model.length <= 80, '结果缺少采集设备信息');
   if (vision) {
-    check(result.device.poseSource === 'deviceAnchor' && result.device.lidar === false, 'Vision Pro 结果必须标明头显参考位姿来源');
+    check(['deviceAnchor', 'spatialAuthoring'].includes(result.device.poseSource) && result.device.lidar === false, 'Vision Pro 结果必须标明头显采样或空间编辑来源');
   } else {
     check((result.device.platform == null || ['iPadOS', 'iOS'].includes(result.device.platform)) && result.device.lidar === true,
       '结果缺少 LiDAR 设备信息或设备平台不支持');
@@ -91,7 +92,8 @@ export function validateIPadResult(result, manifest, sessionId) {
     check(finiteVector(sample.cameraPose?.position, xyz) && finiteVector(sample.cameraPose?.quaternion, [...xyz, 'w']), '相机位姿无效');
     const q = sample.cameraPose.quaternion;
     check(Math.abs(Math.hypot(q.x, q.y, q.z, q.w) - 1) < 0.002, '相机旋转四元数未归一化');
-    check(sample.cameraPose.frameName === (vision ? VISION_HEAD_FRAME : 'ipad_camera_optical_frame'), '相机轴约定与采集设备不一致');
+    const frames = vision ? (result.device.poseSource === 'spatialAuthoring' ? [VISION_HEAD_FRAME, VISION_TARGET_FRAME] : [VISION_HEAD_FRAME]) : ['ipad_camera_optical_frame'];
+    check(frames.includes(sample.cameraPose.frameName), '相机轴约定与采集设备不一致');
     check(sample.surfacePoint == null || finiteVector(sample.surfacePoint, xyz), '表面点无效');
   }
   return result;

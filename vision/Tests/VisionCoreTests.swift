@@ -33,6 +33,38 @@ import ImageIO
         precondition(!placement.isCalibrated, "unlock invalidates the sampling segment")
         let second = try placement.confirm()
         precondition(second.id != first.id, "recalibration creates a new segment")
+        var gestured = VisionPlacement(reference: placement.reference)
+        gestured.moveDraft(to: refinement)
+        same(gestured.transform!, refinement)
+        let gesturedCalibration = try gestured.confirm()
+        same(simd_float4x4(elements: gesturedCalibration.worldFromModel), refinement)
+        var camera = try VisionCameraTarget(transform: modelFromOptical)
+        let focus = camera.position + camera.transform.columns.2.xyz * 0.7
+        camera = try camera.aiming(at: focus)
+        near(camera.transform.columns.2.xyz, simd_normalize(focus - camera.position), "selected surface is the optical +Z target")
+        let movedCamera = try camera.moving(to: camera.position + SIMD3(0.2, 0.05, 0), keepFocus: true)
+        near(movedCamera.transform.columns.2.xyz, simd_normalize(focus - movedCamera.position), "moving a locked camera keeps its aim")
+        let closeCamera = try movedCamera.atDistance(0.4)
+        precondition(abs(closeCamera.distance! - 0.4) < 0.00001)
+        let authored = try closeCamera.sample(segmentID: second.id)
+        precondition(authored.cameraPose.frameName == VisionCameraTarget.frameName)
+        same(simd_float4x4(elements: authored.previewCameraTransform!), closeCamera.transform * TeachingCoordinates.opticalToARCamera)
+        let cameraDraft = try JSONDecoder().decode(SpatialCameraDraft.self, from: JSONEncoder().encode(closeCamera.draft))
+        same(try VisionCameraTarget(draft: cameraDraft).transform, closeCamera.transform)
+        var freeCamera = closeCamera; freeCamera.focusLocked = false
+        let freeDraft = try JSONDecoder().decode(SpatialCameraDraft.self, from: JSONEncoder().encode(freeCamera.draft))
+        let restoredFreeCamera = try VisionCameraTarget(draft: freeDraft)
+        precondition(!restoredFreeCamera.focusLocked, "free orientation must survive reopening")
+        var history = VisionTargetHistory(); history.push(camera); history.push(movedCamera)
+        same(history.pop()!.transform, movedCamera.transform); same(history.pop()!.transform, camera.transform)
+        precondition(history.pop() == nil)
+        // Vertical pointing must remain a right-handed rigid optical transform.
+        let pole = try camera.aiming(at: camera.position + SIMD3(0, 0, 0.7))
+        precondition(VisionPoseMath.isRigid(pole.transform))
+        for distance: Float in [.nan, 0, 1.4] {
+            do { _ = try camera.atDistance(distance); preconditionFailure("invalid shooting distance accepted") } catch is TeachingError {}
+        }
+        do { _ = try camera.moving(to: SIMD3(.infinity, 0, 0), keepFocus: false); preconditionFailure("invalid drag accepted") } catch is TeachingError {}
         for invalid in [simd_float4x4(diagonal: SIMD4(2, 1, 1, 1)), simd_float4x4(diagonal: SIMD4(-1, 1, 1, 1)), simd_float4x4(diagonal: SIMD4(Float.nan, 1, 1, 1))] {
             precondition(!VisionPoseMath.isRigid(invalid))
             do { _ = try VisionPoseMath.sample(device: invalid, worldFromModel: initial, segmentID: first.id); preconditionFailure("invalid pose accepted") }
@@ -174,15 +206,18 @@ import ImageIO
         let downloaded = try await client.download(paired)
         precondition(downloaded == bytes)
         var result = TeachingResult(sessionId: paired.id, modelHash: manifest.modelHash)
-        result.device = .visionPro; result.calibrations = [first, second]; result.samples = [sample]
+        result.device = .visionPro; result.device.poseSource = "spatialAuthoring"
+        result.calibrations = [first, second]; result.samples = [sample]
         var moved = device; moved.columns.3.x += 0.2
-        result.samples.append(try VisionPoseMath.sample(device: moved, worldFromModel: placement.transform!, segmentID: second.id))
+        result.samples.append(authored)
         for i in result.samples.indices { result.samples[i].name = "Vision Pose \(i + 1)" }
         let storeURL = URL(fileURLWithPath: args[3]), store = ProjectStore(directory: storeURL)
         var project = LocalProject(serverURL: base, session: paired, result: result)
+        project.spatialCameraDraft = closeCamera.draft
         try await store.saveModel(downloaded, id: paired.id); try await store.save(project)
         let recovered = try await ProjectStore(directory: storeURL).projects()
         precondition(recovered.count == 1 && recovered[0].result.samples.count == 2 && recovered[0].result.device.platform == "visionOS")
+        same(try VisionCameraTarget(draft: recovered[0].spatialCameraDraft!).transform, closeCamera.transform)
         let modelURL = try await store.modelURL(paired.id)
         var renamed = manifest; renamed.name = "another-name.ply"
         let matching = try await store.matchingModel(renamed)

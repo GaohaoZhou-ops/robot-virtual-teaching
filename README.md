@@ -1473,7 +1473,7 @@ open ipad/AtlasTeaching.xcodeproj
 
 ![Apple Vision Pro 设备示意](images/vision-pro.png)
 
-原生 visionOS 应用支持将独立示教物体以 **1:1** 比例放入空间，校准后逐个记录**头显参考 Pose**，支持离线保存并同步回电脑。
+原生 visionOS 应用支持将独立示教物体以 **1:1** 比例放入空间，通过**手势摆放独立虚拟相机**、点选表面对准，并查看模型取景后记录视点。空间流程无需输入坐标或名称，支持撤销、召回更新、离线保存及同步回电脑；完整抓取与转腕体验使用 visionOS 26。
 
 工程入口、操作流程、编译验证与真机接入步骤见 [Vision Pro 开发与联调文档](vision/README.md)。目前已完成编译和模拟器预检，待接入设备进行真机联调。
 
@@ -1834,6 +1834,8 @@ ATLAS_PHYSICS_BACKEND=isaac ./scripts/start.sh
 脚本不停止服务；运行中的日志和 PID 会保留。清理后可用 `./scripts/restart.sh` 重建前端缓存。
 
 `.gitignore` 按依赖缓存、构建产物、本地运行状态、测试产物及工程导出分类。浏览器截图、录像和追踪包按测试输出目录，或根目录与 `tests/` 下的 `atlas-` / `transfer-` 文件名限定范围，测试报告、截图和下载目录的 ZIP 打包文件也按明确路径忽略。
+
+Vision Pro 空间相机调试产物保存在 `vision/build/spatial-editor/` 与 `vision/test-artifacts/`；单独复制到根目录、`tests/` 或 `vision/` 的 `atlas-spatial-*-attachments` 附件目录、编号重试副本及 ZIP 也会忽略。`vision/` 下的 `atlas-spatial-*` PNG、MP4、WebM 截图录像保留在本机，同名嵌套测试样例和设计素材仍可跟踪。
 
 根目录中的本地参考文件 `sample-pre-teaching-pose.json`、`pre-teaching-pose.json`、`position_[0-9]*.txt`、`1014平地路网终版.json`、`1019平地路网终版测试.json`、`380B平地巡检.zip`、`ABXBrainSystem.zip` 及其同名解压目录，以及另存为目录 `saved-project/` 和 `saved-project.zip` 保留在本机。预设与转换矩阵回归使用 `tests/fixtures/` 下的独立样例；路网与机器人导出测试包含独立构造的样例，本地参考文件存在时额外校验真实格式，提交后无需依赖这些根目录文件。动作排序和路网映射 UI 测试产生的 `atlas-insert-action-*`、`atlas-route-identity-*` 临时目录及归档在根目录或 `tests/` 下也会被忽略。
 

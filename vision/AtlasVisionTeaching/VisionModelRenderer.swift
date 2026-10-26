@@ -42,12 +42,16 @@ enum VisionModelRenderer {
 
     static func markers(_ samples: [TeachingSample]) -> Entity {
         let root = Entity()
-        let sphere = MeshResource.generateSphere(radius: 0.009)
+        let sphere = MeshResource.generateSphere(radius: 0.022)
         let material = UnlitMaterial(color: .systemYellow)
         // Visualize recent markers with a bounded entity count; preserve every saved sample.
         for sample in samples.suffix(500) {
             let marker = ModelEntity(mesh: sphere, materials: [material])
             marker.position = sample.cameraPose.position.simd
+            marker.components.set(VisionRecordedTarget(sampleID: sample.id))
+            marker.components.set(CollisionComponent(shapes: [.generateSphere(radius: 0.035)], mode: .trigger))
+            marker.components.set(InputTargetComponent())
+            marker.components.set(HoverEffectComponent())
             root.addChild(marker)
             let q = sample.cameraPose.quaternion
             let forward = simd_quatf(vector: SIMD4(q.x, q.y, q.z, q.w)).act(SIMD3(0, 0, 0.07))

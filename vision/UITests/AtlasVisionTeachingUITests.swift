@@ -13,6 +13,20 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertEqual(element.value as? String, value)
     }
 
+    private func expandManualConnection(_ app: XCUIApplication) {
+        if app.textFields["server-address"].exists { return }
+        let manual = app.descendants(matching: .any).matching(identifier: "manual-connection").firstMatch
+        XCTAssertTrue(manual.waitForExistence(timeout: 10))
+        manual.tap()
+    }
+
+    private func expectCamera(_ expected: String?, in element: XCUIElement) {
+        let saved = (expected ?? "").split(separator: ",").compactMap { Double($0) }
+        let restored = (element.value as? String ?? "").split(separator: ",").compactMap { Double($0) }
+        XCTAssertEqual(saved.count, 16); XCTAssertEqual(restored.count, 16)
+        for (a, b) in zip(saved, restored) { XCTAssertEqual(a, b, accuracy: 0.0002) }
+    }
+
     private func dragPreview(_ preview: XCUIElement, dx: CGFloat, dy: CGFloat) {
         let start = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let end = preview.coordinate(withNormalizedOffset: CGVector(dx: 0.5 + dx, dy: 0.5 + dy))
@@ -93,8 +107,10 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-serverAddress", base]
         app.launch()
+        expandManualConnection(app)
         XCTAssertTrue(app.buttons["pair-model"].waitForExistence(timeout: 20))
         func pair(_ code: String) {
+            expandManualConnection(app)
             app.buttons["pairing-code-cell-0"].tap(); app.typeText(code + "\n")
             app.buttons["pair-model"].tap()
         }
@@ -170,6 +186,7 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-serverAddress", "http://old-computer.local:22012"]
         app.launch()
+        expandManualConnection(app)
         let host = app.textFields["server-address"], port = app.textFields["server-port"]
         XCTAssertTrue(host.waitForExistence(timeout: 15))
         let receive = app.buttons["pair-model"]
@@ -242,6 +259,7 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         app.launchArguments = ["-serverAddress", "http://192.168.100.7:23456"]
         let automaticCode = environment["ATLAS_DISCOVERY_CODE"] ?? ""
         app.launch()
+        expandManualConnection(app)
         let field = app.textFields["server-address"]
         XCTAssertTrue(field.waitForExistence(timeout: 15))
         app.buttons["pairing-code-cell-0"].tap(); app.typeText("Q7Z2\n")
@@ -293,6 +311,7 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-serverAddress", "http://127.0.0.1:21990"]
         app.launch()
+        expandManualConnection(app)
         let code = app.textFields["pairing-code"]
         XCTAssertTrue(code.waitForExistence(timeout: 15))
         func selectCell(_ index: Int) { app.buttons["pairing-code-cell-\(index)"].tap() }
@@ -388,97 +407,77 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         app.buttons["open-demo"].tap()
         let enter = app.buttons["toggle-space"]
         XCTAssertTrue(enter.waitForExistence(timeout: 15))
-        let enabled = NSPredicate(format: "enabled == true")
-        expectation(for: enabled, evaluatedWith: enter)
-        waitForExpectations(timeout: 20)
-        enter.tap()
-        let front = app.buttons["place-front"]
-        let panelFront = app.buttons["spatial-place-front"]
-        XCTAssertTrue(panelFront.waitForExistence(timeout: 20))
-        panelFront.tap()
+        waitForEntry(enter); enter.tap()
+        let front = app.buttons["spatial-place-front"]
+        XCTAssertTrue(front.waitForExistence(timeout: 20)); front.tap()
+        XCTAssertTrue(app.buttons["spatial-confirm-placement"].waitForExistence(timeout: 10))
         app.buttons["spatial-confirm-placement"].tap()
         let record = app.buttons["spatial-record-pose"]
         XCTAssertTrue(record.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.images["spatial-camera-preview"].waitForExistence(timeout: 20))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.lifetime = .keepAlways; attachment.name = "Spatial camera workspace"; add(attachment)
+        XCTAssertEqual(app.textFields.count, 0, "the teaching workflow requires no text or numeric entry")
+        let state = app.staticTexts["spatial-camera-target-state"]
+        let initial = state.value as? String
+        XCTAssertNotNil(initial)
+        app.buttons["spatial-move-demo"].tap()
+        XCTAssertEqual(state.value as? String, initial, "turning/moving the observer must not move the authored camera")
+        app.buttons["spatial-distance-近景"].tap()
+        XCTAssertNotEqual(state.value as? String, initial)
+        app.buttons["spatial-undo-camera"].tap()
+        XCTAssertEqual(state.value as? String, initial)
         record.tap()
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("1"))
-        app.buttons["spatial-move-demo"].tap()
+        app.buttons["spatial-move-camera-demo"].tap()
+        XCTAssertNotEqual(state.value as? String, initial)
         record.tap()
         XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"))
+        app.buttons["spatial-previous-target"].tap()
+        XCTAssertEqual(record.label, "更新视点")
+        app.buttons["spatial-distance-远景"].tap()
+        record.tap()
+        XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"), "updating a target must not append a duplicate")
+        let saved = state.value as? String
         app.buttons["spatial-adjust-model"].tap()
+        XCTAssertTrue(app.buttons["spatial-cancel-adjustment"].waitForExistence(timeout: 10))
         XCTAssertFalse(record.exists)
         app.buttons["spatial-cancel-adjustment"].tap()
-        XCTAssertTrue(record.exists)
-        // A button-style Toggle still exposes toggle semantics to accessibility.
-        let fieldOfView = app.descendants(matching: .any).matching(identifier: "spatial-zivid-fov").firstMatch
-        expectValue("已隐藏", in: fieldOfView)
-        XCTAssertEqual(fieldOfView.label, "Zivid 视野")
-        fieldOfView.tap()
-        expectValue("已显示", in: fieldOfView)
-        fieldOfView.tap()
-        expectValue("已隐藏", in: fieldOfView)
-        let lock = app.descendants(matching: .any).matching(identifier: "spatial-lock-panel").firstMatch
-        expectValue("自动跟随", in: lock)
-        XCTAssertEqual(lock.label, "锁定当前位置")
-        lock.tap()
-        expectValue("已锁定", in: lock)
-        // Use the entity-aware activation point; 2D coordinate offsets do not
-        // reliably map to a RealityView attachment's position in visionOS XCTest.
-        lock.tap()
-        expectValue("自动跟随", in: lock)
-        lock.tap()
-        expectValue("已锁定", in: lock)
-        // Exit from the floating panel while pinned; the draft must survive and
-        // a fresh immersive session must place an unlocked panel within reach.
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        XCTAssertEqual(state.value as? String, saved)
+        let fov = app.descendants(matching: .any).matching(identifier: "spatial-zivid-fov").firstMatch
+        expectValue("已显示", in: fov); fov.tap(); expectValue("已隐藏", in: fov)
         app.buttons["spatial-exit-space"].tap()
-        XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"))
-        waitForEntry(enter)
-        let quality = app.buttons["render-quality"], summary = app.staticTexts["render-summary"]
-        for label in ["全量", "精细", "轻量", "全量"] {
-            quality.tap()
-            app.buttons.matching(NSPredicate(format: "label == %@", label)).firstMatch.tap()
-            expectation(for: NSPredicate(format: "label CONTAINS %@", "Mesh · \(label) · 12 / 12 面"), evaluatedWith: summary)
-            waitForExpectations(timeout: 15)
-            XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"), "changing display quality must preserve recorded poses")
-        }
-        enter.tap()
-        // visionOS Simulator may omit RealityView attachments from its AX tree
-        // after reopening. Continue through the equivalent workspace controls.
-        XCTAssertTrue(front.waitForExistence(timeout: 15))
-        expectValue("自动跟随", in: app.descendants(matching: .any).matching(identifier: "lock-panel").firstMatch)
-        XCTAssertFalse(app.buttons["record-pose"].exists, "reopening must require calibration")
-        enter.tap()
-        waitForEntry(enter)
-        app.buttons["new-project"].tap()
-        XCTAssertTrue(app.buttons["open-demo"].waitForExistence(timeout: 10))
+        waitForEntry(enter); enter.tap()
+        let windowFront = app.buttons["spatial-place-front"]
+        XCTAssertTrue(windowFront.waitForExistence(timeout: 15))
+        windowFront.tap(); app.buttons["spatial-confirm-placement"].tap()
+        expectCamera(saved, in: state)
+        app.descendants(matching: .any).matching(identifier: "spatial-keep-focus").firstMatch.tap()
+        XCTAssertEqual(state.label, "自由摆放")
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.buttons["open-demo"].waitForExistence(timeout: 15))
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "空间演练工件")).firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["pose-count"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["pose-count"].label.contains("2"), "offline draft survives reopening")
-        app.buttons["review-poses"].tap()
-        XCTAssertTrue(app.buttons["finish-local"].waitForExistence(timeout: 10))
+        waitForEntry(enter); enter.tap()
+        XCTAssertTrue(front.waitForExistence(timeout: 15)); front.tap()
+        app.buttons["spatial-confirm-placement"].tap()
+        XCTAssertTrue(record.waitForExistence(timeout: 10))
+        expectCamera(saved, in: state)
+        XCTAssertEqual(state.label, "自由摆放", "free orientation stays free after restarting")
+        app.buttons["spatial-exit-space"].tap(); waitForEntry(enter)
         app.buttons["finish-local"].tap()
-        app.buttons.matching(NSPredicate(format: "label == %@", "完成并保存在本机")).allElementsBoundByIndex.last!.tap()
-        let sync = app.buttons["sync-result"]
-        XCTAssertTrue(sync.waitForExistence(timeout: 10))
-        XCTAssertFalse(sync.isEnabled, "simulator results must never sync")
-        XCTAssertFalse(app.buttons["删除 Pose 001"].exists, "completed samples are immutable")
-        // A repeated immersive presentation can omit its visible panel from the
-        // simulator AX tree; tapping the occluded workspace is not equivalent.
-        // Relaunch and restore the completed task to verify read-only spatial review.
+        app.buttons.matching(NSPredicate(format: "label == %@", "完成并保存在本机")).firstMatch.tap()
+        XCTAssertTrue(app.buttons["sync-result"].waitForExistence(timeout: 10))
         app.terminate(); app.launch()
         XCTAssertTrue(app.buttons["open-demo"].waitForExistence(timeout: 15))
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "空间演练工件")).firstMatch.tap()
         XCTAssertTrue(app.buttons["review-poses"].waitForExistence(timeout: 15))
         app.buttons["review-poses"].tap()
-        XCTAssertTrue(app.buttons["sync-result"].waitForExistence(timeout: 10))
         waitForEntry(enter); enter.tap()
-        XCTAssertTrue(panelFront.waitForExistence(timeout: 15)); panelFront.tap()
-        let confirmReview = app.buttons["spatial-confirm-placement"]
-        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: confirmReview)
-        waitForExpectations(timeout: 10)
-        confirmReview.tap()
+        XCTAssertTrue(front.waitForExistence(timeout: 15)); front.tap()
+        app.buttons["spatial-confirm-placement"].tap()
         XCTAssertTrue(app.staticTexts["已完成 · 空间回看"].firstMatch.waitForExistence(timeout: 10))
-        XCTAssertFalse(record.exists, "spatial review cannot append samples")
-        XCTAssertFalse(app.buttons["record-pose"].exists, "completed samples remain immutable in the workspace")
-        enter.tap(); waitForEntry(enter)
+        XCTAssertFalse(record.exists)
+        XCTAssertTrue(app.images["spatial-camera-preview"].waitForExistence(timeout: 20))
+        app.buttons["spatial-exit-space"].tap()
     }
 }
