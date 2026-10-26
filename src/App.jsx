@@ -725,8 +725,8 @@ export default function App() {
   const closeRobotPreset = useCallback(() => setRobotPresetDraft(null), []);
   const closeRobotPresetManager = useCallback(() => setRobotPresetManager(null), []);
   const closeRobotJointLimits = useCallback(() => setRobotJointLimitDraft(null), []);
-  const robotJointLimitsDisabledReason = robotLoadState.status !== 'loaded' ? '加载机器人后可调整双臂关节软限位。'
-    : !robotLoadState.movableJoints?.some((joint) => joint.softLimitRatio) ? '当前模型没有可配置的双臂关节。'
+  const robotJointLimitsDisabledReason = robotLoadState.status !== 'loaded' ? '加载机器人后可调整关节软限位。'
+    : !robotLoadState.movableJoints?.some((joint) => joint.softLimitRatio) ? '当前模型没有可配置的双臂或腰部关节。'
       : sessionState.status !== 'ready' || loadState.loading ? '工程就绪后可调整关节软限位。'
         : teachingCaptureState.status === 'capturing' ? '采集完成后可调整关节软限位。'
           : (polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '停止轨迹播放或折线任务后可调整关节软限位。'

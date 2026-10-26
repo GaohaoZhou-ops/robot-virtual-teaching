@@ -8,6 +8,12 @@ export function normalizeArmSoftLimitRatio(value) {
 
 export const armSoftLimitPercent = (ratio) => Number((normalizeArmSoftLimitRatio(ratio) * 100).toFixed(2));
 
+export function robotSoftLimitJointGroup(name) {
+  const arm = /^(left|right)[_-]J\d+$/i.exec(name || '');
+  if (arm) return arm[1].toLowerCase();
+  return /^(ankle_pitch|knee_pitch|waist_pitch|waist_yaw)[_-]J$/i.test(name || '') ? 'waist' : null;
+}
+
 // Endpoints are fractions of the original hard range, not multipliers of the
 // signed angles. This also describes asymmetric joints such as [-176°, 8°].
 export function normalizeArmSoftLimitRange(value) {
@@ -22,7 +28,7 @@ export function normalizeArmSoftLimitRange(value) {
 export function normalizeArmSoftLimitOverrides(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).flatMap(([name, range]) => {
-    const normalized = /^(left|right)[_-]J\d+$/i.test(name) ? normalizeArmSoftLimitRange(range) : null;
+    const normalized = robotSoftLimitJointGroup(name) ? normalizeArmSoftLimitRange(range) : null;
     return normalized ? [[name, normalized]] : [];
   }));
 }
@@ -32,20 +38,29 @@ export function getArmSoftLimitRange(ratio, override) {
   return normalizeArmSoftLimitRange(override) || { lower: margin, upper: 1 - margin };
 }
 
-// The workbench's numbered left/right joints are the two arm chains.
+// Keep the original waist travel until explicitly configured. Shrinking its
+// one-sided hard limits by the arm default would change legacy upright poses.
+export function getRobotSoftLimitRange(name, ratio, override) {
+  return getArmSoftLimitRange(robotSoftLimitJointGroup(name) === 'waist' ? 1 : ratio, override);
+}
+
+// The numbered left/right joints and the four-joint waist chain are configurable.
 // Keep the URDF limits untouched: clones and worker snapshots carry the hard
 // limits and the configured ratio, so every consumer derives the operating
 // range exactly once, including isolated background workers.
+// Retain armSoftLimit* field names for existing project/worker compatibility.
 export function getRobotJointLimits(joint) {
   const data = joint?.userData || {};
   const hardLower = Number.isFinite(data.jointLimit?.lower) ? data.jointLimit.lower : -Infinity;
   const hardUpper = Number.isFinite(data.jointLimit?.upper) ? data.jointLimit.upper : Infinity;
+  const group = robotSoftLimitJointGroup(joint?.name);
   const softLimited = data.jointType === 'revolute'
-    && /^(left|right)[_-]J\d+$/i.test(joint?.name || '')
+    && Boolean(group)
     && Number.isFinite(hardLower) && Number.isFinite(hardUpper) && hardUpper > hardLower;
   const override = softLimited ? normalizeArmSoftLimitRange(data.armSoftLimitRange) : null;
-  const softLimitRatio = softLimited ? override ? override.upper - override.lower : normalizeArmSoftLimitRatio(data.armSoftLimitRatio) : null;
-  const softLimitRange = softLimited ? getArmSoftLimitRange(data.armSoftLimitRatio, override) : null;
+  const defaultRatio = group === 'waist' ? 1 : normalizeArmSoftLimitRatio(data.armSoftLimitRatio);
+  const softLimitRatio = softLimited ? (override ? override.upper - override.lower : defaultRatio) : null;
+  const softLimitRange = softLimited ? getArmSoftLimitRange(defaultRatio, override) : null;
   return {
     lower: softLimited ? hardLower + (hardUpper - hardLower) * softLimitRange.lower : hardLower,
     upper: softLimited ? hardLower + (hardUpper - hardLower) * softLimitRange.upper : hardUpper,

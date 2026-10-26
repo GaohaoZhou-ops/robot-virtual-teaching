@@ -1117,6 +1117,9 @@ slurm-*.err
 .direnv/
 .envrc.local
 
+# Local assistant conversation exports; keep source documentation and fixtures visible.
+/codex-session-*.md
+
 # Editor and operating-system metadata
 .DS_Store
 ._*

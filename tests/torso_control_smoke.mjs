@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { configureRobotArmSoftLimits, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
 import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../src/lib/robotTorsoControl.js';
 
 // A URDF-shaped four-joint chain with the robot's real link lengths and limits.
@@ -70,4 +71,23 @@ for (const joint of controller.joints) setRobotJointValue(joint, 0);
 const uprightTilt = solveRobotTorsoPose(controller, { ...original, pitch: -10 }, original.forward);
 assert.ok(uprightTilt.pose.pitch < -5, JSON.stringify(uprightTilt));
 assert.equal(createRobotTorsoController(new THREE.Group()), null);
-console.log('Torso IK: linked height, yaw/pitch, singularity recovery, chassis frame and joint limits passed');
+
+configureRobotArmSoftLimits(robot, .8, {
+  ankle_pitch_J: { lower: 0, upper: .3 }, knee_pitch_J: { lower: .6, upper: 1 },
+  waist_pitch_J: { lower: 0, upper: .3 }, waist_yaw_J: { lower: .4, upper: .6 },
+});
+assert.ok(Math.abs(controller.limits.yaw[0] + 35) < 1e-7, 'existing controller follows new soft limits');
+assert.ok(Math.abs(controller.limits.yaw[1] - 35) < 1e-7);
+assert.ok(Math.abs(controller.limits.pitch[0] + 58) < 1e-7);
+assert.ok(Math.abs(controller.limits.pitch[1] - 60.9) < 1e-7);
+const customLimited = solveRobotTorsoPose(controller, { height: .1, yaw: 120, pitch: 100 }, original.forward);
+assert.equal(customLimited.status, 'limited');
+assert.ok(Math.abs(customLimited.pose.yaw - 35) < 1e-7);
+for (const joint of controller.joints) {
+  const limits = getRobotJointLimits(joint);
+  assert.ok(joint.userData.jointValue >= limits.lower - 1e-9 && joint.userData.jointValue <= limits.upper + 1e-9);
+}
+configureRobotArmSoftLimits(robot, .95);
+for (const joint of controller.joints) assert.equal(setRobotJointValue(joint, 0), 0, 'restored defaults allow the legacy upright pose');
+assert.ok(Math.abs(controller.limits.yaw[1] - 175) < 1e-7);
+console.log('Torso IK: height, yaw/pitch, singularity recovery, chassis frame, dynamic four-joint soft limits and legacy defaults passed');

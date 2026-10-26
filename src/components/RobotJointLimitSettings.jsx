@@ -36,9 +36,9 @@ export default function RobotJointLimitSettings({ ratio, onChange, onReset, onOp
     data-workbench-menu-keep-open title={disabledReason || undefined}>
     <div className="robot-joint-limit-settings__heading">
       <span><SlidersHorizontal size={14} />关节软限位</span>
-      <button type="button" aria-label="恢复默认软限位 95%" disabled={Boolean(disabledReason) || (ratio === ARM_SOFT_LIMIT_RATIO && !customCount)}
+      <button type="button" aria-label="恢复默认软限位" title="双臂恢复 95%，腰部恢复 100%" disabled={Boolean(disabledReason) || (ratio === ARM_SOFT_LIMIT_RATIO && !customCount)}
         onClick={() => { setDraft('95'); if (onReset) onReset(); else onChange(ARM_SOFT_LIMIT_RATIO); }}>
-        <RotateCcw size={11} />恢复 95%
+        <RotateCcw size={11} />恢复默认
       </button>
     </div>
     <div className="robot-joint-limit-settings__controls">
@@ -57,8 +57,8 @@ export default function RobotJointLimitSettings({ ratio, onChange, onReset, onOp
       </label>
     </div>
     <p id={descriptionId} className="robot-joint-limit-settings__description">
-      {disabledReason || (customCount ? `统一比例 ${percent}% · ${customCount} 个关节使用单独设置的范围。`
-        : `保留双臂硬限位的中间 ${percent}%，两端各预留 ${Number(((100 - percent) / 2).toFixed(2))}%。`)}
+      {disabledReason || (customCount ? `双臂统一比例 ${percent}% · ${customCount} 个关节已单独设置。`
+        : `双臂保留硬限位的中间 ${percent}%；腰部默认保留 100%，可在详细设置中单独调整。`)}
     </p>
     {onOpenDetails && <button type="button" className="robot-joint-limit-settings__details" disabled={Boolean(disabledReason)}
       aria-label="关节软限位详细设置" onClick={onOpenDetails}><SlidersHorizontal size={13} />详细设置<span>范围与动画预览</span></button>}

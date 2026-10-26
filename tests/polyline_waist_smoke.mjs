@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
 import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
 import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable, transformPolyline } from '../src/lib/polylineTeaching.js';
 import { polylineJointExclusions } from '../src/lib/polylineTeachingJoints.js';
@@ -136,8 +137,18 @@ await assert.rejects(plan(left, far, { checkpoint: async () => { throw new DOMEx
 // Actual BOTX: ankle/knee/waist changes participate in the timed trajectory,
 // while the entire base transform and opposite arm's joint angles stay fixed.
 const botx = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
-for (const side of ['left', 'right']) {
+for (const customLimits of [false, true]) for (const side of ['left', 'right']) {
   const robot = restoreMobileTeachingRobot(botx.robot), layer = new THREE.Group(); layer.add(robot);
+  if (customLimits) {
+    const ranges = {};
+    robot.traverse((joint) => {
+      if (!isRobotBodyJoint(joint) || joint.userData.jointType !== 'revolute') return;
+      const { lower, upper } = joint.userData.jointLimit, value = joint.userData.jointValue;
+      ranges[joint.name] = { lower: (Math.max(lower, value - Math.PI / 60) - lower) / (upper - lower),
+        upper: (Math.min(upper, value + Math.PI / 60) - lower) / (upper - lower) };
+    });
+    configureRobotArmSoftLimits(robot, .95, ranges);
+  }
   layer.position.set(.3, -.2, 0); layer.rotation.z = .3; layer.updateMatrixWorld(true);
   const matrix = layer.matrixWorld.clone(), controller = getRobotEndEffector(robot, side);
   const start = controller.frame.getWorldPosition(new THREE.Vector3()), orientation = controller.frame.getWorldQuaternion(new THREE.Quaternion());
@@ -161,6 +172,11 @@ for (const side of ['left', 'right']) {
     assert.ok(readPolylineTcp(robot, action).distanceTo(new THREE.Vector3().fromArray(sample.target)) <= action.settings.tolerance * 1.01);
     assert.ok(controller.frame.getWorldQuaternion(new THREE.Quaternion()).angleTo(orientation) <= THREE.MathUtils.degToRad(action.settings.rotationTolerance));
     for (const [name, value] of Object.entries(sample.joints)) if (name.startsWith(side === 'left' ? 'right_' : 'left_')) assert.equal(value, initial[name]);
+    for (const joint of body) {
+      const limit = getRobotJointLimits(joint), value = THREE.MathUtils.degToRad(sample.joints[joint.name]);
+      assert.ok(value >= limit.lower - 1e-8 && value <= limit.upper + 1e-8, `${joint.name} exceeds its configured waist range`);
+      assert.equal(limit.softLimitCustom, customLimits);
+    }
     if (previous) for (const joint of body) {
       const limit = joint.userData.jointLimit?.velocity;
       if (limit) assert.ok(Math.abs(sample.joints[joint.name] - previous[joint.name]) / seconds < THREE.MathUtils.radToDeg(limit) * 1.02);
@@ -169,4 +185,4 @@ for (const side of ['left', 'right']) {
   }
 }
 obstacle.dispose(); nearObstacle.dispose();
-console.log('Polyline waist: fixed chassis, both arms, longer prefixes, temporary waist permission with preserved global/arm locks, whole-robot/camera collisions, approach rejection, interpolation, persistence and worker policy passed.');
+console.log('Polyline waist: fixed chassis, both arms with default/custom waist ranges, longer prefixes, temporary waist permission with preserved locks, whole-robot collisions, interpolation, persistence and worker policy passed.');

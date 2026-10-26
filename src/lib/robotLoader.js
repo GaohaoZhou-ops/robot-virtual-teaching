@@ -881,7 +881,7 @@ const robotJointDefinition = (joint) => {
 };
 
 // Update the live model without reloading meshes or modifying URDF hard limits.
-// Store the ratio on each arm joint so clones and worker snapshots are independent.
+// Store settings on each supported joint so clones and worker snapshots are independent.
 export function configureRobotArmSoftLimits(robot, ratio, overrides = {}) {
   const normalized = normalizeArmSoftLimitRatio(ratio);
   const ranges = normalizeArmSoftLimitOverrides(overrides);

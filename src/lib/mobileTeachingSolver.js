@@ -200,16 +200,17 @@ function seedUprightTorso(robot, chest, joints, start) {
   const correction = Math.atan2(axis.dot(up.clone().cross(worldUp)), up.dot(worldUp) - up.dot(axis) * worldUp.dot(axis));
   const sum = joints.reduce((value, joint) => value + joint.userData.jointValue, 0) + correction;
   const bend = Math.max(0, start - 2) * 0.25;
+  const limits = joints.map(getRobotJointLimits);
   const values = joints.map((joint, i) => THREE.MathUtils.clamp(start < 2 ? joint.userData.jointValue : [bend, -2 * bend, bend][i],
-    joint.userData.jointLimit.lower, joint.userData.jointLimit.upper));
+    limits[i].lower, limits[i].upper));
   for (let iteration = 0; iteration < joints.length; iteration += 1) {
     const remaining = sum - values.reduce((total, value) => total + value, 0);
     if (Math.abs(remaining) < 1e-10) break;
     const free = joints.map((joint, i) => i).filter((i) => remaining > 0
-      ? values[i] < joints[i].userData.jointLimit.upper - 1e-10 : values[i] > joints[i].userData.jointLimit.lower + 1e-10);
+      ? values[i] < limits[i].upper - 1e-10 : values[i] > limits[i].lower + 1e-10);
     if (!free.length) break;
     for (const i of free) values[i] = THREE.MathUtils.clamp(values[i] + remaining / free.length,
-      joints[i].userData.jointLimit.lower, joints[i].userData.jointLimit.upper);
+      limits[i].lower, limits[i].upper);
   }
   joints.forEach((joint, i) => setRobotJointValue(joint, values[i]));
 }

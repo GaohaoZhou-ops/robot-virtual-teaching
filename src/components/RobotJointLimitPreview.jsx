@@ -4,16 +4,16 @@ import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls
 import { Crosshair, LoaderCircle, Pause, Play, TriangleAlert } from 'lucide-react';
 import { applyRobotJointValues, configureRobotArmSoftLimits, disposeRobotModel,
   loadRobotModel, setRobotJointValue, setRobotVisualBounds } from '../lib/robotLoader.js';
-import { getArmSoftLimitRange } from '../lib/robotJointLimits.js';
+import { getRobotSoftLimitRange } from '../lib/robotJointLimits.js';
 
 const CYCLE_SECONDS = 8;
 
 // Each preview owns its model resources. Endpoint clones share geometry only
 // inside this bundle, which is disposed once as a whole when the page closes.
-function endpointGhost(model, name) {
+function endpointGhost(model, name, color) {
   const ghost = model.clone(true);
   ghost.name = name;
-  const material = new THREE.MeshBasicMaterial({ color: 0x439fff, transparent: true, opacity: 0.27,
+  const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.27,
     depthWrite: false, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   ghost.traverse((node) => { if (node.isMesh) node.material = material; });
   return ghost;
@@ -136,7 +136,8 @@ export default function RobotJointLimitPreview({ robot, joint, values, ratio, ov
     loadRobotModel(robot, { signal: controller.signal }).then((solid) => {
       if (controller.signal.aborted || contextRef.current !== context) { disposeRobotModel(solid); return; }
       bundle = new THREE.Group();
-      const start = endpointGhost(solid, 'soft-limit-start'), end = endpointGhost(solid, 'soft-limit-end');
+      const start = endpointGhost(solid, 'soft-limit-start', 0xff6464);
+      const end = endpointGhost(solid, 'soft-limit-end', 0x439fff);
       bundle.add(solid, start, end); context.scene.add(bundle);
       modelsRef.current = { bundle, solid, start, end }; fittedJointRef.current = '';
       setLoad({ status: 'ready', detail: '' }); setRevision((value) => value + 1);
@@ -154,7 +155,7 @@ export default function RobotJointLimitPreview({ robot, joint, values, ratio, ov
   useEffect(() => {
     const models = modelsRef.current, canvas = canvasRef.current;
     if (!models || !joint) return;
-    const range = getArmSoftLimitRange(ratio, overrides[joint.name]);
+    const range = getRobotSoftLimitRange(joint.name, ratio, overrides[joint.name]);
     const lower = joint.hardLower + (joint.hardUpper - joint.hardLower) * range.lower;
     const upper = joint.hardLower + (joint.hardUpper - joint.hardLower) * range.upper;
     for (const model of [models.solid, models.start, models.end]) {
@@ -176,7 +177,11 @@ export default function RobotJointLimitPreview({ robot, joint, values, ratio, ov
       {load.status !== 'ready' && <div className="joint-limit-preview__state" role={load.status === 'error' ? 'alert' : 'status'}>
         {load.status === 'loading' ? <LoaderCircle className="is-spinning" size={24} /> : <TriangleAlert size={24} />}<span>{load.detail}</span>
       </div>}
-      <div className="joint-limit-preview__legend"><span><i className="is-ghost" />蓝色虚影 · 起点 / 终点</span><span><i />实体模型 · 当前角度</span></div>
+      <div className="joint-limit-preview__legend">
+        <span><i className="is-start" />红色虚影 · 起点 / 下限</span>
+        <span><i className="is-end" />蓝色虚影 · 终点 / 上限</span>
+        <span><i />实体模型 · 当前角度</span>
+      </div>
     </div>
     <div className="joint-limit-preview__transport">
       <button type="button" disabled={load.status !== 'ready'} onClick={() => setPlaying((value) => !value)}

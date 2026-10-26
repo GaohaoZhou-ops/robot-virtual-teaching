@@ -78,6 +78,10 @@ def run():
         for label, value in [('下限百分比', '10'), ('上限百分比', '80')]:
             field = limits.get_by_role('spinbutton', name=label, exact=True)
             field.fill(value); field.press('Enter')
+        limits.get_by_role('button', name='设置 waist_yaw_J 软限位', exact=True).click()
+        for label, value in [('下限百分比', '40'), ('上限百分比', '60')]:
+            field = limits.get_by_role('spinbutton', name=label, exact=True)
+            field.fill(value); field.press('Enter')
         limits.get_by_role('button', name='应用设置', exact=True).click()
         limits.wait_for(state='detached')
         if not COUPLING_ENABLED:
@@ -158,7 +162,8 @@ def run():
             assert config["environmentCollision"]["enabled"] is True
             assert config["armJointCouplingEnabled"] is COUPLING_ENABLED
             assert config['armSoftLimitRatio'] == .95
-            assert config['armSoftLimitOverrides'] == {'left_J1': {'lower': .1, 'upper': .8}}
+            assert config['armSoftLimitOverrides'] == {'left_J1': {'lower': .1, 'upper': .8},
+                                                       'waist_yaw_J': {'lower': .4, 'upper': .6}}
             assert "environment/positions.f32le" in names
             assert "scripts/compute_parking_merge.py" in names
             assert "run_cluster.sh" in names
@@ -200,7 +205,7 @@ def run():
         wrong_limits_path = temporary / 'wrong-limits-result.zip'
         result_archive(mismatch_path, manifest, analysis, map_hash="wrong-map-sha256")
         result_archive(wrong_coupling_path, manifest, {**analysis, 'armJointCouplingEnabled': not COUPLING_ENABLED})
-        result_archive(wrong_limits_path, manifest, {**analysis, 'armSoftLimitOverrides': {}})
+        result_archive(wrong_limits_path, manifest, {**analysis, 'armSoftLimitOverrides': {'left_J1': {'lower': .1, 'upper': .8}}})
         result_archive(valid_path, manifest, analysis)
 
         result_input = dialog.locator('input[type="file"]')

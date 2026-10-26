@@ -132,7 +132,7 @@ def run():
             page.reload(wait_until='networkidle')
             page.wait_for_function("document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded'")
             robot_menu.click(); expect(percent).to_have_value('80')
-            page.get_by_role('button', name='恢复默认软限位 95%', exact=True).click()
+            page.get_by_role('button', name='恢复默认软限位', exact=True).click()
             expect(percent).to_have_value('95')
             expect(robot_menu).to_have_attribute('aria-expanded', 'true')
             percent.press('Escape')

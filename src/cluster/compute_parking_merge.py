@@ -345,10 +345,11 @@ class RobotModel:
             if kind == "continuous":
                 lower, upper = -math.inf, math.inf
             name = node.get("name", f"joint-{len(self.joints)}")
-            # Match robotJointLimits.js using this job's configured arm range.
-            if (kind == "revolute" and re.fullmatch(r"(?:left|right)[_-]J\d+", name, re.IGNORECASE)
+            # Waist joints retain their original range unless individually set.
+            waist = bool(re.fullmatch(r"(?:ankle_pitch|knee_pitch|waist_pitch|waist_yaw)[_-]J", name, re.IGNORECASE))
+            if (kind == "revolute" and (waist or re.fullmatch(r"(?:left|right)[_-]J\d+", name, re.IGNORECASE))
                     and math.isfinite(lower) and math.isfinite(upper) and upper > lower):
-                start, end = (1 - ratio) / 2, 1 - (1 - ratio) / 2
+                start, end = (0.0, 1.0) if waist else ((1 - ratio) / 2, 1 - (1 - ratio) / 2)
                 custom = overrides.get(name)
                 if (isinstance(custom, dict) and all(type(custom.get(key)) in (int, float)
                         and math.isfinite(custom[key]) for key in ("lower", "upper"))

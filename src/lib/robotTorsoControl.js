@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { setRobotJointValue } from './robotLoader.js';
+import { getRobotJointLimits } from './robotJointLimits.js';
 
 const PITCH_JOINTS = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J'];
 const PITCH_WEIGHT = 0.6;
@@ -23,12 +24,15 @@ export function createRobotTorsoController(robot, center = new THREE.Vector3()) 
     length + new THREE.Vector3().fromArray(joint.userData.restPosition).length(), center.length());
   return {
     side: 'torso', robot, base, chest, frame, joints, pitchJoints, yawJoint,
-    limits: {
-      height: [0, maxHeight],
-      yaw: [degrees(yawJoint.userData.jointLimit.lower), degrees(yawJoint.userData.jointLimit.upper)],
-      pitch: ['lower', 'upper'].map((bound) => degrees(pitchJoints.reduce(
-        (sum, joint) => sum + joint.userData.jointLimit[bound], 0,
-      ))),
+    get limits() {
+      const yaw = getRobotJointLimits(yawJoint);
+      return {
+        height: [0, maxHeight],
+        yaw: [degrees(yaw.lower), degrees(yaw.upper)],
+        pitch: ['lower', 'upper'].map((bound) => degrees(pitchJoints.reduce(
+          (sum, joint) => sum + getRobotJointLimits(joint)[bound], 0,
+        ))),
+      };
     },
   };
 }
