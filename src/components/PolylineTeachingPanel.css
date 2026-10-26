@@ -64,6 +64,7 @@
 .polyline-teaching__base-modes input { margin:0; accent-color:#50dce6; }
 .polyline-teaching__base-result { display:flex; flex-direction:column; gap:6px; padding:10px; background:#143137; border:1px solid #32626b; border-radius:7px; font-size:11px; line-height:1.6; }
 .polyline-teaching__base-result small { color:#9dbec5; }
+.polyline-teaching .polyline-teaching__base-position { width:100%; padding:7px 9px; color:#91e8e7; border-color:#417a86; font-size:11px; }
 .polyline-teaching__partial-result { display:flex; flex-direction:column; gap:6px; padding:10px; background:#2a2b20; border:1px solid #746144; border-radius:7px; color:#f0d49f; font-size:11px; line-height:1.6; }
 .polyline-teaching__partial-result small { color:#cbbd9d; }
 .polyline-teaching__suggestion { display:flex; flex-direction:column; gap:7px; padding:10px; background:#143137; border:1px solid #32626b; border-radius:7px; font-size:11px; line-height:1.6; }

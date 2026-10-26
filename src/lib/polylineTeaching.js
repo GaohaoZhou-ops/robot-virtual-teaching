@@ -87,6 +87,24 @@ export function isPolylinePlanExecutable(plan) {
     && Number.isFinite(plan.durationMs) && plan.durationMs > 0);
 }
 
+// Explicit virtual placement at a searched starting pose. Keep the checked
+// drawing samples, timing and ORIGINAL base reference: rebasing those offsets
+// to the selected parking pose would translate the robot a second time.
+export function polylinePlanFromSearchPosition(plan) {
+  if (!isPolylinePlanExecutable(plan) || !(plan.baseSearch?.feasible > 0)
+    || !finiteVector(plan.baseReference?.position, 3) || !finiteVector(plan.baseReference?.quaternion, 4)) return null;
+  const drawing = plan.segments.slice(plan.segments.findIndex(segment => segment.index >= 0));
+  const first = drawing[0]?.samples?.[0];
+  if (!first?.joints || !first.base || !['x', 'y', 'yaw'].every(axis => Number.isFinite(first.base[axis]))
+    || drawing.some(segment => segment.index < 0 || segment.reverse)) return null;
+  let durationMs = 0;
+  const segments = drawing.map(segment => {
+    const startMs = durationMs; durationMs += segment.durationMs;
+    return { ...segment, startMs, endMs: durationMs };
+  });
+  return { ...plan, initialJoints: { ...first.joints }, segments, durationMs };
+}
+
 // Reuse the checked poses and timing after a completed run. Return along the
 // same drawing trajectory in reverse, without marking it, then draw forward.
 // No new IK, shortcut through space or jump back to the original pose.

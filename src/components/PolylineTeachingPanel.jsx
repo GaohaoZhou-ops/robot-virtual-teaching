@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
-import { Check, CircleHelp, MousePointer2, Pause, Play, Plus, RotateCcw, Save, Square, Trash2, X } from 'lucide-react';
+import { Check, CircleHelp, Crosshair, MousePointer2, Pause, Play, Plus, RotateCcw, Save, Square, Trash2, X } from 'lucide-react';
 import { getRobotEndEffector, readRobotJointValues } from '../lib/robotLoader.js';
-import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_BASE_DEFAULTS, POLYLINE_MAX_POINTS, POLYLINE_MAX_SPEED, polylineVertices, polylineDrawingProgress, polylineSegmentStartPoses, samplePolylinePlan, readPolylineTcp, polylineBasePose, isPolylinePlanExecutable, repeatPolylinePlan } from '../lib/polylineTeaching.js';
+import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_BASE_DEFAULTS, POLYLINE_MAX_POINTS, POLYLINE_MAX_SPEED, polylineVertices, polylineDrawingProgress, polylineSegmentStartPoses, samplePolylinePlan, readPolylineTcp, polylineBasePose, isPolylinePlanExecutable, repeatPolylinePlan, polylinePlanFromSearchPosition } from '../lib/polylineTeaching.js';
 import { loadPolylinePreferences, savePolylinePreferences } from '../lib/polylineTeachingPreferences.js';
 import { POLYLINE_ALGORITHM_DEFAULTS, POLYLINE_ALGORITHM_FIELDS, POLYLINE_ALGORITHM_GROUPS } from '../lib/polylineTeachingParameters.js';
 import { planPolylineInWorker } from '../lib/polylineTeachingWorker.js';
@@ -107,6 +107,13 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const waistJoints = getRobotEndEffector(currentContext.robot, path.side)?.joints.filter(isPolylineWaistJoint) || [];
   const selectedBasePose = plan?.baseSearch ? polylineBasePose(plan.baseReference, plan.selectedBase) : null;
   const selectedHeading = selectedBasePose ? new THREE.Vector3(1, 0, 0).applyQuaternion(new THREE.Quaternion().fromArray(selectedBasePose.quaternion)) : null;
+  const searchedStart = useMemo(() => {
+    const drawingPlan = baseOptions.search ? polylinePlanFromSearchPosition(plan) : null;
+    return drawingPlan ? samplePolylinePlan(drawingPlan, 0) : null;
+  }, [plan, baseOptions.search]);
+  const atSearchPosition = Boolean(searchedStart && currentContext.robot && sameJoints(searchedStart.joints, readRobotJointValues(currentContext.robot))
+    && currentContext.robot.parent.getWorldPosition(new THREE.Vector3()).distanceTo(new THREE.Vector3().fromArray(searchedStart.basePose.position)) < 1e-7
+    && currentContext.robot.parent.getWorldQuaternion(new THREE.Quaternion()).angleTo(new THREE.Quaternion().fromArray(searchedStart.basePose.quaternion)) < 1e-7);
   useEffect(() => {
     if (open && active) savePolylinePreferences(path);
   }, [open, active, path.side, path.tcpOffset, path.toolAxisDirection, path.settings, path.base]);
@@ -530,6 +537,19 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     context.applyState({ joints: suggestion.joints, basePose: suggestion.basePose });
     check();
   };
+  const adoptSearchPosition = () => {
+    const current = live.current, context = getContext();
+    if (!current.path.base?.search || busyStatuses.includes(current.status)) return;
+    const drawingPlan = polylinePlanFromSearchPosition(current.plan);
+    if (!drawingPlan) return;
+    if (!contextMatches(context)) { cancel('机器人或约束已改变，请重新检查路径。'); clearTrace(); return; }
+    context.finishEndEffectorEditing?.();
+    autoPlayRef.current = false; runtimeRef.current = null; cancelAnimationFrame(animationRef.current);
+    context.applyState(samplePolylinePlan(drawingPlan, 0));
+    expectedRef.current = robotState(context);
+    clearTrace(); setElapsed(0); setProgress(null); setPlan(drawingPlan); setStatus('ready');
+    setMessage('已到达搜索位置，末端已就位 P0。点击“执行划线”即可从起点开始。');
+  };
   const play = () => {
     const current = live.current, context = getContext();
     if (!['ready', 'paused', 'completed'].includes(current.status) || (runtimeRef.current && current.status !== 'paused')) return;
@@ -734,6 +754,13 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
           <label className="polyline-teaching__field">转向范围 · ±°<PolylineNumberInput aria-label="底盘转向范围 °" min={0} max={180} step="15" value={baseOptions.yawRange}
             onCommit={(value) => edit({ ...path, base: { ...baseOptions, yawRange: value } })} /></label>
         </div>}
+        {baseOptions.search && <button type="button" className="polyline-teaching__base-position" aria-label="到达搜索位置"
+          disabled={busy || !searchedStart || atSearchPosition} onClick={adoptSearchPosition}
+          title={!searchedStart ? '先点击“检查路径”，得到通过检查的底盘搜索结果后即可定位'
+            : atSearchPosition ? '机器人已在搜索位置，末端已就位 P0'
+              : '直接采用搜索位置与对应的机械臂起始姿态，随后从 P0 执行已检查的划线轨迹'}>
+          {atSearchPosition ? <Check size={14} /> : <Crosshair size={14} />}{atSearchPosition ? '已到达搜索位置' : '到达搜索位置'}
+        </button>}
         <details className="polyline-teaching__algorithm">
           <summary>高级参数<span>{modifiedParameters ? `${modifiedParameters} 项已调整` : '默认配置'}</span></summary>
           {POLYLINE_ALGORITHM_GROUPS.map((group) => <div key={group.key} className="polyline-teaching__parameter-group"

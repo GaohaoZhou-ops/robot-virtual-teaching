@@ -18,7 +18,13 @@
 .workspace-cache-dialog strong { color: var(--text); }
 .workspace-cache-dialog__body .workspace-cache-dialog__warning { margin: 20px 0 0; padding: 12px 14px; border: 1px solid #f4c95d38; background: #f4c95d08; color: var(--amber); }
 .workspace-cache-dialog__body .workspace-cache-dialog__error { margin: 14px 0 0; color: var(--red); }
-.workspace-cache-dialog footer { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid #21363c; }
+.workspace-cache-dialog__body .workspace-cache-dialog__export-notice { margin: 14px 0 0; color: var(--cyan); }
+.workspace-cache-dialog__body .workspace-cache-dialog__export-notice[data-kind=error] { color: var(--red); }
+.workspace-cache-dialog__body .workspace-cache-dialog__export-notice[data-kind=warning] { color: var(--amber); }
+.workspace-cache-dialog footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 16px 24px; border-top: 1px solid #21363c; }
+.workspace-cache-dialog__save-as { margin-right: auto; }
+.workspace-cache-dialog__save-as > button { white-space: nowrap; }
+.workspace-cache-dialog[data-kind=reset] footer > button { flex: 0 0 auto; white-space: nowrap; }
 .workspace-cache-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 9px 14px; border: 1px solid #2d464d; border-radius: 0; background: transparent; color: #aec6ca; font: inherit; font-size: 12px; cursor: pointer; }
 .workspace-cache-dialog button:hover:not(:disabled) { border-color: var(--cyan); background: #59dbe808; color: #d9f6f8; }
 .workspace-cache-dialog button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
@@ -33,4 +39,8 @@
   .workspace-cache-dialog header, .workspace-cache-dialog__body, .workspace-cache-dialog footer { padding-left: 18px; padding-right: 18px; }
   .workspace-cache-dialog h2 { font-size: 17px; }
   .workspace-cache-dialog footer > button { flex: 1; }
+}
+@media (max-width: 360px) {
+  .workspace-cache-dialog[data-kind=reset] footer { gap: 6px; padding-left: 12px; padding-right: 12px; }
+  .workspace-cache-dialog[data-kind=reset] footer button { gap: 4px; padding-left: 7px; padding-right: 7px; }
 }

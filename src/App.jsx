@@ -6508,7 +6508,8 @@ export default function App() {
     setCacheActionDialog({ kind, entry, busy: false, error: '' });
   };
   const confirmCacheAction = async () => {
-    if (!cacheActionDialog || independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
+    if (!cacheActionDialog || independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current
+      || projectExportBusyRef.current || projectExportDialog) return;
     const { kind, entry } = cacheActionDialog;
     const reset = kind === 'reset';
     const current = latestWorkspaceRef.current;
@@ -7513,6 +7514,8 @@ export default function App() {
       onClose={() => { if (!independentSwitchBusyRef.current) setIndependentNameDialog(null); }}
     />}
     {cacheActionDialog && <WorkspaceCacheDialog state={cacheActionDialog} onConfirm={confirmCacheAction}
+      mapData={mapData} exportState={projectExportState} exportNotice={toast} onExport={exportProject}
+      exportDialogOpen={Boolean(projectExportDialog)} exportDisabled={independentSwitchBlocked}
       onClose={() => { if (!independentSwitchBusyRef.current) setCacheActionDialog(null); }} />}
     </RobotJointCouplingContext.Provider>
     </RobotJointLimitContext.Provider>

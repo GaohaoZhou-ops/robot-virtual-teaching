@@ -24,7 +24,7 @@ export default function PolylineAlgorithmHelpDialog({ path, onClose }) {
     <div className="polyline-search-explanation__body">
       <p id="polyline-algorithm-help-summary">勾选项决定参与规划的自由度与划线方式；高级参数调整精度、运动和搜索预算。修改参数后需重新检查路径。</p>
       <section aria-labelledby="polyline-algorithm-options-title">
-        <h3 id="polyline-algorithm-options-title">勾选项与组合</h3>
+        <h3 id="polyline-algorithm-options-title">勾选项与底盘参数</h3>
         <dl className="polyline-algorithm-help__options">{POLYLINE_CONSTRAINT_HELP.map(([label, description]) => <div key={label}>
           <dt>{label}</dt><dd>{description}</dd>
         </div>)}</dl>

@@ -49,6 +49,8 @@ node_modules/
 # imported-project reproductions, solver A/B source snapshots, serialized robot
 # collision hulls, playback verification and service-index backups belong in
 # test-artifacts/polyline-*/; maintained regression runners stay in tests/.
+# Reset-confirmation backup checks keep screenshots and service-index backups
+# in test-artifacts/global-reset-export/; exported ZIPs use temporary workspaces.
 dist/
 build/
 out/
@@ -792,6 +794,12 @@ playwright/.auth/
 /tests/atlas-export-separation-*/
 /tests/atlas-save-picker-*/
 /tests/atlas-save-target-*/
+# Reset-confirmation Save As tests contain complete map, robot and teaching
+# archives. Cover TMPDIR overrides and packed copies, keeping fixtures visible.
+/atlas-reset-export-*/
+/tests/atlas-reset-export-*/
+/atlas-reset-export-*.[zZ][iI][pP]
+/tests/atlas-reset-export-*.[zZ][iI][pP]
 # Model-editor native Save As tests use TemporaryDirectory with this prefix.
 # Keep the complete workspace local when TMPDIR is set to the root or tests/.
 /model-editor-save-*/

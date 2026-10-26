@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
 import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
 import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { normalizePolyline, polylineBasePose, samplePolylinePlan, readPolylineTcp, transformPolyline } from '../src/lib/polylineTeaching.js';
+import { normalizePolyline, polylineBasePose, samplePolylinePlan, readPolylineTcp, transformPolyline, polylinePlanFromSearchPosition, repeatPolylinePlan } from '../src/lib/polylineTeaching.js';
 import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
 import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
 
@@ -38,6 +38,8 @@ assert.deepEqual(makePath().base, { sync: false, search: false, allowPartial: fa
 assert.equal(makePath({ range: NaN }), null);
 assert.equal(makePath({ yawRange: 181 }), null);
 assert.equal((await plan(makePath())).complete, false, 'a fixed short arm cannot reach the distant line');
+assert.equal(polylinePlanFromSearchPosition(null), null);
+assert.equal(polylinePlanFromSearchPosition({ complete: false }), null);
 
 for (const [sync, search] of [[false, false], [true, false], [false, true], [true, true]]) {
   const path = makePath({ sync, search }, !sync && !search ? [[0.4, 0.3, 0.7], [0.46, 0.36, 0.7]] : undefined);
@@ -87,6 +89,39 @@ for (const [sync, search] of [[false, false], [true, false], [false, true], [tru
     assert.deepEqual(first.joints, initial); assert.deepEqual(first.base, { x: 0, y: 0, yaw: 0 });
     assert.equal(first.drawing, false, 'preposition is continuous from the actual pose, without ink');
     assert.deepEqual(result.selectedBase, result.segments.find((segment) => segment.index >= 0).samples[0].base, 'reported parking pose is the actual pose at the start of drawing');
+    const original = JSON.stringify(result), drawing = result.segments.filter(segment => segment.index >= 0);
+    const positioned = polylinePlanFromSearchPosition(result), startMs = drawing[0].startMs;
+    assert.ok(positioned.durationMs < result.durationMs, 'adopting the search result removes the preposition/approach time');
+    assert.equal(positioned.baseReference, result.baseReference, 'offsets retain the original world reference');
+    assert.deepEqual(positioned.initialJoints, drawing[0].samples[0].joints);
+    positioned.segments.forEach((segment, i) => {
+      assert.equal(segment.samples, drawing[i].samples);
+      assert.equal(segment.timing, drawing[i].timing);
+      assert.equal(segment.arcMapping, drawing[i].arcMapping);
+    });
+    for (let i = 0; i <= 200; i += 1) {
+      const elapsed = positioned.durationMs * i / 200;
+      const expected = samplePolylinePlan(result, startMs + elapsed), actual = samplePolylinePlan(positioned, elapsed);
+      assert.equal(actual.drawing, true);
+      for (const field of ['joints', 'base']) for (const key of Object.keys(expected[field])) {
+        assert.ok(Math.abs(actual[field][key] - expected[field][key]) < 1e-9, `${field}.${key} retains the checked trajectory`);
+      }
+      for (const field of ['position', 'quaternion']) actual.basePose[field].forEach((value, j) => {
+        assert.ok(Math.abs(value - expected.basePose[field][j]) < 1e-9, 'placement must not translate or rotate the checked stroke again');
+      });
+    }
+    const replay = repeatPolylinePlan(positioned);
+    assert.deepEqual(samplePolylinePlan(replay, 0).joints, samplePolylinePlan(positioned, positioned.durationMs).joints);
+    assert.ok(replay.segments.every(segment => segment.phase !== 'positioning'), 'replay never returns to the old base position');
+    assert.deepEqual(polylinePlanFromSearchPosition(positioned), positioned, 'repeated placement does not accumulate time or offsets');
+    assert.equal(JSON.stringify(result), original, 'the original checked plan stays intact');
+    assert.equal(polylinePlanFromSearchPosition({ ...result, complete: false, executable: false }), null);
+    assert.equal(polylinePlanFromSearchPosition({ ...result, baseSearch: null }), null);
+    const tilted = { ...result, baseReference: { position: [2, -3, .4], quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(.1, -.12, .4)).toArray() } };
+    assert.deepEqual(samplePolylinePlan(polylinePlanFromSearchPosition(tilted), 0).basePose,
+      samplePolylinePlan(tilted, startMs).basePose, 'nonzero, tilted world references are preserved');
+  } else {
+    assert.equal(polylinePlanFromSearchPosition(result), null, 'a non-search plan offers no search placement');
   }
   for (const segment of result.segments.slice(0, -1)) {
     const before = samplePolylinePlan(result, segment.endMs - 0.001), after = samplePolylinePlan(result, segment.endMs + 0.001);

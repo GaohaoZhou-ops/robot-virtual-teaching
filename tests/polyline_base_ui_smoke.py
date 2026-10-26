@@ -25,6 +25,22 @@ def run():
             mode = f'sync-{sync}-search-{search}'
             page = browser.new_page(viewport={'width': 1680, 'height': 1100})
             page.set_default_timeout(30000)
+            page.add_init_script('''
+                window.polylineRequests = 0; window.polylineSearchResult = null;
+                const OriginalWorker = window.Worker;
+                window.Worker = class extends OriginalWorker {
+                    constructor(...args) {
+                        super(...args);
+                        this.addEventListener('message', ({data}) => {
+                            if (data.type === 'complete' && data.value?.baseSearch) window.polylineSearchResult = data.value;
+                        });
+                    }
+                    postMessage(data, ...rest) {
+                        if (data?.path?.settings) window.polylineRequests++;
+                        return super.postMessage(data, ...rest);
+                    }
+                };
+            ''')
             errors = []
             page.on('pageerror', lambda error: errors.append(str(error)))
             descriptor = dict(id='polyline-test.urdf', relativePath='polyline-test.urdf', name='polyline_test_robot', fileName='polyline-test.urdf',
@@ -46,9 +62,13 @@ def run():
                 fixed = panel.get_by_role('checkbox', name='静止', exact=True)
                 together = panel.get_by_role('checkbox', name='移动', exact=True)
                 automatic = panel.get_by_role('checkbox', name='自搜索', exact=True)
+                position_button = panel.get_by_role('button', name='到达搜索位置', exact=True)
                 expect(fixed).to_be_checked(); expect(together).not_to_be_checked(); expect(automatic).not_to_be_checked()
+                expect(position_button).to_have_count(0)
                 together.check(); automatic.check(); expect(fixed).not_to_be_checked()
+                expect(position_button).to_be_visible(); expect(position_button).to_be_disabled()
                 fixed.check(); expect(together).not_to_be_checked(); expect(automatic).not_to_be_checked()
+                expect(position_button).to_have_count(0)
                 together.check(); together.uncheck(); expect(fixed).to_be_checked()
                 initial = base_pose(canvas)
                 initial_joints = canvas.get_attribute('data-robot-joint-values')
@@ -70,10 +90,13 @@ def run():
                 assert base_pose(canvas) == initial and canvas.get_attribute('data-robot-joint-values') == initial_joints, 'worker search must leave the live robot untouched'
                 if search:
                     expect(panel.get_by_label('底盘搜索结果', exact=True)).to_be_visible()
+                    expect(position_button).to_be_enabled()
                 panel.get_by_role('spinbutton', name='底盘水平范围 m', exact=True).fill('0.9')
                 panel.get_by_role('spinbutton', name='底盘水平范围 m', exact=True).press('Enter')
                 expect(panel).to_have_attribute('data-status', 'editing')
                 expect(panel.get_by_role('button', name='执行划线', exact=True)).to_be_disabled()
+                if search:
+                    expect(position_button).to_be_disabled()
                 panel.get_by_role('button', name='检查路径', exact=True).click()
                 expect(panel).to_have_attribute('data-status', 'ready', timeout=60000)
                 page.screenshot(path=str(ARTIFACTS / (mode + '-checked.png')), full_page=True)
@@ -89,11 +112,15 @@ def run():
                 panel.get_by_role('button', name='执行划线', exact=True).click()
                 expect(panel).to_have_attribute('data-status', 'playing')
                 expect(fixed).to_be_disabled(); expect(together).to_be_disabled(); expect(automatic).to_be_disabled()
+                if search:
+                    expect(position_button).to_be_disabled()
                 page.wait_for_function('initial => Math.hypot(...[..."XY"].map((k, i) => Number(document.querySelector(".three-canvas").dataset["robot" + k]) - initial[i])) > .01', arg=initial[:2])
                 expect(panel.get_by_label('划线实际移动距离', exact=True)).to_be_visible()
                 assert float(panel.get_attribute('data-elapsed-ms')) < 3000, 'the initial base motion must not take many seconds to become visible'
                 panel.get_by_role('button', name='暂停', exact=True).click()
                 expect(panel).to_have_attribute('data-status', 'paused')
+                if search:
+                    expect(position_button).to_be_disabled()
                 paused = base_pose(canvas)
                 paused_travel = panel.get_attribute('data-base-travel-mm')
                 assert float(paused_travel) > 9
@@ -120,6 +147,42 @@ def run():
                 assert math.dist(actual_tool, [.65, .42, .75]) < .002, actual_tool
                 assert json.loads(canvas.get_attribute('data-robot-joint-values'))['right_J1'] == 0
                 page.screenshot(path=str(ARTIFACTS / (mode + '-completed.png')), full_page=True)
+                if search:
+                    checked = page.evaluate('window.polylineSearchResult')
+                    requests = page.evaluate('window.polylineRequests')
+                    first_drawing = next(segment for segment in checked['segments'] if segment['index'] >= 0)
+                    first = first_drawing['samples'][0]
+                    expect(position_button).to_be_enabled()
+                    position_button.click()
+                    expect(panel).to_have_attribute('data-status', 'ready')
+                    expect(position_button).to_have_text('已到达搜索位置')
+                    expect(position_button).to_be_disabled()
+                    expect(panel).to_have_attribute('data-elapsed-ms', '0')
+                    expect(panel).to_have_attribute('data-tool-travel-mm', '0')
+                    expect(canvas).to_have_attribute('data-polyline-trace-points', '0')
+                    placed = base_pose(canvas)
+                    expected_position = [checked['baseReference']['position'][i] + first['base'][axis] for i, axis in enumerate(['x', 'y'])]
+                    assert math.dist(placed[:2], expected_position) < .000001
+                    joints = json.loads(canvas.get_attribute('data-robot-joint-values'))
+                    assert all(abs(joints[name] - value) < 1e-8 for name, value in first['joints'].items())
+                    actual_tip = [placed[i] + offset + joints[f'left_J{i + 1}'] for i, offset in enumerate([.4, .3, .5])]
+                    assert math.dist(actual_tip, [.58, .3, .55]) < .002, 'placement must include the checked arm pose at P0'
+                    assert abs(float(panel.get_attribute('data-duration-ms')) - (checked['durationMs'] - first_drawing['startMs'])) < .01
+                    if not sync:
+                        page.set_viewport_size({'width': 1000, 'height': 720})
+                        position_button.scroll_into_view_if_needed()
+                        box = position_button.bounding_box()
+                        assert 0 <= box['x'] and box['x'] + box['width'] <= 1000
+                        page.screenshot(path=str(ARTIFACTS / 'search-placement-compact.png'), full_page=True)
+                        page.set_viewport_size({'width': 1680, 'height': 1100})
+                    panel.get_by_role('button', name='执行划线', exact=True).click()
+                    expect(panel).to_have_attribute('data-status', 'playing')
+                    expect(position_button).to_be_disabled()
+                    expect(panel.get_by_role('status')).to_contain_text('划线 P')
+                    expect(panel).to_have_attribute('data-status', 'completed', timeout=60000)
+                    assert math.dist(base_pose(canvas), end) < .00001, 'the positioned stroke reaches the same checked end pose'
+                    assert float(panel.get_attribute('data-base-travel-mm')) > 20 if sync else float(panel.get_attribute('data-base-travel-mm')) < .003
+                    assert page.evaluate('window.polylineRequests') == requests, 'placement and execution reuse the checked plan without another IK/search request'
                 if sync and search:
                     panel.get_by_role('button', name='保存', exact=True).click()
                     expect(panel).to_contain_text('已保存至当前示教任务')
@@ -139,18 +202,18 @@ def run():
                         start_project_download(page)
                     archive = read_exported_project(download_info.value)
                     saved = [path for task in archive['virtualTeaching']['tasks'] for path in task.get('polylines', [])]
-                    assert saved[0]['base'] == dict(sync=True, search=True, range=.9, yawRange=0)
+                    assert saved[0]['base'] == dict(sync=True, search=True, allowPartial=False, waistAssist=False, range=.9, yawRange=0), saved[0]['base']
                 assert not errors, errors
                 print(mode, 'passed', flush=True)
-            except Exception:
+            except Exception as error:
                 page.screenshot(path=str(ARTIFACTS / (mode + '-failure.png')), full_page=True)
-                print('errors:', errors, flush=True)
-                print('panel:', page.locator('.polyline-teaching').inner_text(), flush=True)
+                print('failure:', repr(error), 'page errors:', errors, flush=True)
+                print('panel:', page.locator('.polyline-teaching').all_text_contents(), flush=True)
                 raise
             finally:
                 page.close()
         browser.close()
-        print('Chassis UI: exclusivity, worker isolation, joint/base playback, fixed parking, pause/resume, FK, saved pose and ZIP configuration passed.')
+        print('Chassis UI: exclusivity, worker isolation, joint/base playback, fixed parking, search placement and direct execution, no replanning, pause/resume, FK, saved pose and ZIP configuration passed.')
 
 
 if __name__ == '__main__':
