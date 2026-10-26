@@ -10,7 +10,7 @@ import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_BASE_DEFAULTS, POLYLINE_
 import { loadPolylinePreferences, savePolylinePreferences } from '../lib/polylineTeachingPreferences.js';
 import { POLYLINE_ALGORITHM_DEFAULTS, POLYLINE_ALGORITHM_FIELDS, POLYLINE_ALGORITHM_GROUPS } from '../lib/polylineTeachingParameters.js';
 import { planPolylineInWorker } from '../lib/polylineTeachingWorker.js';
-import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, writePolylinePreview } from '../lib/polylineTeachingPreview.js';
+import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, polylinePreviewCapacity, writePolylinePreview } from '../lib/polylineTeachingPreview.js';
 import { VIEWPORT_DRAG_THRESHOLD } from '../lib/viewportNavigation.js';
 import { isPolylineWaistJoint } from '../lib/polylineTeachingJoints.js';
 import { polylineWithSide } from '../lib/polylineTeachingTool.js';
@@ -20,7 +20,8 @@ import './PolylineTeachingPanel.css';
 
 // A new stroke resets geometry/identity, not the selected tool or planning
 // constraints. Otherwise nearby points silently get a different IK problem.
-const fresh = (previous) => ({ id: '', name: '表面折线', side: previous?.side || 'left', closed: false, points: [], quaternion: null,
+const fresh = (previous) => ({ id: '', name: previous?.pathType === 'spline' ? '空间曲线' : '表面折线',
+  pathType: previous?.pathType === 'spline' ? 'spline' : 'polyline', side: previous?.side || 'left', closed: false, points: [], quaternion: null,
   tcpOffset: [...(previous?.tcpOffset || [0, 0, -0.2])], toolAxisMode: 'manual', toolAxisDirection: previous?.toolAxisDirection ?? -1,
   settings: { ...POLYLINE_DEFAULTS, ...previous?.settings }, base: { ...POLYLINE_BASE_DEFAULTS, ...previous?.base } });
 const sameJoints = (a, b) => a && b && Object.keys(a).every((name) => Math.abs(a[name] - (b[name] ?? Infinity)) < 1e-6)
@@ -116,7 +117,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     && currentContext.robot.parent.getWorldQuaternion(new THREE.Quaternion()).angleTo(new THREE.Quaternion().fromArray(searchedStart.basePose.quaternion)) < 1e-7);
   useEffect(() => {
     if (open && active) savePolylinePreferences(path);
-  }, [open, active, path.side, path.tcpOffset, path.toolAxisDirection, path.settings, path.base]);
+  }, [open, active, path.side, path.pathType, path.tcpOffset, path.toolAxisDirection, path.settings, path.base]);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   useEffect(() => { setExplanationOpen(false); }, [plan, status, open, active]);
   useEffect(() => { if (!open || !active) setAlgorithmHelpOpen(false); }, [open, active]);
@@ -216,7 +217,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     if (!scene || !canvas) return undefined;
     let preview;
     if (open && active && previewVisible && path.points.length > 1) {
-      const capacity = path.points.length * 3 * 6;
+      const capacity = polylinePreviewCapacity(path) * 6;
       preview = new LineSegments2(new LineSegmentsGeometry().setPositions(new Float32Array(capacity)).setColors(new Float32Array(capacity)),
         new LineMaterial({ color: 0xffffff, vertexColors: true, linewidth: 3, depthTest: false, depthWrite: false }));
       preview.name = 'polyline-tcp-preview';
@@ -246,7 +247,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       delete canvas.dataset.polylineRemainingMm;
       delete canvas.dataset.polylinePreviewColors;
     };
-  }, [path.points, path.closed, previewVisible, plan, open, active, sceneRevision]);
+  }, [path.points, path.closed, path.pathType, path.settings.step, path.settings.tolerance, previewVisible, plan, open, active, sceneRevision]);
 
   // Keep source geometry independent from display LOD. This mesh is never
   // inserted into the scene; picking cannot modify the map's draw range.
@@ -487,7 +488,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
     // on a new plan after the user has adjusted the robot's posture.
     const withOrientation = { ...action, quaternion: controller.frame.getWorldQuaternion(new THREE.Quaternion()).toArray() };
     setPath(withOrientation); setStatus('checking'); setPlan(null); setSuggestionVisible(true); clearTrace(); setProgress(null); setElapsed(0);
-    setMessage(action.base.search ? '正在搜索底盘位置，并检查预定位与完整折线路径。' : '检查到起点的移动、各条线段以及插值中的姿态。');
+    setMessage(action.base.search ? '正在搜索底盘位置，并检查预定位与完整路线。' : '检查到起点的移动、划线路径以及插值中的姿态。');
     snapshotRef.current = { key: contextKey(context) }; expectedRef.current = robotState(context);
     const controllerAbort = new AbortController(); abortRef.current = controllerAbort;
     try {
@@ -657,7 +658,8 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
   const drawingProgress = polylineDrawingProgress(path, executedRef.current?.sample);
   const distance = drawingProgress.total;
   return createPortal(<section className="polyline-teaching" data-layout="sidebar"
-    aria-label="表面折线示教" data-path-id={path.id} data-status={status} data-point-count={path.points.length} data-undo-count={history.length} data-warning-count={warnings.length}
+    aria-label="表面折线示教" data-path-id={path.id} data-path-type={path.pathType || 'polyline'} data-path-length={distance}
+    data-status={status} data-point-count={path.points.length} data-undo-count={history.length} data-warning-count={warnings.length}
     data-plan-partial={Boolean(plan?.partial)} data-plan-executable={executable} data-planned-distance={plan?.distance || 0}
     data-approach-mode={plan?.approachSearch?.mode || ''}
     data-approach-stage={status === 'checking' ? progress?.searchStage || '' : plan?.approachSearch?.stage || plan?.approachSearch?.lastStage || ''}
@@ -700,6 +702,15 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
           onChange={(event) => setPath({ ...path, name: event.target.value })} /></label>
         {path.id && <button type="button" disabled={busy} aria-label="取消选择并新建折线"
           title="保留当前参数与已保存记录，开始点选新折线 · Esc" onClick={startNewPolyline}>取消选择 <kbd>Esc</kbd></button>}
+      </div>
+      <div className="polyline-teaching__path-type" role="group" aria-label="路径类型">
+        <span>路径类型</span>
+        {[['polyline', '折线'], ['spline', '空间曲线']].map(([type, label]) => <button key={type} type="button"
+          disabled={busy} aria-pressed={(path.pathType || 'polyline') === type} onClick={() => {
+            if ((path.pathType || 'polyline') === type) return;
+            edit({ ...path, pathType: type, name: ['表面折线', '空间曲线'].includes(path.name)
+              ? type === 'spline' ? '空间曲线' : '表面折线' : path.name });
+          }}>{label}</button>)}
       </div>
       <div className="polyline-teaching__columns">
         <label className="polyline-teaching__field">执行机械臂<select aria-label="折线执行机械臂" disabled={busy} value={path.side}
@@ -785,7 +796,7 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
       </fieldset>
       </div>
       {plan?.speedProfile && <p className="polyline-teaching__hint" aria-label="匀速划线结果">
-        规划划线速度：{(plan.speedProfile.cruiseSpeed * 1000).toFixed(1)} mm/s · 圆角偏移 ≤ {(plan.speedProfile.blendTolerance * 1000).toFixed(2)} mm
+        规划划线速度：{(plan.speedProfile.cruiseSpeed * 1000).toFixed(1)} mm/s{path.pathType !== 'spline' && <> · 圆角偏移 ≤ {(plan.speedProfile.blendTolerance * 1000).toFixed(2)} mm</>}
         {plan.speedProfile.cornerStops > 0 && `；${plan.speedProfile.cornerStops} 处折返需停车换向。`}
       </p>}
       {plan?.partial && <div className="polyline-teaching__partial-result" role="note" aria-label="最大保障结果">
@@ -820,16 +831,16 @@ export default function PolylineTeachingPanel({ open, active, container, getCont
         <button type="button" disabled={busy} aria-label={`删除折线点 P${index}`} onClick={() => edit({ ...path, closed: path.closed && path.points.length > 3, points: path.points.filter((_, i) => i !== index) }, -1)}><Trash2 size={12} /></button>
       </li>)}</ol> : <div className="polyline-teaching__empty"><MousePointer2 size={24} /><strong>在物体上点出第一条路线</strong><span>单击添加点，拖动已有点重新吸附表面。</span></div>}
       <div className="polyline-teaching__row"><label><input type="checkbox" checked={path.closed} disabled={busy || path.points.length < 3}
-        onChange={(event) => edit({ ...path, closed: event.target.checked })} />闭合折线</label><button type="button" disabled={busy || !history.length}
+        onChange={(event) => edit({ ...path, closed: event.target.checked })} />{path.pathType === 'spline' ? '闭合曲线' : '闭合折线'}</label><button type="button" disabled={busy || !history.length}
           title="撤销上一步 · Ctrl+Z / ⌘Z" aria-keyshortcuts="Control+Z Meta+Z" onClick={undo}>
           <RotateCcw size={12} />撤销</button><button type="button" disabled={busy} title="保留当前工具与算法参数，重新点选折线" onClick={startNewPolyline}>新建</button></div>
-      <p className="polyline-teaching__hint">{path.settings.uniformSpeed !== false ? '容差内平滑过弯' : '严格直线连接 · 拐角停顿'} · 橘黄色为已执行部分；{previewPlan?.partial ? '绿色为待执行的可达部分，红色为不可执行部分。' : '未执行部分保持青绿色；表面警告见提示列表。'}{baseMoving && '紫色为底盘计划路径，箭头表示搜索选中的起始朝向。'}</p>
+      <p className="polyline-teaching__hint">{path.pathType === 'spline' ? '曲线穿过选点 · 点间不自动贴合表面' : path.settings.uniformSpeed !== false ? '容差内平滑过弯' : '严格直线连接 · 拐角停顿'} · 橘黄色为已执行部分；{previewPlan?.partial ? '绿色为待执行的可达部分，红色为不可执行部分。' : '未执行部分保持青绿色；表面警告见提示列表。'}{baseMoving && '紫色为底盘计划路径，箭头表示搜索选中的起始朝向。'}</p>
       <details className="polyline-teaching__library"><summary>已保存折线 <b>{savedPaths.length}</b></summary>
         {savedPaths.length ? savedPaths.map(({ taskId, taskName, path: saved }) => <div key={`${taskId}:${saved.id}`}>
           <button type="button" disabled={busy} aria-pressed={path.id === saved.id} onClick={() => {
             edit(structuredClone(saved), -1); setOperation('append'); setMessage('已载入折线，请从当前机器人姿态重新检查。');
             bodyRef.current?.scrollTo({ top: 0 });
-          }}><strong>{saved.name}</strong><small>{taskName} · {saved.points.length} 点</small></button>
+          }}><strong>{saved.name}</strong><small>{saved.pathType === 'spline' ? '空间曲线' : '折线'} · {taskName} · {saved.points.length} 点</small></button>
           <button type="button" disabled={busy} aria-label={`删除已保存折线 ${saved.name}`} onClick={() => { onDelete(taskId, saved.id); if (path.id === saved.id) setPath({ ...path, id: '' }); }}><Trash2 size={13} /></button>
         </div>) : <p>保存后可在这里重新打开。</p>}
       </details>

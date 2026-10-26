@@ -694,7 +694,7 @@ export default function VirtualTeachingPanel({
                               title="查看保存的笔尖轨迹；此折线独立于停车点"
                               onClick={() => openCapturePolyline(task, path)}>
                               <i>L{String(index + 1).padStart(2, '0')}</i><Route size={12} />
-                              <span><strong>{path.name}</strong><small>独立折线 · {path.side === 'right' ? '右臂' : '左臂'} · {path.points.length} 点</small></span>
+                              <span><strong>{path.name}</strong><small>{path.pathType === 'spline' ? '空间曲线' : '独立折线'} · {path.side === 'right' ? '右臂' : '左臂'} · {path.points.length} 点</small></span>
                             </button>
                             <button type="button" className="teaching-capture-tree__polyline-play"
                               aria-label={`回放折线 ${path.name}`} disabled={disabled}

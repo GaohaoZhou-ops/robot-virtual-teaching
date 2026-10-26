@@ -218,7 +218,7 @@ export default function TeachingArchiveTree({
   };
   const playbackOptions = [
     ...(poseCountForTask(selectedTask) ? [{ value: 'poses', label: '停车点与机械臂姿态' }] : []),
-    ...(selectedTask?.polylines || []).map((path) => ({ value: `polyline:${path.id}`, label: `独立折线 · ${path.name}`, path })),
+    ...(selectedTask?.polylines || []).map((path) => ({ value: `polyline:${path.id}`, label: `${path.pathType === 'spline' ? '空间曲线' : '独立折线'} · ${path.name}`, path })),
   ];
   const playbackOption = playbackOptions.find((option) => playbackSelection?.taskId === selectedTask?.id
     && option.value === playbackSelection.value) || playbackOptions[0];
@@ -614,7 +614,7 @@ export default function TeachingArchiveTree({
                   <button type="button" className="teaching-tree-label" aria-label={`查看折线 ${path.name}`}
                     disabled={Boolean(disabledReason)} title={disabledReason || '在 3D 工作台查看独立折线'}
                     onClick={() => onOpenPolyline?.(task.id, path.id, 'preview')}>
-                    <Route size={12} /><span>{path.name}</span><small>{path.points?.length || 0} 点</small>
+                    <Route size={12} /><span>{path.name}</span><small>{path.pathType === 'spline' ? '曲线 · ' : ''}{path.points?.length || 0} 点</small>
                   </button>
                   <button type="button" className="teaching-tree-polyline-play" aria-label={`回放折线 ${path.name}`}
                     disabled={Boolean(disabledReason)} title={disabledReason || '返回 3D 工作台，检查通过后回放折线'}

@@ -33,7 +33,7 @@ const restored = loadPolylinePreferences(storage);
 for (const key of ['side', 'tcpOffset', 'toolAxisDirection', 'settings', 'base']) assert.deepEqual(restored[key], saved[key]);
 assert.equal(restored.toolAxisDirection, 1, 'retain direction at zero distance');
 const encoded = JSON.parse(entries.get(POLYLINE_PREFERENCES_KEY));
-assert.deepEqual(Object.keys(encoded).sort(), ['base', 'settings', 'side', 'tcpOffset', 'toolAxisDirection', 'version']);
+assert.deepEqual(Object.keys(encoded).sort(), ['base', 'pathType', 'settings', 'side', 'tcpOffset', 'toolAxisDirection', 'version']);
 assert.deepEqual(saved, before, 'remembering parameters cannot change the saved record');
 assert.equal(entries.get('unrelated'), 'preserve');
 restored.tcpOffset[0] = .2;

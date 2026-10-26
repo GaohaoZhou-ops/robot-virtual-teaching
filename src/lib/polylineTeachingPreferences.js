@@ -2,16 +2,16 @@ import { normalizePolyline } from './polylineTeaching.js';
 
 export const POLYLINE_PREFERENCES_KEY = 'atlas-route-studio:polyline-preferences-v1';
 
-// Remember only tool/planning parameters. Geometry, record identity, robot
-// poses and checked plans belong to a particular path and must not carry over.
+// Remember tool/planning parameters and the chosen path type. Authored points,
+// record identity, robot poses and checked plans must not carry over.
 function parameters(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const path = normalizePolyline({ points: [], side: value.side,
+  const path = normalizePolyline({ points: [], side: value.side, pathType: value.pathType,
     tcpOffset: value.tcpOffset ?? [0, 0, -0.2], toolAxisDirection: value.toolAxisDirection,
     settings: value.settings, base: value.base });
   if (!path) return null;
-  const { side, tcpOffset, toolAxisDirection, settings, base } = path;
-  return { side, tcpOffset, toolAxisDirection, settings, base };
+  const { side, pathType, tcpOffset, toolAxisDirection, settings, base } = path;
+  return { side, pathType, tcpOffset, toolAxisDirection, settings, base };
 }
 
 export function loadPolylinePreferences(storage) {

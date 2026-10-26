@@ -1,5 +1,5 @@
 import { Line3, Vector3 } from 'three';
-import { normalizePolyline, polylineVertices } from './polylineTeaching.js';
+import { normalizePolyline, polylineGeometryVertices } from './polylineTeaching.js';
 
 // Saved points are geometric hints, not trusted robot trajectories. Limit the
 // worker payload and try both ends of up to four nearby, compatible strokes.
@@ -11,7 +11,7 @@ export function polylineApproachGuides(path, savedPaths, start) {
     const saved = normalizePolyline(value);
     if (!saved || saved.points.length < 2 || saved.side !== action.side
       || saved.tcpOffset.some((offset, i) => Math.abs(offset - action.tcpOffset[i]) > 1e-6)) continue;
-    const vertices = polylineVertices(saved);
+    const vertices = polylineGeometryVertices(saved);
     let nearest = null;
     for (let i = 0; i < vertices.length - 1; i += 1) {
       if (vertices[i].distanceToSquared(vertices[i + 1]) < 1e-12) continue;

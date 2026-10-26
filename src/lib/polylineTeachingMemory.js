@@ -33,7 +33,8 @@ export function createPolylineSuccessMemory() {
         return { position: [...sample.target], joints: { ...sample.joints } };
       });
       const entry = { key: `successful-plan-${++serial}`, path, quaternion: [...plan.quaternion], samples };
-      entries = [entry, ...entries.filter((item) => JSON.stringify(item.path.points) !== JSON.stringify(path.points))].slice(0, 4);
+      const geometryKey = (stroke) => JSON.stringify([stroke.pathType, stroke.closed, stroke.points]);
+      entries = [entry, ...entries.filter((item) => geometryKey(item.path) !== geometryKey(path))].slice(0, 4);
     },
     guides(key, value, start) {
       select(key);

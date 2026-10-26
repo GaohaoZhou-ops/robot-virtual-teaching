@@ -1,4 +1,5 @@
 import { Vector3 } from 'three';
+import { sampleSpatialCurve } from './polylineTeachingSpatialCurve.js';
 
 const vector = (value) => new Vector3().fromArray(value);
 const pointOnPart = (part, t) => part.control
@@ -88,6 +89,7 @@ export function buildPolylineDrawingEdges(vertices, settings) {
 }
 
 export function samplePolylineCurve(curve, progress) {
+  if (curve.kind === 'spatial') return sampleSpatialCurve(curve, progress);
   const distance = Math.max(0, Math.min(1, progress)) * curve.length;
   let lo = 0, hi = curve.parts.length - 1;
   while (lo < hi) { const mid = (lo + hi) >>> 1; if (distance < curve.parts[mid].endS) hi = mid; else lo = mid + 1; }

@@ -62,6 +62,13 @@ export function preparePolylineTiming(samples, distance, settings, definitions, 
     return { from: a.u, to: b.u, h, speed, acceleration };
   });
 
+  if (!settings.uniformSpeed && arcMapping && curvature > 0) {
+    // Spatial paths retain their curvature even when uniform cruising is off.
+    // Reserve acceleration for turning as well as tangential speed changes.
+    const turnSpeed = Math.sqrt(settings.acceleration / 2 / curvature) / distance;
+    intervals = intervals.map((interval) => ({ ...interval, speed: Math.min(interval.speed, turnSpeed),
+      acceleration: Math.min(interval.acceleration, settings.acceleration / 2 / distance) }));
+  }
   if (settings.uniformSpeed) {
     // One cruise speed for the entire continuous drawing block. A restrictive
     // joint interval lowers this common speed instead of causing repeated ramps.

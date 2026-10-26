@@ -1,6 +1,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { samplePolylineProgress } from './polylineTeachingTiming.js';
 import { samplePolylineCurve } from './polylineTeachingCurve.js';
+import { spatialCurveGeometry, spatialCurveVertices, spatialCurveBoundsPoints } from './polylineTeachingSpatialCurve.js';
 import { POLYLINE_ALGORITHM_DEFAULTS, POLYLINE_ALGORITHM_FIELDS } from './polylineTeachingParameters.js';
 
 export const POLYLINE_MAX_SPEED = 0.3;
@@ -13,6 +14,7 @@ const finiteVector = (value, size) => Array.isArray(value) && value.length === s
 // against the current robot, limits, start posture and environment on reopening.
 export function normalizePolyline(value) {
   if (!value || !Array.isArray(value.points) || value.points.length > POLYLINE_MAX_POINTS) return null;
+  if (value.pathType != null && !['polyline', 'spline'].includes(value.pathType)) return null;
   if (!value.points.every((point) => finiteVector(point.position, 3))) return null;
   const quaternion = finiteVector(value.quaternion, 4) ? new Quaternion().fromArray(value.quaternion) : null;
   if (quaternion && quaternion.lengthSq() < 1e-12) return null;
@@ -31,7 +33,9 @@ export function normalizePolyline(value) {
     if (!Number.isFinite(number) || number < low || number > high || (integer && !Number.isInteger(number))) return null;
     settings[key] = number;
   }
-  return { id: String(value.id || ''), name: String(value.name || '表面折线'), version: 1,
+  const pathType = value.pathType === 'spline' ? 'spline' : 'polyline';
+  return { id: String(value.id || ''), name: String(value.name || (pathType === 'spline' ? '空间曲线' : '表面折线')),
+    version: pathType === 'spline' ? 2 : 1, pathType,
     side: value.side === 'right' ? 'right' : 'left', closed: Boolean(value.closed),
     tcpOffset: [...tcpOffset],
     // The sign of Z is authoritative for old records; retain the selected
@@ -66,14 +70,18 @@ export function polylineVertices(value) {
   return value.closed && points.length > 2 ? [...points, points[0].clone()] : points;
 }
 
-// Measure progress along the authored edges, including the closing edge.
+export const polylineGeometryVertices = (value) => value.pathType === 'spline' ? spatialCurveVertices(value) : polylineVertices(value);
+export const polylineBoundsPoints = (value) => value.pathType === 'spline' ? spatialCurveBoundsPoints(value) : polylineVertices(value);
+
+// Measure authored spans by length, including the closing span and spline arcs.
 // Approach/return motion contributes nothing, and a partial plan still uses
 // the full requested line as its denominator. Rounded paths retain edge progress.
 export function polylineDrawingProgress(path, playback = null) {
   const vertices = polylineVertices(path);
+  const cumulative = path.pathType === 'spline' ? spatialCurveGeometry(path).cumulative : null;
   let total = 0, completed = 0;
   for (let i = 1; i < vertices.length; i += 1) {
-    const length = vertices[i].distanceTo(vertices[i - 1]);
+    const length = cumulative ? cumulative[i] - cumulative[i - 1] : vertices[i].distanceTo(vertices[i - 1]);
     total += length;
     if (playback?.drawing) completed += length * (i - 1 < playback.segmentIndex ? 1
       : i - 1 === playback.segmentIndex ? Math.max(0, Math.min(1, playback.segmentProgress)) : 0);

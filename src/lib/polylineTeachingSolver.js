@@ -5,9 +5,10 @@ import { getRobotJointCouplingPairs, robotJointCouplingViolations } from './robo
 import { polylineJointExclusions } from './polylineTeachingJoints.js';
 import { solveEndEffectorIk } from './robotEndEffectorIk.js';
 import { createMobileCollisionChecker } from './mobileTeachingCollision.js';
-import { normalizePolyline, polylineVertices, preparePolylineInterpolation, samplePolylineState } from './polylineTeaching.js';
+import { normalizePolyline, polylineVertices, polylineGeometryVertices, polylineDrawingProgress, preparePolylineInterpolation, samplePolylineState } from './polylineTeaching.js';
 import { preparePolylineTiming } from './polylineTeachingTiming.js';
 import { buildPolylineDrawingEdges, samplePolylineCurve } from './polylineTeachingCurve.js';
+import { spatialCurveDrawingEdges } from './polylineTeachingSpatialCurve.js';
 import { preparePolylineArcMapping } from './polylineTeachingSpeed.js';
 import { createPolylineBase, polylineBaseCandidates, polylinePostureCost } from './polylineTeachingBase.js';
 import { canRecoverPolylinePosture, nearestPolylineReference, polylineRecoveryPolicies } from './polylineTeachingRecovery.js';
@@ -58,7 +59,11 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const checker = await createMobileCollisionChecker(robot, environment, checkpoint, { preparedEnvironment });
   const vertices = polylineVertices(action);
   const allowPartial = action.base.allowPartial && !action.base.sync && !action.base.search;
-  const requestedDistance = vertices.slice(1).reduce((sum, point, i) => sum + point.distanceTo(vertices[i]), 0);
+  const requestedDistance = polylineDrawingProgress(action).total;
+  if (requestedDistance < 1e-9) throw new Error('路线点重合，请增加有长度的线段');
+  const drawingEdges = action.pathType === 'spline' ? spatialCurveDrawingEdges(action)
+    : settings.uniformSpeed ? buildPolylineDrawingEdges(vertices, settings)
+      : vertices.slice(1).map((to, index) => ({ from: vertices[index], to, index }));
   const start = controller.frame.getWorldPosition(new THREE.Vector3());
   let approachOffset = 0, approachLength = start.distanceTo(vertices[0]), activeCurve = null;
   const issue = (message, index, u, details = {}) => {
@@ -152,7 +157,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     const addSegment = async (edge, samples, distance, endFraction = 1) => {
       const arcMapping = edge.curve ? await preparePolylineArcMapping(samples, applyState, controller.frame, checkpoint) : null;
       const { durationMs: segmentDuration, ...timed } = preparePolylineTiming(samples, arcMapping?.length ?? distance,
-        { ...settings, uniformSpeed: Boolean(edge.curve) }, definitions,
+        { ...settings, uniformSpeed: settings.uniformSpeed && Boolean(edge.curve) }, definitions,
         { curvature: Math.max(edge.curve?.curvature || 0, arcMapping?.curvature || 0), arcMapping });
       segments.push({ index: edge.index, phase: edge.index === -2 ? 'positioning' : edge.index < 0 ? 'approach' : 'drawing',
         from: edge.from.toArray(), to: edge.to.toArray(), samples, ...timed, endFraction,
@@ -186,7 +191,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
         ...(base ? { baseReference: base.reference, selectedBase: drawing[0].samples[0].base } : {}),
         maximumError, checks, distance, requestedDistance, coverage: Math.min(1, distance / requestedDistance),
         ...(settings.uniformSpeed ? { speedProfile: { mode: 'uniform', cruiseSpeed: Math.min(...drawing.map((segment) => segment.cruiseSpeed)),
-          requestedSpeed: settings.speed, blendTolerance: settings.tolerance * .5, cornerStops: drawing.length - 1 } } : {}),
+          requestedSpeed: settings.speed, blendTolerance: action.pathType === 'spline' ? 0 : settings.tolerance * .5, cornerStops: drawing.length - 1 } } : {}),
         stoppedAt: { segmentIndex: lastPoint?.segmentIndex ?? last.index, progress: lastPoint?.segmentProgress ?? last.endFraction, position: [...last.to] } };
     };
     const reposition = base && (Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8);
@@ -197,8 +202,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
     const approach = [start, ...approachWaypoints.map((point) => new THREE.Vector3().fromArray(point)), vertices[0]];
     const edges = [...approach.slice(1).map((to, index) => ({ from: approach[index], to, index: reposition ? -2 : -1,
       ...(reposition ? { baseTarget: candidate } : {}) })),
-      ...(settings.uniformSpeed ? buildPolylineDrawingEdges(vertices, settings)
-        : vertices.slice(1).map((to, index) => ({ from: vertices[index], to, index })))];
+      ...drawingEdges];
     let approachTravel = 0;
     for (const edge of edges) {
       const { from, to, index } = edge, distance = edge.distance ?? from.distanceTo(to);
@@ -207,7 +211,7 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
       // Once recovery reaches P0, keep its achieved posture as the drawing
       // reference. Releasing held joints must not pull them abruptly back
       // toward the pre-approach configuration via IK regularization.
-      if (index === 0 && (approachLocks.size || approachWaypoints.length)) reference = referenceValues(readState());
+      if (index >= 0 && !segments.some((segment) => segment.index >= 0) && (approachLocks.size || approachWaypoints.length)) reference = referenceValues(readState());
       if (distance < 0.00001 && !edge.baseTarget) continue;
       if (index < 0) { approachOffset = approachTravel; approachLength = distance; approachTravel += distance; }
       if (!edge.curve && checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
@@ -392,9 +396,10 @@ export async function planPolyline({ robot, parentMatrix, path, environment, loc
   const initialCollision = collisionIssue(-1, 0);
   if (initialCollision) return { complete: false, warnings: [], issue: { ...initialCollision, phase: 'initial',
     message: `${initialCollision.message}。请先调整机器人姿态或位置，再重新检查。` } };
-  const candidates = polylineBaseCandidates(vertices, start, base.reference, action.base);
+  const searchVertices = polylineGeometryVertices(action);
+  const candidates = polylineBaseCandidates(searchVertices, start, base.reference, action.base);
   const ranked = [];
-  const probePoints = vertices.filter((_, i) => i === 0 || i === vertices.length - 1 || i % Math.max(1, Math.ceil(vertices.length / 16)) === 0);
+  const probePoints = searchVertices.filter((_, i) => i === 0 || i === searchVertices.length - 1 || i % Math.max(1, Math.ceil(searchVertices.length / 16)) === 0);
   for (let i = 0; i < candidates.length; i += 1) {
     await checkpoint(); applyState(initialState); base.apply(candidates[i]);
     const reference = referenceValues({ base: candidates[i] });

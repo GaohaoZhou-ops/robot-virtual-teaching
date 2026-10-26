@@ -2,7 +2,7 @@ import { Euler, Matrix4, Quaternion, Vector3, MathUtils } from 'three';
 import { buildExport, createId, normalizeProject, teachingCoordinateFrame } from './io.js';
 import { sha256Bytes } from './hash.js';
 import { appendPlacedObjectLayers } from './placedObjectRendering.js';
-import { transformPolyline } from './polylineTeaching.js';
+import { transformPolyline, polylineBoundsPoints } from './polylineTeaching.js';
 
 const axes = ['x', 'y', 'z'];
 const rotationAxes = ['roll', 'pitch', 'yaw'];
@@ -357,8 +357,8 @@ export async function extractTeachingWorkspace(source, { bounds, localToMap, nam
   const selected = {
     ...project,
     teachingTasks: project.teachingTasks.map((task) => ({ ...task,
-      ...(task.polylines ? { polylines: task.polylines.filter((path) => path.points.every((point) =>
-        insideTransferBounds(new Vector3().fromArray(point.position), bounds))) } : {}),
+      ...(task.polylines ? { polylines: task.polylines.filter((path) => polylineBoundsPoints(path).every((point) =>
+        insideTransferBounds(point, bounds))) } : {}),
       parkingPoints: task.parkingPoints.filter((point) => insideTransferBounds(point.mapPose.position, bounds)),
     })).filter((task) => task.parkingPoints.length || task.polylines?.length || task.mobileCapture?.samples.some((sample) => {
       const p = sample.cameraPose.position;

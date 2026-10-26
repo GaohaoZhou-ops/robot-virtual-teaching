@@ -35,6 +35,9 @@
 .polyline-teaching__name>.polyline-teaching__field { flex:1; min-width:0; }
 .polyline-teaching__name>button { flex-shrink:0; font-size:11px; }
 .polyline-teaching__name kbd { font:inherit; font-size:9px; opacity:.65; }
+.polyline-teaching__path-type { display:grid; grid-template-columns:auto 1fr 1fr; align-items:center; gap:6px; }
+.polyline-teaching__path-type>span { margin-right:5px; color:#9cb6c2; font-size:11px; }
+.polyline-teaching__path-type button { padding:7px 9px; font-size:11px; }
 .polyline-teaching input:not([type=checkbox]),.polyline-teaching select { width:100%; min-width:0; box-sizing:border-box; padding:7px 8px; color:#ecf8fc; background:#0b1a24; border:1px solid #314652; border-radius:5px; font:inherit; }
 .polyline-teaching__columns { display:grid; grid-template-columns:1.1fr 1fr; gap:10px; }
 .polyline-teaching__constraints { position:relative; }

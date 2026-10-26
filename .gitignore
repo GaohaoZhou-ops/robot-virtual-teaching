@@ -49,6 +49,8 @@ node_modules/
 # imported-project reproductions, solver A/B source snapshots, serialized robot
 # collision hulls, playback verification and service-index backups belong in
 # test-artifacts/polyline-*/; maintained regression runners stay in tests/.
+# Spatial-curve previews, playback captures and service-index backups use
+# test-artifacts/polyline-spatial-curve/ under the same ignored output root.
 # Reset-confirmation backup checks keep screenshots and service-index backups
 # in test-artifacts/global-reset-export/; exported ZIPs use temporary workspaces.
 # Shared-preset migration and map-origin navigation checks use
@@ -198,6 +200,12 @@ test-results/
 ms-playwright/
 playwright/.cache/
 playwright/.auth/
+# Browser smoke tests also create downloaded projects and temporary Chrome
+# profiles when TMPDIR points into the repository. Keep nested fixtures visible.
+/playwright-artifacts-*/
+/tests/playwright-artifacts-*/
+/playwright_chromiumdev_profile-*/
+/tests/playwright_chromiumdev_profile-*/
 *.lcov
 *.xcresult/
 *.xcresult.zip
