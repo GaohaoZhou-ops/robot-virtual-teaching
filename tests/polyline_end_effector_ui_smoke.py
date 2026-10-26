@@ -15,7 +15,7 @@ ARTIFACTS = ROOT / 'test-artifacts/polyline-end-effector'
 
 def edit_field(panel, label, value):
     field = panel.get_by_role('spinbutton', name=label, exact=True)
-    field.fill(str(value)); field.press('Enter')
+    field.fill(str(value)); field.press('Tab')
 
 
 def run():
@@ -103,6 +103,11 @@ def run():
             expect(arm).to_have_attribute('data-end-effector-side', 'right')
             edit_field(arm, '末端 YAW (°)', -17)
             assert abs(state(canvas)['joints']['right_J2'] + 17) < .5
+            accepted = state(canvas)
+            canvas.press('Enter')
+            expect(arm).to_be_hidden()
+            expect(panel).to_be_visible()
+            assert_restored(canvas, accepted)
             panel.get_by_role('button', name='移动选中点', exact=True).click()
             double_click_tool(page, canvas, 'left')
             expect(arm).to_have_attribute('data-end-effector-side', 'left')

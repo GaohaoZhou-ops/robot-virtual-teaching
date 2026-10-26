@@ -6881,6 +6881,12 @@ export default function PointCloudViewer({
     const onKeyDown = (event) => {
       const target = event.target;
       const tagName = target?.tagName?.toLowerCase();
+      const confirmEndEffector = event.key === 'Enter'
+        && !event.shiftKey
+        && ['left', 'right'].includes(endEffectorControlRef.current?.side)
+        && (target === document.body
+          || target === controlsRef.current?.domElement
+          || target?.closest?.('.end-effector-panel:not(.torso-control-panel)'));
       if (
         (target?.isContentEditable
           || tagName === 'input'
@@ -6889,6 +6895,7 @@ export default function PointCloudViewer({
         && !(event.code === 'Escape' && (
           teachingPoseEditingRef.current || endEffectorControlRef.current
         ))
+        && !confirmEndEffector
       ) {
         return;
       }
@@ -6907,7 +6914,23 @@ export default function PointCloudViewer({
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (event.code === 'Escape' && event.repeat) return;
+      if ((event.code === 'Escape' || confirmEndEffector) && event.repeat) return;
+      if (
+        confirmEndEffector
+        && renderActiveRef.current
+        && !endEffectorEditingBlockedRef.current
+        && !event.isComposing
+        && event.keyCode !== 229
+        && !event.defaultPrevented
+        && !document.querySelector('[aria-modal="true"], dialog[open]')
+      ) {
+        // PoseField commits its draft on blur before this window listener runs.
+        event.preventDefault();
+        resetKeys();
+        endEffectorInteractionRef.current?.exit?.();
+        controlsRef.current?.domElement?.focus({ preventScroll: true });
+        return;
+      }
       if (
         event.code === 'Escape'
         && renderActiveRef.current
@@ -7838,7 +7861,9 @@ export default function PointCloudViewer({
         ? '按住底盘拖拽 · 保持 Z / RPY'
         : '左键旋转 · 点 / 路径可选';
   const keyboardHelp = endEffectorControlActive
-    ? `Ctrl+Z 撤销拖拽 · Esc 取消${endEffectorControl.side === 'torso' ? '躯干' : '末端'}调整`
+    ? endEffectorControl.side === 'torso'
+      ? 'Ctrl+Z 撤销拖拽 · Esc 取消躯干调整'
+      : 'Ctrl+Z 撤销拖拽 · Enter 确认 · Esc 取消末端调整'
     : chassisDragMode
     ? 'Ctrl+Z 撤销最近一次拖拽'
     : robotControlActive

@@ -199,7 +199,7 @@ def run():
         target = number_attr(canvas, "end-effector-target-x") + 0.015
         field = page.get_by_role("spinbutton", name="末端 X (m)")
         field.fill(str(target))
-        field.press("Enter")
+        field.press("Tab")
         page.wait_for_function("Number(document.querySelector('.three-canvas').dataset.endEffectorSolveCount) > 0")
         ik_joints = joints(canvas)
         assert ik_joints != expected
@@ -217,6 +217,8 @@ def run():
         expect(canvas).to_have_attribute("data-end-effector-control-state", "active")
         field.fill(str(target))
         field.press("Enter")
+        expect(canvas).to_have_attribute("data-end-effector-control-state", "idle")
+        expect(card).to_have_attribute("data-pose-edit-state", "editing")
         ik_joints = joints(canvas)
         assert ik_joints != expected
         card.get_by_role("button", name="确认修改", exact=True).click()

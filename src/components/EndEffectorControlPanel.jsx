@@ -45,7 +45,10 @@ function PoseField({ axis, label, value, unit, step, tone, disabled, onCommit })
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Enter' && !event.repeat && !event.nativeEvent.isComposing
+            && event.keyCode !== 229 && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+            event.currentTarget.blur();
+          }
           if (event.key === 'Escape') {
             setDraft(Number(value).toFixed(unit === 'm' ? 3 : 1));
             event.currentTarget.blur();
@@ -219,7 +222,8 @@ export default function EndEffectorControlPanel({
           <strong>{sideLabel[control.side]}末端</strong>
         </div>
         <GripHorizontal size={14} className="end-effector-panel__drag-grip" aria-hidden="true" />
-        <button type="button" aria-label="退出机械臂末端控制" title="保留当前姿态并退出末端控制" onClick={onClose}>
+        <button type="button" aria-label="退出机械臂末端控制" aria-keyshortcuts="Enter"
+          title="保留当前姿态并退出末端控制 · Enter" onClick={onClose}>
           <X size={14} />
         </button>
       </header>
@@ -306,10 +310,11 @@ export default function EndEffectorControlPanel({
       <footer className="end-effector-panel__footer">
         <span>
           {bodyLocked
-            ? '本体锁定：关节角保持不变 · Esc 取消调整'
+            ? '本体锁定：关节角保持不变 · '
             : mapLocked
-              ? '全局锁定：地图 XYZ / RPY 保持不变 · Esc 取消调整'
+              ? '全局锁定：地图 XYZ / RPY 保持不变 · '
               : null}
+          Enter 确认 · Esc 取消调整
         </span>
         <div className="end-effector-panel__actions">
           <button type="button" disabled={locked || control.dragging} onClick={onReset}>

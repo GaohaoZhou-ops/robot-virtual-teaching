@@ -211,7 +211,7 @@ def run():
         drag(page, canvas, dx=5, dy=-4)
         field = page.get_by_role('spinbutton', name='末端 X (m)')
         field.fill(str(state(canvas)['target'][0] + 0.003))
-        field.press('Enter')
+        field.press('Tab')
         assert undo_depth(canvas) == 0
         numeric = state(canvas)
         canvas.focus()

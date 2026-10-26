@@ -116,7 +116,7 @@ def exercise(browser, mode):
         target_x = number_attr(canvas, "end-effector-target-x") + 0.018
         field = panel.get_by_role("spinbutton", name="末端 X (m)", exact=True)
         field.fill(str(target_x))
-        field.press("Enter")
+        field.press("Tab")
         page.wait_for_function(
             "x => Math.abs(Number(document.querySelector('.three-canvas').dataset.endEffectorTargetX) - x) < 1e-5",
             arg=target_x,

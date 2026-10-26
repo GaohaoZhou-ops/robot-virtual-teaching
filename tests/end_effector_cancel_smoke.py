@@ -28,7 +28,7 @@ def move_x(page, canvas):
     target = number_attr(canvas, "end-effector-target-x") + 0.018
     field = page.get_by_role("spinbutton", name="末端 X (m)", exact=True)
     field.fill(str(target))
-    field.press("Enter")
+    field.press("Tab")
     page.wait_for_function(
         "x => Math.abs(Number(document.querySelector('.three-canvas').dataset.endEffectorTargetX) - x) < 1e-5",
         arg=target,
@@ -75,7 +75,7 @@ def run():
             page.get_by_role("button", name="RPY 旋转", exact=True).click()
             yaw = page.get_by_role("spinbutton", name="末端 YAW (°)", exact=True)
             yaw.fill(str(number_attr(canvas, "end-effector-target-yaw") + 2.5))
-            yaw.press("Enter")
+            yaw.press("Tab")
             yaw.fill("35")
             cancel(page, canvas, original)
             assert undo_depth(canvas) == 0

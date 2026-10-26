@@ -97,7 +97,7 @@ def run():
                     toggle.press('Escape')
                 double_click_tool(page, canvas, 'left')
                 field = page.get_by_role('spinbutton', name='末端 X (m)', exact=True)
-                field.fill(str(float(field.input_value()) + 0.001)); field.press('Enter')
+                field.fill(str(float(field.input_value()) + 0.001)); field.press('Tab')
                 page.wait_for_function("['limited', 'tracking'].includes(document.querySelector('.three-canvas')?.dataset.endEffectorIkStatus)")
                 values = json.loads(canvas.get_attribute('data-robot-joint-values'))
                 total = abs(math.radians(values['left_J6'] + values['left_J7']))

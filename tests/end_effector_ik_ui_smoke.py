@@ -15,7 +15,7 @@ BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:21990').rstrip('/')
 def set_target(page, canvas, axis, value):
     field = page.get_by_role('spinbutton', name=f'末端 {axis.upper()} (m)', exact=True)
     field.fill(f'{value:.8f}')
-    field.press('Enter')
+    field.press('Tab')
     try:
         page.wait_for_function('''([axis, value]) => Math.abs(Number(
             document.querySelector('.three-canvas').dataset['endEffectorTarget' + axis.toUpperCase()]) - value) < 2e-6''',

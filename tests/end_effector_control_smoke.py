@@ -87,7 +87,7 @@ def run():
         target_x = number_attr(canvas, "end-effector-target-x") + 0.018
         x_field = page.get_by_role("spinbutton", name="末端 X (m)")
         x_field.fill(f"{target_x:.6f}")
-        x_field.press("Enter")
+        x_field.press("Tab")
         page.wait_for_function(
             "([expected]) => Math.abs(Number(document.querySelector('.three-canvas')?.dataset.endEffectorTargetX) - expected) < 1e-5",
             arg=[target_x],
@@ -101,7 +101,7 @@ def run():
         target_yaw = number_attr(canvas, "end-effector-target-yaw") + 2.5
         yaw_field = page.get_by_role("spinbutton", name="末端 YAW (°)")
         yaw_field.fill(f"{target_yaw:.4f}")
-        yaw_field.press("Enter")
+        yaw_field.press("Tab")
         page.wait_for_function(
             "([expected]) => Math.abs(Number(document.querySelector('.three-canvas')?.dataset.endEffectorTargetYaw) - expected) < 1e-4",
             arg=[target_yaw],
@@ -158,7 +158,7 @@ def run():
         right_target_x = number_attr(canvas, "end-effector-target-x") + 0.018
         right_x_field = page.get_by_role("spinbutton", name="末端 X (m)")
         right_x_field.fill(f"{right_target_x:.6f}")
-        right_x_field.press("Enter")
+        right_x_field.press("Tab")
         page.wait_for_function(
             "([expected]) => Math.abs(Number(document.querySelector('.three-canvas')?.dataset.endEffectorTargetX) - expected) < 1e-5",
             arg=[right_target_x],

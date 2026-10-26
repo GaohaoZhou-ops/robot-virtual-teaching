@@ -115,7 +115,7 @@ def run():
         target_x = number_attr(canvas, "end-effector-target-x") + 0.025
         endpoint_x = page.get_by_role("spinbutton", name="末端 X (m)")
         endpoint_x.fill(f"{target_x:.6f}")
-        endpoint_x.press("Enter")
+        endpoint_x.press("Tab")
         page.wait_for_function(
             "([target]) => Math.abs(Number(document.querySelector('.three-canvas')?.dataset.endEffectorTargetX) - target) < 1e-5",
             arg=[target_x],

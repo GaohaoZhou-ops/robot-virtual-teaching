@@ -533,6 +533,16 @@ playwright/.auth/
 /tests/atlas-end-effector-*/
 /atlas-end-effector-*.[zZ][iI][pP]
 /tests/atlas-end-effector-*.[zZ][iI][pP]
+# Standalone copies of Enter-confirmation builds and browser review artifacts.
+# Keep these root/tests exports local; end_effector_* runners and nested fixtures stay visible.
+/end-effector-confirm/
+/tests/end-effector-confirm/
+/end-effector-confirm-*/
+/tests/end-effector-confirm-*/
+/end-effector-confirm.[zZ][iI][pP]
+/tests/end-effector-confirm.[zZ][iI][pP]
+/end-effector-confirm-*.[zZ][iI][pP]
+/tests/end-effector-confirm-*.[zZ][iI][pP]
 # Model-editor smoke-test captures copied from /tmp for local inspection.
 /model-editor-*.png
 /tests/model-editor-*.png
