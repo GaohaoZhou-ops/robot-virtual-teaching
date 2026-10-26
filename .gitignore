@@ -77,6 +77,11 @@ output/
 *.tsbuildinfo
 vite.config.*.timestamp-*
 
+# Xcode regenerates the bundled Vision Pro document engine, workers and map.
+# Keep the bundler script and application sources; omit generated bundle copies.
+/vision/AtlasVisionTeaching/WebWorkbench/
+/vision/AtlasVisionTeaching/WebWorkbench.[zZ][iI][pP]
+
 # Node.js and browser diagnostic dumps
 *.heapsnapshot
 *.cpuprofile
@@ -984,6 +989,26 @@ playwright/.auth/
 /atlas-vision-pairing-ui-*/
 /tests/atlas-vision-pairing-ui-*/
 /vision/atlas-vision-pairing-ui-*/
+
+# Complete-scene/workbench tests contain map/robot payloads, local connection
+# credentials and compiled Swift harnesses when TMPDIR is inside the repository.
+# Scope temporary workspaces and ZIP copies to output roots, preserving fixtures.
+/atlas-vision-scene-*/
+/tests/atlas-vision-scene-*/
+/vision/atlas-vision-scene-*/
+/atlas-vision-scene-*.[zZ][iI][pP]
+/tests/atlas-vision-scene-*.[zZ][iI][pP]
+/vision/atlas-vision-scene-*.[zZ][iI][pP]
+/atlas-vision-workbench-*/
+/tests/atlas-vision-workbench-*/
+/vision/atlas-vision-workbench-*/
+/atlas-vision-workbench-*.[zZ][iI][pP]
+/tests/atlas-vision-workbench-*.[zZ][iI][pP]
+/vision/atlas-vision-workbench-*.[zZ][iI][pP]
+# Native file imports are copied here before the document engine consumes them.
+/VisionWorkbenchImports/
+/tests/VisionWorkbenchImports/
+/vision/VisionWorkbenchImports/
 
 # Automatic pairing tests store LAN sessions, model payloads and a compiled
 # Swift test executable here when TMPDIR is inside the repository. Keep both

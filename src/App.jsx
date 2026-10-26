@@ -54,6 +54,8 @@ import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
 import { WorkSyncControl, WorkSyncAuthorization } from './components/WorkSyncControl.jsx';
 import { useWorkSync } from './hooks/useWorkSync.js';
+import VisionWorkbenchBridge from './components/VisionWorkbenchBridge.jsx';
+import { isVisionWorkbench } from './lib/visionWorkbench.js';
 import { useProjectImportProgress } from './hooks/useProjectImportProgress.js';
 import { syncDocument, retainSyncReferences } from './lib/workSyncDocument.js';
 import ModelEditorPage from './components/ModelEditorPage.jsx';
@@ -63,6 +65,7 @@ import TeachingPlaybackDock from './components/TeachingPlaybackDock.jsx';
 import TeachingTransferDialog from './components/TeachingTransferDialog.jsx';
 import IPadTeachingDialog from './components/IPadTeachingDialog.jsx';
 import IPadTeachingMenu from './components/IPadTeachingMenu.jsx';
+import VisionSceneShareDialog from './components/VisionSceneShareDialog.jsx';
 import IPadScreenCollaboration from './components/IPadScreenCollaboration.jsx';
 import { screenPoseCaptureState } from './lib/ipadScreenControl.js';
 import { analyzeParkingPointDrift } from './lib/teachingParkingDrift.js';
@@ -625,6 +628,7 @@ export default function App() {
   const [displaySettingsContainer, setDisplaySettingsContainer] = useState(null);
   const [synchronizedFocus, setSynchronizedFocus] = useState(null);
   const [selectedRobot, setSelectedRobot] = useState(null);
+  const [visionSceneOpen, setVisionSceneOpen] = useState(false);
   const [robotLoadState, setRobotLoadState] = useState({ status: 'idle' });
   const [robotPose, setRobotPose] = useState(() => normalizeRobotPose(null));
   const [robotJointValues, setRobotJointValues] = useState({});
@@ -4736,7 +4740,7 @@ export default function App() {
       if (overwrite) {
         setProjectExportState({ status: 'selecting', operation, byteLength: 0, phase: '确认文件写入权限' });
         await ensureProjectWritePermission(fileHandle);
-      } else if (typeof downloadName !== 'string') {
+      } else if (typeof downloadName !== 'string' && !isVisionWorkbench()) {
         if (typeof window.showSaveFilePicker !== 'function') {
           setProjectExportDialog({ filename });
           return;
@@ -6551,7 +6555,7 @@ export default function App() {
       view2d: view2dRef.current, view3d: view3dRef.current });
   };
   const workSync = useWorkSync({
-    deviceName: /Mac/.test(navigator.platform) ? 'Mac 浏览器' : /Win/.test(navigator.platform) ? 'Windows 浏览器' : '浏览器设备',
+    deviceName: isVisionWorkbench() ? 'Vision Pro 工作台' : /Mac/.test(navigator.platform) ? 'Mac 浏览器' : /Win/.test(navigator.platform) ? 'Windows 浏览器' : '浏览器设备',
     ready: () => sessionReadyRef.current && !workspaceSwitchingRef.current && !loadState.loading
       && teachingCaptureState.status !== 'capturing',
     identity: syncIdentity,
@@ -6706,6 +6710,19 @@ export default function App() {
       data-independent-teaching-input="true"
       onChange={handleIndependentCloudFile}
     />
+    <VisionWorkbenchBridge ready={sessionState.status === 'ready'} name={independentTeachingName || mapData?.name}
+      sceneReady={Boolean(mapData?.geometry && !loadState.loading && robotLoadState.status !== 'pending' && !workspaceSwitchingRef.current)}
+      sync={workSync} persist={persistWorkspaceNow} save={() => exportProject()}
+      importFile={async (file) => {
+        const { readProjectFile } = await import('./lib/projectArchive.js');
+        const imported = await readProjectFile(file);
+        const mode = imported.workspaceCollection?.activeMode || (imported.linkedWorkspaces ? teachingSpaceMode
+          : normalizeProject(imported.payload).workspace?.teachingSpaceMode) || 'map';
+        await applyImportedProject(async () => imported, file.name, mode, { throwOnError: true });
+      }}
+      scene={{ mapData, robot: selectedRobot, robotPose, robotJointValues, tasks: teachingTasks, waypoints, edges,
+        mode: teachingSpaceMode, softLimitRatio: robotArmSoftLimitRatio, softLimitOverrides: robotArmSoftLimitOverrides,
+        jointCoupling: robotArmJointCouplingEnabled }} />
     <input
       ref={pathInputRef}
       className="visually-hidden"
@@ -6735,8 +6752,8 @@ export default function App() {
         <div className="brand-block">
           <div className="brand-mark"><Route size={20} strokeWidth={1.8} /></div>
           <div>
-            <span>ATLAS / ROUTE</span>
-            <strong>虚拟示教平台</strong>
+            <span>{isVisionWorkbench() ? 'ATLAS / VISION PRO' : 'ATLAS / ROUTE'}</span>
+            <strong>{isVisionWorkbench() ? '空间工程工作台' : '虚拟示教平台'}</strong>
           </div>
         </div>
 
@@ -6748,7 +6765,7 @@ export default function App() {
           onClick={() => navigateAppPage(APP_PAGE_HOME)}
           disabled={loadState.loading}
         >
-          <House size={15} /> <span>主页面</span>
+          <House size={15} /> <span>{isVisionWorkbench() ? '工程管理' : '主页面'}</span>
         </button>
 
         <div className="map-identity" data-space-mode={teachingSpaceMode}>
@@ -6766,7 +6783,7 @@ export default function App() {
         </div>
 
         <WorkbenchToolbar
-          isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+          isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !visionSceneOpen && !mobileSolveTaskId}
           sections={[
             {
               id: 'project', label: '工程', icon: FolderOpen, triggerRef: mapDetailsButtonRef,
@@ -6925,16 +6942,17 @@ export default function App() {
                     menuAnchorRef={devicesMenuButtonRef}
                     inputRef={spaceMouseInputRef}
                     onNotify={notify}
-                    isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !visionSceneOpen && !mobileSolveTaskId}
                   />
                 </section>
                 <section className="workbench-menu-section">
                   <p>移动示教设备</p>
-                  {(isIndependentTeachingSpace ? ['ipad', 'vision'] : ['ipad']).map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
+                  {['ipad', 'vision'].map((device) => <IPadTeachingMenu key={device} device={device} menuAnchorRef={devicesMenuButtonRef} mapData={mapData} source={teachingDevice}
                     desktopCount={desktopTeachingTasks.length} deviceCount={mobileTasksByDevice[device].length}
                     disabled={!mapData?.geometry || loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'}
-                    isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                    isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !visionSceneOpen && !mobileSolveTaskId}
                     onSourceChange={switchTeachingSource} onOpenSync={openIPadTeaching} allowTeaching={isIndependentTeachingSpace}
+                    onOpenScene={() => setVisionSceneOpen(true)}
                     onOpenScreen={() => setIPadScreenOpen(true)} />)}
                 </section>
               </>,
@@ -6943,8 +6961,8 @@ export default function App() {
         >
           <div className="service-pill" title="局域网服务默认端口">
             <Server size={13} />
-            <span>LAN</span>
-            <strong>:21990</strong>
+            <span>{isVisionWorkbench() ? 'VISION' : 'LAN'}</span>
+            <strong>{isVisionWorkbench() ? '本机工作台' : ':21990'}</strong>
           </div>
           <WorkSyncControl sync={workSync} />
         </WorkbenchToolbar>
@@ -7007,7 +7025,7 @@ export default function App() {
                 disabled={!mapData?.geometry}
                 collapsed={heightRangeCollapsed}
                 onCollapsedChange={setHeightRangeCollapsed}
-                isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !visionSceneOpen && !mobileSolveTaskId}
               />
               {!isIndependentTeachingSpace && (
                 <button
@@ -7136,7 +7154,7 @@ export default function App() {
                 onRecordParkingPointPosition={recordTeachingParkingPointPosition}
                 onEditTeachingPose={beginTeachingPoseEdit}
                 onConfirmTeachingPose={captureTeachingPoint}
-                isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !mobileSolveTaskId}
+                isActive={appPage === APP_PAGE_WORKBENCH && !robotSettingsModalOpen && !teachingTransferDialog && !ipadTeachingOpen && !visionSceneOpen && !mobileSolveTaskId}
               />
               <TeachingPlaybackDock
                 key={teachingPlayback.taskId}
@@ -7583,6 +7601,9 @@ export default function App() {
       poseCaptureState={ipadPoseCaptureState} onRecordPose={recordPoseFromIPad}
       controlBlockedReason={(polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '请先在网页端结束轨迹播放或折线任务，再调整关节。'
         : teachingCaptureState.status === 'capturing' ? '正在记录 Pose，请稍候。' : ''} />}
+    {visionSceneOpen && <VisionSceneShareDialog mapData={mapData} robot={selectedRobot} robotPose={robotPose} robotJointValues={robotJointValues}
+      tasks={teachingTasks} waypoints={waypoints} edges={edges} mode={teachingSpaceMode} softLimitRatio={robotArmSoftLimitRatio}
+      softLimitOverrides={robotArmSoftLimitOverrides} jointCoupling={robotArmJointCouplingEnabled} onClose={() => setVisionSceneOpen(false)} />}
     {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
       onClose={() => setIPadTeachingOpen(false)} onImport={importIPadTeaching} />}
     {teachingTransferDialog && <TeachingTransferDialog

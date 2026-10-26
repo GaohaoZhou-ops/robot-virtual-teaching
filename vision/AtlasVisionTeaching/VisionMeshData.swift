@@ -35,11 +35,11 @@ struct VisionMeshData {
         return try VisionMeshData(model: model, mode: .points, quality: .detail, pointRadius: radius)
     }
 
-    init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality, pointRadius: Float? = nil) throws {
+    init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality, pointRadius: Float? = nil, primitiveBudget: Int? = nil) throws {
         try Task.checkCancellation()
         isMesh = mode == .mesh && model.indices > 0
         let total = isMesh ? model.indices / 3 : model.vertices
-        primitiveCount = min(total, isMesh ? quality.faces : quality.points)
+        primitiveCount = min(total, isMesh ? quality.faces : quality.points, max(1, primitiveBudget ?? .max))
         textureSide = Int(ceil(sqrt(Double(primitiveCount))))
         pixels = [UInt8](repeating: 255, count: textureSide * textureSide * 4)
         positions.reserveCapacity(primitiveCount * (isMesh ? 3 : 4))

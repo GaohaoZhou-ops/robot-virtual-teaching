@@ -4,13 +4,35 @@ import SwiftUI
 struct AtlasVisionTeachingApp: App {
     @StateObject private var session = TeachingSession()
     @StateObject private var spatial = VisionTrackingController()
+    @StateObject private var review = VisionSceneController()
+    @StateObject private var workbench = VisionWorkbench()
     @State private var immersionStyle: ImmersionStyle = .mixed
+    @State private var projectImmersion: ImmersionStyle = .full
 
     var body: some Scene {
         WindowGroup(id: "workspace", for: String.self) { _ in
-            VisionWorkspaceView().environmentObject(session).environmentObject(spatial)
+            Group {
+                #if targetEnvironment(simulator)
+                if UserDefaults.standard.bool(forKey: "visionLegacyTeaching") {
+                    VisionWorkspaceView().environmentObject(session).environmentObject(spatial).environmentObject(review)
+                } else { VisionWorkbenchRoot().environmentObject(workbench).environmentObject(review).environmentObject(session).environmentObject(spatial) }
+                #else
+                VisionWorkbenchRoot().environmentObject(workbench).environmentObject(review).environmentObject(session).environmentObject(spatial)
+                #endif
+            }
         } defaultValue: { "workspace" }
-        .defaultSize(width: 1180, height: 900)
+        .defaultSize(width: 1440, height: 1000)
+
+        WindowGroup(id: "project-tools", for: String.self) { _ in
+            VisionProjectToolsView().environmentObject(review).environmentObject(workbench)
+        } defaultValue: { "project-tools" }
+        .defaultSize(width: 680, height: 190)
+        .windowResizability(.contentSize)
+        .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
+
+        ImmersiveSpace(id: "project-space") {
+            VisionProjectImmersiveView().environmentObject(review).environmentObject(workbench)
+        }.immersionStyle(selection: $projectImmersion, in: .full)
 
         WindowGroup(id: "spatial-controls", for: String.self) { _ in
             VisionSpatialToolsWindow().environmentObject(session).environmentObject(spatial)
@@ -22,5 +44,16 @@ struct AtlasVisionTeachingApp: App {
             VisionImmersiveView().environmentObject(session).environmentObject(spatial)
         }
         .immersionStyle(selection: $immersionStyle, in: .mixed)
+
+        WindowGroup(id: "scene-review-tools", for: String.self) { _ in
+            VisionSceneToolsView().environmentObject(review)
+        } defaultValue: { "scene-review-tools" }
+        .defaultSize(width: 600, height: 160)
+        .windowResizability(.contentSize)
+        .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
+
+        ImmersiveSpace(id: "scene-review") {
+            VisionSceneImmersiveView().environmentObject(review)
+        }.immersionStyle(selection: $immersionStyle, in: .mixed)
     }
 }

@@ -5,14 +5,14 @@ const PREFIX = '/__atlas/work-sync';
 // One client per browser tab. The adapter is intentionally independent of React
 // so delayed replies, lease expiry and retries can be exercised without a UI.
 export class WorkSyncClient {
-  constructor({ adapter, onChange = () => {}, request = globalThis.fetch.bind(globalThis),
+  constructor({ adapter, onChange = () => {}, request = globalThis.fetch.bind(globalThis), pollPending = false,
     openSocket = globalThis.location ? (path) => {
       const url = new URL(path, globalThis.location.href);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       return new WebSocket(url);
     } : null }) {
     this.adapter = adapter; this.onChange = onChange; this.request = request;
-    this.openSocket = openSocket; this.listenLocal = false; this.projectSignature = null;
+    this.openSocket = openSocket; this.pollPending = pollPending; this.listenLocal = false; this.projectSignature = null;
     this.token = null; this.context = null; this.epoch = 0; this.running = false; this.timer = null;
     this.working = false; this.preparing = false; this.controllers = new Set();
     this.blockedLinks = new Set(); this.disconnecting = false; this.statusVersion = -1;
@@ -52,7 +52,7 @@ export class WorkSyncClient {
     socket?.close();
   }
   updateActivity() {
-    const linked = this.running && this.state.link?.expiresAt > Date.now();
+    const linked = this.running && (this.state.link?.expiresAt > Date.now() || (this.pollPending && this.state.pending));
     if (linked && !this.timer) this.timer = setInterval(() => this.tick(), WORK_SYNC_INTERVAL);
     if (!linked) { clearInterval(this.timer); this.timer = null; }
     const listening = this.running && (this.listenLocal || this.state.pending || linked);

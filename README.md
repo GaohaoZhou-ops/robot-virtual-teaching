@@ -330,7 +330,7 @@ A 作为固定基准，B 初始与 A 共用坐标原点；B 的 XYZ / RPY 表示
 | 工程 | 地图与工程配置、另存为工程、保存工程 |
 | 示教 | 切换地图 / 独立示教、示教数据、示教转换 |
 | 机器人 | 机器人模型选择与显示控制、新建预设姿态（弹窗内可导入文件）、管理预设姿态、应用已保存预设 |
-| 设备 | 3D 鼠标；独立示教另提供 iPad、Vision Pro 两个入口 |
+| 设备 | 3D 鼠标、iPad / iPhone 协作、Vision Pro 完整场景查看；独立示教还提供设备采集与同步 |
 
 点击菜单后可用上下方向键选择操作、左右方向键切换分类，按 Esc 或点击外部收起。关闭菜单会保留设备连接与控制状态。
 
@@ -1469,15 +1469,17 @@ open ipad/AtlasTeaching.xcodeproj
 
 <a id="vision-pro-空间示教"></a>
 
-## 🥽 Vision Pro 空间示教
+## 🥽 Vision Pro 空间工作台
 
 ![Apple Vision Pro 设备示意](images/vision-pro.png)
 
-原生 visionOS 应用支持将独立示教物体以 **1:1** 比例放入空间，通过**手势摆放独立虚拟相机**、点选表面对准，并查看模型取景后记录视点。空间流程无需输入坐标或名称，支持撤销、召回更新、离线保存及同步回电脑；完整抓取与转腕体验使用 visionOS 26。
+Vision Pro 启动后可 **选择设备同步** 电脑当前工程，也可 **载入当前工程 / 工程文件**。资源准备好后自动进入原生 RealityKit 全沉浸空间，以真实尺度在地图与机器人周围观察、游走。转头与小范围移动使用头部追踪；远处通过 **点选地面 → 前往此处** 跳转，也可在沙盘中选择位置。默认空间界面不需要数值或文字输入。
 
-工程入口、操作流程、编译验证与真机接入步骤见 [Vision Pro 开发与联调文档](vision/README.md)。目前已完成编译和模拟器预检，待接入设备进行真机联调。
+辅助面板提供沙盘、回放和 **编辑工具**，更多游走、测量和保存操作收进菜单。完整工程编辑器按需打开，保留 Mac 的地图、机器人、导航、任务、关节与末端、路径检查和 ZIP 导入导出能力；修改后选择 **更新空间** 更新原生场景。设备同步沿用电脑授权和双向工程协议，完整资源接收后可离线继续。iPad / iPhone 示教体验保持独立。
 
-在 Mac 上调试时，可在 Finder 中双击 [`scripts/start_vision_simulator.command`](scripts/start_vision_simulator.command)，一键启动 Vision Pro 模拟器与「Atlas 空间示教」。脚本以单例模式运行：重复启动会复用当前设备和应用，并发启动不会重复执行。首次未安装应用时自动编译安装；修改代码后运行 `./scripts/start_vision_simulator.command --rebuild` 更新应用。需预先安装 Xcode 和 visionOS Simulator。
+工程入口、能力边界、构建验证与真机联调见 [Vision Pro 开发文档](vision/README.md)。历史单模型相机示教保留在首页的兼容入口。
+
+Mac 上可双击 [`scripts/start_vision_simulator.command`](scripts/start_vision_simulator.command) 启动模拟器，修改后执行 `./scripts/start_vision_simulator.command --rebuild`。Xcode 构建时自动打包工作台页面和 Worker，需要先安装项目的 Node 依赖。
 
 <a id="工作会话自动保护"></a>
 
@@ -1836,6 +1838,8 @@ ATLAS_PHYSICS_BACKEND=isaac ./scripts/start.sh
 `.gitignore` 按依赖缓存、构建产物、本地运行状态、测试产物及工程导出分类。浏览器截图、录像和追踪包按测试输出目录，或根目录与 `tests/` 下的 `atlas-` / `transfer-` 文件名限定范围，测试报告、截图和下载目录的 ZIP 打包文件也按明确路径忽略。
 
 Vision Pro 空间相机调试产物保存在 `vision/build/spatial-editor/` 与 `vision/test-artifacts/`；单独复制到根目录、`tests/` 或 `vision/` 的 `atlas-spatial-*-attachments` 附件目录、编号重试副本及 ZIP 也会忽略。`vision/` 下的 `atlas-spatial-*` PNG、MP4、WebM 截图录像保留在本机，同名嵌套测试样例和设计素材仍可跟踪。
+
+沉浸式工程的构建与验证输出使用 `vision/build/workbench*` 和 `vision/test-artifacts/workbench/`。Xcode 生成的 `vision/AtlasVisionTeaching/WebWorkbench/` 及其 ZIP 副本不提交；根目录、`tests/` 或 `vision/` 下的 `atlas-vision-scene-*`、`atlas-vision-workbench-*` 临时目录与 ZIP，以及 `VisionWorkbenchImports/` 工程导入缓存也保留在本机，嵌套测试夹具仍可跟踪。
 
 根目录中的本地参考文件 `sample-pre-teaching-pose.json`、`pre-teaching-pose.json`、`position_[0-9]*.txt`、`1014平地路网终版.json`、`1019平地路网终版测试.json`、`380B平地巡检.zip`、`ABXBrainSystem.zip` 及其同名解压目录，以及另存为目录 `saved-project/` 和 `saved-project.zip` 保留在本机。预设与转换矩阵回归使用 `tests/fixtures/` 下的独立样例；路网与机器人导出测试包含独立构造的样例，本地参考文件存在时额外校验真实格式，提交后无需依赖这些根目录文件。动作排序和路网映射 UI 测试产生的 `atlas-insert-action-*`、`atlas-route-identity-*` 临时目录及归档在根目录或 `tests/` 下也会被忽略。
 

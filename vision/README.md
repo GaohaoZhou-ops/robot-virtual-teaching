@@ -1,8 +1,61 @@
-# Vision Pro 空间示教
+# Vision Pro 空间工作台
 
-原生 visionOS App「Atlas 空间示教」，工程入口为 [AtlasVisionTeaching.xcodeproj](AtlasVisionTeaching.xcodeproj)。支持 Apple Vision Pro，包括 M5 设备；最低部署版本 visionOS 2.0；本版完整的抓取、转腕与双手操控使用 visionOS 26 的原生 ManipulationComponent，M5 联调请使用 visionOS 26 或更新版本。旧系统仅保留相机拖动和按钮操作。使用 SwiftUI、RealityKit 与 ARKit，不依赖第三方 Swift 包。
+原生 visionOS App「Atlas 空间工作台」，工程入口为 [AtlasVisionTeaching.xcodeproj](AtlasVisionTeaching.xcodeproj)。打开工程后，地图与完整机器人直接进入全沉浸 RealityKit 空间，默认以米制原大站在机器人旁。完整工程编辑器通过辅助面板按需呼出。iPad / iPhone 的现场采集与逐 Pose 示教流程保持独立。最低 visionOS 2.0；原生双手操控使用 visionOS 26 的 ManipulationComponent，M5 联调使用 visionOS 26 或更新版本。
 
-## 使用流程
+## 启动与完整工程
+
+- **选择设备同步**：自动发现同一局域网的 Atlas 电脑，点选后申请同步电脑当前工程。在电脑已有工作台上允许同步后，完整地图、机器人资源、任务和导航数据传入头显。无需打开旧版“空间工程共享”窗口。发现失败时可展开地址输入。
+- **载入当前工程**：恢复头显本机自动保存的工作区，自动进入沉浸空间；没有地图资源时显示工程准备页，可打开编辑工具新建或导入。
+- **载入工程文件**：从系统文件选择器导入 Mac 导出的 ZIP 完整工程、双工作区工程和工作区集合。兼容 JSON 配置，但 JSON 不携带地图和机器人资源，离线迁移推荐 ZIP。
+
+同步、导入和离线载入均在地图与机器人资源准备好后自动构建原生空间。同步入口等待电脑授权和完整接收，不会先展示上一次缓存工程。默认只显示小型空间工具面板，无需坐标、角度或名称输入。
+
+**编辑工具** 在单独窗口中提供完整工程编辑能力：地图与模型、导航图、机器人全关节与末端、任务 / 停车点 / 姿态、折线、路径检查、工程导入导出。这个可收起的窗口复用 Mac 的 React / Three.js 引擎；原生空间的渲染和游走使用 RealityKit。工程数据引擎留在本机后台，已接收完整工程后可离线继续。编辑器目前仍有数字与文字输入，后续逐项手势化。
+
+- 空间面板 **… → 保存工程** 或编辑器顶部 **保存工程** 生成可回到 Mac 打开的完整 ZIP，保存在“文件 → Atlas 空间工作台 → Exports”。完成后 **导出文件** 可分享或另存。
+- **工程入口** 会先自动保存并结束同步，再返回设备与本机入口。重新打开使用同一份本机缓存。
+- 同步沿用现有协议：主机授权 5 分钟，每 3 秒双向合并任务、停车点、姿态、导航点、路径、关节预设和独立工程名称。地图与机器人资源在建立连接时完整传输；不同步实时视角、机器人临时关节拖动、模型几何编辑或整套历史工作区。几何变更需重新建立同步或交换 ZIP。过期后在工作台申请续期。
+- Mac 的机器人目录、Isaac 服务和其他电脑专属服务仍需连接电脑。WebKit 不支持桌面的目录直接覆写 API，头显通过自动缓存与完整 ZIP 保存；Mac 外设和文件系统专属 API 尚未移植。
+
+## 沉浸游走
+
+默认进入 `project-space` 全沉浸空间。入口自动寻找机器人附近朝上的平坦表面，并检查落点的身体空间；找不到时展示沙盘，允许手动选择入口。稀疏点云与独立工件补充可见的参考地面。头部位置与朝向使用 WorldTrackingProvider，真实移动与项目米制距离保持 1:1。
+
+1. **近处观察**：转头、转身和小范围移动直接改变观察位置。原大模式固定世界，不允许将地面整体拖走。
+2. **前往远处**：注视地面并捏合，出现落点环后选择 **前往此处**；短暂淡出再进入新位置。拒绝墙面、陡坡、模型占据的位置；游走只改变观察位置，不改工程坐标。
+3. **沙盘**：双手缩放、转动完整工程，在地面选择落点后进入。**… → 前往示教点** 可选择停车点旁的空地；**回到机器人旁**、转身和测量收进同一菜单。
+4. **回放**：任务菜单、播放 / 暂停和时间轴驱动机器人底盘与完整关节链。
+5. **空间检查**：开启 **测量两点间距** 后点选两处显示近似间距，再点一次重新开始。
+6. **编辑后更新**：编辑工具或同步改变工程后提示 **工程有更新**，选择 **更新空间** 重建原生场景。完整编辑器仍为工程数据的来源，空间内暂未实现直接拖动机器人关节或编辑任务。
+
+网格地图保留全部三角形与碰撞表面；点云按距离加载显示细节，原始点集完整保存在本机。机器人保留完整关节层级。当前外观使用顶点与材质颜色，不包括 UV / PBR 贴图。测量与落点检查用于查看，不是精密碰撞校核。模拟器验证入口、落点切换、回放、编辑器收起、空间刷新、保存和重开；真实头部运动、注视捏合与大工程帧率需要在头显体验。
+
+## 构建与工作台验证
+
+Xcode 在应用构建阶段运行 `scripts/build_vision_workbench.mjs`，打包完整页面、Worker 和样式到生成目录 `AtlasVisionTeaching/WebWorkbench`。构建前运行 `npm install`；Xcode 可使用 `/opt/homebrew/bin` 或 `/usr/local/bin` 的 Node。只附带仓库的 `xian_map.ply` 示例地图，不打包其他本地地图和 `robots/` 目录；用户的完整资源随工程文件或同步传入。
+
+本机服务仅监听 `127.0.0.1:21991`，固定 origin 保留 IndexedDB。导入与空间资源写入使用每次进程生成的凭据，限制同源请求；大文件经临时文件流式传输。选择电脑后只转发 Atlas API 到经 LANClient 校验的局域网地址，原生客户端始终作为需要授权的同步参与端。
+
+```bash
+npm run test:vision:workbench
+npm run test:vision:scene # 坐标、原大比例、入口朝向、地面筛选与回放一致性
+# Python 环境需要安装 Playwright，并有 Chrome：
+VISION_PYTHON=/path/to/python npm run test:vision:workbench-ui
+# 模拟器（ATLAS_WORKBENCH_FILE 为测试工程，不使用用户工程）：
+node tests/vision_workbench_fixture.mjs /tmp/vision-workbench-fixture.zip
+TEST_RUNNER_ATLAS_WORKBENCH_FILE=/tmp/vision-workbench-fixture.zip xcodebuild \
+  -project vision/AtlasVisionTeaching.xcodeproj -scheme AtlasVisionTeaching \
+  -destination 'platform=visionOS Simulator,name=Apple Vision Pro' \
+  -only-testing:AtlasVisionTeachingUITests/AtlasVisionTeachingUITests/testFullWorkbenchProject test
+```
+
+`tests/vision_workbench_sync_ui.py` 与隔离的 `tests/vision_scene_web_server.mjs` 验证真实双端授权、完整工程传输及双向任务编辑；`tests/vision_workbench_smoke.mjs --sync-ui` 可在该隔离服务运行时执行。测试使用临时服务目录与新的浏览器上下文，不操作用户工程。
+
+## 历史单模型示教
+
+首页的 **打开历史单模型示教** 保留既有相机草稿、离线任务与旧同步流程。以下说明适用于这个兼容入口。
+
+## 虚拟相机示教
 
 欢迎页与 iPad 采用一致的顶部标题与双栏卡片布局：左侧「从电脑接收物体」，右侧「保存在此 Vision Pro」。保留 Vision Pro 的青色主题与系统玻璃背景，通过局域网搜索或手动输入地址和配对码连接，不提供扫码入口。默认通过局域网发现和自动获取配对码连接，手动地址、端口和配对码折叠为备用入口。空间示教过程中不需要输入坐标、角度或名称。
 
@@ -85,6 +138,8 @@ Apple 参考：[空间输入与高亮设计](https://developer.apple.com/videos/
 ```bash
 # 从仓库根目录执行；不访问真实示教任务，网络测试使用临时目录与独立端口。
 npm run test:vision
+npm run test:vision:scene     # 无损分块、机器人层级、原生/桌面回放一致性、共享撤销与缓存修复
+npm run test:vision:scene-ui  # 已启动的 visionOS 模拟器：完整场景接收、播放、时间轴、尺度切换、本地重开
 node tests/vision_simulator_launcher_smoke.mjs  # 模拟 Apple 命令，验证启动锁、复用、首次安装及失败恢复
 npm run test:vision:pairing-ui  # 已启动的 visionOS 模拟器：本地复用、缩略图、确认/暂缓同步与失败重试
 npm run test:vision:autofill    # 配对窗口发布/撤销、有效期、自动填码、电脑切换和手动输入优先
@@ -110,7 +165,7 @@ VISION_SIMULATOR_ID=<UDID> VISION_ARTIFACTS=/tmp/atlas-vision-check ./scripts/ch
 
 与 iPad 工程共享 `TeachingModels`、`TeachingSession`、`ProjectStore`、`LANClient`、Bonjour 发现和 ATLS 模型验证源码。独立的 visionOS Target 使用 RealityKit 渲染，不加载 iPad 的 ARSCNView。旧协议名称和 `/__atlas/ipad/` 路由保留，以兼容已有 iPad App；服务端依据明确的平台及位姿来源校验坐标轴。
 
-模型原文件完整保留；空间显示预算为轻量 / 均衡 / 精细：最多 4 / 12 / 30 万三角面，或 0.8 / 2 / 5 万点。Mesh 使用抽样面及其平均顶点颜色，点云使用小四面体；显示精度不改变示教坐标或模型指纹。最多保存 50,000 个 Pose、1,000 段校准，空间中显示最近 500 个 Pose 标记。当前版本提供虚拟相机模型取景，不包含真实相机预览、二维码相机扫描、覆盖着色、机器人空间回放或头显端关节求解。
+虚拟相机示教模式的模型原文件完整保留；空间显示预算为轻量 / 均衡 / 精细：最多 4 / 12 / 30 万三角面，或 0.8 / 2 / 5 万点。Mesh 使用抽样面及其平均顶点颜色，点云使用小四面体；显示精度不改变示教坐标或模型指纹。最多保存 50,000 个 Pose、1,000 段校准，空间中显示最近 500 个 Pose 标记。此模式提供虚拟相机模型取景；机器人回放位于上述完整工程模式。当前版本不包含真实相机预览、二维码相机扫描、覆盖着色或头显端关节求解。
 
 窗口预览使用独立显示数据：12 万面以内的模型保留完整网格，更密的扫描模型和点云采用最多 5 万个彩色点，按窗口尺寸设置点的可见大小，避免大量细小三角面被抽样后在缩小预览中消失。预览生成可取消、失败可重试，不改变空间示教的 1:1 模型与校准数据。原生回归测试覆盖稠密网格的预览策略、显示预算与点大小；`testExistingLocalModelPreview` 可通过测试运行器的 `ATLAS_PREVIEW_PROJECT_ID` 和 `ATLAS_PREVIEW_CAPTURE_URL` 检查指定本地模型，并让 Mac 端截图接收服务保存实际画面。
 

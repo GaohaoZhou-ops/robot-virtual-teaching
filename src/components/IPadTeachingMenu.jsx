@@ -6,7 +6,7 @@ import { WorkbenchMenuContext } from './WorkbenchMenuContext.js';
 import './IPadTeachingMenu.css';
 
 const transferStatus = { preparing: '准备模型', ready: '等待配对', paired: '设备示教中', completed: '待接收', imported: '已接收', cancelled: '已结束' };
-export default function IPadTeachingMenu({ device = 'ipad', mapData, source, desktopCount, deviceCount, disabled, onSourceChange, onOpenSync, onOpenScreen, allowTeaching = true, isActive = true, menuAnchorRef }) {
+export default function IPadTeachingMenu({ device = 'ipad', mapData, source, desktopCount, deviceCount, disabled, onSourceChange, onOpenSync, onOpenScreen, onOpenScene, allowTeaching = true, isActive = true, menuAnchorRef }) {
   const vision = device === 'vision';
   const deviceLabel = vision ? 'Vision Pro' : 'iPad / iPhone';
   const DeviceIcon = vision ? Glasses : Tablet;
@@ -166,13 +166,16 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
           event.preventDefault(); event.stopPropagation(); showMenu(true);
         }
       }}>
-      <DeviceIcon size={15}/><span><strong>{deviceLabel}</strong><small>{vision ? '配对码连接 · 空间示教' : '扫码连接 · AR 示教'}</small></span>
+      <DeviceIcon size={15}/><span><strong>{deviceLabel}</strong><small>{vision ? '完整场景 · 空间回放' : '扫码连接 · AR 示教'}</small></span>
       {parentMenu ? <ChevronRight size={12}/> : <ChevronDown size={12}/>}
     </button>
     {open && createPortal(<div className="ipad-nav-menu" id={menuId} ref={menuRef} role="menu" aria-label={deviceLabel} tabIndex={-1}
       data-workbench-menu-owner={parentMenu?.ownerId} data-side={position.side}
       style={{ left: position.left, top: position.top }} onKeyDown={keyDown}>
       <p className="ipad-nav-title"><DeviceIcon size={14}/>{deviceLabel}</p>
+      {vision && onOpenScene && <button type="button" role="menuitem" aria-label="完整工程空间查看" onPointerMove={() => setSection(null)} onClick={() => run(onOpenScene)}>
+        <Glasses size={14}/><span><strong>完整工程空间查看</strong><small>地图 · 机器人 · 动作回放</small></span><ChevronRight size={13}/>
+      </button>}
       {!vision && onOpenScreen && <button type="button" role="menuitem" aria-label="画面协作"
         onPointerMove={() => setSection(null)} onClick={() => run(onOpenScreen)}>
         <Monitor size={14}/><span><strong>画面协作</strong><small>相机画面 · 关节控制</small></span><ChevronRight size={13}/>

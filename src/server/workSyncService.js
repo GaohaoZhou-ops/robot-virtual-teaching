@@ -125,13 +125,13 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
       prune();
       const route = pathname.slice(PREFIX.length);
       if (req.method === 'GET' && route === '/capabilities') {
-        reply(res, 200, { local: isLocal(req) }); return;
+        reply(res, 200, { local: isLocal(req) && req.headers['x-atlas-client'] !== 'vision-pro' }); return;
       }
       if (req.method === 'POST' && route === '/clients') {
         const data = await body(req);
         if (clients.size >= 64) fail(429, '同步设备过多，请稍后重试');
         const token = randomBytes(32).toString('hex');
-        const client = { token, id: randomUUID(), name: String(data.name || '浏览器设备').slice(0, 100), ip: address(req), local: isLocal(req), seenAt: now(), reason: '' };
+        const client = { token, id: randomUUID(), name: String(data.name || '浏览器设备').slice(0, 100), ip: address(req), local: isLocal(req) && req.headers['x-atlas-client'] !== 'vision-pro', seenAt: now(), reason: '' };
         clients.set(token, client); updateProject(client, data.project);
         reply(res, 201, { token, ...status(client) }); return;
       }

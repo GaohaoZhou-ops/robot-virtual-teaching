@@ -1,0 +1,15 @@
+/* Scope every adjustment to the native shell; desktop and mobile are unchanged. */
+html.atlas-vision-workbench { font-size: 17px; }
+.atlas-vision-workbench body { min-width: 1100px; }
+.atlas-vision-workbench .topbar { min-height: 66px; }
+.atlas-vision-workbench .workbench-menu-trigger { min-height: 44px; min-width: 52px; }
+.atlas-vision-workbench .workbench-menu-section button { min-height: 40px; }
+.atlas-vision-workbench button { touch-action: manipulation; min-height: 36px; font-size: 13px; }
+.atlas-vision-workbench .brand-block { display: none; }
+.atlas-vision-workbench input:not([type="range"]):not([type="checkbox"]):not([type="file"]),
+.atlas-vision-workbench select { min-height: 36px; font-size: 15px; }
+.vision-workbench-notice { position: fixed; z-index: 1200; bottom: 22px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 24px; max-width: 85vw; padding: 16px 24px; border: 1px solid #386965;
+  border-radius: 16px; background: #122626f5; box-shadow: 0 10px 40px #0006; color: #d5f2ec; }
+.vision-workbench-notice.is-error { border-color: #b68453; color: #ffd7ad; }
+.vision-workbench-notice button { min-height: 40px; padding: 4px 18px; }

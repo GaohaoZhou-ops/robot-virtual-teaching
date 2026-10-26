@@ -18,6 +18,7 @@ struct VisionWorkspaceView: View {
     @State private var addressError = ""
     @State private var modelSyncPresented = false
     @State private var showingModelPreview = true
+    @State private var sceneLibraryPresented = false
     @FocusState private var portFocused: Bool
 
     private var completed: Bool { session.current?.result.completedAt != nil }
@@ -96,6 +97,7 @@ struct VisionWorkspaceView: View {
         .onDisappear {
             discovery.stop(); pairingAutofill.stop(); session.backgroundSave()
         }
+        .sheet(isPresented: $sceneLibraryPresented) { VisionSceneLibraryView() }
         .confirmationDialog("完成后将锁定当前 Pose，可以稍后重试同步。", isPresented: $finishConfirmation, titleVisibility: .visible) {
             Button(syncOnFinish ? "完成并同步" : "完成并保存在本机") {
                 Task {
@@ -123,6 +125,17 @@ struct VisionWorkspaceView: View {
                             .foregroundStyle(.cyan).accessibilityHidden(true)
                     }
                     VisionInteractionHint()
+                    Button { sceneLibraryPresented = true } label: {
+                        HStack(spacing: 20) {
+                            Image(systemName: "square.3.layers.3d").font(.largeTitle)
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("打开空间工程").font(.title2)
+                                Text("地图、机器人与动作，在沙盘和原大空间中查看").font(.body).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                        }.padding(16).frame(maxWidth: .infinity)
+                    }.buttonStyle(.borderedProminent).tint(.cyan).accessibilityIdentifier("open-scene-library")
                     HStack(alignment: .top, spacing: 24) {
                         pairingPanel(minHeight: panelHeight)
                             .frame(width: min(560, (viewport.size.width - 88) * 0.5))
