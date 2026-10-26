@@ -11,7 +11,7 @@
     "test:model-editor": "node tests/model_editing_smoke.mjs",
     "test:model-composition": "node tests/model_composition_smoke.mjs",
     "test:torso": "node tests/torso_control_smoke.mjs",
-    "test:robot-presets": "node tests/robot_joint_presets_smoke.mjs",
+    "test:robot-presets": "node tests/robot_joint_presets_smoke.mjs && node tests/shared_robot_presets_smoke.mjs",
     "test:robot-limits": "node tests/robot_joint_limits_smoke.mjs",
     "test:robot-coupling": "node tests/robot_joint_coupling_smoke.mjs",
     "test:interactive-ik": "node tests/end_effector_ik_smoke.mjs",

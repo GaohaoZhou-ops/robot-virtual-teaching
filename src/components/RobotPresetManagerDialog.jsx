@@ -99,7 +99,7 @@ export default function RobotPresetManagerDialog({
         <header>
           <span className="robot-preset-dialog__icon"><List size={23} /></span>
           <div><small>ROBOT / POSE LIBRARY</small><h2 id="robot-preset-manager-title">管理预设姿态</h2>
-            <p>当前工程 · {poses.length} 个预设姿态</p></div>
+            <p>地图示教与独立示教共用 · {poses.length} 个预设姿态</p></div>
           <button type="button" ref={closeRef} aria-label="关闭预设姿态管理" disabled={busy} onClick={onClose}>
             <X size={18} />
           </button>
@@ -159,7 +159,7 @@ export default function RobotPresetManagerDialog({
           </ul>}
         </div>
         <footer><span className={error ? 'is-error' : ''} role={error ? 'alert' : undefined}>
-          {error || '修改后自动保存到当前工程。'}
+          {error || '修改后自动保存，地图示教与独立示教同步生效。'}
         </span><div><button type="button" disabled={busy} onClick={onClose}>完成</button></div></footer>
       </section>
     </div>, document.body,

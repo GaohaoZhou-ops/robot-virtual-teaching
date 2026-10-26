@@ -226,7 +226,7 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
         </div>
         <footer>
           <span className={error ? 'is-error' : ''} role={error ? 'alert' : undefined}>
-            {error || '保存到当前工程；选择“保存并应用”可立即使用该姿态。'}
+            {error || '地图示教与独立示教共用；选择“保存并应用”可立即使用该姿态。'}
           </span>
           <div><button type="button" disabled={busy} onClick={onClose}>取消</button>
             <button type="submit" name="action" value="save" className="robot-preset-dialog__save" disabled={busy}>

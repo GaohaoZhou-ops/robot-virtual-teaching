@@ -1,6 +1,7 @@
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
 import { normalizeIndependentTeachingName, validateIndependentTeachingName } from './independentTeachingName.js';
 import { matchesPlacedSource } from './placedObjectRendering.js';
+import { sharedRobotPresetEntries, withSharedRobotPresetConfig, mergeImportedRobotPresets } from './sharedRobotPresets.js';
 
 const DATABASE_NAME = 'atlas-route-studio';
 const DATABASE_VERSION = 1;
@@ -12,6 +13,7 @@ const WORKSPACE_INDEX_KEY = 'workspace-slots';
 const WORKSPACE_MODES = ['map', 'independent'];
 // History survives workspace switches and service-session recovery.
 const INDEPENDENT_HISTORY_KEY = 'independent-history';
+const SHARED_ROBOT_PRESETS_KEY = 'shared-robot-presets';
 const historyMapKey = (id) => `independent-history-map:${id}`;
 const historyConfigKey = (id) => `independent-history-config:${id}`;
 
@@ -175,6 +177,79 @@ const openDatabase = () => {
 
   return databasePromise;
 };
+
+const emptyPresetLibrary = () => ({ key: SHARED_ROBOT_PRESETS_KEY, version: 1, revision: 0, poses: [] });
+const samePresets = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const presetConfigKey = key => typeof key === 'string' && (key === 'config' || key === 'recovery-config'
+  || key.startsWith('workspace-config:') || key.startsWith('independent-history-config:'));
+const readPresetConfigs = async (store) => {
+  // Never deserialize the potentially huge point clouds just to migrate poses.
+  const keys = (await requestResult(store.getAllKeys())).filter(presetConfigKey);
+  return Promise.all(keys.map(key => requestResult(store.get(key))));
+};
+const writePresetSnapshots = (store, records, library) => {
+  for (const record of records) {
+    const config = withSharedRobotPresetConfig(record.config, library.poses);
+    if (JSON.stringify(config?.project?.virtualTeaching?.jointPoses) !== JSON.stringify(record.config?.project?.virtualTeaching?.jointPoses)) {
+      store.put({ ...record, config, savedAt: Date.now() });
+    }
+  }
+};
+
+// One device-wide library survives ordinary workspace switches. The initial
+// migration deliberately takes the MAP copy, including an explicitly empty
+// map list; independent copies never get merged back on later reloads.
+export async function loadSharedRobotPresets() {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction), store = transaction.objectStore(STORE_NAME);
+  let library;
+  try {
+    const [existing, records] = await Promise.all([
+      requestResult(store.get(SHARED_ROBOT_PRESETS_KEY)), readPresetConfigs(store),
+    ]);
+    library = existing || emptyPresetLibrary();
+    if (!existing) {
+      const available = records.filter(record => record.config?.project);
+      const source = available.find(record => record.key === workspaceConfigKey('map'))
+        || available.find(record => record.key === 'config' && inferWorkspaceMode(null, record) === 'map')
+        || available.find(record => record.key === workspaceConfigKey('independent'))
+        || available.find(record => record.key === 'config') || available[0];
+      if (source) {
+        library = { ...library, revision: 1, poses: sharedRobotPresetEntries(source.config.project), savedAt: Date.now() };
+        store.put(library);
+      }
+    }
+    if (library.revision) writePresetSnapshots(store, records, library);
+  } catch (error) {
+    transaction.abort(); await completion.catch(() => undefined); throw error;
+  }
+  await completion;
+  return library;
+}
+
+// Explicit ZIP/directory imports may add new presets, retaining the current
+// shared edits on identity/name conflicts. Ordinary cache restoration never does.
+export async function importSharedRobotPresets(sessionId, incoming) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction), store = transaction.objectStore(STORE_NAME);
+  let library;
+  try {
+    const [meta, existing, records] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(SHARED_ROBOT_PRESETS_KEY)), readPresetConfigs(store),
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
+    const previous = existing || emptyPresetLibrary();
+    const poses = mergeImportedRobotPresets(previous.poses, incoming);
+    library = { ...previous, poses, revision: previous.revision + Number(!existing || !samePresets(previous.poses, poses)), savedAt: Date.now() };
+    store.put(library); writePresetSnapshots(store, records, library);
+  } catch (error) {
+    transaction.abort(); await completion.catch(() => undefined); throw error;
+  }
+  await completion;
+  return library;
+}
 
 const replaceSession = async (database, sessionId) => {
   const transaction = database.transaction(STORE_NAME, 'readwrite');
@@ -699,7 +774,7 @@ export async function saveWorkspaceMap(sessionId, mapId, name, mapCache, mode = 
   return modes[workspaceMode];
 }
 
-export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null) {
+export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null, { presetLibrary } = {}) {
   const database = await openDatabase();
   const workspaceMode = normalizeWorkspaceMode(
     mode
@@ -710,47 +785,48 @@ export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null)
   const transaction = database.transaction(STORE_NAME, 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
   const completion = transactionComplete(transaction);
-  const [workspaceIndex, meta] = await Promise.all([
-    requestResult(store.get(WORKSPACE_INDEX_KEY)),
-    requestResult(store.get('meta')),
-  ]);
-  const configRecord = {
-    key: workspaceConfigKey(workspaceMode),
-    sessionId,
-    mapId,
-    config,
-    teachingSpaceMode: workspaceMode,
-    savedAt,
-  };
-  const modes = {
-    map: workspaceIndex?.modes?.map || null,
-    independent: workspaceIndex?.modes?.independent || null,
-  };
-  modes[workspaceMode] = summarizeWorkspace(
-    workspaceMode,
-    null,
-    configRecord,
-    modes[workspaceMode],
-  );
-  store.put(configRecord);
-  store.delete('map');
-  store.delete('config');
-  store.put({
-    key: WORKSPACE_INDEX_KEY,
-    sessionId,
-    activeMode: workspaceMode,
-    modes,
-    updatedAt: savedAt,
-  });
-  store.put({
-    ...(meta || {}),
-    key: 'meta',
-    sessionId,
-    activeMode: workspaceMode,
-    startedAt: Number(meta?.startedAt) || savedAt,
-  });
+  let library, modes;
+  try {
+    const [workspaceIndex, meta, storedLibrary] = await Promise.all([
+      requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get('meta')),
+      requestResult(store.get(SHARED_ROBOT_PRESETS_KEY)),
+    ]);
+    library = storedLibrary;
+    if (presetLibrary) {
+      if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
+      const previous = storedLibrary || emptyPresetLibrary();
+      const poses = sharedRobotPresetEntries(config?.project);
+      if (previous.revision !== presetLibrary.revision && !samePresets(poses, previous.poses)) {
+        throw new Error('共享预设姿态已在其他页面更新，请刷新后重试，避免覆盖新的修改');
+      }
+      if (!storedLibrary || !samePresets(previous.poses, poses)) {
+        library = { ...previous, poses, revision: previous.revision + 1, savedAt };
+        store.put(library);
+        writePresetSnapshots(store, await readPresetConfigs(store), library);
+      }
+    }
+    if (library) config = withSharedRobotPresetConfig(config, library.poses);
+    const configRecord = {
+      key: workspaceConfigKey(workspaceMode), sessionId, mapId, config,
+      teachingSpaceMode: workspaceMode, savedAt,
+    };
+    modes = {
+      map: workspaceIndex?.modes?.map || null,
+      independent: workspaceIndex?.modes?.independent || null,
+    };
+    modes[workspaceMode] = summarizeWorkspace(workspaceMode, null, configRecord, modes[workspaceMode]);
+    store.put(configRecord);
+    store.delete('map');
+    store.delete('config');
+    store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode: workspaceMode, modes, updatedAt: savedAt });
+    store.put({ ...(meta || {}), key: 'meta', sessionId, activeMode: workspaceMode,
+      startedAt: Number(meta?.startedAt) || savedAt });
+  } catch (error) {
+    transaction.abort(); await completion.catch(() => undefined); throw error;
+  }
   await completion;
-  return modes[workspaceMode];
+  return presetLibrary ? { ...modes[workspaceMode], presetLibrary: library } : modes[workspaceMode];
 }
 
 // Read another workspace's route/relation without unpacking its point cloud.

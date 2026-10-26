@@ -51,6 +51,9 @@ node_modules/
 # test-artifacts/polyline-*/; maintained regression runners stay in tests/.
 # Reset-confirmation backup checks keep screenshots and service-index backups
 # in test-artifacts/global-reset-export/; exported ZIPs use temporary workspaces.
+# Shared-preset migration and map-origin navigation checks use
+# test-artifacts/{shared-robot-presets,map-origin-navigation}/ for browser
+# captures and service-index backups; their regression runners stay in tests/.
 dist/
 build/
 out/
@@ -777,6 +780,20 @@ playwright/.auth/
 /tests/atlas-preset-manager-*/
 /atlas-preset-manager-*.[zZ][iI][pP]
 /tests/atlas-preset-manager-*.[zZ][iI][pP]
+# Shared-preset and map-origin review folders copied out of test-artifacts/.
+# Include dated copies and ZIPs without hiding source modules or nested fixtures.
+/shared-robot-presets/
+/shared-robot-presets-*/
+/shared-robot-presets*.[zZ][iI][pP]
+/tests/shared-robot-presets/
+/tests/shared-robot-presets-*/
+/tests/shared-robot-presets*.[zZ][iI][pP]
+/map-origin-navigation/
+/map-origin-navigation-*/
+/map-origin-navigation*.[zZ][iI][pP]
+/tests/map-origin-navigation/
+/tests/map-origin-navigation-*/
+/tests/map-origin-navigation*.[zZ][iI][pP]
 # Waypoint/path-name display checks export complete projects for ZIP round trips.
 # Keep local TMPDIR workspaces and packed copies out of source/fixture paths.
 /atlas-waypoint-names-*/

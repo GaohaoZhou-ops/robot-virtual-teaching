@@ -1337,6 +1337,7 @@ const createCoordinateOrigin = (axisLength) => {
     new THREE.MeshBasicMaterial({ color: 0xe9edf0, depthTest: false, depthWrite: false, fog: false }),
   );
   joint.renderOrder = 19;
+  joint.name = 'coordinate-origin-center';
   group.add(joint);
   return group;
 };
@@ -1393,6 +1394,8 @@ const createChassisControlGuide = () => {
 export default function PointCloudViewer({
   mapData,
   mapOriginPose = null,
+  selectedMapOrigin = false,
+  onSelectMapOrigin,
   displaySettingsContainer,
   heightRange,
   showSlice = true,
@@ -1549,6 +1552,8 @@ export default function PointCloudViewer({
   const placedObjectColorModeRef = useRef(placedObjectColorMode);
   const renderActiveRef = useRef(Boolean(isActive));
   const onSelectWaypointRef = useRef(onSelectWaypoint);
+  const onSelectMapOriginRef = useRef(onSelectMapOrigin);
+  const selectedMapOriginRef = useRef(selectedMapOrigin);
   const onInspectorPageRequestRef = useRef(onInspectorPageRequest);
   const onSelectEdgeRef = useRef(onSelectEdge);
   const onClearSelectionRef = useRef(onClearSelection);
@@ -1639,6 +1644,8 @@ export default function PointCloudViewer({
   placedObjectColorModeRef.current = placedObjectColorMode;
   renderActiveRef.current = Boolean(isActive);
   onSelectWaypointRef.current = onSelectWaypoint;
+  onSelectMapOriginRef.current = onSelectMapOrigin;
+  selectedMapOriginRef.current = selectedMapOrigin;
   onInspectorPageRequestRef.current = onInspectorPageRequest;
   onSelectEdgeRef.current = onSelectEdge;
   onClearSelectionRef.current = onClearSelection;
@@ -4049,6 +4056,16 @@ export default function PointCloudViewer({
         if (waypointSelection) return waypointSelection;
       }
 
+      const origin = mapOriginGroupRef.current || originGroup;
+      const screenOrigin = origin.position.clone().project(camera);
+      // Keep the small center easy to click without enlarging the visible axes.
+      if (screenOrigin.z >= -1 && screenOrigin.z <= 1
+        && (Math.hypot((screenOrigin.x - normalizedPointer.x) * rect.width / 2,
+          (screenOrigin.y - normalizedPointer.y) * rect.height / 2) <= 10
+          || raycaster.intersectObjects(origin.children, true).length)) {
+        return { type: 'map-origin' };
+      }
+
       if (!routeGroup.visible) return null;
       const edgeHit = raycaster.intersectObjects(routeGroup.children, true)[0];
       return edgeHit ? selectionForObject(edgeHit.object) : null;
@@ -4468,6 +4485,7 @@ export default function PointCloudViewer({
       renderer.domElement.dataset.lastPickType = selection?.type || 'none';
       renderer.domElement.dataset.lastPickId = selection?.id || '';
       if (selection?.type === 'waypoint') onSelectWaypointRef.current?.(selection.id);
+      else if (selection?.type === 'map-origin') onSelectMapOriginRef.current?.();
       else if (selection?.type === 'edge') onSelectEdgeRef.current?.(selection.id);
       else onClearSelectionRef.current?.();
     };
@@ -5395,7 +5413,13 @@ export default function PointCloudViewer({
       }
 
       const mapOrigin = mapOriginGroupRef.current;
+      originGroup.getObjectByName('coordinate-origin-center').material.color.setHex(
+        selectedMapOriginRef.current && !mapOrigin ? 0xf4c95d : 0xe9edf0,
+      );
       if (mapOrigin) {
+        mapOrigin.getObjectByName('coordinate-origin-center').material.color.setHex(
+          selectedMapOriginRef.current ? 0xf4c95d : 0xe9edf0,
+        );
         originCameraPosition.copy(mapOrigin.position).applyMatrix4(camera.matrixWorldInverse);
         const depth = -originCameraPosition.z;
         if (depth > 1e-9) {
@@ -7864,7 +7888,9 @@ export default function PointCloudViewer({
           )}
           {teachingSpaceMode === 'independent' && mapOriginPose && (
             <div className="coordinate-reference-layer" role="group" aria-label="地图坐标原点参考">
-              <span ref={mapOriginLabelRef} className="map-origin-label">地图原点 · (0, 0, 0)</span>
+              <button type="button" ref={mapOriginLabelRef} className="map-origin-label"
+                aria-label="选择地图原点" aria-pressed={selectedMapOrigin} disabled={polylineOpen}
+                onClick={onSelectMapOrigin}>地图原点 · (0, 0, 0)</button>
             </div>
           )}
           {showPaths && showPathNames && (

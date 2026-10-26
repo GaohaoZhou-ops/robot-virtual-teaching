@@ -82,10 +82,12 @@ export default function Map2DView({
   mode,
   connectionSourceId,
   selectedWaypointId,
+  selectedMapOrigin = false,
   selectedEdgeId,
   colorMode,
   onAddWaypoint,
   onSelectWaypoint,
+  onSelectMapOrigin,
   onSelectEdge,
   onConnectTarget,
   onClearSelection,
@@ -1062,15 +1064,18 @@ export default function Map2DView({
       {bounds && (
         <button
           type="button"
-          className={`map-origin-marker ${originVisible ? '' : 'is-offscreen'}`}
+          className={`map-origin-marker ${originVisible ? '' : 'is-offscreen'} ${selectedMapOrigin ? 'is-selected' : ''}`}
           style={{ left: displayedOrigin.x, top: displayedOrigin.y }}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
             event.stopPropagation();
             centerOrigin();
+            setBoxSelection({ waypointIds: [], edgeIds: [] });
+            onSelectMapOrigin?.();
           }}
           aria-label="二维坐标原点"
-          title={originVisible ? '坐标原点 O (0, 0)' : '坐标原点在当前视野外，点击定位'}
+          aria-pressed={selectedMapOrigin}
+          title={originVisible ? '地图原点 O (0, 0) · 单击打开导航' : '地图原点在当前视野外，点击定位并打开导航'}
         >
           {originVisible ? (
             <span className="ros-origin-core" aria-hidden="true" />

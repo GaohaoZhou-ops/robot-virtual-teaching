@@ -118,6 +118,7 @@ export default function Inspector({
   waypoints,
   edges,
   selectedWaypointId,
+  selectedMapOrigin = false,
   arrivedWaypointId = null,
   selectedEdgeId,
   validation,
@@ -161,6 +162,7 @@ export default function Inspector({
   onSelectWaypoint,
   onSearchWaypoint,
   onMoveToWaypoint,
+  onMoveToMapOrigin,
   waypointMoveDisabled = false,
   onSelectEdge,
   onClearSelection,
@@ -268,7 +270,7 @@ export default function Inspector({
 
   useEffect(() => {
     setConnectivityResultsOpen(false);
-  }, [activePage, collapsed, isWorkbenchActive, teachingSpaceMode, selectedWaypointId, selectedEdgeId]);
+  }, [activePage, collapsed, isWorkbenchActive, teachingSpaceMode, selectedWaypointId, selectedEdgeId, selectedMapOrigin]);
 
   useEffect(() => {
     if (validation.status !== 'partial') setConnectivityResultsOpen(false);
@@ -330,10 +332,10 @@ export default function Inspector({
     || inspectorPages[0];
 
   useEffect(() => {
-    if (selectedEdgeId || (selectedWaypoint && !selectedWaypoint.teachingTaskId)) {
+    if (selectedMapOrigin || selectedEdgeId || (selectedWaypoint && !selectedWaypoint.teachingTaskId)) {
       setActivePage('navigation');
     }
-  }, [selectedEdgeId, selectedWaypointId, selectedWaypoint?.id, selectedWaypoint?.teachingTaskId]);
+  }, [selectedMapOrigin, selectedEdgeId, selectedWaypointId, selectedWaypoint?.id, selectedWaypoint?.teachingTaskId]);
 
   useEffect(() => {
     if (!pageRequest) return;
@@ -358,6 +360,7 @@ export default function Inspector({
   }, []);
 
   const activateInspectorPage = (pageId) => {
+    if (selectedMapOrigin) onClearSelection();
     setActivePage(pageId);
   };
 
@@ -446,6 +449,21 @@ export default function Inspector({
             id="inspector-page-navigation"
             aria-labelledby="inspector-tab-navigation"
           >
+            {selectedMapOrigin ? (
+              <button
+                type="button"
+                className="inspector-route-import map-origin-move-button"
+                disabled={!robot || robotLoadState?.status !== 'loaded' || waypointMoveDisabled || !onMoveToMapOrigin}
+                title={!robot || robotLoadState?.status !== 'loaded'
+                  ? '请先加载机器人模型'
+                  : waypointMoveDisabled ? '请等待当前加载或采集完成'
+                    : '移动到地图原点并对齐底盘朝向，保持当前 Z 高度和关节姿态'}
+                onClick={onMoveToMapOrigin}
+              >
+                <Navigation size={14} />运动到地图原点
+              </button>
+            ) : (
+              <>
             {!isIndependentTeachingSpace && (
               <div className="inspector-route-actions" role="group" aria-label="路径导入导出">
                 <button
@@ -853,6 +871,8 @@ export default function Inspector({
             </section>
           </>
         )}
+              </>
+            )}
           </div>
         )}
 

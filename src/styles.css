@@ -2466,7 +2466,11 @@ code {
   border-color: rgba(247, 199, 107, 0.55);
   color: #f7c76b;
   background: rgba(39, 31, 15, 0.88);
+  pointer-events: auto;
+  cursor: pointer;
 }
+
+.map-origin-label:disabled { pointer-events: none; }
 
 .spacemouse-axis-hud {
   position: absolute;
@@ -4879,6 +4883,16 @@ input[type="number"]::-webkit-inner-spin-button {
 .map-origin-marker:hover {
   border-color: #fff;
   background: rgba(18, 28, 32, 0.96);
+}
+
+.map-origin-marker.is-selected {
+  border-color: var(--amber);
+  box-shadow: 0 0 0 4px rgba(244, 201, 93, 0.2), 0 0 18px rgba(244, 201, 93, 0.35);
+}
+
+.map-origin-move-button {
+  width: 100%;
+  justify-content: center;
 }
 
 @keyframes source-pulse {

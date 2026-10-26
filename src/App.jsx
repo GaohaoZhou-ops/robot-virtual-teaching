@@ -133,6 +133,7 @@ import {
   buildRobotPresetFile, createRobotJointPreset, presetJointDefinitions, presetMatchesRobot,
   robotPresetValuesForEditing, validateRobotPresetName,
 } from './lib/robotJointPresets.js';
+import { withSharedRobotPresets } from './lib/sharedRobotPresets.js';
 import { insertTeachingPreset } from './lib/teachingPresetInsertion.js';
 import { moveTeachingPose } from './lib/teachingPoseOrder.js';
 import {
@@ -151,6 +152,8 @@ import {
   loadWorkspaceSnapshot,
   loadWorkSyncCheckpoint,
   loadProjectCompanions,
+  loadSharedRobotPresets,
+  importSharedRobotPresets,
   loadIndependentDisplaySource,
   listIndependentWorkspaces,
   renameIndependentWorkspace,
@@ -596,6 +599,7 @@ export default function App() {
   const [mode, setMode] = useState('select');
   const [connectionSourceId, setConnectionSourceId] = useState(null);
   const [selectedWaypointId, setSelectedWaypointId] = useState(null);
+  const [selectedMapOrigin, setSelectedMapOrigin] = useState(false);
   const [robotWaypointLocation, setRobotWaypointLocation] = useState(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState(null);
   const [validation, setValidation] = useState(initialValidation);
@@ -638,6 +642,7 @@ export default function App() {
   const robotParkingGhostRef = useRef(null);
   robotParkingGhostRef.current = robotParkingGhost;
   const [jointPoses, setJointPoses] = useState([]);
+  const sharedRobotPresetsRef = useRef(null);
   const [robotPresetDraft, setRobotPresetDraft] = useState(null);
   const [robotPresetManager, setRobotPresetManager] = useState(null);
   const robotPresetModalOpen = Boolean(robotPresetDraft || robotPresetManager);
@@ -735,6 +740,8 @@ export default function App() {
   }, [appPage, mapData?.mapId, robotPresetManager, teachingSpaceMode]);
   const coordinateFrame = teachingCoordinateFrame(teachingSpaceMode);
   const isIndependentTeachingSpace = teachingSpaceMode === 'independent';
+  const visibleMapOriginPose = isIndependentTeachingSpace && mapRouteSyncEnabled
+    && syncedMapOrigin?.mapId === mapData?.mapId ? syncedMapOrigin?.pose : null;
   const independentSwitchBlocked = loadState.loading || sessionState.status !== 'ready'
     || teachingCaptureState.status === 'capturing' || projectExportBusyRef.current || abxImportBusy
     || mapRouteSyncBusy || robotLoadState.status === 'pending' || robotLoadState.status === 'loading'
@@ -899,7 +906,16 @@ export default function App() {
     ));
     setSelectedWaypointId(point?.id || null);
     setSelectedEdgeId(null);
+    setSelectedMapOrigin(false);
   }, [activeTeachingTaskId, activeTeachingParkingPointId]);
+
+  useEffect(() => {
+    setSelectedMapOrigin(false);
+  }, [mapData?.geometry, teachingSpaceMode, visibleMapOriginPose, polylineTeachingOpen]);
+
+  useEffect(() => {
+    if (selectedWaypointId || selectedEdgeId) setSelectedMapOrigin(false);
+  }, [selectedWaypointId, selectedEdgeId]);
 
   useEffect(() => {
     const ids = new Set(waypoints.map((point) => point.id));
@@ -1173,12 +1189,17 @@ export default function App() {
     };
     sessionWriteChainRef.current = sessionWriteChainRef.current
       .catch(() => undefined)
-      .then(() => saveWorkspaceConfig(
-        sessionId,
-        mapId,
-        snapshot,
-        current.teachingSpaceMode,
-      ))
+      .then(async () => {
+        const saved = await saveWorkspaceConfig(
+          sessionId,
+          mapId,
+          snapshot,
+          current.teachingSpaceMode,
+          { presetLibrary: project ? sharedRobotPresetsRef.current : undefined },
+        );
+        if (saved?.presetLibrary) sharedRobotPresetsRef.current = saved.presetLibrary;
+        return saved;
+      })
       .catch(reportSessionFailure);
 
     const directoryBinding = projectDirectoryRef.current;
@@ -1417,7 +1438,7 @@ export default function App() {
         setTeachingTasks([]);
         setActiveTeachingTaskId(null);
         setActiveTeachingParkingPointId(null);
-        setJointPoses([]);
+        setJointPoses(withSharedRobotPresets([], sharedRobotPresetsRef.current?.poses || []));
         setCameraTeachingCommand(null);
         setCameraTeachingResult({ status: 'idle', revision: 0 });
         setTeachingCaptureState({ status: 'idle', message: '' });
@@ -1562,6 +1583,9 @@ export default function App() {
       try {
         const service = await fetchServiceSession().catch(() => ({ sessionId: createId('workspace') }));
         if (!isCurrent()) return;
+        const presetLibrary = await loadSharedRobotPresets();
+        if (!isCurrent()) return;
+        sharedRobotPresetsRef.current = presetLibrary;
         const stored = await prepareWorkspaceSession(service.sessionId, { preserveExisting: true });
         if (!isCurrent()) return;
         const identity = { sessionId: stored.sessionId };
@@ -1585,6 +1609,7 @@ export default function App() {
             !stored.map || (stored.config && stored.config.mapId === stored.map.mapId);
           const snapshot = configMatchesMap ? stored.config?.config : null;
           const project = snapshot?.project ? normalizeProject(snapshot.project) : null;
+          if (project) project.jointPoses = withSharedRobotPresets(project.jointPoses, presetLibrary.poses);
           setWorkspaceTransfer(project?.workspace?.transfer || null);
           setIndependentTeachingName(project?.workspace?.independentTeachingName || '');
           setMapRouteSyncEnabled(project?.workspace?.teachingSpaceMode === 'independent'
@@ -1928,7 +1953,7 @@ export default function App() {
           setTeachingTasks([]);
           setActiveTeachingTaskId(null);
           setActiveTeachingParkingPointId(null);
-          setJointPoses([]);
+          setJointPoses(withSharedRobotPresets([], sharedRobotPresetsRef.current?.poses || []));
           setRobotLoadState({ status: 'idle' });
           setRestoredView2d(null);
           view2dRef.current = null;
@@ -2555,6 +2580,8 @@ export default function App() {
           detail: `正在恢复工作区和 ${collection.independentHistory.length} 组独立示教缓存` });
         advanceProjectImport(0.8, '恢复工作区与示教历史');
         await restoreWorkspaceCollection(sessionIdRef.current, collection, activeMode);
+        const presetSource = collection.workspaces.map || collection.workspaces.independent;
+        sharedRobotPresetsRef.current = await importSharedRobotPresets(sessionIdRef.current, presetSource?.config?.config?.project);
         for (const mode of Object.keys(collection.workspaces)) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
         }
@@ -2571,6 +2598,7 @@ export default function App() {
           detail: '正在一起恢复地图示教、独立示教及绑定关系' });
         advanceProjectImport(0.8, '恢复工作区与示教结果');
         await restoreLinkedWorkspaces(sessionIdRef.current, workspaces, normalizeTeachingSpaceMode(requestedMode));
+        sharedRobotPresetsRef.current = await importSharedRobotPresets(sessionIdRef.current, workspaces.map?.config?.config?.project);
         for (const mode of ['map', 'independent']) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
         }
@@ -2738,6 +2766,8 @@ export default function App() {
         ...edge, status: importedConnectivity.edgeStatus.get(edge.id),
       })) : project.edges);
       setTeachingTasks(project.teachingTasks);
+      sharedRobotPresetsRef.current = await importSharedRobotPresets(sessionIdRef.current, project.jointPoses);
+      project.jointPoses = withSharedRobotPresets(project.jointPoses, sharedRobotPresetsRef.current.poses);
       setJointPoses(project.jointPoses);
       setActiveTeachingTaskId(importedTaskId);
       setActiveTeachingParkingPointId(importedParkingPointId);
@@ -3090,6 +3120,7 @@ export default function App() {
   }, [lastProjectRecovery, notify, persistWorkspaceNow]);
 
   const setActiveMode = (nextMode) => {
+    setSelectedMapOrigin(false);
     setMode(nextMode);
     setConnectionSourceId(null);
     if (nextMode === 'box') notify('框选模式：在二维图空白处按住左键拖框', 'info');
@@ -3167,6 +3198,7 @@ export default function App() {
   }, [addWaypoint, notify, robotLoadState.status, robotPose, selectedRobot]);
 
   const selectWaypoint = useCallback((id) => {
+    setSelectedMapOrigin(false);
     setSelectedWaypointId(id);
     setSelectedEdgeId(null);
   }, []);
@@ -3182,6 +3214,7 @@ export default function App() {
   }, []);
 
   const selectEdge = useCallback((id) => {
+    setSelectedMapOrigin(false);
     setSelectedEdgeId(id);
     setSelectedWaypointId(null);
   }, []);
@@ -3195,6 +3228,7 @@ export default function App() {
   );
 
   const clearSelection = useCallback(() => {
+    setSelectedMapOrigin(false);
     setSelectedWaypointId(null);
     setSelectedEdgeId(null);
   }, []);
@@ -3706,6 +3740,17 @@ export default function App() {
       setRobotParkingGhost(null);
     }
   }, [previewTeachingParkingPoint, selectWaypoint, waypoints]);
+
+  const selectMapOrigin = useCallback(() => {
+    if (polylineTeachingOpen) return;
+    setSelectedWaypointId(null);
+    setSelectedEdgeId(null);
+    setSelectedMapOrigin(true);
+    setConnectionSourceId(null);
+    setMode('select');
+    clearRobotParkingGhost();
+    requestInspectorPage({ page: 'navigation' });
+  }, [clearRobotParkingGhost, polylineTeachingOpen, requestInspectorPage]);
 
   const focusWaypointFromInspector = useCallback((id) => {
     setShowWaypoints3D(true);
@@ -5412,8 +5457,7 @@ export default function App() {
   }, [clearRobotParkingGhost, notify, requestSynchronizedFocus, robotLoadState.status,
     robotPresetJoints, selectedRobot, stopTeachingTaskPlayback, teachingContextMatches]);
 
-  const moveRobotToWaypoint = useCallback((id) => {
-    const point = latestWorkspaceRef.current.waypoints.find((item) => item.id === id);
+  const moveRobotToNavigationPoint = useCallback((point) => {
     if (!point || !selectedRobot || robotLoadState.status !== 'loaded' || loadState.loading) return;
     if (teachingCaptureBusyRef.current) {
       notify('请等待当前姿态采集完成后再移动机器人', 'warning');
@@ -5431,17 +5475,31 @@ export default function App() {
     // Navigation coordinates describe the route, while the base height is
     // calibrated independently for the loaded robot. Respect both frames.
     setRobotPose(normalizeRobotPose(target));
-    setRobotWaypointLocation({
-      waypointId: id,
+    setRobotWaypointLocation(point.id ? {
+      waypointId: point.id,
       sourceWaypointId: point.source === TEMPORARY_MAP_ROUTE_SOURCE ? point.sourceWaypointId : null,
       mapId: latestWorkspaceRef.current.mapData?.mapId,
       teachingSpaceMode: latestWorkspaceRef.current.teachingSpaceMode,
       robotKey: selectedRobot.id || selectedRobot.relativePath,
-    });
+    } : null);
     requestSynchronizedFocus('robot', selectedRobot.id || selectedRobot.relativePath);
     notify(`已运动到 ${point.name}，底盘朝向已对齐，Z 高度保持不变`, 'success');
   }, [clearRobotParkingGhost, loadState.loading, notify, requestSynchronizedFocus,
     robotLoadState.status, selectedRobot, stopTeachingTaskPlayback]);
+
+  const moveRobotToWaypoint = useCallback((id) => {
+    moveRobotToNavigationPoint(latestWorkspaceRef.current.waypoints.find((point) => point.id === id));
+  }, [moveRobotToNavigationPoint]);
+
+  const moveRobotToMapOrigin = useCallback(() => {
+    const pose = normalizeRobotPose(visibleMapOriginPose);
+    // The transformed map Z axis matters when navigating a tilted local frame.
+    const up = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(
+      ...['roll', 'pitch', 'yaw'].map((axis) => THREE.MathUtils.degToRad(pose.rpy[axis])), 'ZYX',
+    ));
+    moveRobotToNavigationPoint({ name: '地图原点', pose: parkingWaypointPose(pose),
+      source: TEMPORARY_MAP_ROUTE_SOURCE, navigationUp: { x: up.x, y: up.y, z: up.z } });
+  }, [moveRobotToNavigationPoint, visibleMapOriginPose]);
 
   const beginTeachingParkingPointEdit = useCallback((taskId, parkingPointId) => {
     const task = teachingTasks.find((item) => item.id === taskId);
@@ -6931,8 +6989,9 @@ export default function App() {
             >
               <PointCloudViewer
                 mapData={mapData}
-                mapOriginPose={isIndependentTeachingSpace && mapRouteSyncEnabled
-                  && syncedMapOrigin?.mapId === mapData?.mapId ? syncedMapOrigin?.pose : null}
+                mapOriginPose={visibleMapOriginPose}
+                selectedMapOrigin={selectedMapOrigin}
+                onSelectMapOrigin={selectMapOrigin}
                 displaySettingsContainer={displaySettingsContainer}
                 heightRange={heightRange}
                 showSlice={showSlice3D}
@@ -7103,6 +7162,8 @@ export default function App() {
               >
                 <Map2DView
                   mapData={mapData}
+                  selectedMapOrigin={selectedMapOrigin}
+                  onSelectMapOrigin={selectMapOrigin}
                   initialView={restoredView2d}
                   heightRange={heightRange}
                   waypoints={waypoints}
@@ -7181,6 +7242,8 @@ export default function App() {
           onSelectWaypoint={focusWaypointFromInspector}
           onSearchWaypoint={focusWaypointFromInspector}
           onMoveToWaypoint={moveRobotToWaypoint}
+          selectedMapOrigin={selectedMapOrigin}
+          onMoveToMapOrigin={moveRobotToMapOrigin}
           waypointMoveDisabled={loadState.loading || teachingCaptureState.status === 'capturing'}
           onSelectEdge={focusEdgeFromInspector}
           onClearSelection={clearSelection}
