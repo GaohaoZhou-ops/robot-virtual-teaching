@@ -38,7 +38,7 @@
 .robot-preset-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 3px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
 .robot-preset-dialog button:disabled { opacity: 0.4; cursor: default; }
 .robot-preset-dialog button:hover:not(:disabled) { background: #59dbe810; }
-.robot-preset-dialog button:focus-visible, .robot-preset-dialog input:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+.robot-preset-dialog button:focus-visible, .robot-preset-dialog input:focus-visible, .robot-preset-dialog textarea:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
 .robot-preset-dialog__body { flex: 1; display: grid; grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.6fr); gap: 22px; min-height: 0; overflow: hidden; padding: 22px 24px; }
 .robot-preset-dialog__preview { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 10px; min-width: 0; min-height: 0; }
 .robot-preset-dialog .is-preset-preview { position: relative; grid-template-rows: 56px minmax(0, 1fr); min-height: 0; border-radius: 3px; }
@@ -56,7 +56,15 @@
 .robot-preset-dialog__controls button { min-height: 38px; white-space: nowrap; }
 .robot-preset-dialog__units > span { display: block; margin-bottom: 9px; font-size: 12px; color: #b4c9c6; }
 .robot-preset-dialog__units > div { display: flex; gap: 4px; }
-.robot-preset-dialog__units button[aria-pressed="true"] { border-color: #59dbe877; color: var(--cyan); background: #59dbe810; }
+.robot-preset-dialog__units button[aria-pressed="true"], .robot-preset-dialog__pose-actions button[aria-pressed="true"] { border-color: #59dbe877; color: var(--cyan); background: #59dbe810; }
+.robot-preset-dialog__paste { display: grid; gap: 12px; min-width: 0; }
+.robot-preset-dialog__paste > label { color: #c9e3df; font-size: 13px; }
+.robot-preset-dialog__paste > p { margin: 0; color: #8aa8a4; font-size: 11px; line-height: 1.7; }
+.robot-preset-dialog__paste textarea { display: block; box-sizing: border-box; width: 100%; min-height: 320px; padding: 14px; resize: vertical; border: 1px solid #31514f; border-radius: 3px; background: #061015; color: #e0efec; font: 12px/1.8 Menlo, monospace; tab-size: 2; }
+.robot-preset-dialog__paste textarea::placeholder { color: #607e7a; opacity: 1; }
+.robot-preset-dialog__paste textarea[aria-invalid="true"] { border-color: #e09182; }
+.robot-preset-dialog__paste > p.is-error { color: #f4a999; overflow-wrap: anywhere; }
+.robot-preset-dialog__paste-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .robot-preset-dialog__groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .robot-preset-dialog fieldset { min-width: 0; margin: 0; padding: 4px 14px 8px; border: 1px solid #28403f; border-radius: 3px; }
 .robot-preset-dialog legend { padding: 0 7px; color: #c9e3df; font-size: 13px; }

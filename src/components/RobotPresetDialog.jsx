@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Bot, Crosshair, FolderOpen, LoaderCircle, Play, RotateCcw, Save, X } from 'lucide-react';
+import { Bot, ClipboardPaste, Crosshair, FolderOpen, LoaderCircle, Play, RotateCcw, Save, X } from 'lucide-react';
 import TeachingPoseRobotPreview from './TeachingPoseRobotPreview.jsx';
 import {
   groupPresetJoints,
@@ -24,6 +24,8 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
   const panelRef = useRef(null);
   const nameInputRef = useRef(null);
   const fileInputRef = useRef(null);
+  const pasteButtonRef = useRef(null);
+  const pasteInputRef = useRef(null);
   const mountedRef = useRef(false);
   const savingRef = useRef(false);
   const importingRef = useRef(false);
@@ -38,6 +40,9 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteError, setPasteError] = useState('');
   const busy = Boolean(saving || importing);
   const groups = useMemo(() => groupPresetJoints(snapshot.joints), [snapshot.joints]);
   const previewValues = useMemo(() => ({ ...currentJointValues,
@@ -59,6 +64,44 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
     };
   }, [returnFocusRef]);
 
+  useEffect(() => {
+    if (pasteMode) pasteInputRef.current?.focus();
+  }, [pasteMode]);
+
+  const applyImportedValues = (imported) => {
+    setDrafts((current) => Object.fromEntries(snapshot.joints.map((joint) => {
+      const value = imported.values[joint.name] ?? current[joint.name].value;
+      return [joint.name, { value, previewValue: imported.values[joint.name] ?? current[joint.name].previewValue,
+        text: formatValue(jointValueToInput(value, joint, imported.unit)) }];
+    })));
+    setUnit(imported.unit);
+    setErrors((current) => Object.fromEntries(Object.entries(current)
+      .filter(([joint]) => !Object.hasOwn(imported.values, joint))));
+  };
+
+  const leavePasteMode = () => {
+    setPasteMode(false);
+    setPasteError('');
+    pasteButtonRef.current?.focus();
+  };
+
+  const parsePastedValues = () => {
+    if (savingRef.current || importingRef.current) return;
+    setPasteError('');
+    try {
+      if (!pasteText.trim()) throw new Error('请先粘贴关节值 JSON');
+      if (new Blob([pasteText]).size > 1024 * 1024) throw new Error('关节值文本不能超过 1 MB');
+      const imported = readRobotPresetFile(pasteText, snapshot.joints);
+      applyImportedValues(imported);
+      setPasteText('');
+      setError('');
+      leavePasteMode();
+    } catch (reason) {
+      setPasteError(reason.message || '关节值解析失败，请检查粘贴的内容');
+      pasteInputRef.current?.focus();
+    }
+  };
+
   const importFile = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -71,15 +114,8 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
       if (file.size > 1024 * 1024) throw new Error('预设姿态文件不能超过 1 MB');
       const imported = readRobotPresetFile(await file.text(), snapshot.joints, file.name);
       if (!mountedRef.current) return;
-      setDrafts((current) => Object.fromEntries(snapshot.joints.map((joint) => {
-        const value = imported.values[joint.name] ?? current[joint.name].value;
-        return [joint.name, { value, previewValue: imported.values[joint.name] ?? current[joint.name].previewValue,
-          text: formatValue(jointValueToInput(value, joint, imported.unit)) }];
-      })));
+      applyImportedValues(imported);
       setName((current) => current.trim() ? current : imported.name);
-      setUnit(imported.unit);
-      setErrors((current) => Object.fromEntries(Object.entries(current)
-        .filter(([joint]) => !Object.hasOwn(imported.values, joint))));
     } catch (reason) {
       if (mountedRef.current) setError(reason.message || '预设姿态文件导入失败');
     } finally {
@@ -113,7 +149,7 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
 
   const save = async (event) => {
     event.preventDefault();
-    if (savingRef.current || importingRef.current) return;
+    if (savingRef.current || importingRef.current || pasteMode) return;
     const apply = event.nativeEvent.submitter?.value === 'apply';
     const values = Object.fromEntries(Object.entries(drafts).map(([key, draft]) => [key, draft.value]));
     const nextErrors = jointPresetErrors(snapshot.joints, values);
@@ -139,7 +175,7 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
       event.preventDefault();
       if (!savingRef.current && !importingRef.current) onClose();
     } else if (event.key === 'Tab') {
-      const controls = [...panelRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="file"]), canvas[tabindex="0"]')];
+      const controls = [...panelRef.current.querySelectorAll('button:not(:disabled), input:not(:disabled):not([type="file"]), textarea:not(:disabled), canvas[tabindex="0"]')];
       if (event.shiftKey && [controls[0], panelRef.current].includes(document.activeElement)) {
         event.preventDefault(); controls.at(-1)?.focus();
       } else if (!event.shiftKey && document.activeElement === controls.at(-1)) {
@@ -178,27 +214,49 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
                 <div className="robot-preset-dialog__units" role="group" aria-label="关节角度单位">
                   <span>输入单位</span>
                   <div>{[['degree', '角度 °'], ['radian', '弧度 rad']].map(([value, label]) => (
-                    <button type="button" key={value} aria-pressed={unit === value} disabled={busy}
+                    <button type="button" key={value} aria-pressed={unit === value} disabled={busy || pasteMode}
                       onClick={() => changeUnit(value)}>{label}</button>
                   ))}</div>
                 </div>
-                <input ref={fileInputRef} type="file" hidden tabIndex={-1} disabled={busy}
+                <input ref={fileInputRef} type="file" hidden tabIndex={-1} disabled={busy || pasteMode}
                   accept=".json,application/json" aria-label="预设姿态文件" onChange={importFile} />
                 <div className="robot-preset-dialog__pose-actions">
-                  <button type="button" disabled={busy} onClick={() => replacePoseValues({})}>
+                  <button type="button" disabled={busy || pasteMode} onClick={() => replacePoseValues({})}>
                     <RotateCcw size={14} />重置姿态
                   </button>
-                  <button type="button" disabled={busy} onClick={() => replacePoseValues(currentJointValues)}>
+                  <button type="button" disabled={busy || pasteMode} onClick={() => replacePoseValues(currentJointValues)}>
                     <Crosshair size={14} />当前姿态
                   </button>
-                  <button type="button" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                  <button type="button" disabled={busy || pasteMode} onClick={() => fileInputRef.current?.click()}>
                     {importing ? <LoaderCircle size={14} className="is-spinning" /> : <FolderOpen size={14} />}
                     {importing ? '正在读取…' : '导入预设姿态'}
+                  </button>
+                  <button ref={pasteButtonRef} type="button" disabled={busy} aria-pressed={pasteMode}
+                    onClick={() => {
+                      setError('');
+                      if (pasteMode) leavePasteMode();
+                      else setPasteMode(true);
+                    }}>
+                    <ClipboardPaste size={14} />粘贴关节值
                   </button>
                 </div>
               </div>
             </div>
-            <div className="robot-preset-dialog__groups">
+            {pasteMode ? <div className="robot-preset-dialog__paste">
+              <label htmlFor="robot-preset-paste">关节值 JSON</label>
+              <p id="robot-preset-paste-help">在下方粘贴 JSON，支持 deg（角度）和 rad（弧度）。解析成功后返回关节表单。</p>
+              <textarea id="robot-preset-paste" ref={pasteInputRef} value={pasteText} disabled={busy}
+                spellCheck={false} autoCapitalize="off" autoCorrect="off" aria-invalid={Boolean(pasteError)}
+                aria-describedby={`robot-preset-paste-help${pasteError ? ' robot-preset-paste-error' : ''}`}
+                placeholder={'{\n  "unit": "deg",\n  "joints": {\n    "head": [0, 0],\n    "torso": [0, 0, 0, 0],\n    "left_arm": [0, 0, 0, 0, 0, 0, 0],\n    "right_arm": [0, 0, 0, 0, 0, 0, 0]\n  }\n}'}
+                onChange={(event) => { setPasteText(event.target.value); setPasteError(''); }} />
+              {pasteError && <p id="robot-preset-paste-error" className="is-error" role="alert">{pasteError}</p>}
+              <div className="robot-preset-dialog__paste-actions">
+                <button type="button" disabled={busy} onClick={leavePasteMode}>返回关节表单</button>
+                <button type="button" className="robot-preset-dialog__save" disabled={busy || !pasteText.trim()}
+                  onClick={parsePastedValues}>解析关节值</button>
+              </div>
+            </div> : <div className="robot-preset-dialog__groups">
               {groups.map((group) => <fieldset key={group.id} data-preset-group={group.id} disabled={busy}>
                 <legend>{group.label}<span>{group.joints.length} 个关节</span></legend>
                 {group.joints.map((joint) => <label key={joint.name} className="robot-preset-joint">
@@ -221,19 +279,19 @@ export default function RobotPresetDialog({ snapshot, currentJointValues = snaps
                   </span>
                 </label>)}
               </fieldset>)}
-            </div>
+            </div>}
           </div>
         </div>
         <footer>
           <span className={error ? 'is-error' : ''} role={error ? 'alert' : undefined}>
-            {error || '地图示教与独立示教共用；选择“保存并应用”可立即使用该姿态。'}
+            {error || (pasteMode ? '请先解析关节值，再保存预设姿态。' : '地图示教与独立示教共用；选择“保存并应用”可立即使用该姿态。')}
           </span>
           <div><button type="button" disabled={busy} onClick={onClose}>取消</button>
-            <button type="submit" name="action" value="save" className="robot-preset-dialog__save" disabled={busy}>
+            <button type="submit" name="action" value="save" className="robot-preset-dialog__save" disabled={busy || pasteMode}>
               {saving === 'save' ? <LoaderCircle size={14} className="is-spinning" /> : <Save size={14} />}
               {saving === 'save' ? '正在保存' : '保存姿态'}
             </button>
-            <button type="submit" name="action" value="apply" className="robot-preset-dialog__apply" disabled={busy}>
+            <button type="submit" name="action" value="apply" className="robot-preset-dialog__apply" disabled={busy || pasteMode}>
               {saving === 'apply' ? <LoaderCircle size={14} className="is-spinning" /> : <Play size={14} />}
               {saving === 'apply' ? '正在保存并应用' : '保存并应用'}
             </button></div>

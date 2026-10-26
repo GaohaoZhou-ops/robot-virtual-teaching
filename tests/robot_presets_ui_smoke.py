@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -94,7 +95,7 @@ def run():
             loaded_requests = len(model_requests)
             expect(dialog.get_by_role('button', name='导入预设姿态', exact=True)).to_be_enabled()
             assert dialog.locator('.robot-preset-dialog__pose-actions button').all_text_contents() == [
-                '重置姿态', '当前姿态', '导入预设姿态']
+                '重置姿态', '当前姿态', '导入预设姿态', '粘贴关节值']
             expect(dialog.locator('input[type="file"]')).to_be_hidden()
             expect(dialog.get_by_role('spinbutton')).to_have_count(20)
             assert dialog.locator('[data-preset-group]').evaluate_all(
@@ -118,7 +119,7 @@ def run():
             assert abs(preview_values(page)['left_J1'] - before['left_J1']) < 1e-6
             left.fill('999')
             save_and_apply.click()
-            expect(dialog).to_contain_text('超出关节限位')
+            expect(dialog).to_contain_text(re.compile(r'超出关节(?:软)?限位'))
             assert abs(preview_values(page)['left_J1'] - before['left_J1']) < 1e-6
             assert scene_values(page) == before, 'invalid save-and-apply must not move the robot'
             dialog.get_by_role('button', name='重置姿态', exact=True).click()

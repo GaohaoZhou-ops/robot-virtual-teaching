@@ -477,6 +477,21 @@ playwright/.auth/
 /tests/atlas-robot-preset-*/
 /atlas-robot-preset-*.[zZ][iI][pP]
 /tests/atlas-robot-preset-*.[zZ][iI][pP]
+# Standalone copies of preset-paste builds/captures and model-update reports.
+# Their usual build/, test-artifacts/ and .atlas-cache/ locations are covered above.
+# Scope exported copies to root/tests; keep robot_preset_* runners and fixtures visible.
+/robot-preset-paste/
+/tests/robot-preset-paste/
+/robot-preset-paste-*/
+/tests/robot-preset-paste-*/
+/robot-preset-paste.[zZ][iI][pP]
+/tests/robot-preset-paste.[zZ][iI][pP]
+/robot-preset-paste-*.[zZ][iI][pP]
+/tests/robot-preset-paste-*.[zZ][iI][pP]
+/robot-model-update-*/
+/tests/robot-model-update-*/
+/robot-model-update-*.[zZ][iI][pP]
+/tests/robot-model-update-*.[zZ][iI][pP]
 # Grouped teaching and record-button UI review output copied from /tmp.
 # Includes pose previews, parking navigation and upper-body action checks.
 # Keep scripts and nested source artwork / regression fixtures trackable.
