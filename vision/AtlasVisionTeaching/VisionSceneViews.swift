@@ -39,6 +39,7 @@ struct VisionProjectToolsView: View {
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.dismissImmersiveSpace) private var dismissSpace
+    private var toolsActive: Bool { workbench.projectImmersed || workbench.replacingScene }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -46,23 +47,12 @@ struct VisionProjectToolsView: View {
                     ForEach(Array((review.manifest?.clips ?? []).enumerated()), id: \.element.id) { index, clip in
                         Button(clip.taskName) { review.chooseClip(index) }
                     }
-                } label: { Label(review.clip?.taskName ?? review.manifest?.name ?? "沉浸式工程", systemImage: "cube.transparent").lineLimit(1) }
+                } label: {
+                    Label(review.clip?.taskName ?? review.manifest?.name ?? "沉浸式工程", systemImage: "cube.transparent")
+                        .lineLimit(1).truncationMode(.middle)
+                }
                     .disabled(!review.hasClips)
                 Spacer(minLength: 0)
-                Button { review.togglePlayback() } label: { Image(systemName: review.playing ? "pause.fill" : "play.fill") }
-                    .disabled(!review.hasClips || review.travelling)
-                    .accessibilityLabel(review.playing ? "暂停回放" : "开始回放").accessibilityIdentifier("project-play")
-                Button(review.lifeSize ? "沙盘" : "进入", systemImage: review.lifeSize ? "square.3.layers.3d" : "figure.walk") {
-                    if review.lifeSize { review.overview() } else { review.enterProject() }
-                }.disabled(review.travelling).accessibilityIdentifier("project-scale")
-                Button("编辑工具", systemImage: "slider.horizontal.3") {
-                    workbench.editorVisible = true; openWindow(id: "workspace", value: "workspace")
-                }.accessibilityIdentifier("project-editor")
-                Button("双相机", systemImage: "camera.on.rectangle") {
-                    if review.cameraWindowVisible { dismissWindow(id: "project-cameras") }
-                    else { openWindow(id: "project-cameras", value: "project-cameras") }
-                }.disabled(!review.hasCameras)
-                    .tint(review.cameraWindowVisible ? .cyan : nil).accessibilityIdentifier("project-cameras")
                 Menu {
                     Section("游走") {
                         Button("回到机器人旁", systemImage: "viewfinder") { review.returnToRobot() }
@@ -86,8 +76,10 @@ struct VisionProjectToolsView: View {
                             .accessibilityIdentifier("project-home")
                     }
                 } label: { Image(systemName: "ellipsis") }
+                    .fixedSize()
                     .accessibilityLabel("空间选项").accessibilityIdentifier("project-options")
             }.disabled(workbench.openingScene || review.busy)
+            projectActions.disabled(workbench.openingScene || review.busy)
             if review.clip != nil {
                 Slider(value: Binding(get: { review.progress }, set: { review.scrub($0) }), in: 0...1)
                     .accessibilityLabel("回放进度").accessibilityIdentifier("project-timeline")
@@ -96,9 +88,9 @@ struct VisionProjectToolsView: View {
                 HStack {
                     Label("落点已选好", systemImage: "mappin.circle.fill").foregroundStyle(.mint)
                     Spacer()
-                    Button("取消") { review.clearDestination() }
+                    Button("取消") { review.clearDestination() }.fixedSize()
                     Button("前往此处", systemImage: "figure.walk") { review.travel() }
-                        .tint(.mint).accessibilityIdentifier("project-travel")
+                        .fixedSize().tint(.mint).accessibilityIdentifier("project-travel")
                 }.disabled(review.travelling)
             } else if review.travelling { ProgressView("正在前往…") }
             else {
@@ -118,7 +110,7 @@ struct VisionProjectToolsView: View {
             } else if workbench.sceneIsOutdated {
                 HStack {
                     Text("工程有更新").foregroundStyle(.secondary)
-                    Button("更新空间", systemImage: "arrow.clockwise") { workbench.command("scene") }
+                    Button("更新空间", systemImage: "arrow.clockwise") { workbench.command("scene") }.fixedSize()
                 }.font(.callout)
             }
             if let exported = workbench.exportedFile { ShareLink("导出文件", item: exported).accessibilityIdentifier("project-exported") }
@@ -130,14 +122,70 @@ struct VisionProjectToolsView: View {
                 .accessibilityValue("\(review.manifest?.nodes.count ?? 0) 个节点 · \(review.manifest?.clips.count ?? 0) 个任务 · \(String(describing: review.content.position)) · \(review.manifest?.id ?? "")")
             #endif
         }.padding(20).frame(width: 660).buttonStyle(.bordered).controlSize(.large)
+        .opacity(toolsActive ? 1 : 0).allowsHitTesting(toolsActive).accessibilityHidden(!toolsActive)
         .background(VisionWorkbenchEngine())
         .modifier(VisionProjectSceneCoordinator())
+        .task(id: toolsActive) {
+            // Handles previously saved windows and pre-26 scene restoration.
+            // Keep the panel during an internal scene refresh, but never on
+            // the gateway or after an immersive session has ended.
+            if !toolsActive {
+                openWindow(id: "workspace", value: "workspace")
+                dismissWindow(id: "project-cameras")
+                dismissWindow(id: "project-tools")
+            }
+        }
         .onDisappear {
             if workbench.projectImmersed && !workbench.replacingScene {
                 workbench.command("checkpoint"); review.stop()
                 Task { await dismissSpace() }
             }
         }
+    }
+
+    // Keep the project title out of the action row. At larger text sizes, wrap
+    // whole controls instead of squeezing Chinese labels into several lines.
+    private var projectActions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                playbackButton; scaleButton; editorButton; camerasButton
+            }.fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) { playbackButton; scaleButton }
+                HStack(spacing: 12) { editorButton; camerasButton }
+            }.fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 12) {
+                playbackButton; scaleButton; editorButton; camerasButton
+            }.fixedSize(horizontal: true, vertical: false)
+        }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var playbackButton: some View {
+        Button { review.togglePlayback() } label: { Image(systemName: review.playing ? "pause.fill" : "play.fill") }
+            .disabled(!review.hasClips || review.travelling)
+            .accessibilityLabel(review.playing ? "暂停回放" : "开始回放").accessibilityIdentifier("project-play")
+    }
+
+    private var scaleButton: some View {
+        Button(review.lifeSize ? "沙盘" : "进入", systemImage: review.lifeSize ? "square.3.layers.3d" : "figure.walk") {
+            if review.lifeSize { review.overview() } else { review.enterProject() }
+        }.disabled(review.travelling).accessibilityIdentifier("project-scale")
+    }
+
+    private var editorButton: some View {
+        Button("编辑工具", systemImage: "slider.horizontal.3") {
+            workbench.editorVisible = true; openWindow(id: "workspace", value: "workspace")
+        }.accessibilityIdentifier("project-editor")
+    }
+
+    private var camerasButton: some View {
+        Button("双相机", systemImage: "camera.on.rectangle") {
+            if review.cameraWindowVisible { dismissWindow(id: "project-cameras") }
+            else { openWindow(id: "project-cameras", value: "project-cameras") }
+        }.disabled(!review.hasCameras)
+            .tint(review.cameraWindowVisible ? .cyan : nil).accessibilityIdentifier("project-cameras")
     }
 }
 
@@ -174,9 +222,12 @@ struct VisionSceneLibraryView: View {
                         Label("电脑正在共享", systemImage: "wifi")
                         Spacer()
                         Button("重新发现") { discovery.start(); if !address.isEmpty { findOffers(address) } }
+                            .fixedSize()
                     }
                     if discovery.servers.count > 1 {
-                        ForEach(discovery.servers) { server in Button(server.name) { findOffers(server.address) } }
+                        ForEach(discovery.servers) { server in
+                            Button(server.name) { findOffers(server.address) }.multilineTextAlignment(.leading)
+                        }
                     }
                     if offers.isEmpty {
                         Text("在电脑选择「设备 → Vision Pro → 完整工程空间查看」，保持共享窗口打开。")
@@ -192,17 +243,18 @@ struct VisionSceneLibraryView: View {
                             }
                         } label: {
                             VStack(alignment: .leading, spacing: 6) {
-                                Label(offer.name, systemImage: "cube.transparent")
+                                Label(offer.name, systemImage: "cube.transparent").lineLimit(2)
                                 Text("\(offer.hasRobot ? "含完整机器人" : "地图场景") · \(offer.clipCount) 个动作任务")
                                     .font(.callout).foregroundStyle(.secondary)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                            }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading).padding(12)
                         }.accessibilityIdentifier("scene-offer-\(offer.id)")
                     }
                     Divider()
                     Label("本机空间工程", systemImage: "square.stack.3d.up")
                     ForEach(local) { scene in
                         Button { run { try await open(scene) } } label: {
-                            Label(scene.name, systemImage: "cube.fill").frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                            Label(scene.name, systemImage: "cube.fill").lineLimit(2).multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
                         }.accessibilityIdentifier("scene-local-\(scene.id)")
                     }
                     if local.isEmpty { Text("接收一次后，可离线查看和回放。").foregroundStyle(.secondary) }
@@ -292,8 +344,10 @@ struct VisionSceneToolsView: View {
                             Button(clip.taskName) { review.chooseClip(index) }
                         }
                     } label: { Text(review.clip?.taskName ?? "已保存动作").lineLimit(1) }
-                } else { Text(review.manifest?.name ?? "空间工程").lineLimit(1) }
+                } else { Text(review.manifest?.name ?? "空间工程").lineLimit(1).truncationMode(.middle) }
                 Spacer()
+            }
+            VisionActionRow {
                 Button { review.togglePlayback() } label: { Image(systemName: review.playing ? "pause.fill" : "play.fill") }
                     .disabled(!review.hasClips).accessibilityLabel(review.playing ? "暂停回放" : "开始回放").accessibilityIdentifier("scene-play")
                 Button(review.lifeSize ? "沙盘" : "原大", systemImage: review.lifeSize ? "square.3.layers.3d" : "viewfinder") {

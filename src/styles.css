@@ -2455,6 +2455,10 @@ code {
   user-select: none;
 }
 
+/* Keep accessible names and measurements while their pixels are rendered in 3D. */
+.waypoint-name-layer.is-depth-tested,
+.path-name-layer.is-depth-tested { opacity: 0; }
+
 .waypoint-name-label.is-selected,
 .path-name-label.is-selected {
   border-color: rgba(247, 199, 107, 0.65);

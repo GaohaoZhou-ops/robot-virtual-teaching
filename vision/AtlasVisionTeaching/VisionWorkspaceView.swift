@@ -134,7 +134,7 @@ struct VisionWorkspaceView: View {
                             }
                             Spacer()
                             Image(systemName: "arrow.up.right")
-                        }.padding(16).frame(maxWidth: .infinity)
+                        }.multilineTextAlignment(.leading).padding(16).frame(maxWidth: .infinity)
                     }.buttonStyle(.borderedProminent).tint(.cyan).accessibilityIdentifier("open-scene-library")
                     HStack(alignment: .top, spacing: 24) {
                         pairingPanel(minHeight: panelHeight)
@@ -291,7 +291,7 @@ struct VisionWorkspaceView: View {
                                 Text(item.session.manifest.name).font(.title3.weight(.medium)).lineLimit(2)
                                 Text("\(displayed.result.samples.count) 个 Pose · \(displayed.syncedAt != nil ? "已同步" : displayed.result.completedAt != nil ? "待同步" : "草稿")")
                                     .font(.body).foregroundStyle(.secondary)
-                            }.frame(maxWidth: .infinity, alignment: .leading).padding(8)
+                            }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading).padding(8)
                         }
                         .tint(item.id == session.current?.id ? Color.cyan : nil)
                         .accessibilityIdentifier("project-\(item.id)")
@@ -357,7 +357,7 @@ struct VisionWorkspaceView: View {
                 ForEach(pairingAutofill.offers) { offer in
                     Button { pairingAutofill.select(offer) } label: {
                         HStack {
-                            Label(offer.name, systemImage: "cube.transparent").lineLimit(2)
+                            Label(offer.name, systemImage: "cube.transparent").lineLimit(2).multilineTextAlignment(.leading)
                             Spacer(minLength: 0)
                             if pairingAutofill.selected?.id == offer.id { Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan) }
                         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -386,7 +386,8 @@ struct VisionWorkspaceView: View {
                     } else {
                         Label(hasSearched ? "重新检测局域网服务器" : "自动检测局域网服务器", systemImage: "network")
                     }
-                }.frame(maxWidth: .infinity).padding(.vertical, 4)
+                }.multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity).padding(.vertical, 4)
             }
             .buttonStyle(.bordered).tint(.cyan)
             .disabled(discovery.isSearching || session.busy)
@@ -408,7 +409,7 @@ struct VisionWorkspaceView: View {
                         }
                         Spacer(minLength: 0)
                         if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(.cyan) }
-                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .disabled(session.busy)
                 .accessibilityIdentifier("discovered-service-\(server.id)")
@@ -487,14 +488,13 @@ struct VisionWorkspaceView: View {
 
     private var teachingProject: some View {
         VStack(alignment: .leading, spacing: 24) {
-            HStack(spacing: 24) {
+            VisionActionRow(spacing: 24) {
                 Picker("显示", selection: $spatial.displayMode) {
                     ForEach(ModelDisplayMode.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented).frame(width: 220)
+                }.pickerStyle(.segmented).frame(minWidth: 220)
                 Picker("精度", selection: $spatial.quality) {
                     ForEach(VisionQuality.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.menu).frame(width: 190).accessibilityIdentifier("render-quality")
-                Spacer(minLength: 0)
+                }.pickerStyle(.menu).frame(minWidth: 190).accessibilityIdentifier("render-quality")
                 Button(spaceClosed ? "进入空间示教" : "退出空间") { Task { await toggleSpace() } }
                     .buttonStyle(.borderedProminent).tint(.cyan)
                     .disabled(session.busy || spatial.preparing || spatial.spaceState == .opening || spatial.spaceState == .closing)
@@ -519,14 +519,13 @@ struct VisionWorkspaceView: View {
     private var previewActions: some View {
         VStack(alignment: .leading, spacing: 24) {
             Divider()
-            HStack(spacing: 24) {
+            VisionActionRow(spacing: 24) {
                 Button("返回主页") { Task { await session.close() } }
                     .disabled(session.busy).accessibilityIdentifier("defer-teaching")
                 if session.current?.result.samples.isEmpty == false {
                     Button("查看记录") { showingModelPreview = false }
                         .disabled(session.busy).accessibilityIdentifier("review-poses")
                 }
-                Spacer(minLength: 0)
                 Button("进入空间示教") { Task { await toggleSpace() } }
                     .buttonStyle(.borderedProminent).tint(.cyan)
                     .disabled(session.busy || spatial.preparing || spatial.modelEntity == nil || !spatial.renderError.isEmpty)
@@ -543,7 +542,7 @@ struct VisionWorkspaceView: View {
     private var completionActions: some View {
         VStack(alignment: .leading, spacing: 24) {
             Divider()
-            HStack(spacing: 24) {
+            VisionActionRow(spacing: 24) {
                 Button("完成并保存在本机") { syncOnFinish = false; finishConfirmation = true }
                     .disabled(session.busy || session.current?.result.samples.isEmpty != false || spatial.calibrating)
                     .accessibilityIdentifier("finish-local")
@@ -560,13 +559,13 @@ struct VisionWorkspaceView: View {
                 if !session.error.isEmpty {
                     HStack(spacing: 24) {
                         Text(session.error).foregroundStyle(.red).textSelection(.enabled)
-                        Button("知道了") { session.error = "" }
+                        Button("知道了") { session.error = "" }.fixedSize()
                     }.accessibilityIdentifier("session-error")
                 }
                 if !spatial.renderError.isEmpty {
                     HStack(spacing: 24) {
                         Text(spatial.renderError).foregroundStyle(.red)
-                        Button("重试显示") { if let model = session.geometry { spatial.render(model) } }
+                        Button("重试显示") { if let model = session.geometry { spatial.render(model) } }.fixedSize()
                     }
                 }
                 if session.busy || !session.status.isEmpty {

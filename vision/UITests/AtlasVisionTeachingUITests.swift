@@ -9,6 +9,9 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["workbench-open-local"].waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["workbench-import"].exists)
+        XCTAssertTrue(app.buttons["project-play"].waitForNonExistence(timeout: 5), "Startup must not restore the immersive tools")
+        XCTAssertFalse(app.buttons["scene-play"].exists)
+        XCTAssertFalse(app.buttons["project-cameras-close"].exists)
         app.buttons["打开历史单模型示教"].tap()
         let back = app.buttons["返回工程入口"]
         XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
@@ -65,16 +68,22 @@ final class AtlasVisionTeachingUITests: XCTestCase {
         XCTAssertEqual(state.label, "沉浸游走")
         app.buttons["project-options"].tap(); app.buttons["project-home"].tap()
         let local = app.buttons["workbench-open-local"]
-        XCTAssertTrue(local.waitForExistence(timeout: 20)); local.tap()
+        XCTAssertTrue(local.waitForExistence(timeout: 20))
+        XCTAssertTrue(play.waitForNonExistence(timeout: 5), "Leaving the immersive space must close its tools")
+        local.tap()
         XCTAssertTrue(play.waitForExistence(timeout: 90), "Cached project must also open directly in space")
         app.terminate()
         app.launchArguments = ["-visionLegacyTeaching", "NO"]
         app.launch()
-        XCTAssertTrue(local.waitForExistence(timeout: 20)); local.tap()
+        XCTAssertTrue(local.waitForExistence(timeout: 20))
+        XCTAssertTrue(play.waitForNonExistence(timeout: 5), "Terminating inside the space must not restore its tools on launch")
+        XCTAssertFalse(app.buttons["project-cameras-close"].exists)
+        local.tap()
         XCTAssertTrue(play.waitForExistence(timeout: 90))
         XCTAssertEqual(state.label, "沉浸游走")
         app.buttons["project-options"].tap(); app.buttons["project-home"].tap()
         XCTAssertTrue(local.waitForExistence(timeout: 20))
+        XCTAssertTrue(play.waitForNonExistence(timeout: 5))
     }
     @MainActor func testFullSceneReview() async throws {
         let environment = ProcessInfo.processInfo.environment

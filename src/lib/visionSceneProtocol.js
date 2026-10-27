@@ -33,6 +33,8 @@ export function validateVisionScene(scene) {
     check(node.parent == null || nodes.has(node.parent), '空间节点必须按父子顺序排列');
     check(node.asset == null || assets.has(node.asset), '空间节点缺少资源');
     check(['map', 'robot', 'part', 'joint'].includes(node.role), '空间节点角色无效');
+    if (node.material != null) check(node.role === 'part' && ['roughness', 'metallic'].every(key =>
+      Number.isFinite(node.material[key]) && node.material[key] >= 0 && node.material[key] <= 1), '机器人表面材质无效');
     if (node.joint) check(name(node.joint.name) && ['revolute', 'continuous', 'prismatic'].includes(node.joint.type)
       && vector(node.joint.axis, 3) && Math.abs(Math.hypot(...node.joint.axis) - 1) < 0.002
       && vector(node.joint.restPosition, 3) && vector(node.joint.restQuaternion, 4)

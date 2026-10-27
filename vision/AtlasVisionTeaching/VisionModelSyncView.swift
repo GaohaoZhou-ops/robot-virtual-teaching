@@ -59,10 +59,10 @@ struct VisionModelSyncView: View {
             if !session.error.isEmpty {
                 Text(session.error).foregroundStyle(.red).accessibilityIdentifier("model-sync-error")
             }
-            HStack(spacing: 24) {
-                Button("暂不同步") { dismiss() }
-                    .frame(minWidth: 180, minHeight: 64)
-                    .accessibilityIdentifier("defer-model-sync")
+            VisionActionRow(spacing: 24) {
+                Button { dismiss() } label: {
+                    Text("暂不同步").frame(minWidth: 180, minHeight: 64)
+                }.accessibilityIdentifier("defer-model-sync")
                 Button {
                     Task {
                         await session.syncPendingModel()

@@ -35,7 +35,9 @@ enum VisionSceneCameraTests {
         precondition(frames.count == 2)
         for image in frames.values {
             precondition(image.width == 648 && image.height == 400)
-            precondition(center(image).allSatisfy { $0 > 70 }, "Optical +Z must see the model in front of each camera")
+            // Height colors are saturated; a visible blue/green surface need
+            // not have a bright red channel like the original gray fixture.
+            precondition(center(image).max()! > 100, "Optical +Z must see the model in front of each camera")
         }
         precondition(pixels(frames[.left]!) != pixels(frames[.right]!), "Left and right must render separate viewpoints")
         if let path = ProcessInfo.processInfo.environment["VISION_CAMERA_ARTIFACTS"] {
@@ -66,7 +68,7 @@ enum VisionSceneCameraTests {
         }
         snapshot.transforms[left] = lookingAlongY(at: SIMD3(0, -0.7, 1.2))
         let pointFrame = try await renderer.frames(snapshot)
-        precondition(center(pointFrame[.left]!).allSatisfy { $0 > 70 }, "Loose map points must appear in virtual camera images")
+        precondition(center(pointFrame[.left]!).max()! > 100, "Loose map points must appear in virtual camera images")
 
         snapshot.transforms.removeValue(forKey: right)
         let single = try await renderer.frames(snapshot)

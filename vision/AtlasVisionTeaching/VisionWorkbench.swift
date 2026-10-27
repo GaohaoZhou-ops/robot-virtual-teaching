@@ -25,7 +25,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
     @Published var revision = ""
     @Published var sceneRevision = ""
     var sceneOperation: Task<Void, Never>?
-    var replacingScene = false
+    @Published var replacingScene = false
     var projectSpaceVisible = false
     var generation = 0
     #if targetEnvironment(simulator)
@@ -96,7 +96,10 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
         self.webView = webView
     }
     func command(_ type: String) {
-        if type == "home" { sceneOperation?.cancel(); pendingScene = nil; generation += 1 }
+        if type == "home" {
+            sceneOperation?.cancel(); pendingScene = nil; generation += 1
+            replacingScene = false; openingScene = false
+        }
         guard ready else {
             if type == "home" { webView?.stopLoading(); loading = false; isHome = true }
             return
@@ -120,6 +123,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
             pendingAction = nil; replyHandler(action, nil)
         case "home":
             isHome = true; ready = false; editorVisible = false; buildingScene = false; openingScene = false
+            replacingScene = false
             sceneOperation?.cancel(); pendingScene = nil; replyHandler(true, nil)
         case "sceneProgress":
             if value["generation"] as? Int == generation {
@@ -259,7 +263,8 @@ struct VisionProjectSceneCoordinator: ViewModifier {
             .onChange(of: workbench.isHome) { _, home in
                 if home && workbench.projectImmersed {
                     workbench.sceneOperation?.cancel(); review.stop()
-                    Task { await dismissSpace(); openWindow(id: "workspace", value: "workspace"); dismissWindow(id: "project-tools") }
+                    dismissWindow(id: "project-cameras")
+                    Task { await dismissSpace(); restoreGateway() }
                 }
             }.task { openPending() }
     }
@@ -305,6 +310,7 @@ struct VisionProjectSceneCoordinator: ViewModifier {
     }
     private func restoreGateway() {
         workbench.projectImmersed = false; workbench.editorVisible = false
+        dismissWindow(id: "project-cameras")
         openWindow(id: "workspace", value: "workspace"); dismissWindow(id: "project-tools")
     }
 }
@@ -328,6 +334,7 @@ struct VisionWorkbenchRoot: View {
                 VStack(spacing: 0) {
                     HStack {
                         Button("返回工程入口", systemImage: "square.grid.2x2") { workbench.legacyActive = false }
+                            .fixedSize()
                         Spacer(); Text("历史单模型示教").foregroundStyle(.secondary)
                     }.padding(20)
                     VisionWorkspaceView()
@@ -372,7 +379,7 @@ struct VisionWorkbenchRoot: View {
             }
             Text(workbench.syncStatus).font(.callout).foregroundStyle(.secondary)
             if !workbench.error.isEmpty { Text(workbench.error).foregroundStyle(.orange).frame(maxWidth: 650) }
-            HStack(spacing: 20) {
+            VisionActionRow(spacing: 20, alignment: .center) {
                 if workbench.sceneReady && !workbench.buildingScene && !workbench.openingScene {
                     Button("进入空间", systemImage: "figure.walk") { workbench.command("scene") }
                         .accessibilityIdentifier("workbench-enter-space")
@@ -405,16 +412,19 @@ struct VisionWorkbenchRoot: View {
                             Button { workbench.connect(server) } label: {
                                 HStack(spacing: 16) {
                                     Image(systemName: "desktopcomputer").font(.title)
-                                    VStack(alignment: .leading, spacing: 5) { Text(server.name); Text(server.address).font(.caption).foregroundStyle(.secondary) }
-                                    Spacer(); Image(systemName: "arrow.right")
-                                }.padding(12)
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(server.name).lineLimit(2)
+                                        Text(server.address).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(); Image(systemName: "arrow.right").fixedSize()
+                                }.multilineTextAlignment(.leading).padding(12)
                             }.accessibilityIdentifier("workbench-device-\(server.id)")
                         }
                         if discovery.servers.isEmpty {
                             Label(discovery.isSearching ? "正在查找同一局域网的电脑…" : "尚未发现设备", systemImage: "wifi")
                                 .foregroundStyle(.secondary).padding(.vertical, 16)
                         }
-                        HStack {
+                        VisionActionRow {
                             Button("重新查找", systemImage: "arrow.clockwise") { discovery.start() }
                             Button("通过地址连接") { manual.toggle() }
                         }
@@ -425,7 +435,7 @@ struct VisionWorkbenchRoot: View {
                                 Button("连接") {
                                     UserDefaults.standard.set(address, forKey: "visionWorkbenchAddress")
                                     workbench.connect(DiscoveredTeachingServer(id: "manual", name: "已选电脑", address: address))
-                                }.accessibilityIdentifier("workbench-connect")
+                                }.fixedSize().accessibilityIdentifier("workbench-connect")
                             }
                         }
                         if discovery.servers.isEmpty && !discovery.message.isEmpty && !discovery.isSearching {
@@ -440,8 +450,9 @@ struct VisionWorkbenchRoot: View {
                         Button { workbench.openLocal() } label: {
                             VStack(alignment: .leading, spacing: 8) {
                                 Label("载入当前工程", systemImage: "clock.arrow.circlepath")
-                                Text(workbench.projectName.isEmpty ? "打开本机工作台与工程缓存" : workbench.projectName).font(.callout).foregroundStyle(.secondary)
-                            }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                                Text(workbench.projectName.isEmpty ? "打开本机工作台与工程缓存" : workbench.projectName)
+                                    .font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                            }.multilineTextAlignment(.leading).padding(14).frame(maxWidth: .infinity, alignment: .leading)
                         }.buttonStyle(.borderedProminent).tint(Color(red: 0.08, green: 0.48, blue: 0.54)).accessibilityIdentifier("workbench-open-local")
                         Button("载入工程文件", systemImage: "doc.zipper") { importPresented = true }
                             .accessibilityIdentifier("workbench-import")
@@ -471,10 +482,10 @@ struct VisionWorkbenchRoot: View {
         .controlSize(.large)
     }
     private var toolbar: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 18) {
                 Button { workbench.command("home") } label: { Label("工程入口", systemImage: "square.grid.2x2") }
-                    .accessibilityIdentifier("workbench-home")
+                    .fixedSize().accessibilityIdentifier("workbench-home")
                 VStack(alignment: .leading, spacing: 4) {
                     Text(workbench.projectName.isEmpty ? "工程工作台" : workbench.projectName).font(.headline).lineLimit(1)
                     Text("\(workbench.deviceName) · \(workbench.syncStatus)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -484,8 +495,10 @@ struct VisionWorkbenchRoot: View {
                 if workbench.projectImmersed {
                     Button("收起工具", systemImage: "rectangle.compress.vertical") {
                         workbench.editorVisible = false; dismissWindow(id: "workspace")
-                    }.accessibilityIdentifier("workbench-hide-editor")
+                    }.fixedSize().accessibilityIdentifier("workbench-hide-editor")
                 }
+            }
+            VisionActionRow {
                 Button("保存工程", systemImage: "square.and.arrow.down") { workbench.command("save") }
                     .disabled(!workbench.ready || !workbench.hasProject).accessibilityIdentifier("workbench-save")
                 Button("空间场景", systemImage: "cube.transparent") { workbench.command("scene") }
@@ -493,7 +506,11 @@ struct VisionWorkbenchRoot: View {
                 if let exported = workbench.exportedFile { ShareLink("导出文件", item: exported).accessibilityIdentifier("workbench-exported") }
             }
             if !workbench.error.isEmpty {
-                HStack { Text(workbench.error).font(.caption).foregroundStyle(.orange); Spacer(); Button("关闭") { workbench.error = "" } }
+                HStack {
+                    Text(workbench.error).font(.caption).foregroundStyle(.orange)
+                    Spacer()
+                    Button("关闭") { workbench.error = "" }.fixedSize()
+                }
             }
         }.padding(.horizontal, 22).padding(.vertical, 12)
     }

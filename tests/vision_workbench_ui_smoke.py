@@ -5,9 +5,11 @@ VisionWorkbenchServerHarness; no user browser, cache or project is touched.
 """
 import json
 import os
+import struct
 import zipfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from viewer_tools_helpers import display_settings_section
 
 ROOT = Path(__file__).resolve().parents[1]
 CONNECTION = json.loads(Path(os.environ['VISION_WORKBENCH_CONNECTION']).read_text())
@@ -19,7 +21,26 @@ with sync_playwright() as p:
     context = browser.new_context(viewport={'width': 1440, 'height': 960}, accept_downloads=True)
     page = context.new_page()
     errors = []
+    assets = {}
     page.on('pageerror', lambda error: errors.append(str(error)))
+    page.on('console', lambda message: errors.append(message.text) if message.type == 'error' and 'WebGLProgram' in message.text else None)
+    def capture_asset(request):
+        if '/__atlas/vision-native/assets/' in request.url and request.method == 'PUT':
+            assets[request.url.rsplit('/', 1)[-1]] = request.post_data_buffer
+    page.on('request', capture_asset)
+
+    def map_vertices(scene):
+        result = []
+        ids = {node.get('asset') for node in scene['nodes'] if node['role'] == 'map'}
+        for asset in scene['assets']:
+            if asset['id'] not in ids:
+                continue
+            data, count = assets[asset['id']], asset['vertices']
+            for i in range(count):
+                z = struct.unpack_from('<f', data, 32 + i * 12 + 8)[0]
+                rgb = list(data[32 + count * 12 + i * 4:32 + count * 12 + i * 4 + 3])
+                result.append((z, rgb))
+        return result
     page.add_init_script('window.AtlasVision = ' + json.dumps({'native': True, 'immersive': True, 'token': CONNECTION['token']}) + ''';
       window.nativeMessages=[];
       window.webkit={messageHandlers:{atlasWorkbench:{postMessage:async (message)=>{
@@ -49,8 +70,33 @@ with sync_playwright() as p:
     first_scene = page.evaluate('nativeMessages.find(m=>m.type==="openScene")')
     assert first_scene['generation'] == 7 and first_scene['revision']
     assert first_scene['manifest']['robotRoot'], 'Automatic entry must wait for the imported robot'
+    for node in first_scene['manifest']['nodes']:
+        if node['role'] == 'part' and node.get('asset'):
+            assert node['material'] == {'roughness': 0.58, 'metallic': 0.16}, 'Web URDF material properties must reach native surfaces'
+    vertices = map_vertices(first_scene['manifest'])
+    assert min(vertices, key=lambda vertex: vertex[0])[1] == [4, 17, 55], 'Web low-elevation blue must reach native assets'
+    assert max(vertices, key=lambda vertex: vertex[0])[1] == [255, 41, 40], 'Web high-elevation coral must reach native assets'
     page.locator('.vision-workbench-notice').wait_for(state='hidden')
     page.screenshot(path=str(ARTIFACTS / 'full-workbench.png'), full_page=True)
+    # A display-only change must invalidate the scene, even though the source
+    # geometry and tasks are unchanged. Exercise the real React prop chain.
+    panel = display_settings_section(page, '地图与对象')
+    color = panel.get_by_role('button', name='切换点云颜色模式', exact=True)
+    expect(color).to_have_attribute('data-color-mode', 'height')
+    color.click()
+    expect(color).to_have_attribute('data-color-mode', 'source')
+    color.click()
+    expect(color).to_have_attribute('data-color-mode', 'white')
+    page.wait_for_function('(previous) => nativeMessages.filter(m=>m.type==="status").at(-1).revision !== previous', arg=first_scene['revision'])
+    page.get_by_role('button', name='显示设置', exact=True).click()
+    page.evaluate('window.dispatchEvent(new CustomEvent("atlas-vision-command", {detail:{type:"scene"}}))')
+    page.wait_for_function('nativeMessages.filter(m=>m.type==="openScene").length===2', timeout=60000)
+    white_scene = page.evaluate('nativeMessages.filter(m=>m.type==="openScene").at(-1)')
+    assert white_scene['revision'] != first_scene['revision']
+    assert all(rgb == [255, 255, 255] for _, rgb in map_vertices(white_scene['manifest']))
+    robot_assets = lambda scene: [n['asset'] for n in scene['nodes'] if n['role'] == 'part' and n.get('asset')]
+    assert robot_assets(white_scene['manifest']) == robot_assets(first_scene['manifest']), 'Display changes preserve robot materials'
+    page.locator('.vision-workbench-notice').wait_for(state='hidden')
     create.click()
     dialog = page.get_by_role('dialog', name='新建示教任务', exact=True)
     expect(dialog).to_be_visible()
@@ -61,7 +107,7 @@ with sync_playwright() as p:
     # Exercise the native scene bridge with the real robot loader, geometry
     # conversion, native disk upload validation, and complete task snapshot.
     page.evaluate('window.dispatchEvent(new CustomEvent("atlas-vision-command", {detail:{type:"scene"}}))')
-    page.wait_for_function('nativeMessages.filter(m=>m.type==="openScene").length===2', timeout=60000)
+    page.wait_for_function('nativeMessages.filter(m=>m.type==="openScene").length===3', timeout=60000)
     second_scene = page.evaluate('nativeMessages.filter(m=>m.type==="openScene").at(-1)')
     assert second_scene['revision'] != first_scene['revision'], 'Edits must mark the native scene outdated'
     scene = second_scene['manifest']
@@ -75,6 +121,7 @@ with sync_playwright() as p:
     pending.value.save_as(str(output))
     with zipfile.ZipFile(output) as archive:
         config = json.loads(archive.read('config/project.json'))
+        assert config['workspace']['pointColorMode'] == 'white'
         tasks = config['virtualTeaching']['tasks']
         assert any(task['name'] == 'Vision Pro 本机编辑' for task in tasks)
         assert any(task['name'] == '检查动作' for task in tasks)
@@ -88,7 +135,7 @@ with sync_playwright() as p:
         page.evaluate('window.dispatchEvent(new CustomEvent("atlas-vision-command", {detail:{type:"scene"}}))')
     page.evaluate('window.dispatchEvent(new CustomEvent("atlas-vision-command", {detail:{type:"home",generation:8}}))')
     page.wait_for_function('nativeMessages.some(m=>m.type==="home")')
-    assert page.evaluate('nativeMessages.filter(m=>m.type==="openScene").length') == 2
+    assert page.evaluate('nativeMessages.filter(m=>m.type==="openScene").length') == 3
     for route in uploads:
         try: route.abort()
         except Exception: pass  # AbortController may already have canceled it.
@@ -100,6 +147,8 @@ with sync_playwright() as p:
     expect(page.get_by_role('button', name='新建示教任务', exact=True)).to_be_enabled(timeout=30000)
     page.wait_for_function('nativeMessages.filter(m=>m.type==="openScene").length===1', timeout=60000)
     assert page.evaluate('nativeMessages.find(m=>m.type==="openScene").manifest.clips.length') > 0
+    restored = page.evaluate('nativeMessages.find(m=>m.type==="openScene").manifest')
+    assert all(rgb == [255, 255, 255] for _, rgb in map_vertices(restored)), 'Saved display modes survive reload and native export'
     assert not errors, errors
     browser.close()
-print('Vision workbench: automatic immersive import/reload, canceled scene launch, scene revision, native isolation, robot hierarchy, task editing and ZIP round-trip passed.')
+print('Vision workbench: automatic immersive import/reload, Web/native map colors, display revisions, canceled scene launch, native isolation, robot hierarchy, task editing and ZIP round-trip passed.')

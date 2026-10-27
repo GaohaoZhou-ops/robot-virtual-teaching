@@ -5,6 +5,8 @@ import { normalizeRobotPose, readRobotJointValues, setRobotVisualBounds } from '
 import { mobileSamplePosition } from './ipadCaptureDisplay.js';
 import { polylineGeometryVertices } from './polylineTeaching.js';
 import { VISION_SCENE_FORMAT, validateVisionScene } from './visionSceneProtocol.js';
+import { heightPalette } from './heightPalette.js';
+import { placedObjectLayers, placedObjectMask } from './placedObjectRendering.js';
 
 const identity = () => new THREE.Matrix4().toArray();
 const point = (p) => [Number(p?.x) || 0, Number(p?.y) || 0, Number(p?.z) || 0];
@@ -17,7 +19,7 @@ const poseMatrix = (value) => {
 
 // Spatially tiled, lossless geometry. Every source primitive is assigned once;
 // display detail is chosen on the headset, independently of the source package.
-export function partitionVisionGeometry(geometry, { tiled = true, primitiveLimit = 60000, start = 0, count, material } = {}) {
+export function partitionVisionGeometry(geometry, { tiled = true, primitiveLimit = 60000, start = 0, count, material, vertexColor } = {}) {
   const positions = geometry.getAttribute('position'), colors = geometry.getAttribute('color');
   const index = geometry.getIndex()?.count ? geometry.getIndex() : null;
   const mesh = !!index || !tiled;
@@ -59,8 +61,9 @@ export function partitionVisionGeometry(geometry, { tiled = true, primitiveLimit
         if (!ids.has(source)) {
           ids.set(source, ids.size);
           xyz.push(positions.getX(source), positions.getY(source), positions.getZ(source));
+          const displayColor = vertexColor?.(source);
           for (const [axis, channel] of ['r', 'g', 'b'].entries()) {
-            rgb.push((colors ? colors.getComponent(source, axis) : 1) * (material?.color?.[channel] ?? (colors ? 1 : [0.36, 0.82, 0.87][axis])));
+            rgb.push(displayColor ? displayColor[axis] : (colors ? colors.getComponent(source, axis) : 1) * (material?.color?.[channel] ?? (colors ? 1 : [0.36, 0.82, 0.87][axis])));
           }
         }
         if (mesh) indices.push(ids.get(source));
@@ -75,7 +78,8 @@ export function partitionVisionGeometry(geometry, { tiled = true, primitiveLimit
 }
 
 export async function buildVisionScenePackage({ mapData, robotModel, robotDescriptor, robotPose, robotJointValues = {},
-  tasks = [], waypoints = [], edges = [], mode = 'map', onAsset = async () => {}, onProgress = () => {}, signal } = {}) {
+  tasks = [], waypoints = [], edges = [], mode = 'map', pointColorMode = 'height', placedObjectColorMode = pointColorMode,
+  workspaceTransfer, onAsset = async () => {}, onProgress = () => {}, signal } = {}) {
   if (!mapData?.geometry?.getAttribute('position')?.count) throw new Error('请先打开地图或示教工件');
   const scene = { format: VISION_SCENE_FORMAT, name: mapData.name || '空间工程', coordinateFrame: mode === 'map' ? 'map' : 'virtual_origin',
     sourceHash: mapData.sourceHash || '', createdAt: new Date().toISOString(), assets: [], nodes: [], paths: [], markers: [], clips: [], robotRoot: null,
@@ -90,12 +94,33 @@ export async function buildVisionScenePackage({ mapData, robotModel, robotDescri
         const packed = await packIPadModel({ geometry: chunk, bounds: chunk.boundingBox, name, mapId: mapData.mapId, sourceHash: scene.sourceHash });
         const asset = { ...packed.manifest, id: packed.manifest.modelHash };
         if (!assets.has(asset.id)) { await onAsset(asset, packed.buffer); scene.assets.push(asset); assets.add(asset.id); }
-        scene.nodes.push({ id: `node-${nextID++}`, name, role, parent, transform: identity(), asset: asset.id });
+        const material = role === 'part' ? {
+          roughness: options.material?.roughness ?? 0.58,
+          metallic: options.material?.metalness ?? 0.16,
+        } : undefined;
+        scene.nodes.push({ id: `node-${nextID++}`, name, role, parent, transform: identity(), asset: asset.id, material });
         onProgress(`已准备 ${scene.assets.length} 块空间资源`);
       } finally { chunk.dispose(); }
     }
   }
-  await meshNode(mapData.geometry, { tiled: true }, null, mapData.name || '地图', 'map');
+  // Web display colors live in its shader, not the source RGB buffer. Bake
+  // them into exported map vertices using the full map's height range, before
+  // tiling. Keep the original geometry and robot materials untouched.
+  const geometry = mapData.geometry, positions = geometry.getAttribute('position'), colors = geometry.getAttribute('color');
+  geometry.computeBoundingBox();
+  const { min, max } = geometry.boundingBox;
+  const layers = mode === 'map' ? placedObjectLayers(mapData, workspaceTransfer) : null;
+  const objectMask = layers ? placedObjectMask(positions.count, layers.objectRanges) : null;
+  const fallback = new THREE.Color(0x9fc7ca).toArray(), rgb = [0, 0, 0];
+  const vertexColor = (vertex) => {
+    const colorMode = objectMask?.[vertex] ? placedObjectColorMode : pointColorMode;
+    if (colorMode === 'height') return heightPalette(positions.getZ(vertex), min.z, max.z, rgb);
+    for (let channel = 0; channel < 3; channel++) {
+      rgb[channel] = colorMode === 'white' ? 1 : colors ? colors.getComponent(vertex, channel) : fallback[channel];
+    }
+    return rgb;
+  };
+  await meshNode(geometry, { tiled: true, vertexColor }, null, mapData.name || '地图', 'map');
   if (robotModel) {
     scene.robotRoot = 'robot-placement';
     scene.nodes.push({ id: scene.robotRoot, parent: null, role: 'robot', name: robotDescriptor?.name || '机器人', transform: poseMatrix(robotPose) });

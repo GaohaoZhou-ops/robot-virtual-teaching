@@ -168,8 +168,8 @@ test-results/
 /tests/test-videos/
 /tests/test-traces/
 # Native simulator launchers write build.log and DerivedData under simulator-dev/.
-# Mixed-map checks and virtual Zivid camera renders stay under
-# vision/test-artifacts/{mixed-map,dual-cameras}/, including local project views.
+# Mixed-map, virtual Zivid camera and robot-surface render checks stay under
+# vision/test-artifacts/{mixed-map,dual-cameras,robot-surface}/, including local project views.
 /ipad/test-artifacts/
 /iphone/test-artifacts/
 /vision/test-artifacts/
@@ -1135,6 +1135,12 @@ playwright/.auth/
 /tests/atlas-height-legend-*/
 /atlas-height-legend-*.[zZ][iI][pP]
 /tests/atlas-height-legend-*.[zZ][iI][pP]
+# Path/label occlusion checks use this TMPDIR prefix for framebuffer captures
+# and exported project ZIPs; preserve the runner and nested regression fixtures.
+/atlas-annotation-depth-*/
+/tests/atlas-annotation-depth-*/
+/atlas-annotation-depth-*.[zZ][iI][pP]
+/tests/atlas-annotation-depth-*.[zZ][iI][pP]
 
 # Python bytecode, environments, and test caches
 __pycache__/

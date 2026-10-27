@@ -746,6 +746,7 @@ export function normalizeProject(payload) {
         ? workspace.placedObjectColorMode : ['height', 'source', 'white'].includes(workspace.pointColorMode)
           ? workspace.pointColorMode : 'height',
       showPaths3D: workspace.showPaths3D !== false,
+      annotationsOnTop3D: workspace.annotationsOnTop3D !== false,
       showParkingPoints3D: workspace.showParkingPoints3D !== false,
       showWaypoints3D: workspace.showWaypoints3D !== false,
       showWaypointNames3D: workspace.showWaypointNames3D !== false,
@@ -794,6 +795,7 @@ export function buildExport({
   pointColorMode = 'height',
   placedObjectColorMode = pointColorMode,
   showPaths3D = true,
+  annotationsOnTop3D = true,
   showParkingPoints3D = true,
   showWaypoints3D = true,
   showWaypointNames3D = true,
@@ -848,6 +850,7 @@ export function buildExport({
         ? pointColorMode
         : 'height',
       showPaths3D: showPaths3D !== false,
+      annotationsOnTop3D: annotationsOnTop3D !== false,
       showParkingPoints3D: showParkingPoints3D !== false,
       showWaypoints3D: showWaypoints3D !== false,
       placedObjectColorMode: ['height', 'source', 'white'].includes(placedObjectColorMode)

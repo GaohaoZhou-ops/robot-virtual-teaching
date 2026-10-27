@@ -12,4 +12,5 @@ html.atlas-vision-workbench { font-size: 17px; }
   display: flex; align-items: center; gap: 24px; max-width: 85vw; padding: 16px 24px; border: 1px solid #386965;
   border-radius: 16px; background: #122626f5; box-shadow: 0 10px 40px #0006; color: #d5f2ec; }
 .vision-workbench-notice.is-error { border-color: #b68453; color: #ffd7ad; }
-.vision-workbench-notice button { min-height: 40px; padding: 4px 18px; }
+.vision-workbench-notice > span { min-width: 0; overflow-wrap: anywhere; }
+.vision-workbench-notice button { flex-shrink: 0; white-space: nowrap; min-height: 40px; padding: 4px 18px; }

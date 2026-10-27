@@ -24,9 +24,17 @@ struct VisionSceneJoint: Codable {
         var result = simd_float4x4(rotation); result.columns.3 = SIMD4(position, 1); return result
     }
 }
+struct VisionSceneMaterial: Codable {
+    let roughness: Float
+    let metallic: Float
+    // Matches the URDF material used by the Web robot loader. Older cached
+    // scenes lack material metadata but should also regain surface shading.
+    static let robotDefault = VisionSceneMaterial(roughness: 0.58, metallic: 0.16)
+}
 struct VisionSceneNode: Codable, Identifiable {
     let id: String; let name: String; let role: String; let parent: String?
     let transform: [Float]; let asset: String?; let joint: VisionSceneJoint?
+    let material: VisionSceneMaterial?
 }
 enum VisionSceneCameraSide: String, CaseIterable, Identifiable {
     case left, right
@@ -129,6 +137,11 @@ struct VisionSceneManifest: Codable, Identifiable {
             guard name(node.id), name(node.name), ["map", "robot", "part", "joint"].contains(node.role), !nodeIDs.contains(node.id), node.parent.map({ nodeIDs.contains($0) }) ?? true,
                   vector(node.transform, 16), node.asset.map({ assetIDs.contains($0) }) ?? true else { throw TeachingError("空间层级无效") }
             let m = node.transform
+            if let material = node.material {
+                guard node.role == "part", [material.roughness, material.metallic].allSatisfy({ $0.isFinite && (0...1).contains($0) }) else {
+                    throw TeachingError("机器人表面材质无效")
+                }
+            }
             guard [3, 7, 11].allSatisfy({ abs(m[$0]) < 0.0001 }), abs(m[15] - 1) < 0.0001,
                   [0, 4, 8].allSatisfy({ simd_length(SIMD3(m[$0], m[$0 + 1], m[$0 + 2])) > 1e-8 }) else { throw TeachingError("空间节点变换无效") }
             if let joint = node.joint {

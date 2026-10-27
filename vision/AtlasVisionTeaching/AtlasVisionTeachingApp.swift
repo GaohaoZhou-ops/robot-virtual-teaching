@@ -9,6 +9,12 @@ struct AtlasVisionTeachingApp: App {
     @State private var immersionStyle: ImmersionStyle = .mixed
     @State private var projectImmersion: ImmersionStyle = .full
 
+    private var toolWindowRestoration: SceneRestorationBehavior {
+        if #available(visionOS 26.0, *) { return .disabled }
+        // Earlier systems close restored tools through their session guards.
+        return .automatic
+    }
+
     var body: some Scene {
         WindowGroup(id: "workspace", for: String.self) { _ in
             Group {
@@ -26,9 +32,10 @@ struct AtlasVisionTeachingApp: App {
         WindowGroup(id: "project-tools", for: String.self) { _ in
             VisionProjectToolsView().environmentObject(review).environmentObject(workbench)
         } defaultValue: { "project-tools" }
-        .defaultSize(width: 680, height: 190)
+        .defaultSize(width: 660, height: 260)
         .windowResizability(.contentSize)
         .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
+        .restorationBehavior(toolWindowRestoration)
 
         WindowGroup(id: "project-cameras", for: String.self) { _ in
             VisionSceneCameraView().environmentObject(review).environmentObject(workbench)
@@ -41,6 +48,7 @@ struct AtlasVisionTeachingApp: App {
             }
             return WindowPlacement(.utilityPanel)
         }
+        .restorationBehavior(toolWindowRestoration)
 
         ImmersiveSpace(id: "project-space") {
             VisionProjectImmersiveView().environmentObject(review).environmentObject(workbench)
@@ -51,6 +59,7 @@ struct AtlasVisionTeachingApp: App {
         } defaultValue: { "spatial-controls" }
         .windowResizability(.contentSize)
         .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
+        .restorationBehavior(toolWindowRestoration)
 
         ImmersiveSpace(id: "teaching-space") {
             VisionImmersiveView().environmentObject(session).environmentObject(spatial)
@@ -60,9 +69,10 @@ struct AtlasVisionTeachingApp: App {
         WindowGroup(id: "scene-review-tools", for: String.self) { _ in
             VisionSceneToolsView().environmentObject(review)
         } defaultValue: { "scene-review-tools" }
-        .defaultSize(width: 600, height: 160)
+        .defaultSize(width: 560, height: 240)
         .windowResizability(.contentSize)
         .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
+        .restorationBehavior(toolWindowRestoration)
 
         ImmersiveSpace(id: "scene-review") {
             VisionSceneImmersiveView().environmentObject(review)

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { createIPadCaptureLayer, createMobilePosePreview, disposeIPadCaptureLayer, mobileSamplePosition } from '../lib/ipadCaptureDisplay.js';
 import { solveMobileTeachingInWorker } from '../lib/mobileTeachingWorker.js';
 import * as THREE from 'three';
+import { heightPaletteGLSL } from '../lib/heightPalette.js';
 import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -16,6 +17,7 @@ import {
   EyeOff,
   Gauge,
   Keyboard,
+  Layers,
   Lock,
   MapPin,
   MousePointer2,
@@ -105,6 +107,7 @@ import {
 import { createRobotCollisionBackend } from '../lib/robotCollisionBackend.js';
 import { buildWaypointLabels } from '../lib/waypointLabels.js';
 import { buildPathLabels } from '../lib/pathLabels.js';
+import { createDepthLabel, disposeDepthLabels, setAnnotationDepth, updateDepthLabels } from '../lib/annotationRendering.js';
 import { placedObjectLayers, placedObjectMask } from '../lib/placedObjectRendering.js';
 
 const RESOLUTION_LEVELS = [
@@ -353,6 +356,10 @@ const formatPointCount = (count) => {
   if (count >= 1_000) return `${(count / 1_000).toFixed(count >= 100_000 ? 0 : 1)}K`;
   return String(count);
 };
+
+const qualityCountFormatter = new Intl.NumberFormat('zh-CN', {
+  notation: 'compact', maximumFractionDigits: 2,
+});
 
 const formatHeight = (value) => (Math.abs(value) < 0.005 ? '0.00' : value.toFixed(2));
 
@@ -891,22 +898,7 @@ uniform float atlasHeightMax;
 uniform float atlasTeachingTintVisibility;
 uniform float atlasTeachingTintOpacity;
 
-vec3 atlasHeightPalette(float heightValue) {
-  float t = clamp(
-    (heightValue - atlasHeightMin) / max(atlasHeightMax - atlasHeightMin, 0.000001),
-    0.0,
-    1.0
-  );
-  vec3 lowBlue = vec3(0.0176, 0.0685, 0.2159);
-  vec3 cyan = vec3(0.0212, 0.3916, 0.6308);
-  vec3 green = vec3(0.0908, 0.6514, 0.3325);
-  vec3 amber = vec3(0.9047, 0.5841, 0.1095);
-  vec3 highCoral = vec3(1.0, 0.1620, 0.1560);
-  if (t < 0.25) return mix(lowBlue, cyan, smoothstep(0.0, 0.25, t));
-  if (t < 0.50) return mix(cyan, green, smoothstep(0.25, 0.50, t));
-  if (t < 0.75) return mix(green, amber, smoothstep(0.50, 0.75, t));
-  return mix(amber, highCoral, smoothstep(0.75, 1.0, t));
-}`,
+${heightPaletteGLSL}`,
       )
       .replace(
         '#include <color_fragment>',
@@ -915,7 +907,7 @@ float atlasActiveColorMode = vAtlasPlacedObject > 0.5 ? atlasObjectColorMode : a
 if (atlasActiveColorMode > 1.5) {
   diffuseColor.rgb = vec3(1.0);
 } else if (atlasActiveColorMode > 0.5) {
-  diffuseColor.rgb = atlasHeightPalette(vAtlasHeight);
+  diffuseColor.rgb = atlasHeightPalette(vAtlasHeight, atlasHeightMin, atlasHeightMax);
 }
 ${surface ? `vec3 atlasDx = dFdx(vAtlasViewPosition);
 vec3 atlasDy = dFdy(vAtlasViewPosition);
@@ -1416,6 +1408,8 @@ export default function PointCloudViewer({
   onMeshRenderQualityChange,
   showPaths = true,
   onShowPathsChange,
+  annotationsOnTop = true,
+  onAnnotationsOnTopChange,
   showParkingPoints = true,
   onShowParkingPointsChange,
   showWaypoints = true,
@@ -1517,6 +1511,7 @@ export default function PointCloudViewer({
   const waypointNameElementsRef = useRef(new Map());
   const waypointLabels = useMemo(() => buildWaypointLabels(waypoints), [waypoints]);
   const pathNameElementsRef = useRef(new Map());
+  const depthLabelsRef = useRef(null);
   const pathLabels = useMemo(() => showPaths && showPathNames ? buildPathLabels(waypoints, edges) : [],
     [showPaths, showPathNames, waypoints, edges]);
   const mapOriginGroupRef = useRef(null);
@@ -1783,9 +1778,10 @@ export default function PointCloudViewer({
       ? 'auto'
       : 'native';
   const resolution = RESOLUTION_LEVELS[resolutionIndex];
-  const renderedPointCount = renderablePointCount
-    ? Math.max(1, Math.round(renderablePointCount * resolution.ratio))
+  const pointsAtResolution = (ratio) => renderablePointCount
+    ? Math.max(1, Math.round(renderablePointCount * ratio))
     : 0;
+  const renderedPointCount = pointsAtResolution(resolution.ratio);
   const objectLayers = useMemo(() => teachingSpaceMode === 'map'
     ? placedObjectLayers(mapData, workspaceTransfer) : null, [mapData, workspaceTransfer, teachingSpaceMode]);
   const placedObjectPointCount = objectLayers?.objectRanges.reduce((count, range) => count + range.count, 0) || 0;
@@ -5495,6 +5491,7 @@ export default function PointCloudViewer({
       // with zoom. This overlay never participates in route/robot picking.
       const labelWidth = renderer.domElement.clientWidth;
       const labelHeight = renderer.domElement.clientHeight;
+      updateDepthLabels(depthLabelsRef.current, camera, labelHeight);
       const mapOriginLabel = mapOriginLabelRef.current;
       if (mapOrigin && mapOriginLabel) {
         waypointNamePosition.copy(mapOrigin.position).project(camera);
@@ -7671,7 +7668,32 @@ export default function PointCloudViewer({
       canvas.dataset.selectedWaypointBodyColor = WAYPOINT_SELECTED_BODY_COLOR;
       canvas.dataset.selectedWaypointHaloColor = WAYPOINT_SELECTED_HALO_COLOR;
     }
-  }, [edges, mapData?.geometry, selectedEdgeId, selectedWaypointId, waypoints]);
+    setAnnotationDepth(group, annotationsOnTop);
+    setAnnotationDepth(waypointGroup, annotationsOnTop);
+    if (canvas) canvas.dataset.annotationsOnTop = String(annotationsOnTop);
+  }, [annotationsOnTop, edges, mapData?.geometry, selectedEdgeId, selectedWaypointId, waypoints]);
+
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene || annotationsOnTop) return undefined;
+    const labels = new THREE.Group();
+    labels.name = 'depth-tested-annotation-labels';
+    const addLabel = ({ element, pose }, options) => {
+      const sprite = createDepthLabel(element, pose, options);
+      if (sprite) labels.add(sprite);
+    };
+    waypointNameElementsRef.current.forEach((label) => addLabel(label, {
+      offset: MAX_WAYPOINT_SCREEN_DIAMETER / 2 + 5, above: true,
+    }));
+    pathNameElementsRef.current.forEach((label) => addLabel(label, { offset: -8, above: false }));
+    scene.add(labels);
+    depthLabelsRef.current = labels;
+    return () => {
+      if (depthLabelsRef.current === labels) depthLabelsRef.current = null;
+      disposeDepthLabels(labels);
+    };
+  }, [annotationsOnTop, mapData?.geometry, waypointLabels, pathLabels, selectedWaypointId,
+    selectedEdgeId, showPaths, showPathNames, showParkingPoints, showWaypointNames]);
 
   useEffect(() => {
     const group = routeGroupRef.current;
@@ -7937,7 +7959,7 @@ export default function PointCloudViewer({
             </div>
           )}
           {showPaths && showPathNames && (
-            <div className="path-name-layer" role="group" aria-label="3D路径名称">
+            <div className={`path-name-layer${annotationsOnTop ? '' : ' is-depth-tested'}`} role="group" aria-label="3D路径名称">
               {pathLabels.map(({ id, name, pose }) => (
                 <span
                   key={id}
@@ -7954,7 +7976,7 @@ export default function PointCloudViewer({
             </div>
           )}
           {showParkingPoints && showWaypointNames && (
-            <div className="waypoint-name-layer" role="group" aria-label="3D停车点名称">
+            <div className={`waypoint-name-layer${annotationsOnTop ? '' : ' is-depth-tested'}`} role="group" aria-label="3D停车点名称">
               {waypointLabels.map(({ point, waypointIds }) => (
                 <span
                   key={point.id}
@@ -8421,6 +8443,19 @@ export default function PointCloudViewer({
                   { id: 'routes', label: '路径与标注', icon: Route,
                     description: '路径 · 停车点 · 名称标注', content: <>
                       <div className="viewer-display-settings__layer">
+                        <span><Layers size={13} /> 置顶显示</span>
+                        <button type="button" role="switch" className="viewer-display-settings__toggle"
+                          aria-label="路径与标注置顶显示" aria-checked={annotationsOnTop}
+                          title="统一控制路径、停车点及名称；关闭后可被前方的机器人和模型遮挡"
+                          onClick={() => onAnnotationsOnTopChange?.(!annotationsOnTop)}>
+                          <Layers size={12} />
+                          <span>{annotationsOnTop ? '开启' : '关闭'}</span>
+                        </button>
+                      </div>
+                      <p className="viewer-display-settings__layer-notice">
+                        关闭后，路径、停车点及名称按空间远近显示，可被机器人和模型遮挡。
+                      </p>
+                      <div className="viewer-display-settings__layer">
                         <span><MapPin size={13} /> 停车点</span>
                         <button type="button" role="switch" className="viewer-display-settings__toggle"
                           aria-label="显示停车点" aria-checked={showParkingPoints}
@@ -8557,16 +8592,16 @@ export default function PointCloudViewer({
                               onChange={(event) => chooseResolutionMode(event.target.value)}
                             >
                               <option value="auto">
-                                自动 · {suggestedResolution.label} {Math.round(suggestedResolution.ratio * 100)}%（推荐）
+                                自动 · {suggestedResolution.label} {Math.round(suggestedResolution.ratio * 100)}% · {qualityCountFormatter.format(pointsAtResolution(suggestedResolution.ratio))} 点（推荐）
                               </option>
                               {RESOLUTION_LEVELS.map((option, index) => (
                                 <option key={option.ratio} value={index}>
-                                  {option.label} · {Math.round(option.ratio * 100)}%
+                                  {option.label} · {Math.round(option.ratio * 100)}% · {qualityCountFormatter.format(pointsAtResolution(option.ratio))} 点
                                 </option>
                               ))}
                             </select>
                           </span>
-                          <em>{Math.round(resolution.ratio * 100)}% · {formatPointCount(renderedPointCount)} 点</em>
+                          <em>{Math.round(resolution.ratio * 100)}% · {qualityCountFormatter.format(renderedPointCount)} 点</em>
                         </label>
                         {hasEmbeddedMesh && (
                           <label
@@ -8581,14 +8616,16 @@ export default function PointCloudViewer({
                                 value={meshQualityPlan.requestedId}
                                 onChange={(event) => onMeshRenderQualityChange?.(event.target.value)}
                               >
-                                {MESH_RENDER_QUALITY_OPTIONS.map((option) => (
-                                  <option key={option.id} value={option.id}>
-                                    {option.label}{option.id === 'auto' ? '（推荐）' : ''}
-                                  </option>
-                                ))}
+                                {MESH_RENDER_QUALITY_OPTIONS.map((option) => {
+                                  const plan = resolveMeshRenderQuality(option.id, meshInfo.faceCount);
+                                  return <option key={option.id} value={option.id}
+                                    title={`${plan.renderedFaceCount.toLocaleString('zh-CN')} 个三角面`}>
+                                    {option.label} · {qualityCountFormatter.format(plan.renderedFaceCount)} 面{option.id === 'auto' ? '（推荐）' : ''}
+                                  </option>;
+                                })}
                               </select>
                             </span>
-                            <em>{formatPointCount(meshQualityPlan.renderedFaceCount)} 面</em>
+                            <em>{qualityCountFormatter.format(meshQualityPlan.renderedFaceCount)} 面</em>
                           </label>
                         )}
                       </div>
@@ -8601,7 +8638,7 @@ export default function PointCloudViewer({
                         >
                           <Box size={12} />
                           <span>内嵌网格</span>
-                          <strong>{formatPointCount(meshInfo.faceCount)} 面</strong>
+                          <strong>{qualityCountFormatter.format(meshInfo.faceCount)} 面</strong>
                         </div>
                       )}
                   </> },

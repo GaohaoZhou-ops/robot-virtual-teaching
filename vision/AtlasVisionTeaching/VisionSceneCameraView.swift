@@ -48,6 +48,7 @@ struct VisionSceneCameraView: View {
                 Text("虚拟取景 · M70").foregroundStyle(.secondary)
                 Spacer()
                 Button { dismissWindow(id: "project-cameras") } label: { Image(systemName: "xmark") }
+                    .fixedSize()
                     .accessibilityLabel("关闭双相机画面").accessibilityIdentifier("project-cameras-close")
             }
             HStack(alignment: .top, spacing: 20) {
@@ -65,7 +66,7 @@ struct VisionSceneCameraView: View {
                 HStack {
                     Text(feed.error).foregroundStyle(.orange)
                     Spacer()
-                    Button("重试") { retry += 1 }.accessibilityIdentifier("project-cameras-retry")
+                    Button("重试") { retry += 1 }.fixedSize().accessibilityIdentifier("project-cameras-retry")
                 }
             }
         }

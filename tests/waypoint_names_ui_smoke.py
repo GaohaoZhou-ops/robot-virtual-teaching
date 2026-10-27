@@ -154,6 +154,11 @@ def run():
             viewer_tool(page, "显示3D路径点").click()
             page.keyboard.press("Escape")
 
+            # Escape returns from a submenu to its parent; close the parent too
+            # so camera gestures cannot land on the display-settings overlay.
+            trigger = page.get_by_role('button', name='显示设置', exact=True)
+            if trigger.get_attribute('aria-expanded') == 'true':
+                trigger.click()
             box = canvas.bounding_box()
             x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
             page.mouse.move(x, y)
@@ -197,6 +202,8 @@ def run():
             page.keyboard.press('Escape')
             # This fixture's default close-up puts the route below the viewport.
             # Zoom out before checking its projected name is visible.
+            if trigger.get_attribute('aria-expanded') == 'true':
+                trigger.click()
             box = canvas.bounding_box()
             page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] / 2)
             for _ in range(4):

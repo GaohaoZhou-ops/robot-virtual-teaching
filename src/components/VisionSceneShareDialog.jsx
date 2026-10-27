@@ -6,7 +6,7 @@ import { configureRobotJointCoupling } from '../lib/robotJointCoupling.js';
 import './IPadTeaching.css';
 
 export default function VisionSceneShareDialog({ mapData, robot, robotPose, robotJointValues, tasks, waypoints, edges, mode,
-  softLimitRatio, softLimitOverrides, jointCoupling, onClose }) {
+  pointColorMode, placedObjectColorMode, workspaceTransfer, softLimitRatio, softLimitOverrides, jointCoupling, onClose }) {
   const [status, setStatus] = useState('正在准备完整空间工程…');
   const [scene, setScene] = useState(null), [error, setError] = useState('');
   const closeButton = useRef(null);
@@ -16,7 +16,7 @@ export default function VisionSceneShareDialog({ mapData, robot, robotPose, robo
   }, []);
   useEffect(() => {
     const controller = new AbortController(); let ticket, model, heartbeat;
-    const snapshot = structuredClone({ robotPose, robotJointValues, tasks, waypoints, edges });
+    const snapshot = structuredClone({ robotPose, robotJointValues, tasks, waypoints, edges, pointColorMode, placedObjectColorMode, workspaceTransfer });
     const revoke = () => {
       if (ticket) fetch(`/__atlas/vision-scenes/${ticket.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${ticket.ownerToken}` }, keepalive: true }).catch(() => {});
     };

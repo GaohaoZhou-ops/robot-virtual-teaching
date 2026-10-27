@@ -14,7 +14,7 @@ export function visionSceneFixture() {
   const geometry = mergeGeometries(pieces); pieces.forEach(p => p.dispose());
   const robot = new THREE.Group(); robot.name = 'fixture-robot';
   const visual = (parent, size, position, color, name) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), new THREE.MeshStandardMaterial({ color }));
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(...size), new THREE.MeshStandardMaterial({ color, roughness: 0.58, metalness: 0.16 }));
     mesh.name = name; mesh.position.set(...position); parent.add(mesh); return mesh;
   };
   const joint = (parent, name, type, position, axis) => {

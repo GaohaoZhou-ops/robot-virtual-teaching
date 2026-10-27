@@ -42,7 +42,14 @@ import simd
                 close(snapshot.cameraTransform(scene.cameraNodes[side]!)!, optical * TeachingCoordinates.opticalToARCamera)
             }
         }
-        for mutation in 0..<5 {
+        var legacy = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        legacy["nodes"] = (legacy["nodes"] as! [[String: Any]]).map { node in
+            var node = node; node.removeValue(forKey: "material"); return node
+        }
+        let legacyScene = try decoder.decode(VisionSceneManifest.self, from: JSONSerialization.data(withJSONObject: legacy))
+        try legacyScene.validate()
+        precondition(legacyScene.nodes.allSatisfy { $0.material == nil }, "Older cached scenes must use the robot material fallback")
+        for mutation in 0..<7 {
             var object = try JSONSerialization.jsonObject(with: data) as! [String: Any]
             var nodes = object["nodes"] as! [[String: Any]]
             if mutation == 0 { nodes[0]["parent"] = "missing" }
@@ -50,6 +57,8 @@ import simd
             if mutation == 2 { nodes[0]["role"] = "invalid" }
             if mutation == 3 { object["id"] = "../../outside" }
             if mutation == 4 { var assets = object["assets"] as! [[String: Any]]; assets[0]["vertices"] = -1; object["assets"] = assets }
+            if mutation == 5 { nodes[nodes.firstIndex { $0["material"] != nil }!]["material"] = ["roughness": -1, "metallic": 0] }
+            if mutation == 6 { nodes[0]["material"] = ["roughness": 0.58, "metallic": 0.16] }
             object["nodes"] = nodes
             do { try decoder.decode(VisionSceneManifest.self, from: JSONSerialization.data(withJSONObject: object)).validate(); preconditionFailure("Invalid scene accepted") } catch {}
         }
@@ -68,6 +77,7 @@ import simd
         }
         precondition(renderedMapPoints == 3, "All loose map points reach native rendering beside the mesh and robot")
         try await VisionSceneCameraTests.run(scene, store: store)
+        try await VisionSurfaceTests.run(scene, store: store)
         _ = try await store.download(offers[0], address: base) { _ in }
         let broken = directory.appendingPathComponent("device/\(scene.assets[0].id).atls")
         try Data([0, 1, 2]).write(to: broken)

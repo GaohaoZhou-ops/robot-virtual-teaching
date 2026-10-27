@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { heightPaletteGLSL } from '../lib/heightPalette.js';
 
 const colorModeValue = (mode) => (mode === 'height' ? 1 : mode === 'white' ? 2 : 0);
 
@@ -34,22 +35,7 @@ uniform float atlasPointColorMode;
 uniform float atlasHeightMin;
 uniform float atlasHeightMax;
 
-vec3 atlasSliceHeightPalette(float heightValue) {
-  float t = clamp(
-    (heightValue - atlasHeightMin) / max(atlasHeightMax - atlasHeightMin, 0.000001),
-    0.0,
-    1.0
-  );
-  vec3 lowBlue = vec3(0.0176, 0.0685, 0.2159);
-  vec3 cyan = vec3(0.0212, 0.3916, 0.6308);
-  vec3 green = vec3(0.0908, 0.6514, 0.3325);
-  vec3 amber = vec3(0.9047, 0.5841, 0.1095);
-  vec3 highCoral = vec3(1.0, 0.1620, 0.1560);
-  if (t < 0.25) return mix(lowBlue, cyan, smoothstep(0.0, 0.25, t));
-  if (t < 0.50) return mix(cyan, green, smoothstep(0.25, 0.50, t));
-  if (t < 0.75) return mix(green, amber, smoothstep(0.50, 0.75, t));
-  return mix(amber, highCoral, smoothstep(0.75, 1.0, t));
-}`,
+${heightPaletteGLSL}`,
       )
       .replace(
         '#include <clipping_planes_fragment>',
@@ -62,7 +48,7 @@ if (vAtlasSliceZ < atlasSliceMin || vAtlasSliceZ > atlasSliceMax) discard;`,
 if (atlasPointColorMode > 1.5) {
   diffuseColor.rgb = vec3(1.0);
 } else if (atlasPointColorMode > 0.5) {
-  diffuseColor.rgb = atlasSliceHeightPalette(vAtlasSliceZ);
+  diffuseColor.rgb = atlasHeightPalette(vAtlasSliceZ, atlasHeightMin, atlasHeightMax);
 }`,
       )
       .replace(

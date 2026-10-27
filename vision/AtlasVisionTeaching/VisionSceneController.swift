@@ -25,7 +25,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     @Published var measuring = false
     @Published private(set) var navigationMessage = ""
     let root = Entity(), stage = Entity(), axes = Entity(), content = Entity(), annotation = Entity()
-    private let landing = Entity(), environment = Entity()
+    private let landing = Entity(), environment = Entity(), lighting = Entity()
     private let mapGroup = CollisionGroup(rawValue: 1 << 4)
     private let robotGroup = CollisionGroup(rawValue: 1 << 5)
     private var travelTask: Task<Void, Never>?
@@ -64,6 +64,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         VisionSceneSelection.registerComponent()
         root.addChild(stage); stage.addChild(axes); axes.addChild(content)
         axes.transform = Transform(matrix: TeachingCoordinates.zUpToAR)
+        axes.addChild(lighting)
         content.addChild(annotation); content.addChild(landing); root.addChild(environment)
     }
     func prepare(_ scene: VisionSceneManifest, immersiveProject: Bool = false) async throws {
@@ -78,6 +79,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         clearDestination()
         let assets = Dictionary(uniqueKeysWithValues: scene.assets.map { ($0.id, $0) })
         do {
+            if scene.robotRoot != nil { try await VisionSurfaceRenderer.configureLighting(lighting) }
             for (index, node) in scene.nodes.enumerated() {
                 try Task.checkCancellation(); guard token == generation else { throw CancellationError() }
                 status = "装配空间内容 \(index + 1) / \(scene.nodes.count)"
@@ -144,11 +146,14 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         let useMesh = model.indices > 0 && (detailed || model.indices / 3 <= budget)
         let extent = SIMD3<Float>(model.maximum.x - model.minimum.x, model.maximum.y - model.minimum.y, model.maximum.z - model.minimum.z)
         let radius = detailed ? Float(0.002) : max(0.002, simd_length(extent) / 180)
+        let surface: VisionSceneMaterial? = node.role == "part" ? node.material ?? .robotDefault : nil
         let data = try await Task.detached(priority: .userInitiated) {
-            try VisionMeshData(model: model, mode: useMesh ? .mesh : .points, quality: .full, pointRadius: radius, primitiveBudget: budget)
+            try VisionMeshData(model: model, mode: useMesh ? .mesh : .points, quality: .full, pointRadius: radius,
+                               primitiveBudget: budget, includeNormals: surface != nil)
         }.value
         try Task.checkCancellation()
-        let entity = try await VisionModelRenderer.makeEntity(data)
+        let entity = try await VisionSurfaceRenderer.makeEntity(data, surface: surface)
+        if surface != nil { entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: lighting)) }
         entity.components.set(VisionSceneSelection(nodeID: node.id, name: node.name, role: node.role))
         entity.components.set(InputTargetComponent()); entity.components.set(HoverEffectComponent())
         let shape = try await ShapeResource.generateStaticMesh(from: entity.model!.mesh)
@@ -238,6 +243,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     private func addEnvironment(_ scene: VisionSceneManifest) {
         let sky = ModelEntity(mesh: .generateSphere(radius: 500), materials: [UnlitMaterial(color: UIColor(red: 0.035, green: 0.055, blue: 0.065, alpha: 1))])
+        sky.components.set(DynamicLightShadowComponent(castsShadow: false))
         sky.scale = SIMD3(-1, 1, 1); environment.addChild(sky)
         // Sparse point clouds and isolated workpieces have no continuous floor.
         // A point-cloud map can also contain placed mesh models; it still needs

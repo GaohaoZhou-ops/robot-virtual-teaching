@@ -4,23 +4,7 @@ import UIKit
 @MainActor
 enum VisionModelRenderer {
     static func makeEntity(_ data: VisionMeshData) async throws -> ModelEntity {
-        var descriptor = MeshDescriptor(name: "Atlas workpiece")
-        descriptor.positions = MeshBuffers.Positions(data.positions)
-        descriptor.textureCoordinates = MeshBuffers.TextureCoordinates(data.textureCoordinates)
-        descriptor.primitives = .triangles(data.triangles)
-        let mesh = try await MeshResource(from: [descriptor])
-        try Task.checkCancellation()
-        guard let provider = CGDataProvider(data: Data(data.pixels) as CFData),
-              let space = CGColorSpace(name: CGColorSpace.sRGB),
-              let image = CGImage(width: data.textureSide, height: data.textureSide, bitsPerComponent: 8,
-                bitsPerPixel: 32, bytesPerRow: data.textureSide * 4, space: space,
-                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue), provider: provider,
-                decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { throw TeachingError("模型颜色纹理生成失败") }
-        let texture = try await TextureResource(image: image, options: .init(semantic: .color, mipmapsMode: .none))
-        var material = UnlitMaterial()
-        material.color = .init(tint: .white, texture: .init(texture))
-        material.faceCulling = .none
-        return ModelEntity(mesh: mesh, materials: [material])
+        try await VisionSurfaceRenderer.makeEntity(data)
     }
 
     static func line(from: SIMD3<Float>, to: SIMD3<Float>, color: UIColor, width: Float = 0.004) -> Entity {

@@ -99,6 +99,10 @@ try {
   scene = await buildVisionScenePackage({ ...fixture, onAsset: async (asset, buffer) => buffers.set(asset.id, buffer) });
   assert.equal(scene.clips.length, 1); assert.equal(scene.nodes.filter(n => n.joint).length, 3);
   assert.ok(!scene.nodes.some(n => n.name === 'collision-only'));
+  assert.ok(scene.nodes.filter(n => n.role === 'map').every(n => n.material == null), 'map colors remain unlit');
+  for (const node of scene.nodes.filter(n => n.role === 'part' && n.asset)) {
+    assert.deepEqual(node.material, { roughness: 0.58, metallic: 0.16 }, 'robot material parameters survive export');
+  }
   assert.deepEqual(scene.markers.find(m => m.id === 'pose-mobile-key').position, [-.9, -.8, .9]);
   assert.deepEqual(scene.paths.find(p => p.id === 'line-motion-line').points, [[-1.7, 0, .85], [-1.2, .5, .85]]);
   assert.equal(scene.assets.reduce((sum, a) => sum + a.indices / 3, 0), 36 + 4 * 12, 'all map faces and all four robot visuals exported');
@@ -113,7 +117,9 @@ try {
   assert.ok(outside.bounds.max[0] > 10, 'framing includes robots outside the map bounds');
   for (const mutate of [s => { s.nodes[0].parent = 'missing'; }, s => { s.nodes[0].transform[15] = 0; },
     s => { s.nodes.find(n => n.joint).joint.axis = [0, 0, 0]; }, s => { s.assets[0].bounds = null; },
-    s => { s.clips[0].segments[0].endOffsetMs++; }, s => { s.clips.push(s.clips[0]); }]) {
+    s => { s.clips[0].segments[0].endOffsetMs++; }, s => { s.clips.push(s.clips[0]); },
+    s => { s.nodes.find(n => n.material).material.roughness = 2; },
+    s => { s.nodes.find(n => n.role === 'map').material = { roughness: 0.58, metallic: 0.16 }; }]) {
     const bad = structuredClone(scene); mutate(bad); assert.throws(() => validateVisionScene(bad));
   }
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -152,6 +158,7 @@ try {
     'vision/AtlasVisionTeaching/VisionMeshData.swift', 'ipad/AtlasTeaching/ZividFieldOfView.swift',
     'vision/AtlasVisionTeaching/VisionSceneModels.swift', 'vision/AtlasVisionTeaching/VisionSceneStore.swift',
     'vision/AtlasVisionTeaching/VisionSceneCameraRenderer.swift', 'vision/Tests/VisionSceneCameraTests.swift',
+    'vision/AtlasVisionTeaching/VisionSurfaceRenderer.swift', 'vision/Tests/VisionSurfaceTests.swift',
     'vision/AtlasVisionTeaching/VisionSceneNavigation.swift', 'vision/Tests/VisionSceneTests.swift', '-o', binary]);
   await run(binary, [base, directory]);
   assert.equal(downloads, scene.assets.length + 1, 'native cache reuses valid assets and repairs exactly one corrupted asset');

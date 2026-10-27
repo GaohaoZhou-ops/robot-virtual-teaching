@@ -14,6 +14,7 @@ enum VisionQuality: String, CaseIterable, Identifiable {
 /// The original ATLS bytes and the 1:1 model coordinates are never modified.
 struct VisionMeshData {
     var positions: [SIMD3<Float>] = []
+    var normals: [SIMD3<Float>] = []
     var textureCoordinates: [SIMD2<Float>] = []
     var triangles: [UInt32] = []
     var pixels: [UInt8]
@@ -35,7 +36,8 @@ struct VisionMeshData {
         return try VisionMeshData(model: model, mode: .points, quality: .detail, pointRadius: radius)
     }
 
-    init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality, pointRadius: Float? = nil, primitiveBudget: Int? = nil) throws {
+    init(model: ModelGeometry, mode: ModelDisplayMode, quality: VisionQuality, pointRadius: Float? = nil, primitiveBudget: Int? = nil,
+         includeNormals: Bool = false) throws {
         try Task.checkCancellation()
         isMesh = mode == .mesh && model.indices > 0
         let total = isMesh ? model.indices / 3 : model.vertices
@@ -43,6 +45,7 @@ struct VisionMeshData {
         textureSide = Int(ceil(sqrt(Double(primitiveCount))))
         pixels = [UInt8](repeating: 255, count: textureSide * textureSide * 4)
         positions.reserveCapacity(primitiveCount * (isMesh ? 3 : 4))
+        if includeNormals && isMesh { normals.reserveCapacity(primitiveCount * 3) }
         textureCoordinates.reserveCapacity(positions.capacity)
         triangles.reserveCapacity(primitiveCount * (isMesh ? 3 : 12))
         func gcd(_ a: Int, _ b: Int) -> Int { var a = a, b = b; while b != 0 { (a, b) = (b, a % b) }; return a }
@@ -79,6 +82,14 @@ struct VisionMeshData {
                 }
                 if isMesh {
                     positions.append(contentsOf: points)
+                    if includeNormals {
+                        // ATLS stores geometry and colors. Recover the surface
+                        // orientation from winding, retaining CAD/STL hard edges.
+                        let cross = simd_cross(points[1] - points[0], points[2] - points[0])
+                        let length = simd_length(cross)
+                        let normal = length.isFinite && length > 1e-12 ? cross / length : SIMD3<Float>(0, 0, 1)
+                        normals.append(contentsOf: [normal, normal, normal])
+                    }
                     textureCoordinates.append(contentsOf: [uv, uv, uv])
                     triangles.append(contentsOf: [base, base + 1, base + 2])
                 } else {

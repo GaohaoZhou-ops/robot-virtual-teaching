@@ -19,7 +19,8 @@ export async function openVisionWorkspaceScene(options, progress, { signal, gene
   const { configureRobotJointCoupling } = await import('./robotJointCoupling.js');
   const { robot, softLimitRatio, softLimitOverrides, jointCoupling, ...scene } = options;
   const snapshot = structuredClone({ robotPose: scene.robotPose, robotJointValues: scene.robotJointValues,
-    tasks: scene.tasks, waypoints: scene.waypoints, edges: scene.edges });
+    tasks: scene.tasks, waypoints: scene.waypoints, edges: scene.edges, pointColorMode: scene.pointColorMode,
+    placedObjectColorMode: scene.placedObjectColorMode, workspaceTransfer: scene.workspaceTransfer });
   let model;
   try {
     if (robot) {

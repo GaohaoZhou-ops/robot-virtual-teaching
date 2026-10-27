@@ -12,7 +12,8 @@ export default function VisionWorkbenchBridge(props) {
   const [status, setStatus] = useState(''), [error, setError] = useState('');
   const native = isVisionWorkbench(), immersive = native && window.AtlasVision.immersive;
   const revision = useMemo(() => `${Date.now()}:${++sequence.current}`, [props.scene.mapData?.geometry,
-    props.scene.robot, props.scene.robotPose, props.scene.robotJointValues, props.scene.tasks, props.scene.waypoints, props.scene.edges]);
+    props.scene.robot, props.scene.robotPose, props.scene.robotJointValues, props.scene.tasks, props.scene.waypoints, props.scene.edges,
+    props.scene.pointColorMode, props.scene.placedObjectColorMode, props.scene.workspaceTransfer, props.scene.mode]);
   const currentRevision = useRef(revision); currentRevision.current = revision;
   useEffect(() => {
     if (!native || !props.ready) return undefined;

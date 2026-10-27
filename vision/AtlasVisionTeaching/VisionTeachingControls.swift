@@ -23,9 +23,10 @@ struct VisionTeachingControls: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Label(spatial.placement.isCalibrated ? selectedName : "摆放工件", systemImage: "camera.viewfinder")
-                    .font(.title3.weight(.semibold))
+                    .font(.title3.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
                 Spacer()
                 Image(systemName: spatial.trackingNormal ? "location.fill" : "location.slash")
+                    .fixedSize()
                     .foregroundStyle(spatial.trackingNormal ? .green : .orange)
                     .accessibilityLabel(spatial.tracking)
             }
@@ -58,7 +59,7 @@ struct VisionTeachingControls: View {
             if !spatial.surfacePickError.isEmpty { Text(spatial.surfacePickError).font(.caption).foregroundStyle(.secondary) }
             #if targetEnvironment(simulator)
             if spatial.isDemo && spatial.placement.isCalibrated {
-                HStack {
+                VisionActionRow {
                     Button("移动观察者") { spatial.moveDemo() }.accessibilityIdentifier(id("move-demo"))
                     Button("演练相机拖动") { spatial.moveCameraDemo() }.accessibilityIdentifier(id("move-camera-demo"))
                 }.font(.caption).disabled(readOnly)
@@ -86,7 +87,7 @@ struct VisionTeachingControls: View {
     private var placementControls: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("捏住工件移动，转动手腕调整朝向", systemImage: "hand.draw").font(.callout)
-            HStack {
+            VisionActionRow {
                 Button("放到前方") { spatial.placeInFront() }.accessibilityIdentifier(id("place-front"))
                 Button("确认摆放") {
                     Task {
@@ -127,8 +128,8 @@ struct VisionTeachingControls: View {
     }
 
     private var editingControls: some View {
-        VStack(spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 12) {
+            VisionActionRow {
                 Button(spatial.selectedSampleID == nil ? "记录视点" : "更新视点", systemImage: "checkmark") { capture() }
                     .buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
                     .disabled(!spatial.canRecord).accessibilityIdentifier(id("record-pose"))
@@ -136,21 +137,23 @@ struct VisionTeachingControls: View {
                     .disabled(!spatial.canUndoTarget || !spatial.canEditTarget || spatial.isManipulating)
                     .accessibilityLabel("撤销相机调整").accessibilityIdentifier(id("undo-camera"))
             }
-            HStack {
+            VisionActionRow {
                 Button("新视点", systemImage: "plus") { spatial.placeCameraNearWorkpiece() }
                     .accessibilityIdentifier(id("new-camera"))
                 Button("取当前视角", systemImage: "eye") { spatial.useCurrentView() }
                     .accessibilityIdentifier(id("camera-from-view"))
             }.disabled(!spatial.canEditTarget || spatial.isManipulating)
-            HStack {
+            VStack(alignment: .leading, spacing: 12) {
                 Toggle("持续对准", isOn: Binding(get: { spatial.keepFocus }, set: { spatial.setFocusLock($0) })).toggleStyle(.button)
                     .disabled(spatial.cameraTarget?.focus == nil).accessibilityIdentifier(id("keep-focus"))
-                ForEach(Array(zip(["近景", "标准", "远景"], [Float(0.4), 0.7, 1.0])), id: \.0) { label, distance in
-                    Button(label) { spatial.setCameraDistance(distance) }.accessibilityIdentifier(id("distance-\(label)"))
-                        .disabled(spatial.cameraTarget?.focus == nil)
+                VisionActionRow {
+                    ForEach(Array(zip(["近景", "标准", "远景"], [Float(0.4), 0.7, 1.0])), id: \.0) { label, distance in
+                        Button(label) { spatial.setCameraDistance(distance) }.accessibilityIdentifier(id("distance-\(label)"))
+                            .disabled(spatial.cameraTarget?.focus == nil)
+                    }
                 }
             }.disabled(!spatial.canEditTarget || spatial.isManipulating)
-        }
+        }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func capture() {

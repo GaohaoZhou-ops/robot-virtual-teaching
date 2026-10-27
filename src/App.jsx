@@ -615,6 +615,7 @@ export default function App() {
   const layerRecoveryAttemptRef = useRef(null);
   const [meshRenderQuality, setMeshRenderQuality] = useState('auto');
   const [showPaths3D, setShowPaths3D] = useState(true);
+  const [annotationsOnTop3D, setAnnotationsOnTop3D] = useState(true);
   const [showParkingPoints3D, setShowParkingPoints3D] = useState(true);
   const [showWaypoints3D, setShowWaypoints3D] = useState(true);
   const [showWaypointNames3D, setShowWaypointNames3D] = useState(true);
@@ -868,6 +869,7 @@ export default function App() {
     placedObjectColorMode,
     meshRenderQuality,
     showPaths3D,
+    annotationsOnTop3D,
     showParkingPoints3D,
     showWaypoints3D,
     showWaypointNames3D,
@@ -1157,6 +1159,7 @@ export default function App() {
           pointColorMode: current.pointColorMode,
           placedObjectColorMode: current.placedObjectColorMode,
           showPaths3D: current.showPaths3D,
+          annotationsOnTop3D: current.annotationsOnTop3D,
           showParkingPoints3D: current.showParkingPoints3D,
           showWaypoints3D: current.showWaypoints3D,
           showWaypointNames3D: current.showWaypointNames3D,
@@ -1186,6 +1189,7 @@ export default function App() {
         placedObjectColorMode: current.placedObjectColorMode,
         meshRenderQuality: current.meshRenderQuality,
         showPaths3D: current.showPaths3D,
+        annotationsOnTop3D: current.annotationsOnTop3D,
         showParkingPoints3D: current.showParkingPoints3D,
         showWaypoints3D: current.showWaypoints3D,
         showWaypointNames3D: current.showWaypointNames3D,
@@ -1691,6 +1695,7 @@ export default function App() {
             snapshot?.ui?.meshRenderQuality ?? project?.rendering?.meshQuality,
           ));
           setShowPaths3D((snapshot?.ui?.showPaths3D ?? project?.workspace?.showPaths3D) !== false);
+          setAnnotationsOnTop3D((snapshot?.ui?.annotationsOnTop3D ?? project?.workspace?.annotationsOnTop3D) !== false);
           setShowParkingPoints3D((snapshot?.ui?.showParkingPoints3D ?? project?.workspace?.showParkingPoints3D) !== false);
           setShowWaypoints3D(snapshot?.ui?.showWaypoints3D !== false);
           setShowWaypointNames3D(
@@ -1959,6 +1964,7 @@ export default function App() {
           setPlacedObjectColorMode('height');
           setMeshRenderQuality('auto');
           setShowPaths3D(true);
+          setAnnotationsOnTop3D(true);
           setShowParkingPoints3D(true);
           setShowWaypoints3D(true);
           setShowWaypointNames3D(true);
@@ -2148,6 +2154,7 @@ export default function App() {
     jointPoses,
     sessionState.status,
     showPaths3D,
+    annotationsOnTop3D,
     showParkingPoints3D,
     showWaypoints3D,
     showWaypointNames3D,
@@ -2532,6 +2539,7 @@ export default function App() {
         meshRenderQuality: current.meshRenderQuality, pointColorMode: current.pointColorMode,
         placedObjectColorMode: current.placedObjectColorMode,
         showPaths3D: current.showPaths3D,
+        annotationsOnTop3D: current.annotationsOnTop3D,
         showParkingPoints3D: current.showParkingPoints3D,
         showWaypoints3D: syncRoute || current.showWaypoints3D, showWaypointNames3D: current.showWaypointNames3D,
         showPathNames3D: current.showPathNames3D,
@@ -2773,6 +2781,7 @@ export default function App() {
         ? project.workspace.pointColorMode
         : 'height';
       const importedShowPaths3D = project.workspace?.showPaths3D !== false;
+      const importedAnnotationsOnTop3D = project.workspace?.annotationsOnTop3D !== false;
       const importedShowParkingPoints3D = project.workspace?.showParkingPoints3D !== false;
       const importedShowWaypoints3D = project.workspace?.showWaypoints3D !== false;
       const importedShowWaypointNames3D = project.workspace?.showWaypointNames3D !== false;
@@ -2816,6 +2825,7 @@ export default function App() {
       setPointColorMode(importedPointColorMode);
       setPlacedObjectColorMode(importedObjectColor);
       setShowPaths3D(importedShowPaths3D);
+      setAnnotationsOnTop3D(importedAnnotationsOnTop3D);
       setShowParkingPoints3D(importedShowParkingPoints3D);
       setShowWaypoints3D(importedShowWaypoints3D);
       setShowWaypointNames3D(importedShowWaypointNames3D);
@@ -2896,6 +2906,7 @@ export default function App() {
             pointColorMode: importedPointColorMode,
             placedObjectColorMode: importedObjectColor,
             showPaths3D: importedShowPaths3D,
+            annotationsOnTop3D: importedAnnotationsOnTop3D,
             showParkingPoints3D: importedShowParkingPoints3D,
             showWaypoints3D: importedShowWaypoints3D,
             showWaypointNames3D: importedShowWaypointNames3D,
@@ -2919,6 +2930,7 @@ export default function App() {
             placedObjectColorMode: importedObjectColor,
             meshRenderQuality: importedMeshQuality,
             showPaths3D: importedShowPaths3D,
+            annotationsOnTop3D: importedAnnotationsOnTop3D,
             showParkingPoints3D: importedShowParkingPoints3D,
             showWaypoints3D: importedShowWaypoints3D,
             showWaypointNames3D: importedShowWaypointNames3D,
@@ -4543,6 +4555,7 @@ export default function App() {
     pointColorMode,
     placedObjectColorMode,
     showPaths3D,
+    annotationsOnTop3D,
     showParkingPoints3D,
     showWaypoints3D,
     showWaypointNames3D,
@@ -6721,6 +6734,7 @@ export default function App() {
         await applyImportedProject(async () => imported, file.name, mode, { throwOnError: true });
       }}
       scene={{ mapData, robot: selectedRobot, robotPose, robotJointValues, tasks: teachingTasks, waypoints, edges,
+        pointColorMode, placedObjectColorMode, workspaceTransfer,
         mode: teachingSpaceMode, softLimitRatio: robotArmSoftLimitRatio, softLimitOverrides: robotArmSoftLimitOverrides,
         jointCoupling: robotArmJointCouplingEnabled }} />
     <input
@@ -7085,7 +7099,9 @@ export default function App() {
                 meshRenderQuality={meshRenderQuality}
                 onMeshRenderQualityChange={setMeshRenderQuality}
                 showPaths={showPaths3D}
+                annotationsOnTop={annotationsOnTop3D}
                 onShowPathsChange={setShowPaths3D}
+                onAnnotationsOnTopChange={setAnnotationsOnTop3D}
                 showParkingPoints={showParkingPoints3D}
                 onShowParkingPointsChange={setShowParkingPoints3D}
                 showWaypoints={showWaypoints3D}
@@ -7602,6 +7618,7 @@ export default function App() {
       controlBlockedReason={(polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '请先在网页端结束轨迹播放或折线任务，再调整关节。'
         : teachingCaptureState.status === 'capturing' ? '正在记录 Pose，请稍候。' : ''} />}
     {visionSceneOpen && <VisionSceneShareDialog mapData={mapData} robot={selectedRobot} robotPose={robotPose} robotJointValues={robotJointValues}
+      pointColorMode={pointColorMode} placedObjectColorMode={placedObjectColorMode} workspaceTransfer={workspaceTransfer}
       tasks={teachingTasks} waypoints={waypoints} edges={edges} mode={teachingSpaceMode} softLimitRatio={robotArmSoftLimitRatio}
       softLimitOverrides={robotArmSoftLimitOverrides} jointCoupling={robotArmJointCouplingEnabled} onClose={() => setVisionSceneOpen(false)} />}
     {ipadTeachingOpen && <IPadTeachingDialog device={ipadTeachingEntry.device} mapData={mapData} teachingTasks={teachingTasks} waypoints={waypoints} edges={edges} initialAction={ipadTeachingEntry.action} initialTicketId={ipadTeachingEntry.ticketId}
