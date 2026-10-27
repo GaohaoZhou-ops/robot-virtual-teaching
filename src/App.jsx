@@ -40,6 +40,7 @@ import IndependentTeachingExportDialog from './components/IndependentTeachingExp
 import { buildIndependentMapTeachingExport } from './lib/independentTeachingExport.js';
 import { defaultIndependentTeachingName, validateIndependentTeachingName } from './lib/independentTeachingName.js';
 import Inspector from './components/Inspector.jsx';
+import TaskMonitorConsole from './components/TaskMonitorConsole.jsx';
 import Map2DView from './components/Map2DView.jsx';
 import MapDetailsDialog from './components/MapDetailsDialog.jsx';
 import PointCloudViewer from './components/PointCloudViewer.jsx';
@@ -7305,7 +7306,7 @@ export default function App() {
           )}
         </div>
 
-        <Inspector
+        {robotTwin.active ? <TaskMonitorConsole twin={robotTwin} collapsed={inspectorCollapsed} onCollapsedChange={setInspectorCollapsed} /> : <Inspector
           mapData={mapData}
           pageRequest={inspectorPageRequest}
           polylineOpen={polylineTeachingOpen}
@@ -7321,7 +7322,6 @@ export default function App() {
           robotLoadState={robotLoadState}
           robotPose={displayedRobotPose}
           robotJointValues={displayedRobotJoints}
-          robotTelemetry={robotTwin.active}
           lockedRobotJointNames={lockedRobotJointNames}
           meshRenderQuality={meshRenderQuality}
           onMeshRenderQualityChange={setMeshRenderQuality}
@@ -7399,7 +7399,7 @@ export default function App() {
           onCameraTeachingMove={requestCameraTeachingMove}
           onZividCaptureProviderChange={handleZividCaptureProviderChange}
           isWorkbenchActive={appPage === APP_PAGE_WORKBENCH}
-        />
+        />}
       </main>
 
       <footer className="statusbar">

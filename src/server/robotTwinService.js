@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL, robotTwinSnapshot } from '../lib/robotTwin.js';
 import { robotFetch } from './robotTwinTransport.js';
+import { createRobotTaskMonitor, isRobotMonitorRead } from './robotTwinMonitor.js';
 
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const reply = (res, status, data) => {
@@ -41,10 +42,10 @@ async function body(req) {
 }
 
 // The only upstream POST is password authentication. There is deliberately no
-// generic proxy, control-ownership request, motion, enable, stop or task route.
+// generic proxy, control-ownership request, motion, enable, stop or task command.
 const allowedReads = new Set(['/api/v1/control-session', '/api/v1/model', '/api/v1/slam', '/api/v1/state']);
 async function readRobot(session, path, login) {
-  if (login ? path !== '/api/v1/access/login' : !allowedReads.has(path)) fail(403, '真机孪生只允许读取状态');
+  if (login ? path !== '/api/v1/access/login' : !allowedReads.has(path) && !isRobotMonitorRead(path)) fail(403, '真机孪生只允许读取状态');
   const headers = { Accept: 'application/json', 'X-ABX-Web-Client': 'robot-dashboard' };
   if (session.cookie) headers.Cookie = session.cookie;
   if (session.credential) headers['X-ABX-Control-Token'] = session.credential;
@@ -136,13 +137,14 @@ export function createRobotTwinService() {
           }
           session.model = await readRobot(session, '/api/v1/model');
           const initial = await snapshot(session);
+          session.monitor = createRobotTaskMonitor((path) => readRobot(session, path));
           const token = randomBytes(32).toString('hex');
           session.lastSeen = Date.now(); sessions.set(token, session);
           reply(res, 201, { token, address: session.address, snapshot: initial });
         } finally { pending -= 1; }
         return;
       }
-      if (pathname !== `${ROBOT_TWIN_PREFIX}/snapshot` && pathname !== `${ROBOT_TWIN_PREFIX}/session`) fail(404, '孪生接口不存在');
+      if (!['/snapshot', '/monitor', '/session'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
       const token = /^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
       const session = sessions.get(token);
       if (!session || Date.now() - session.lastSeen > 60_000) {
@@ -151,8 +153,13 @@ export function createRobotTwinService() {
       if (pathname.endsWith('/session') && req.method === 'DELETE') {
         session.controller.abort(); sessions.delete(token); reply(res, 200, { ok: true }); return;
       }
-      if (!pathname.endsWith('/snapshot') || req.method !== 'GET') fail(405, '真机孪生仅支持读取状态或断开本地会话');
+      if (pathname.endsWith('/session') || req.method !== 'GET') fail(405, '真机孪生仅支持读取状态或断开本地会话');
       session.lastSeen = Date.now();
+      if (pathname.endsWith('/monitor')) {
+        const result = await session.monitor();
+        reply(res, 200, { ...result, taskAgeMs: Date.now() - result.taskSampledAt });
+        return;
+      }
       try {
         const result = await snapshot(session);
         // Durations survive client/server clock differences and cached replies.
@@ -160,7 +167,7 @@ export function createRobotTwinService() {
         reply(res, 200, { ...result, poseValidForMs: Math.max(0, result.poseValidForMs - heldMs),
           jointsValidForMs: Math.max(0, result.jointsValidForMs - heldMs) });
       } catch (error) {
-        if (error.status === 401) sessions.delete(token);
+        if (error.status === 401) { session.controller.abort(); sessions.delete(token); }
         throw error;
       }
     } catch (error) {

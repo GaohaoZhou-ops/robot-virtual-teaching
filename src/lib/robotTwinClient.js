@@ -1,11 +1,13 @@
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL } from './robotTwin.js';
+import { ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_MONITOR_MAX_AGE } from './robotTwinMonitor.js';
 
 export class RobotTwinClient {
   constructor({ request = (...args) => globalThis.fetch(...args), onChange = () => {} } = {}) {
     this.request = request; this.onChange = onChange;
     this.generation = 0;
     this.controllers = new Set();
-    this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '' };
+    this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '',
+      monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null };
   }
 
   publish(update) { this.state = { ...this.state, ...update }; this.onChange(this.state); }
@@ -28,10 +30,12 @@ export class RobotTwinClient {
   disconnect() {
     ++this.generation;
     clearTimeout(this.timer); clearTimeout(this.expiry);
+    clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
     this.release(this.token); this.token = null;
-    this.publish({ active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '' });
+    this.publish({ active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '',
+      monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null });
   }
 
   accept(snapshot, elapsed, generation) {
@@ -58,7 +62,7 @@ export class RobotTwinClient {
   async connect(address, password) {
     this.disconnect();
     const generation = this.generation;
-    this.publish({ active: true, phase: 'connecting', address, error: '' });
+    this.publish({ active: true, phase: 'connecting', address, error: '', monitorPhase: 'loading' });
     const started = performance.now();
     try {
       const result = await this.api('/sessions', { method: 'POST', body: JSON.stringify({ address, password }) });
@@ -67,6 +71,7 @@ export class RobotTwinClient {
       this.publish({ address: result.address });
       this.accept(result.snapshot, performance.now() - started, generation);
       this.timer = setTimeout(() => this.poll(generation), ROBOT_TWIN_INTERVAL);
+      void this.pollMonitor(generation);
       return true;
     } catch (error) {
       if (generation === this.generation) this.publish({ active: false, phase: 'error', error: error.message });
@@ -87,9 +92,36 @@ export class RobotTwinClient {
       clearTimeout(this.expiry);
       this.publish({ phase: 'stale', error: error.message,
         snapshot: this.state.snapshot ? { ...this.state.snapshot, localizationFresh: false, jointCount: 0 } : null });
-      if (error.status === 401) { this.token = null; return; }
+      if (error.status === 401) {
+        this.token = null; clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
+        this.publish({ monitorPhase: 'stale', monitorError: error.message });
+        return;
+      }
       delay = 1500;
     }
     if (generation === this.generation) this.timer = setTimeout(() => this.poll(generation), delay);
+  }
+
+  async pollMonitor(generation) {
+    if (generation !== this.generation || !this.token) return;
+    const started = performance.now();
+    let delay = ROBOT_TWIN_MONITOR_INTERVAL;
+    try {
+      const monitor = await this.api('/monitor');
+      if (generation !== this.generation || !this.token) return;
+      const validFor = ROBOT_TWIN_MONITOR_MAX_AGE - monitor.taskAgeMs - (performance.now() - started);
+      clearTimeout(this.monitorExpiry);
+      this.publish({ monitor, monitorPhase: validFor > 0 ? 'live' : 'stale',
+        monitorError: validFor > 0 ? '' : '任务数据已过期，等待恢复', monitorReceivedAt: Date.now() });
+      if (validFor > 0) this.monitorExpiry = setTimeout(() => {
+        if (generation === this.generation) this.publish({ monitorPhase: 'stale', monitorError: '任务数据已过期，保留上次记录' });
+      }, validFor);
+    } catch (error) {
+      if (generation !== this.generation || !this.token) return;
+      clearTimeout(this.monitorExpiry);
+      this.publish({ monitorPhase: 'stale', monitorError: error.message });
+      delay = 2000;
+    }
+    if (generation === this.generation && this.token) this.monitorTimer = setTimeout(() => this.pollMonitor(generation), delay);
   }
 }

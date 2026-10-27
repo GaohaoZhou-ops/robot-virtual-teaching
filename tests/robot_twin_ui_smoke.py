@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import os
+import re
 from pathlib import Path
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,7 +18,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--live', action='store_true')
 args = parser.parse_args()
 traffic = []
-fixture = {'stale': False, 'x': 2.5}
+fixture = {'stale': False, 'x': 2.5, 'task_phase': 'running', 'task_failure': False, 'processing': True,
+           'run_id': 'd' * 32, 'task_name': '设备巡检任务', 'captures': 1}
 
 
 class RobotFixture(BaseHTTPRequestHandler):
@@ -36,6 +38,24 @@ class RobotFixture(BaseHTTPRequestHandler):
             payload = {'robot': {'valid': True, 'state_fresh': True, 'health_fresh': True, 'state_age_ms': 5,
                 'joint_samples': {key: [{'valid': True, 'fresh': True, 'position_rad': 1.0} for _ in range(count)]
                                   for key, count in [('torso', 4), ('head', 2), ('left_arm', 7), ('right_arm', 7)]}}}
+        elif self.path.startswith('/api/v1/execution') and fixture['task_failure']:
+            self.send_error(503)
+            return
+        elif self.path == '/api/v1/execution/activity':
+            payload = {'ok': True, 'task_phase': fixture['task_phase'], 'navigation_phase': 'idle'}
+        elif self.path == '/api/v1/execution':
+            payload = {'ok': True, 'run': {'id': fixture['run_id'], 'phase': fixture['task_phase'], 'task_name': fixture['task_name'],
+                'parking_name': '一号停车点', 'point_name': '焊缝检测', 'stage': 'capture', 'task_index': 0,
+                'message': '正在采集检测图像', 'completed_points': 2, 'completed_captures': fixture['captures'], 'elapsed_ms': 125000,
+                'algorithm_mode': 'execute', 'algorithm_state': 'processing',
+                'summary': {'point_count': 4, 'tasks': [{'name': fixture['task_name'], 'point_count': 4}]}}}
+        elif self.path == f"/api/v1/execution/captures?run_id={fixture['run_id']}&offset=0":
+            payload = {'ok': True, 'run_id': fixture['run_id'], 'total': fixture['captures'], 'next_offset': fixture['captures'],
+                'captures': [{'id': 'e' * 32, 'side': 'left', 'sequence': 1, 'task_name': fixture['task_name'],
+                              'parking_name': '一号停车点', 'point_name': '焊缝检测'}] if fixture['captures'] else []}
+        elif self.path == '/api/v1/cameras/jobs/' + 'e' * 32:
+            payload = {'job': {'state': 'complete', 'cameras': {'left': {'inspection': {'state': 'processing'} if fixture['processing']
+                else {'state': 'complete', 'boxes': [{'label': '表面裂纹', 'x': 20, 'y': 40, 'width': 80, 'height': 10}]}}}}}
         else:
             self.send_error(404)
             return
@@ -127,7 +147,38 @@ try:
                        for s in snapshots[-4:]), (live['pose'], snapshots[-1]['pose'])
             assert live['pose']['z'] == before['pose']['z']
             assert all(any(abs(live['joints'][name] - s['joints'][name]) < 1e-5 for s in snapshots[-4:] if name in s['joints']) for name in NAMES)
-            expect(page.locator('.inspector-scroll')).to_have_attribute('inert', '')
+            monitor = page.get_by_role('complementary', name='任务监控台', exact=True)
+            expect(monitor).to_be_visible()
+            expect(monitor).to_have_attribute('data-monitor-phase', 'live')
+            expect(page.get_by_role('complementary', name='图谱控制台', exact=True)).to_have_count(0)
+            expect(page.get_by_role('tablist', name='控制台子页')).to_have_count(0)
+            expect(page.get_by_role('button', name='打开全关节浮动窗口', exact=True)).to_have_count(0)
+            if not args.live:
+                expect(monitor.locator('.task-monitor__task-name')).to_have_text('设备巡检任务')
+                expect(monitor.get_by_role('progressbar', name='任务步骤进度')).to_have_attribute('value', '2')
+                expect(monitor.locator('.task-monitor__result')).to_contain_text('算法执行中')
+                fixture['processing'] = False
+                expect(monitor.locator('.task-monitor__result')).to_contain_text('表面裂纹')
+                monitor.get_by_text('原始算法输出', exact=True).click()
+                expect(monitor.locator('pre')).to_contain_text('"x": 20')
+                page.screenshot(path=str(artifacts / 'task-monitor-results.png'))
+                monitor.get_by_role('button', name='折叠任务监控台').click()
+                expect(monitor).to_have_attribute('data-collapsed', 'true')
+                monitor.get_by_role('button', name='展开任务监控台').click()
+                expect(monitor).to_have_attribute('data-collapsed', 'false')
+                fixture['task_phase'] = 'paused'
+                expect(monitor.locator('.task-monitor__section-title').first).to_contain_text('已暂停')
+                fixture['task_failure'] = True
+                expect(monitor).to_have_attribute('data-monitor-phase', 'stale')
+                expect(page.locator('.work-sync:visible')).to_have_attribute('data-twin-phase', 'live')
+                expect(monitor).to_contain_text('以下为上次读取记录')
+                fixture['task_failure'] = False
+                fixture.update(run_id='c' * 32, task_name='下一站任务', captures=0, task_phase='running')
+                expect(monitor.locator('.task-monitor__task-name')).to_have_text('下一站任务')
+                expect(monitor.locator('.task-monitor__result')).to_have_count(0)
+                expect(monitor).to_contain_text('暂无算法结果')
+                fixture['task_phase'] = 'idle'
+                expect(monitor).to_contain_text('当前没有执行中的任务')
             expect(canvas).to_have_attribute('data-robot-control-enabled', 'false')
             page.screenshot(path=str(artifacts / ('live-readings.png' if args.live else 'fixture-readings.png')))
             if not args.live:
@@ -147,6 +198,9 @@ try:
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect(page.get_by_role('button', name='同步作业', exact=True)).to_be_visible()
             expect(page.get_by_role('dialog')).to_have_count(0)
+            expect(page.get_by_role('complementary', name='任务监控台', exact=True)).to_have_count(0)
+            expect(page.get_by_role('complementary', name='图谱控制台', exact=True)).to_be_visible()
+            expect(page.get_by_role('tablist', name='控制台子页')).to_be_visible()
             page.wait_for_timeout(100)
             after = reading(canvas)
             assert before['pose'] == after['pose'], (before['pose'], after['pose'])
@@ -200,4 +254,6 @@ try:
 finally:
     if server:
         server.shutdown()
-        assert all(method == 'GET' and path in ['/api/v1/slam', '/api/v1/state', '/api/v1/model'] for method, path in traffic), traffic
+        assert all(method == 'GET' and (path in ['/api/v1/slam', '/api/v1/state', '/api/v1/model', '/api/v1/execution', '/api/v1/execution/activity']
+            or re.fullmatch(r'/api/v1/execution/captures\?run_id=[a-f0-9]{32}&offset=0', path)
+            or path == '/api/v1/cameras/jobs/' + 'e' * 32) for method, path in traffic), traffic

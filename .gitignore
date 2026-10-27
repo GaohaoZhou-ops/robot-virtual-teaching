@@ -259,6 +259,17 @@ playwright/.auth/
 /tests/robot-twin-*.[pP][nN][gG]
 /robot-twin-*.json
 /tests/robot-twin-*.json
+# Task-monitor captures and result diagnostics copied out of the shared twin
+# artifact directory. Scope standalone reports to root/tests, preserving
+# TaskMonitorConsole sources, maintained runners and nested regression fixtures.
+/task-monitor-*/
+/tests/task-monitor-*/
+/task-monitor-*.[pP][nN][gG]
+/tests/task-monitor-*.[pP][nN][gG]
+/task-monitor-*.json
+/tests/task-monitor-*.json
+/task-monitor-*.[zZ][iI][pP]
+/tests/task-monitor-*.[zZ][iI][pP]
 # Standalone copies of display-settings and robot-coordinate review bundles.
 # Keep component source, maintained test helpers and nested fixtures visible.
 /display-settings-*/

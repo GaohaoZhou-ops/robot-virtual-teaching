@@ -6,6 +6,8 @@ import { ROBOT_TWIN_PREFIX, robotTwinSnapshot, robotTwinDisplayPose } from '../s
 import { RobotTwinClient } from '../src/lib/robotTwinClient.js';
 import { applyRobotJointValues } from '../src/lib/robotLoader.js';
 import { systemRobotFetch } from '../src/server/robotTwinTransport.js';
+import { createRobotTaskMonitor, isRobotMonitorRead } from '../src/server/robotTwinMonitor.js';
+import { robotTwinTask } from '../src/lib/robotTwinMonitor.js';
 
 const names = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J', 'waist_yaw_J', 'head_yaw_J', 'head_pitch_J',
   ...Array.from({ length: 7 }, (_, i) => `left_J${i + 1}`), ...Array.from({ length: 7 }, (_, i) => `right_J${i + 1}`)];
@@ -45,6 +47,17 @@ for (const value of ['https://example.com', 'http://8.8.8.8', 'http://192.168.0.
 
 const traffic = [];
 let unauthorized = false, stale = false, redirect = false, failures = false;
+let taskFailures = false, resultFailures = false, algorithmProcessing = true;
+const run = { id: 'd'.repeat(32), phase: 'idle', task_name: '巡检任务', task_index: 0,
+  parking_name: '一号停车点', point_name: '焊缝检测', stage: 'capture', message: '正在采集',
+  completed_points: 2, completed_captures: 1, elapsed_ms: 1234, algorithm_mode: 'execute', algorithm_state: 'processing',
+  confirmation: 'do-not-expose', summary: { point_count: 4, tasks: [{ id: 'private-plan', name: '巡检任务', point_count: 4 }] } };
+const capture = { id: 'e'.repeat(32), side: 'left', sequence: 1, task_name: '巡检任务', point_name: '焊缝检测' };
+assert.ok(!JSON.stringify(robotTwinTask(run)).includes('do-not-expose'));
+assert.ok(!JSON.stringify(robotTwinTask(run)).includes('private-plan'));
+for (const path of ['/api/v1/execution/start', '/api/v1/execution/cancel', '/api/v1/cameras/capture',
+  `/api/v1/cameras/jobs/${capture.id}/wait-capture`, `/api/v1/execution/captures?run_id=${run.id}&offset=0&start=1`,
+  '/api/v1/execution/captures?run_id=../../control&offset=0']) assert.equal(isRobotMonitorRead(path), false);
 const credential = 'a'.repeat(64), cookie = 'b'.repeat(64);
 const send = (res, status, payload, headers = {}) => { res.writeHead(status, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(payload)); };
 const upstream = createServer(async (req, res) => {
@@ -65,6 +78,15 @@ const upstream = createServer(async (req, res) => {
   if (redirect) return send(res, 302, {}, { Location: '/api/v1/control/enable' });
   if (req.url === '/api/v1/slam') return send(res, 200, { ...slam, fresh: !stale });
   if (req.url === '/api/v1/state') return send(res, 200, state);
+  if (taskFailures) return send(res, 503, { error: 'task unavailable' });
+  if (req.url === '/api/v1/execution/activity') return send(res, 200, { ok: true, task_phase: run.phase, navigation_phase: 'idle' });
+  if (req.url === '/api/v1/execution') return send(res, 200, { ok: true, run });
+  if (resultFailures) return send(res, 503, { error: 'results unavailable' });
+  if (req.url === `/api/v1/execution/captures?run_id=${run.id}&offset=0`) return send(res, 200, {
+    ok: true, run_id: run.id, captures: [capture], next_offset: 1, total: 1 });
+  if (req.url === `/api/v1/cameras/jobs/${capture.id}`) return send(res, 200, { job: {
+    state: 'complete', cameras: { left: { inspection: algorithmProcessing ? { state: 'processing' }
+      : { state: 'complete', boxes: [{ label: '表面裂纹', x: 10, y: 20, width: 30, height: 40 }] } } } } });
   assert.fail(`Unexpected robot endpoint: ${req.method} ${req.url}`);
 });
 const service = createRobotTwinService();
@@ -92,8 +114,38 @@ try {
   await until(() => client.state.phase === 'live');
   assert.equal(client.state.pose.x, 1.25);
   assert.equal(client.state.joints.left_J7, 90);
+  await until(() => client.state.monitorPhase === 'live');
+  assert.equal(client.state.monitor.task, null);
+  assert.ok(!traffic.includes('GET /api/v1/execution'), 'idle observation does not start the execution worker');
+  run.phase = 'running';
+  await until(() => client.state.monitor?.task?.taskName === '巡检任务');
+  assert.equal(client.state.monitor.results[0].state, 'processing');
+  algorithmProcessing = false;
+  await until(() => client.state.monitor?.results[0]?.state === 'complete');
+  assert.equal(client.state.monitor.results[0].labels[0], '表面裂纹');
+  assert.ok(client.state.monitor.results[0].output.includes('"x": 10'));
+  const jobReads = traffic.filter((entry) => entry.includes('/cameras/jobs/')).length;
+  resultFailures = true;
+  await until(() => Boolean(client.state.monitor?.resultsError));
+  assert.equal(client.state.monitor.task.taskName, '巡检任务');
+  assert.equal(client.state.monitor.results[0].labels[0], '表面裂纹', 'retain and mark stale results for the same run');
+  assert.equal(client.state.phase, 'live', 'results failures do not interrupt pose polling');
+  resultFailures = false;
+  await until(() => !client.state.monitor?.resultsError);
+  assert.equal(traffic.filter((entry) => entry.includes('/cameras/jobs/')).length, jobReads, 'finished algorithm results are cached');
+  taskFailures = true;
+  await until(() => client.state.monitorPhase === 'stale');
+  assert.equal(client.state.phase, 'live', 'task failures do not interrupt pose polling');
+  taskFailures = false;
+  await until(() => client.state.monitorPhase === 'live');
+  run.phase = 'idle';
+  await until(() => client.state.monitor?.task === null);
+  assert.deepEqual(client.state.monitor.results, [], 'idle state clears previous task outputs');
   assert.ok(!JSON.stringify(client.state).includes(cookie));
   assert.ok(!JSON.stringify(client.state).includes(credential));
+  // Isolate rejected requests from the two legitimate background polling loops.
+  await until(() => client.controllers.size === 0);
+  clearTimeout(client.timer); clearTimeout(client.monitorTimer);
   const before = traffic.length;
   for (const path of ['/api/v1/control/jog', '/control', '/snapshot?path=/api/v1/control/enable']) {
     const result = await request(ROBOT_TWIN_PREFIX + path, { method: 'POST', headers: { 'X-Atlas-Robot-Twin': '1', Authorization: `Bearer ${client.token}` } });
@@ -102,6 +154,7 @@ try {
   const denied = await request(ROBOT_TWIN_PREFIX + '/snapshot', { headers: { 'X-Atlas-Robot-Twin': '1', Origin: 'http://evil.test', Authorization: `Bearer ${client.token}` } });
   assert.equal(denied.status, 403);
   assert.equal(traffic.length, before, 'rejected paths and cross-origin requests never reach robot');
+  void client.poll(client.generation); void client.pollMonitor(client.generation);
   stale = true;
   await until(() => client.state.phase === 'stale');
   assert.equal(client.state.pose.x, 1.25, 'retain last pose without odometry fallback');
@@ -119,9 +172,11 @@ try {
   await delay(650); assert.equal(traffic.length, afterAuth, 'authentication expiry requires explicit reconnect');
   client.disconnect();
   assert.equal(client.state.pose, null); assert.deepEqual(client.state.joints, {});
+  assert.equal(client.state.monitor, null);
   await delay(650); assert.equal(traffic.length, afterAuth, 'disconnect stops robot requests');
   assert.deepEqual([...new Set(traffic)].sort(), ['POST /api/v1/access/login', 'GET /api/v1/control-session',
-    'GET /api/v1/model', 'GET /api/v1/slam', 'GET /api/v1/state'].sort());
+    'GET /api/v1/model', 'GET /api/v1/slam', 'GET /api/v1/state', 'GET /api/v1/execution/activity', 'GET /api/v1/execution',
+    `GET /api/v1/execution/captures?run_id=${run.id}&offset=0`, `GET /api/v1/cameras/jobs/${capture.id}`].sort());
 } finally {
   client.disconnect(); service.close();
   await Promise.all([app, upstream].map((server) => new Promise((resolve) => server.close(resolve))));
@@ -138,4 +193,36 @@ const connecting = pending.connect('192.168.0.112:9090', 'fixture');
 pending.disconnect(); finish(new Response(JSON.stringify({ token: 'c'.repeat(64) }), { status: 201 }));
 await connecting; await delay(0);
 assert.equal(pending.state.active, false); assert.equal(released, true);
-console.log('Robot twin: SLAM coordinates, 20 joints, measured rendering, freshness, reconnect, auth, request allowlist, redirects, isolation and cancellation passed.');
+
+// Paired Zivid sides share a job; body cameras use the frame-result read route.
+const records = [{ ...capture, side: 'left' }, { ...capture, side: 'right', sequence: 2 },
+  { ...capture, id: 'f'.repeat(32), side: 'chest-color', sequence: 3 }];
+const monitorReads = [];
+const monitor = createRobotTaskMonitor(async (path) => {
+  assert.ok(isRobotMonitorRead(path)); monitorReads.push(path);
+  if (path.endsWith('/activity')) return { ok: true, task_phase: 'running', navigation_phase: 'idle' };
+  if (path === '/api/v1/execution') return { ok: true, run: { ...run, phase: 'running', completed_captures: 3 } };
+  if (path.includes('/captures?')) return { ok: true, run_id: run.id, total: 3, captures: records };
+  return { job: { state: 'complete', cameras: Object.fromEntries(['left', 'right', 'chest-color'].map((side) =>
+    [side, { inspection: { state: 'complete', boxes: [] } }])) } };
+});
+const paired = await monitor();
+assert.equal(paired.results.length, 3); assert.equal(paired.results[0].camera, 'chest-color');
+assert.ok(paired.results.every((item) => item.received && item.state === 'complete' && item.detectionCount === 0));
+assert.equal(monitorReads.filter((path) => path.includes('/cameras/jobs/')).length, 1);
+assert.equal(monitorReads.filter((path) => path.includes('/frame-captures/')).length, 1);
+await monitor(); assert.equal(monitorReads.length, 5, 'one session shares its cached monitor response');
+
+// Demo mode reads the last page of persisted annotations, never camera jobs.
+const demoReads = [];
+const demoMonitor = createRobotTaskMonitor(async (path) => {
+  assert.ok(isRobotMonitorRead(path)); demoReads.push(path);
+  if (path.endsWith('/activity')) return { ok: true, task_phase: 'succeeded', navigation_phase: 'idle' };
+  if (path === '/api/v1/execution') return { ok: true, run: { ...run, phase: 'succeeded', algorithm_mode: 'demo', demo_image_count: 12 } };
+  assert.equal(path, `/api/v1/execution/demo-images?run_id=${run.id}&offset=4`);
+  return { ok: true, total: 12, algorithm_state: 'complete', images: [{ ...capture, sequence: 5, width: 640, height: 480, boxes: [{ label: '演示缺陷' }] }] };
+});
+const demo = await demoMonitor();
+assert.equal(demo.results[0].demo, true); assert.equal(demo.results[0].labels[0], '演示缺陷');
+assert.equal(demo.resultLimit, 8); assert.equal(demoReads.length, 3);
+console.log('Robot twin: SLAM, 20 joints, task monitoring, algorithm outputs, paired/body cameras, demo results, freshness, failure isolation, read-only allowlist and cancellation passed.');
