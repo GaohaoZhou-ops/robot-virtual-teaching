@@ -31,9 +31,8 @@
 .work-sync-mode-options small { color: #8bd7b8; font-size: 11px; }
 .work-sync-mode-dialog button:focus-visible, .robot-twin-panel input:focus-visible { outline: 2px solid #8bd7b8; outline-offset: 3px; }
 .work-sync-mode-dialog .work-sync__status { position: static; max-width: 100%; white-space: normal; font-size: 12px; margin-top: 8px; }
-.robot-twin-panel__readonly { display: flex; align-items: center; gap: 7px; }
-.robot-twin-panel > label { display: grid; gap: 8px; margin: 16px 0; font-size: 12px; color: #b2c5c1; }
-.robot-twin-panel input { box-sizing: border-box; width: 100%; border: 1px solid #405a55; border-radius: 5px; padding: 11px; background: #0d191c; color: #dbe9e6; font: inherit; font-size: 14px; }
+.robot-twin-field { display: grid; gap: 8px; margin: 16px 0; font-size: 12px; color: #b2c5c1; }
+.robot-twin-panel input:not([type='radio']) { box-sizing: border-box; width: 100%; border: 1px solid #405a55; border-radius: 5px; padding: 11px; background: #0d191c; color: #dbe9e6; font: inherit; font-size: 14px; }
 .robot-twin-panel input:disabled { opacity: .65; }
 .robot-twin-panel__state { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #b2c5c1; padding-top: 5px; }
 .robot-twin-panel__state span { margin-left: auto; font-size: 11px; }
@@ -53,7 +52,47 @@
   .robot-twin-success, .robot-twin-success__mark, .robot-twin-success__ring, .robot-twin-success__check { animation: none; }
   .robot-twin-success__ring, .robot-twin-success__check { stroke-dashoffset: 0; }
 }
-.robot-twin-inspector-note { margin: 8px 12px; padding: 9px; border: 1px solid #405a55; color: #a3ddbd; font-size: 12px; line-height: 1.6; }
+.work-sync-mode-dialog.is-twin { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
+.robot-twin-robots { min-width: 0; padding: 0; margin: 22px 0 0; border: 0; }
+.robot-twin-robots legend { width: 100%; padding: 0 0 12px; color: #dbe9e6; font-size: 12px; }
+.robot-twin-robots legend > span { float: right; color: #809d94; font-size: 11px; }
+.robot-twin-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 320px; overflow: auto; padding: 3px; margin: -3px; scrollbar-width: thin; }
+.robot-twin-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border: 1px solid #334d48; border-radius: 7px; background: #101d20; color: #dbe9e6; cursor: pointer; font: inherit; text-align: left; transition: border-color .15s ease, background-color .15s ease; }
+.robot-twin-card:hover { border-color: #6b9a88; background: #152a28; }
+.robot-twin-card.is-selected { border-color: #8bd7b8; background: linear-gradient(130deg, #1c3930, #142725); box-shadow: inset 3px 0 #8bd7b8; }
+.robot-twin-card:has(input:focus-visible) { outline: 2px solid #8bd7b8; outline-offset: 2px; }
+.robot-twin-card input { position: absolute; width: 1px; height: 1px; padding: 0; border: 0; clip-path: inset(50%); overflow: hidden; }
+.robot-twin-card__top { display: flex; align-items: center; gap: 9px; color: #809f92; }
+.robot-twin-card__top > svg { color: #a2cbb6; }
+.robot-twin-card__top > small { font: 9px 'SFMono-Regular', Menlo, monospace; letter-spacing: .08em; }
+.robot-twin-card__check { margin-left: auto; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid #466053; border-radius: 50%; }
+.robot-twin-card.is-selected .robot-twin-card__check { color: #132c24; border-color: #a3ddbd; background: #a3ddbd; }
+.robot-twin-card > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.robot-twin-card > code { color: #91b5a6; font: 11px 'SFMono-Regular', Menlo, monospace; overflow-wrap: anywhere; }
+.robot-twin-card--add { justify-content: center; align-items: center; min-height: 119px; border-style: dashed; background: transparent; color: #91b5a6; }
+.robot-twin-card--add > strong { font-size: 12px; }
+.robot-twin-card--add > span { font-size: 10px; color: #78958a; }
+.robot-twin-robots:disabled .robot-twin-card { cursor: default; opacity: .55; }
+.robot-twin-robots:disabled .robot-twin-card.is-selected { opacity: .85; }
+.robot-twin-robots__tools, .robot-twin-robots__undo { display: flex; align-items: center; gap: 12px; margin: 13px 0; font-size: 11px; color: #819e97; }
+.robot-twin-robots__tools { justify-content: flex-end; }
+.robot-twin-robots__tools > span, .robot-twin-robots__undo > span { flex: 1; overflow-wrap: anywhere; min-width: 0; }
+.robot-twin-robots__tools button, .robot-twin-robots__undo button { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 4px 0; background: none; color: #a3c6b7; cursor: pointer; font: inherit; white-space: nowrap; }
+.robot-twin-robots__tools button:hover, .robot-twin-robots__undo button:hover { color: #d1f2df; }
+.robot-twin-robots__tools button:disabled, .robot-twin-robots__undo button:disabled { opacity: .45; cursor: default; }
+.robot-twin-robots__undo { padding: 9px 11px; border: 1px solid #334d48; border-radius: 4px; }
+.robot-twin-editor { margin-top: 20px; padding: 16px; border: 1px solid #3d5b58; border-radius: 6px; background: #101c1f; }
+.robot-twin-editor h3 { margin: 0 0 2px; font-size: 13px; font-weight: 500; color: #bcd6c8; }
+.robot-twin-editor__fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; }
+.robot-twin-editor .robot-twin-field { min-width: 0; margin-bottom: 0; }
+.robot-twin-editor .work-sync-dialog__actions { margin-top: 18px; }
+@media (max-width: 520px) {
+  .work-sync-mode-dialog.is-twin { padding: 20px; }
+  .robot-twin-cards, .robot-twin-editor__fields { grid-template-columns: minmax(0, 1fr); }
+  .robot-twin-cards { max-height: 280px; }
+  .robot-twin-card { padding: 13px 15px; gap: 8px; }
+  .robot-twin-card--add { min-height: 105px; }
+}
 @media (max-width: 720px) {
   .start-page:has(.work-sync) { grid-template-rows: auto minmax(0, 1fr) 25px; }
   .start-page .start-page__topbar { flex-wrap: wrap; height: auto; min-height: 62px; }

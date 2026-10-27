@@ -247,6 +247,8 @@ playwright/.auth/
 # Digital-twin checks normally write into test-artifacts/robot-twin/.
 # Ignore standalone copies of live readings, session diagnostics and captures
 # at root/tests too; keep robot_twin_*.py/.mjs runners and nested fixtures visible.
+# The shared artifact directory also holds robot-card, body-camera, arrow-spacing
+# and expanded-preview screenshots. Use robot-twin-* for standalone diagnostics.
 /robot-twin/
 /robot-twin-*/
 /tests/robot-twin/
@@ -257,6 +259,20 @@ playwright/.auth/
 /tests/robot-twin-*.[zZ][iI][pP]
 /robot-twin-*.[pP][nN][gG]
 /tests/robot-twin-*.[pP][nN][gG]
+# Body-camera JPEG frames, converted previews and recordings stay local.
+/robot-twin-*.[jJ][pP][gG]
+/tests/robot-twin-*.[jJ][pP][gG]
+/robot-twin-*.[jJ][pP][eE][gG]
+/tests/robot-twin-*.[jJ][pP][eE][gG]
+/robot-twin-*.[wW][eE][bB][pP]
+/tests/robot-twin-*.[wW][eE][bB][pP]
+/robot-twin-*.[wW][eE][bB][mM]
+/tests/robot-twin-*.[wW][eE][bB][mM]
+/robot-twin-*.[mM][pP]4
+/tests/robot-twin-*.[mM][pP]4
+# Network captures may contain session headers as well as live frame payloads.
+/robot-twin-*.[hH][aA][rR]
+/tests/robot-twin-*.[hH][aA][rR]
 /robot-twin-*.json
 /tests/robot-twin-*.json
 # Task-monitor captures and result diagnostics copied out of the shared twin

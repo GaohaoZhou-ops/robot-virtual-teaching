@@ -1,27 +1,32 @@
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL } from './robotTwin.js';
 import { ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_MONITOR_MAX_AGE } from './robotTwinMonitor.js';
+import { RobotTwinCameraClient } from './robotTwinCameraClient.js';
 
 export class RobotTwinClient {
   constructor({ request = (...args) => globalThis.fetch(...args), onChange = () => {} } = {}) {
     this.request = request; this.onChange = onChange;
     this.generation = 0;
     this.controllers = new Set();
+    this.cameraClient = new RobotTwinCameraClient({ request: (path, options) => this.api(path, options),
+      onChange: (camera) => this.publish({ camera }) });
     this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '',
-      monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null };
+      monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state };
   }
 
   publish(update) { this.state = { ...this.state, ...update }; this.onChange(this.state); }
 
-  async api(path, options = {}, token = this.token) {
+  async api(path, { binary = false, ...options } = {}, token = this.token) {
     const controller = new AbortController(); this.controllers.add(controller);
     try {
       const response = await this.request(ROBOT_TWIN_PREFIX + path, { ...options,
         cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Atlas-Robot-Twin': '1',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12_000)]) });
-      const payload = await response.json();
-      if (!response.ok) throw Object.assign(new Error(payload.error || '真机连接失败'), { status: response.status });
-      return payload;
+          ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12_000), ...(options.signal ? [options.signal] : [])]) });
+      if (!response.ok) {
+        const payload = await response.json();
+        throw Object.assign(new Error(payload.error || '真机连接失败'), { status: response.status });
+      }
+      return binary ? { blob: await response.blob(), headers: response.headers } : await response.json();
     } finally { this.controllers.delete(controller); }
   }
 
@@ -31,6 +36,7 @@ export class RobotTwinClient {
     ++this.generation;
     clearTimeout(this.timer); clearTimeout(this.expiry);
     clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
+    this.cameraClient.reset();
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
     this.release(this.token); this.token = null;
@@ -72,6 +78,7 @@ export class RobotTwinClient {
       this.accept(result.snapshot, performance.now() - started, generation);
       this.timer = setTimeout(() => this.poll(generation), ROBOT_TWIN_INTERVAL);
       void this.pollMonitor(generation);
+      void this.cameraClient.load();
       return true;
     } catch (error) {
       if (generation === this.generation) this.publish({ active: false, phase: 'error', error: error.message });
@@ -93,6 +100,7 @@ export class RobotTwinClient {
       this.publish({ phase: 'stale', error: error.message,
         snapshot: this.state.snapshot ? { ...this.state.snapshot, localizationFresh: false, jointCount: 0 } : null });
       if (error.status === 401) {
+        this.cameraClient.reset();
         this.token = null; clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
         this.publish({ monitorPhase: 'stale', monitorError: error.message });
         return;

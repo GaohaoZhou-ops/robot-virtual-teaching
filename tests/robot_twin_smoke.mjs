@@ -8,6 +8,7 @@ import { applyRobotJointValues } from '../src/lib/robotLoader.js';
 import { systemRobotFetch } from '../src/server/robotTwinTransport.js';
 import { createRobotTaskMonitor, isRobotMonitorRead } from '../src/server/robotTwinMonitor.js';
 import { robotTwinTask } from '../src/lib/robotTwinMonitor.js';
+import { BODY_CAMERAS } from '../src/lib/robotTwinCamera.js';
 
 const names = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J', 'waist_yaw_J', 'head_yaw_J', 'head_pitch_J',
   ...Array.from({ length: 7 }, (_, i) => `left_J${i + 1}`), ...Array.from({ length: 7 }, (_, i) => `right_J${i + 1}`)];
@@ -46,6 +47,8 @@ for (const value of ['https://example.com', 'http://8.8.8.8', 'http://192.168.0.
   'http://admin:pass@192.168.0.112', 'http://192.168.0.112/?path=/control', 'file:///etc/passwd']) assert.throws(() => robotTwinAddress(value));
 
 const traffic = [];
+const cameraTraffic = [], cameraLeases = new Map();
+let activeCamera = null, frameSequence = 0, freezeFrames = false, cameraDelay = 0;
 let unauthorized = false, stale = false, redirect = false, failures = false;
 let taskFailures = false, resultFailures = false, algorithmProcessing = true;
 const run = { id: 'd'.repeat(32), phase: 'idle', task_name: '巡检任务', task_index: 0,
@@ -71,6 +74,35 @@ const upstream = createServer(async (req, res) => {
   }
   if (unauthorized || req.headers.cookie !== `abx_access_9090=${cookie}`) return send(res, 401, { error: 'login required' });
   if (req.url === '/api/v1/control-session' && req.method === 'GET') return send(res, 200, { token: credential });
+  if (req.url === '/api/v1/body-cameras' && req.method === 'GET') return send(res, 200, { ok: true,
+    cameras: [...Object.entries(BODY_CAMERAS).map(([id, label]) => ({ id, label, available: true })), { id: 'left', label: 'Zivid', available: true }] });
+  if (req.method === 'POST' && ['/api/v1/body-cameras/preview', '/api/v1/body-cameras/frame'].includes(req.url)) {
+    assert.equal(req.headers['x-abx-control-token'], credential);
+    let content = ''; for await (const chunk of req) content += chunk;
+    const fields = Object.fromEntries(new URLSearchParams(content));
+    assert.match(fields.client, /^[a-f0-9]{32}$/);
+    const generation = Number(fields.generation);
+    assert.ok(Number.isSafeInteger(generation) && generation > 0);
+    cameraTraffic.push({ path: req.url, ...fields });
+    if (fields.enabled === '1' && cameraDelay) await delay(cameraDelay);
+    const previous = cameraLeases.get(fields.client);
+    if (req.url.endsWith('/preview')) {
+      if (generation < (previous?.generation || 0)) return send(res, fields.enabled === '1' ? 409 : 200, { ok: fields.enabled !== '1' });
+      if (fields.enabled === '1') {
+        assert.ok(Object.hasOwn(BODY_CAMERAS, fields.camera), 'only body-camera IDs may be subscribed');
+        assert.equal(activeCamera, null, 'release the previous stream before starting another');
+        assert.equal(Object.keys(fields).length, 4);
+        activeCamera = fields.camera;
+      } else { assert.equal(fields.enabled, '0'); assert.equal(Object.keys(fields).length, 3); activeCamera = null; }
+      cameraLeases.set(fields.client, { generation, camera: activeCamera });
+      return send(res, 200, { ok: true });
+    }
+    assert.equal(Object.keys(fields).length, 2);
+    if (!previous?.camera || previous.generation !== generation) return send(res, 409, { error: 'lease ended' });
+    if (!freezeFrames) ++frameSequence;
+    res.writeHead(200, { 'Content-Type': 'image/jpeg', 'X-ABX-Preview-Width': '16', 'X-ABX-Preview-Height': '9', 'X-ABX-Sequence': String(frameSequence) });
+    res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9])); return;
+  }
   assert.equal(req.method, 'GET', 'no robot mutation except login');
   assert.equal(req.headers['x-abx-control-token'], credential);
   if (req.url === '/api/v1/model') return send(res, 200, model);
@@ -114,6 +146,45 @@ try {
   await until(() => client.state.phase === 'live');
   assert.equal(client.state.pose.x, 1.25);
   assert.equal(client.state.joints.left_J7, 90);
+  await until(() => client.state.camera.catalogPhase === 'ready');
+  assert.equal(client.state.camera.cameras.length, 6, 'Zivid is excluded from the preview catalog');
+  assert.equal(cameraTraffic.length, 0, 'connecting the twin never opens a preview automatically');
+  await client.cameraClient.start('head-left');
+  await until(() => client.state.camera.phase === 'live');
+  const previewCount = cameraTraffic.filter((item) => item.path.endsWith('/preview')).length;
+  const invalidCamera = await request(ROBOT_TWIN_PREFIX + '/camera', { method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Atlas-Robot-Twin': '1', Authorization: `Bearer ${client.token}` },
+    body: JSON.stringify({ camera: 'left', revision: 999 }) });
+  assert.equal(invalidCamera.status, 400);
+  assert.equal(cameraTraffic.filter((item) => item.path.endsWith('/preview')).length, previewCount);
+  freezeFrames = true;
+  await until(() => client.state.camera.phase === 'stale');
+  assert.equal(client.state.camera.imageUrl, null, 'never display a frozen frame as live');
+  assert.equal(client.state.phase, 'live', 'camera freshness is independent of robot pose');
+  freezeFrames = false;
+  await until(() => client.state.camera.phase === 'live');
+  client.cameraClient.select('wrist-right');
+  await until(() => activeCamera === 'wrist-right' && client.state.camera.phase === 'live');
+  const previewActions = cameraTraffic.filter((item) => item.path.endsWith('/preview'));
+  assert.deepEqual(previewActions.slice(-3).map((item) => item.enabled), ['1', '0', '1']);
+  await client.cameraClient.stop();
+  assert.equal(activeCamera, null); assert.equal(client.state.camera.imageUrl, null);
+  const stoppedFrames = cameraTraffic.length;
+  await delay(500); assert.equal(cameraTraffic.length, stoppedFrames);
+  cameraDelay = 350;
+  const enabling = client.cameraClient.start('head-left');
+  await until(() => cameraTraffic.length > stoppedFrames);
+  await client.cameraClient.stop(); await enabling; await delay(450);
+  assert.equal(activeCamera, null, 'a late enable cannot resurrect a cancelled stream');
+  cameraDelay = 0;
+  await client.cameraClient.start('chest-color'); await until(() => client.state.camera.phase === 'live');
+  client.disconnect();
+  assert.equal(client.state.camera.imageUrl, null);
+  await until(() => activeCamera === null);
+  const releasedTraffic = traffic.length;
+  await delay(600); assert.equal(traffic.length, releasedTraffic, 'disconnect releases the preview and stops all data reads');
+  assert.equal(await client.connect(upstreamUrl, 'fixture-password'), true);
+  await until(() => client.state.phase === 'live');
   await until(() => client.state.monitorPhase === 'live');
   assert.equal(client.state.monitor.task, null);
   assert.ok(!traffic.includes('GET /api/v1/execution'), 'idle observation does not start the execution worker');
@@ -176,9 +247,10 @@ try {
   await delay(650); assert.equal(traffic.length, afterAuth, 'disconnect stops robot requests');
   assert.deepEqual([...new Set(traffic)].sort(), ['POST /api/v1/access/login', 'GET /api/v1/control-session',
     'GET /api/v1/model', 'GET /api/v1/slam', 'GET /api/v1/state', 'GET /api/v1/execution/activity', 'GET /api/v1/execution',
+    'GET /api/v1/body-cameras', 'POST /api/v1/body-cameras/preview', 'POST /api/v1/body-cameras/frame',
     `GET /api/v1/execution/captures?run_id=${run.id}&offset=0`, `GET /api/v1/cameras/jobs/${capture.id}`].sort());
 } finally {
-  client.disconnect(); service.close();
+  client.disconnect(); await service.close();
   await Promise.all([app, upstream].map((server) => new Promise((resolve) => server.close(resolve))));
 }
 

@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL, robotTwinSnapshot } from '../lib/robotTwin.js';
 import { robotFetch } from './robotTwinTransport.js';
 import { createRobotTaskMonitor, isRobotMonitorRead } from './robotTwinMonitor.js';
+import { createRobotCamera } from './robotTwinCameraService.js';
 
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const reply = (res, status, data) => {
@@ -41,8 +42,9 @@ async function body(req) {
   catch { fail(400, '连接参数格式无效'); }
 }
 
-// The only upstream POST is password authentication. There is deliberately no
-// generic proxy, control-ownership request, motion, enable, stop or task command.
+// This status reader only POSTs password authentication. Body-camera observation
+// has a separate restricted preview/frame adapter, never a generic proxy or a
+// control-ownership, motion, enable, stop or task command.
 const allowedReads = new Set(['/api/v1/control-session', '/api/v1/model', '/api/v1/slam', '/api/v1/state']);
 async function readRobot(session, path, login) {
   if (login ? path !== '/api/v1/access/login' : !allowedReads.has(path) && !isRobotMonitorRead(path)) fail(403, '真机孪生只允许读取状态');
@@ -76,10 +78,14 @@ async function readRobot(session, path, login) {
 
 export function createRobotTwinService() {
   const sessions = new Map();
+  const dispose = (session) => {
+    session.controller.abort();
+    return session.camera?.close().catch(() => {});
+  };
   let pending = 0;
   const prune = () => {
     for (const [id, session] of sessions) if (Date.now() - session.lastSeen > 60_000) {
-      session.controller.abort(); sessions.delete(id);
+      void dispose(session); sessions.delete(id);
     }
   };
   const cleanup = setInterval(prune, 30_000); cleanup.unref();
@@ -138,23 +144,39 @@ export function createRobotTwinService() {
           session.model = await readRobot(session, '/api/v1/model');
           const initial = await snapshot(session);
           session.monitor = createRobotTaskMonitor((path) => readRobot(session, path));
+          session.camera = createRobotCamera(session);
           const token = randomBytes(32).toString('hex');
           session.lastSeen = Date.now(); sessions.set(token, session);
           reply(res, 201, { token, address: session.address, snapshot: initial });
         } finally { pending -= 1; }
         return;
       }
-      if (!['/snapshot', '/monitor', '/session'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
+      if (!['/snapshot', '/monitor', '/session', '/cameras', '/camera', '/camera/frame'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
       const token = /^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
       const session = sessions.get(token);
       if (!session || Date.now() - session.lastSeen > 60_000) {
-        session?.controller.abort(); sessions.delete(token); fail(401, '孪生会话已结束，请重新连接');
+        if (session) void dispose(session);
+        sessions.delete(token); fail(401, '孪生会话已结束，请重新连接');
       }
       if (pathname.endsWith('/session') && req.method === 'DELETE') {
-        session.controller.abort(); sessions.delete(token); reply(res, 200, { ok: true }); return;
+        sessions.delete(token); await dispose(session); reply(res, 200, { ok: true }); return;
+      }
+      session.lastSeen = Date.now();
+      if (pathname === `${ROBOT_TWIN_PREFIX}/camera`) {
+        if (req.method !== 'PUT') fail(405, '相机预览仅支持切换订阅');
+        const data = await body(req);
+        if (!data || Object.keys(data).sort().join(',') !== 'camera,revision') fail(400, '相机订阅参数无效');
+        reply(res, 200, await session.camera.set(data.camera, data.revision)); return;
       }
       if (pathname.endsWith('/session') || req.method !== 'GET') fail(405, '真机孪生仅支持读取状态或断开本地会话');
-      session.lastSeen = Date.now();
+      if (pathname.endsWith('/cameras')) { reply(res, 200, await session.camera.catalog()); return; }
+      if (pathname.endsWith('/camera/frame')) {
+        const frame = await session.camera.frame(Number(req.headers['x-atlas-camera-revision']));
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store', 'Content-Length': frame.bytes.length,
+          'X-Atlas-Camera': frame.camera, 'X-Atlas-Camera-Revision': String(frame.revision),
+          'X-Atlas-Frame-Sequence': frame.sequence, 'X-Atlas-Frame-Width': String(frame.width), 'X-Atlas-Frame-Height': String(frame.height) });
+        res.end(frame.bytes); return;
+      }
       if (pathname.endsWith('/monitor')) {
         const result = await session.monitor();
         reply(res, 200, { ...result, taskAgeMs: Date.now() - result.taskSampledAt });
@@ -167,14 +189,18 @@ export function createRobotTwinService() {
         reply(res, 200, { ...result, poseValidForMs: Math.max(0, result.poseValidForMs - heldMs),
           jointsValidForMs: Math.max(0, result.jointsValidForMs - heldMs) });
       } catch (error) {
-        if (error.status === 401) { session.controller.abort(); sessions.delete(token); }
+        if (error.status === 401) { void dispose(session); sessions.delete(token); }
         throw error;
       }
     } catch (error) {
       if (!res.headersSent) reply(res, error.status || 500, { error: error.message || '真机状态读取失败' });
     }
   };
-  middleware.close = () => { clearInterval(cleanup); for (const session of sessions.values()) session.controller.abort(); sessions.clear(); };
+  middleware.close = () => {
+    clearInterval(cleanup);
+    const closing = [...sessions.values()].map(dispose); sessions.clear();
+    return Promise.allSettled(closing);
+  };
   return middleware;
 }
 

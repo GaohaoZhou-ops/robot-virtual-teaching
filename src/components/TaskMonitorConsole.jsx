@@ -1,6 +1,7 @@
 import { Activity, CheckCheck, CircleDot, Clock3, Code2, ListChecks, PanelRightClose, PanelRightOpen, ScanSearch, ShieldCheck, WifiOff } from 'lucide-react';
 import { ALGORITHM_PHASES, CAMERA_NAMES, FINISHED_TASK_PHASES, TASK_PHASES } from '../lib/robotTwinMonitor.js';
 import './TaskMonitorConsole.css';
+import RobotTwinCameraPanel from './RobotTwinCameraPanel.jsx';
 
 const duration = (milliseconds) => {
   const seconds = Math.floor(milliseconds / 1000);
@@ -58,6 +59,7 @@ export default function TaskMonitorConsole({ twin, collapsed, onCollapsedChange 
           <time>{twin.monitorReceivedAt ? new Date(twin.monitorReceivedAt).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}</time>
         </div>
         <div className="task-monitor__scroll">
+          <RobotTwinCameraPanel twin={twin} collapsed={collapsed} />
           {twin.monitorError && <p className="task-monitor__warning" role="status">{twin.monitorError}{monitor ? '；以下为上次读取记录。' : ''}</p>}
           <section className="task-monitor__section" aria-label="机器人任务状态">
             <div className="task-monitor__section-title"><ListChecks size={14} /><h3>{finished ? '最近任务' : '当前任务'}</h3>

@@ -58,7 +58,7 @@ export function WorkSyncControl({ sync, twin }) {
       {twin?.active ? <Unplug size={13} /> : <Link2 size={13} />}{twin?.active ? '停止同步' : '同步作业'}
     </button>
     {status && <span className={`work-sync__status ${twin?.phase === 'stale' ? 'is-error' : ''}`} role="status" title={twin?.error || status}>{status}</span>}
-    <dialog ref={dialog} className="work-sync-dialog work-sync-mode-dialog" aria-labelledby={titleId}
+    <dialog ref={dialog} className={`work-sync-dialog work-sync-mode-dialog ${page === 'twin' ? 'is-twin' : ''}`} aria-labelledby={titleId}
       onClose={() => setOpen(false)} onCancel={() => setOpen(false)}
       onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
       <div className="work-sync-dialog__heading">
