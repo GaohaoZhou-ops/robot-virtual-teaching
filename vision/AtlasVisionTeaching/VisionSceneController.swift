@@ -12,6 +12,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     @Published var status = ""
     @Published var error = ""
     @Published var immersed = false
+    @Published var cameraWindowVisible = false
     @Published private(set) var playing = false
     @Published private(set) var progress = 0.0
     @Published private(set) var clipIndex: Int?
@@ -48,6 +49,16 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     private var focusPoint: SIMD3<Float>?
     var clip: VisionSceneClip? { clipIndex.flatMap { manifest?.clips.indices.contains($0) == true ? manifest?.clips[$0] : nil } }
     var hasClips: Bool { manifest?.clips.isEmpty == false }
+    var hasCameras: Bool { manifest?.cameraNodes.isEmpty == false }
+
+    func cameraSnapshot() -> VisionSceneCameraSnapshot? {
+        guard immersed, !busy, let manifest else { return nil }
+        let cameraIDs = Set(manifest.cameraNodes.values)
+        let nodes = manifest.nodes.filter { ($0.role == "map" && $0.asset != nil) || cameraIDs.contains($0.id) }
+        return VisionSceneCameraSnapshot(transforms: Dictionary(uniqueKeysWithValues: nodes.compactMap { node in
+            entities[node.id].map { (node.id, $0.transformMatrix(relativeTo: content)) }
+        }))
+    }
 
     init() {
         VisionSceneSelection.registerComponent()
@@ -228,11 +239,10 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     private func addEnvironment(_ scene: VisionSceneManifest) {
         let sky = ModelEntity(mesh: .generateSphere(radius: 500), materials: [UnlitMaterial(color: UIColor(red: 0.035, green: 0.055, blue: 0.065, alpha: 1))])
         sky.scale = SIMD3(-1, 1, 1); environment.addChild(sky)
-        let mapAssets = Set(scene.nodes.filter { $0.role == "map" }.compactMap(\.asset))
-        let pointCloud = scene.assets.filter { mapAssets.contains($0.id) }.allSatisfy { $0.manifest.indices == 0 }
         // Sparse point clouds and isolated workpieces have no continuous floor.
-        // Supply a clearly visible reference plane at the robot's ground level.
-        if pointCloud || scene.coordinateFrame == "virtual_origin" {
+        // A point-cloud map can also contain placed mesh models; it still needs
+        // a continuous reference plane at the robot's ground level.
+        if scene.hasPointCloudMap || scene.coordinateFrame == "virtual_origin" {
             let low = SIMD3(scene.bounds.min), high = SIMD3(scene.bounds.max)
             let ground = scene.robotRoot.flatMap { entities[$0]?.position(relativeTo: content).z } ?? low.z
             let floor = ModelEntity(mesh: .generateBox(size: SIMD3(max(4, high.x-low.x+2), max(4, high.y-low.y+2), 0.02)),

@@ -2,7 +2,10 @@ import Foundation
 import simd
 
 @main struct VisionSceneTests {
-    struct Expected: Decodable { let milliseconds: Double; let pose: VisionScenePose; let joints: [String: Float]; let tip: [Float] }
+    struct Expected: Decodable {
+        let milliseconds: Double; let pose: VisionScenePose; let joints: [String: Float]; let tip: [Float]
+        let cameras: [String: [Float]]
+    }
     static func close(_ a: simd_float4x4, _ b: simd_float4x4) {
         for (a, b) in zip(a.elements, b.elements) { precondition(abs(a - b) < 0.0002, "Native robot transform differs from desktop") }
     }
@@ -11,6 +14,17 @@ import simd
         let base = CommandLine.arguments[1], directory = URL(fileURLWithPath: CommandLine.arguments[2])
         let decoder = JSONDecoder(), data = try Data(contentsOf: directory.appendingPathComponent("scene.json"))
         let scene = try decoder.decode(VisionSceneManifest.self, from: data); try scene.validate()
+        precondition(scene.cameraNodes.count == 2, "Both optical frames survive project export")
+        precondition(scene.hasPointCloudMap, "A mixed map still needs a continuous navigation reference floor")
+        var meshOnly = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        let pointAssets = Set(scene.assets.filter { $0.manifest.indices == 0 }.map(\.id))
+        meshOnly["nodes"] = (meshOnly["nodes"] as! [[String: Any]]).map { node in
+            var node = node
+            if let asset = node["asset"] as? String, pointAssets.contains(asset) { node["role"] = "part" }
+            return node
+        }
+        let meshOnlyScene = try decoder.decode(VisionSceneManifest.self, from: JSONSerialization.data(withJSONObject: meshOnly))
+        precondition(!meshOnlyScene.hasPointCloudMap, "Non-map point assets must not change map navigation")
         let expected = try decoder.decode([Expected].self, from: Data(contentsOf: directory.appendingPathComponent("expected.json")))
         for sample in expected {
             let (pose, values) = scene.clips[0].sample(milliseconds: sample.milliseconds)
@@ -21,6 +35,11 @@ import simd
                 let local = node.id == scene.robotRoot ? pose.matrix : node.joint.map { $0.matrix(value: values[$0.name] ?? $0.value) } ?? simd_float4x4(elements: node.transform)
                 world[node.id] = (node.parent.flatMap { world[$0] } ?? matrix_identity_float4x4) * local
                 if node.name == "检查相机" { close(world[node.id]!, simd_float4x4(elements: sample.tip)) }
+            }
+            let snapshot = VisionSceneCameraSnapshot(transforms: world)
+            for side in VisionSceneCameraSide.allCases {
+                let optical = simd_float4x4(elements: sample.cameras[side.rawValue]!)
+                close(snapshot.cameraTransform(scene.cameraNodes[side]!)!, optical * TeachingCoordinates.opticalToARCamera)
             }
         }
         for mutation in 0..<5 {
@@ -38,12 +57,23 @@ import simd
         let offers = try await store.offers(address: base); precondition(offers.count == 1)
         let downloaded = try await store.download(offers[0], address: base) { _ in }; try downloaded.validate()
         for asset in scene.assets { let model = try await store.model(asset); precondition(model.vertices == asset.manifest.vertices) }
+        let mapAssets = Set(scene.nodes.filter { $0.role == "map" }.compactMap(\.asset))
+        var renderedMapPoints = 0
+        for asset in scene.assets where mapAssets.contains(asset.id) && asset.manifest.indices == 0 {
+            let model = try await store.model(asset)
+            let rendered = try VisionMeshData(model: model, mode: .points, quality: .full)
+            precondition(!rendered.isMesh && rendered.primitiveCount == model.vertices)
+            precondition(rendered.positions.count == model.vertices * 4 && rendered.triangles.count == model.vertices * 12)
+            renderedMapPoints += rendered.primitiveCount
+        }
+        precondition(renderedMapPoints == 3, "All loose map points reach native rendering beside the mesh and robot")
+        try await VisionSceneCameraTests.run(scene, store: store)
         _ = try await store.download(offers[0], address: base) { _ in }
         let broken = directory.appendingPathComponent("device/\(scene.assets[0].id).atls")
         try Data([0, 1, 2]).write(to: broken)
         _ = try await store.download(offers[0], address: base) { _ in }
         let cached = try await store.localScenes(); precondition(cached.count == 1 && cached[0].id == scene.id)
-        print("Native scene: complete hierarchy, joint units, playback parity, malformed manifests, resumable downloads and offline cache passed.")
+        print("Native scene: mixed-map point rendering and navigation, complete hierarchy, joint units, playback parity, malformed manifests, resumable downloads and offline cache passed.")
     }
     static func navigation() {
         let landing = SIMD3<Float>(7, -12, 1.4), forward = simd_normalize(SIMD3<Float>(3, 4, 0))

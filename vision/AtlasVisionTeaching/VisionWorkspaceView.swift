@@ -520,7 +520,7 @@ struct VisionWorkspaceView: View {
         VStack(alignment: .leading, spacing: 24) {
             Divider()
             HStack(spacing: 24) {
-                Button(completed ? "返回任务列表" : "暂不示教") { Task { await session.close() } }
+                Button("返回主页") { Task { await session.close() } }
                     .disabled(session.busy).accessibilityIdentifier("defer-teaching")
                 if session.current?.result.samples.isEmpty == false {
                     Button("查看记录") { showingModelPreview = false }

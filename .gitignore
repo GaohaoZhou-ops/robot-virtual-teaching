@@ -168,6 +168,8 @@ test-results/
 /tests/test-videos/
 /tests/test-traces/
 # Native simulator launchers write build.log and DerivedData under simulator-dev/.
+# Mixed-map checks and virtual Zivid camera renders stay under
+# vision/test-artifacts/{mixed-map,dual-cameras}/, including local project views.
 /ipad/test-artifacts/
 /iphone/test-artifacts/
 /vision/test-artifacts/
@@ -1034,6 +1036,20 @@ playwright/.auth/
 /VisionWorkbenchImports/
 /tests/VisionWorkbenchImports/
 /vision/VisionWorkbenchImports/
+
+# Copied immersive-scene caches include project manifests as well as ATLS models.
+# Scope device-cache copies and archives to output roots, preserving fixtures.
+/AtlasVisionScenes/
+/tests/AtlasVisionScenes/
+/vision/AtlasVisionScenes/
+/AtlasVisionScenes.[zZ][iI][pP]
+/tests/AtlasVisionScenes.[zZ][iI][pP]
+/vision/AtlasVisionScenes.[zZ][iI][pP]
+# Interrupted workbench uploads can leave extensionless request-body files when
+# TMPDIR points into the repository. Match the server's UUID filename format.
+/vision-http-????????-????-????-????-????????????
+/tests/vision-http-????????-????-????-????-????????????
+/vision/vision-http-????????-????-????-????-????????????
 
 # Automatic pairing tests store LAN sessions, model payloads and a compiled
 # Swift test executable here when TMPDIR is inside the repository. Keep both

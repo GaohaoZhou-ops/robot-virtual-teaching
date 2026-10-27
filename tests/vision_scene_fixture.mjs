@@ -29,6 +29,12 @@ export function visionSceneFixture() {
   const elbow = joint(shoulder, 'elbow', 'continuous', [0, 0, .7], [0, 1, 0]);
   visual(elbow, [.14, .14, .6], [0, 0, .3], '#e7e9ea', '前臂');
   const tip = visual(elbow, [.23, .25, .18], [0, 0, .65], '#28bdce', '检查相机');
+  const cameras = Object.fromEntries(['left', 'right'].map((side, i) => {
+    const optical = new THREE.Group(); optical.name = `zivid_${side}_optical_frame`;
+    optical.position.set(i ? .11 : -.11, .04, .65);
+    optical.rotation.set(.15, i ? -.2 : .2, .1, 'ZYX');
+    elbow.add(optical); return [side, optical];
+  }));
   const collision = visual(robot, [1, 1, 1], [0, 0, 0], '#f00', 'collision-only');
   collision.userData.robotCollisionGeometry = true;
   robot.userData.robot = { movableJoints: [{ name: 'lift', type: 'prismatic' }, { name: 'shoulder', type: 'revolute' }, { name: 'elbow', type: 'continuous' }] };
@@ -43,5 +49,5 @@ export function visionSceneFixture() {
   const mobile = { id: 'mobile', name: '移动视点', mobileTransform: new THREE.Matrix4().makeTranslation(-1, -1, .1).toArray(),
     mobileCapture: { samples: [{ id: 'key', kind: 'keyframe', segmentId: 'a', cameraPose: { position: { x: .1, y: .2, z: .8 } } }] } };
   return { mapData: { geometry, name: '空间检查演练', mapId: 'scene-fixture' }, robotModel: robot, robotDescriptor: { id: 'fixture', name: '完整机械臂' },
-    robotPose, robotJointValues, tasks: [task, mobile], waypoints: [{ id: 'a', x: -2, y: -1, z: 0 }, { id: 'b', x: 2, y: -1, z: 0 }], edges: [{ id: 'edge', from: 'a', to: 'b' }], tip };
+    robotPose, robotJointValues, tasks: [task, mobile], waypoints: [{ id: 'a', x: -2, y: -1, z: 0 }, { id: 'b', x: 2, y: -1, z: 0 }], edges: [{ id: 'edge', from: 'a', to: 'b' }], tip, cameras };
 }

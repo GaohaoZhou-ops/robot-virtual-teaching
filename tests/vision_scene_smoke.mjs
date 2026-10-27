@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import * as THREE from 'three';
+import { PLYLoader } from 'three/addons/loaders/PLYLoader.js';
 import { buildVisionScenePackage, partitionVisionGeometry } from '../src/lib/visionScenePackage.js';
 import { validateVisionScene } from '../src/lib/visionSceneProtocol.js';
 import { createVisionSceneService } from '../src/server/visionSceneService.js';
@@ -33,6 +34,47 @@ const run = (cmd, args, options = {}) => new Promise((resolve, reject) => {
   child.on('error', reject); child.on('exit', code => code === 0 ? resolve() : reject(new Error(`${cmd} exited ${code}`)));
 });
 try {
+  // Placing a mesh in a scan leaves the background points outside its index.
+  // Those points must survive in separate point-only assets, with exact RGB
+  // and coordinates, even when mesh and point tiles share the same grid cell.
+  const hybridBytes = await readFile('tests/fixtures/hybrid-map.ply');
+  const hybrid = new PLYLoader().parse(hybridBytes.buffer.slice(hybridBytes.byteOffset, hybridBytes.byteOffset + hybridBytes.byteLength));
+  const sample = (geometry, vertex) => ['position', 'color'].flatMap(name => {
+    const attribute = geometry.getAttribute(name);
+    return [attribute.getX(vertex), attribute.getY(vertex), attribute.getZ(vertex)];
+  }).join(',');
+  const referenced = new Set(hybrid.index.array);
+  const loose = Array.from({ length: hybrid.attributes.position.count }, (_, i) => i).filter(i => !referenced.has(i));
+  for (const primitiveLimit of [1, 2, 97]) {
+    const points = [], faces = [];
+    for (const chunk of partitionVisionGeometry(hybrid, { primitiveLimit })) {
+      assert.ok((chunk.index ? chunk.index.count / 3 : chunk.attributes.position.count) <= primitiveLimit);
+      if (chunk.index) for (const vertex of chunk.index.array) faces.push(sample(chunk, vertex));
+      else for (let i = 0; i < chunk.attributes.position.count; i++) points.push(sample(chunk, i));
+      chunk.dispose();
+    }
+    assert.deepEqual(points.sort(), loose.map(i => sample(hybrid, i)).sort(), 'mixed maps retain every loose point exactly once');
+    assert.deepEqual(faces.sort(), Array.from(hybrid.index.array, i => sample(hybrid, i)).sort(), 'mixed maps retain every source triangle');
+  }
+  const grouped = [...partitionVisionGeometry(hybrid, { tiled: false, start: 3, count: 3 })];
+  assert.deepEqual(grouped.flatMap(chunk => Array.from(chunk.index.array, i => sample(chunk, i))).sort(),
+    Array.from(hybrid.index.array.slice(3, 6), i => sample(hybrid, i)).sort(), 'robot material groups never acquire map points or other faces');
+  grouped.forEach(chunk => chunk.dispose());
+  const emptyIndex = hybrid.clone().setIndex([]);
+  const pointChunks = [...partitionVisionGeometry(emptyIndex)];
+  assert.ok(pointChunks.every(chunk => !chunk.index));
+  assert.deepEqual(pointChunks.flatMap(chunk => Array.from({ length: chunk.attributes.position.count }, (_, i) => sample(chunk, i))).sort(),
+    Array.from({ length: hybrid.attributes.position.count }, (_, i) => sample(hybrid, i)).sort(), 'an empty index still exports a point cloud');
+  pointChunks.forEach(chunk => chunk.dispose()); emptyIndex.dispose();
+
+  // Send a mixed map through the complete package, download and native path.
+  for (const name of ['position', 'color']) {
+    const source = fixture.mapData.geometry.getAttribute(name), extra = hybrid.getAttribute(name);
+    const values = new Float32Array(source.array.length + loose.length * 3); values.set(source.array);
+    loose.forEach((vertex, i) => values.set([extra.getX(vertex), extra.getY(vertex), extra.getZ(vertex)], source.array.length + i * 3));
+    fixture.mapData.geometry.setAttribute(name, new THREE.BufferAttribute(values, 3));
+  }
+  hybrid.dispose();
   // Every source triangle and point survives tiling, including material groups.
   for (const indexed of [true, false]) {
     const geometry = indexed ? new THREE.PlaneGeometry(3, 4, 120, 120) : new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(Array.from({ length: 3015 }, (_, i) => i / 30), 3));
@@ -60,6 +102,9 @@ try {
   assert.deepEqual(scene.markers.find(m => m.id === 'pose-mobile-key').position, [-.9, -.8, .9]);
   assert.deepEqual(scene.paths.find(p => p.id === 'line-motion-line').points, [[-1.7, 0, .85], [-1.2, .5, .85]]);
   assert.equal(scene.assets.reduce((sum, a) => sum + a.indices / 3, 0), 36 + 4 * 12, 'all map faces and all four robot visuals exported');
+  const mapAssetIDs = new Set(scene.nodes.filter(n => n.role === 'map').map(n => n.asset));
+  assert.equal(scene.assets.filter(a => mapAssetIDs.has(a.id) && a.indices === 0).reduce((sum, a) => sum + a.vertices, 0),
+    loose.length, 'point-only map assets remain in the same scene as the mesh and robot');
   for (const node of scene.nodes.filter(n => n.name === '上臂' && n.asset)) {
     const asset = scene.assets.find(a => a.id === node.asset), rgb = new Uint8Array(buffers.get(asset.id), 32 + asset.vertices * 12, 3);
     assert.ok(rgb[0] > rgb[1] && rgb[1] > rgb[2], 'a single material applies to every geometry group');
@@ -96,14 +141,17 @@ try {
     const p = sample.robotPose, placement = new THREE.Matrix4().compose(new THREE.Vector3(p.position.x, p.position.y, p.position.z),
       new THREE.Quaternion().setFromEuler(new THREE.Euler(p.rpy.roll * Math.PI / 180, p.rpy.pitch * Math.PI / 180, p.rpy.yaw * Math.PI / 180, 'ZYX')), new THREE.Vector3(1, 1, 1));
     return { milliseconds: segment.startOffsetMs + segment.durationMs * progress, pose: sample.robotPose, joints: sample.robotJointValues,
-      tip: placement.multiply(fixture.tip.matrixWorld).toArray() };
+      tip: placement.clone().multiply(fixture.tip.matrixWorld).toArray(),
+      cameras: Object.fromEntries(Object.entries(fixture.cameras).map(([side, node]) => [side, placement.clone().multiply(node.matrixWorld).toArray()])) };
   }));
   await writeFile(path.join(directory, 'scene.json'), JSON.stringify(scene));
   await writeFile(path.join(directory, 'expected.json'), JSON.stringify(expected));
   const binary = path.join(directory, 'native');
   await run('xcrun', ['swiftc', '-parse-as-library', 'ipad/AtlasTeaching/TeachingModels.swift', 'ipad/AtlasTeaching/LANClient.swift',
     'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/AtlasTeaching/ModelGeometry.swift', 'vision/AtlasVisionTeaching/VisionPoseMath.swift',
+    'vision/AtlasVisionTeaching/VisionMeshData.swift', 'ipad/AtlasTeaching/ZividFieldOfView.swift',
     'vision/AtlasVisionTeaching/VisionSceneModels.swift', 'vision/AtlasVisionTeaching/VisionSceneStore.swift',
+    'vision/AtlasVisionTeaching/VisionSceneCameraRenderer.swift', 'vision/Tests/VisionSceneCameraTests.swift',
     'vision/AtlasVisionTeaching/VisionSceneNavigation.swift', 'vision/Tests/VisionSceneTests.swift', '-o', binary]);
   await run(binary, [base, directory]);
   assert.equal(downloads, scene.assets.length + 1, 'native cache reuses valid assets and repairs exactly one corrupted asset');
@@ -124,7 +172,7 @@ try {
   assert.equal((await fetch(`${endpoint}/${ticket.id}`, { method: 'DELETE', headers: owner })).status, 200);
   assert.equal((await (await fetch(endpoint)).json()).scenes.length, 0);
   assert.equal((await fetch(`${endpoint}/${ticket.id}/manifest`, { headers: { Authorization: `Bearer ${offer.readToken}` } })).status, 404);
-  console.log('Vision scene passed: lossless geometry, complete hierarchy, transformed paths, authenticated snapshot lifecycle, native download/cache and desktop/native playback parity.');
+  console.log('Vision scene passed: lossless mesh + point-cloud maps, complete hierarchy, transformed paths, authenticated snapshot lifecycle, native point rendering/download/cache and desktop/native playback parity.');
 } finally {
   await new Promise(resolve => server.close(resolve));
   fixture.mapData.geometry.dispose(); disposeRobotModel(fixture.robotModel);

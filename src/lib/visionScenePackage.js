@@ -18,33 +18,44 @@ const poseMatrix = (value) => {
 // Spatially tiled, lossless geometry. Every source primitive is assigned once;
 // display detail is chosen on the headset, independently of the source package.
 export function partitionVisionGeometry(geometry, { tiled = true, primitiveLimit = 60000, start = 0, count, material } = {}) {
-  const positions = geometry.getAttribute('position'), colors = geometry.getAttribute('color'), index = geometry.getIndex();
+  const positions = geometry.getAttribute('position'), colors = geometry.getAttribute('color');
+  const index = geometry.getIndex()?.count ? geometry.getIndex() : null;
   const mesh = !!index || !tiled;
   const length = count ?? (mesh ? index?.count || positions.count : positions.count);
   const primitives = mesh ? Math.floor(length / 3) : length;
+  // A placed mesh adds an index buffer to a point-cloud map. Vertices outside
+  // that index are still the background map, not unused mesh vertices.
+  // Robot material groups stay mesh-only and keep their requested range.
+  const referenced = tiled && index ? new Uint8Array(positions.count) : null;
+  let loosePointCount = 0;
+  if (referenced) {
+    for (let i = 0; i < index.count; i++) referenced[index.getX(i)] = 1;
+    for (const used of referenced) if (!used) loosePointCount++;
+  }
   geometry.computeBoundingBox();
   const bounds = geometry.boundingBox;
-  const grid = tiled ? Math.min(8, Math.max(1, Math.ceil(Math.sqrt(primitives / primitiveLimit)))) : 1;
+  const grid = tiled ? Math.min(8, Math.max(1, Math.ceil(Math.sqrt((primitives + loosePointCount) / primitiveLimit)))) : 1;
   const buckets = new Map();
   const vertex = (offset) => index ? index.getX(offset) : offset;
-  for (let i = 0; i < primitives; i++) {
-    const first = start + i * (mesh ? 3 : 1);
+  function assign(first, asMesh) {
     let x = 0, y = 0;
-    for (let j = 0; j < (mesh ? 3 : 1); j++) {
-      const v = vertex(first + j); x += positions.getX(v); y += positions.getY(v);
+    for (let j = 0; j < (asMesh ? 3 : 1); j++) {
+      const v = asMesh ? vertex(first + j) : first; x += positions.getX(v); y += positions.getY(v);
     }
-    const n = mesh ? 3 : 1; x /= n; y /= n;
+    const n = asMesh ? 3 : 1; x /= n; y /= n;
     const gx = Math.min(grid - 1, Math.max(0, Math.floor((x - bounds.min.x) / Math.max(1e-6, bounds.max.x - bounds.min.x) * grid)));
     const gy = Math.min(grid - 1, Math.max(0, Math.floor((y - bounds.min.y) / Math.max(1e-6, bounds.max.y - bounds.min.y) * grid)));
-    const key = `${gx}:${gy}`;
-    if (!buckets.has(key)) buckets.set(key, []);
-    buckets.get(key).push(first);
+    const key = `${asMesh ? 'mesh' : 'points'}:${gx}:${gy}`;
+    if (!buckets.has(key)) buckets.set(key, { mesh: asMesh, items: [] });
+    buckets.get(key).items.push(first);
   }
+  for (let i = 0; i < primitives; i++) assign(start + i * (mesh ? 3 : 1), mesh);
+  if (referenced) for (let i = 0; i < positions.count; i++) if (!referenced[i]) assign(i, false);
   return (function* chunks() {
-    for (const items of buckets.values()) for (let offset = 0; offset < items.length; offset += primitiveLimit) {
+    for (const { mesh, items } of buckets.values()) for (let offset = 0; offset < items.length; offset += primitiveLimit) {
       const ids = new Map(), xyz = [], rgb = [], indices = [];
       for (const first of items.slice(offset, offset + primitiveLimit)) for (let j = 0; j < (mesh ? 3 : 1); j++) {
-        const source = vertex(first + j);
+        const source = mesh ? vertex(first + j) : first;
         if (!ids.has(source)) {
           ids.set(source, ids.size);
           xyz.push(positions.getX(source), positions.getY(source), positions.getZ(source));

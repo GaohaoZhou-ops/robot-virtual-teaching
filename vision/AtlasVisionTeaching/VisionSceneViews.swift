@@ -24,6 +24,7 @@ struct VisionProjectImmersiveView: View {
         .onDisappear {
             review.stop(); workbench.projectSpaceVisible = false
             if !workbench.replacingScene {
+                dismissWindow(id: "project-cameras")
                 workbench.projectImmersed = false; workbench.editorVisible = false
                 workbench.sceneStatus = "空间已关闭，可重新进入"
                 openWindow(id: "workspace", value: "workspace"); dismissWindow(id: "project-tools")
@@ -36,6 +37,7 @@ struct VisionProjectToolsView: View {
     @EnvironmentObject private var review: VisionSceneController
     @EnvironmentObject private var workbench: VisionWorkbench
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.dismissImmersiveSpace) private var dismissSpace
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -56,6 +58,11 @@ struct VisionProjectToolsView: View {
                 Button("编辑工具", systemImage: "slider.horizontal.3") {
                     workbench.editorVisible = true; openWindow(id: "workspace", value: "workspace")
                 }.accessibilityIdentifier("project-editor")
+                Button("双相机", systemImage: "camera.on.rectangle") {
+                    if review.cameraWindowVisible { dismissWindow(id: "project-cameras") }
+                    else { openWindow(id: "project-cameras", value: "project-cameras") }
+                }.disabled(!review.hasCameras)
+                    .tint(review.cameraWindowVisible ? .cyan : nil).accessibilityIdentifier("project-cameras")
                 Menu {
                     Section("游走") {
                         Button("回到机器人旁", systemImage: "viewfinder") { review.returnToRobot() }

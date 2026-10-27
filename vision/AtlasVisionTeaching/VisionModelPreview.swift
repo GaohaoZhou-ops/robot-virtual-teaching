@@ -49,10 +49,11 @@ private final class VisionPreviewScene: ObservableObject {
 }
 
 struct VisionModelPreview: View {
+    private static let initialPose = VisionPreviewPose(zoom: 2)
     let model: ModelGeometry
     @StateObject private var scene = VisionPreviewScene()
     @State private var retry = 0
-    @State private var pose = VisionPreviewPose()
+    @State private var pose = Self.initialPose
     @GestureState private var gesture = PreviewGesture()
 
     private struct PreviewGesture {
@@ -89,7 +90,7 @@ struct VisionModelPreview: View {
                     .contentShape(Rectangle())
                     .gesture(manipulationGesture)
                     .simultaneousGesture(TapGesture(count: 2).onEnded {
-                        pose = VisionPreviewPose()
+                        pose = Self.initialPose
                     })
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("三维模型预览")
@@ -106,7 +107,7 @@ struct VisionModelPreview: View {
                     .accessibilityAction(named: "向右旋转") { pose = pose.applying(drag: [80, 0]) }
                     .accessibilityAction(named: "向上旋转") { pose = pose.applying(drag: [0, -60]) }
                     .accessibilityAction(named: "向下旋转") { pose = pose.applying(drag: [0, 60]) }
-                    .accessibilityAction(named: "重置视角") { pose = VisionPreviewPose() }
+                    .accessibilityAction(named: "重置视角") { pose = Self.initialPose }
                     .accessibilityIdentifier("model-preview")
                 } else if scene.error.isEmpty {
                     ProgressView("正在准备模型预览…")

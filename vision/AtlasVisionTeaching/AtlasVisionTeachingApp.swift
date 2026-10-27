@@ -30,6 +30,18 @@ struct AtlasVisionTeachingApp: App {
         .windowResizability(.contentSize)
         .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
 
+        WindowGroup(id: "project-cameras", for: String.self) { _ in
+            VisionSceneCameraView().environmentObject(review).environmentObject(workbench)
+        } defaultValue: { "project-cameras" }
+        .defaultSize(width: 1120, height: 530)
+        .windowResizability(.contentSize)
+        .defaultWindowPlacement { _, context in
+            if let tools = context.windows.first(where: { $0.id == "project-tools" }) {
+                return WindowPlacement(.above(tools))
+            }
+            return WindowPlacement(.utilityPanel)
+        }
+
         ImmersiveSpace(id: "project-space") {
             VisionProjectImmersiveView().environmentObject(review).environmentObject(workbench)
         }.immersionStyle(selection: $projectImmersion, in: .full)

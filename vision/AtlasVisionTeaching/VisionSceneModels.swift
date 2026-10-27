@@ -28,6 +28,20 @@ struct VisionSceneNode: Codable, Identifiable {
     let id: String; let name: String; let role: String; let parent: String?
     let transform: [Float]; let asset: String?; let joint: VisionSceneJoint?
 }
+enum VisionSceneCameraSide: String, CaseIterable, Identifiable {
+    case left, right
+    var id: String { rawValue }
+    var title: String { self == .left ? "左相机" : "右相机" }
+    var opticalFrameName: String { "zivid_\(rawValue)_optical_frame" }
+}
+
+/// All transforms stay in project metres, independent of the observer and sandbox.
+struct VisionSceneCameraSnapshot: Equatable {
+    var transforms: [String: simd_float4x4]
+    func cameraTransform(_ nodeID: String) -> simd_float4x4? {
+        transforms[nodeID].map { $0 * TeachingCoordinates.opticalToARCamera }
+    }
+}
 struct VisionScenePath: Codable, Identifiable { let id: String; let name: String; let points: [[Float]] }
 struct VisionSceneMarker: Codable, Identifiable {
     let id: String; let name: String; let kind: String; let position: [Float]; let taskId: String?
@@ -82,6 +96,15 @@ struct VisionSceneManifest: Codable, Identifiable {
     let id: String; let format: String; let name: String; let coordinateFrame: String; let createdAt: String
     let bounds: VisionSceneBounds; let assets: [VisionSceneAsset]; let nodes: [VisionSceneNode]
     let robotRoot: String?; let paths: [VisionScenePath]; let markers: [VisionSceneMarker]; let clips: [VisionSceneClip]
+    var cameraNodes: [VisionSceneCameraSide: String] {
+        Dictionary(uniqueKeysWithValues: VisionSceneCameraSide.allCases.compactMap { side in
+            nodes.first(where: { $0.name == side.opticalFrameName }).map { (side, $0.id) }
+        })
+    }
+    var hasPointCloudMap: Bool {
+        let mapAssets = Set(nodes.filter { $0.role == "map" }.compactMap(\.asset))
+        return assets.contains { mapAssets.contains($0.id) && $0.manifest.indices == 0 }
+    }
     func validate() throws {
         func vector(_ v: [Float], _ count: Int) -> Bool { v.count == count && v.allSatisfy(\.isFinite) }
         func name(_ v: String) -> Bool { !v.isEmpty && v.count <= 512 }
