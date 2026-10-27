@@ -12,7 +12,7 @@
     <key>UIFileSharingEnabled</key><true/>
     <key>LSSupportsOpeningDocumentsInPlace</key><true/>
     <key>NSBonjourServices</key><array><string>_atlas-teach._tcp</string></array>
-    <key>NSWorldSensingUsageDescription</key><string>识别现场水平面，将真实尺寸的示教模型放置在周围环境中。</string>
+    <key>NSWorldSensingUsageDescription</key><string>识别现场地面，将地图和模型以真实尺寸放在脚下原点；感知前方墙面、桌椅等障碍物，靠近时逐渐显示真实环境。</string>
     <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
     <key>UIApplicationSceneManifest</key><dict>
         <key>UIApplicationSupportsMultipleScenes</key><true/>

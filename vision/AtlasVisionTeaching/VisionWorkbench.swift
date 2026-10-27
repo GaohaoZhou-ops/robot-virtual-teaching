@@ -26,6 +26,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
     @Published var sceneRevision = ""
     var sceneOperation: Task<Void, Never>?
     @Published var replacingScene = false
+    @Published var toolsPresentation = VisionToolsPresentation()
     var projectSpaceVisible = false
     var generation = 0
     #if targetEnvironment(simulator)
@@ -99,6 +100,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
         if type == "home" {
             sceneOperation?.cancel(); pendingScene = nil; generation += 1
             replacingScene = false; openingScene = false
+            toolsPresentation.end()
         }
         guard ready else {
             if type == "home" { webView?.stopLoading(); loading = false; isHome = true }
@@ -296,7 +298,10 @@ struct VisionProjectSceneCoordinator: ViewModifier {
                 case .opened:
                     guard token == workbench.generation, !workbench.isHome, !Task.isCancelled else { review.stop(); await dismissSpace(); return }
                     review.immersed = true; workbench.projectImmersed = true; workbench.editorVisible = false
-                    openWindow(id: "project-tools", value: "project-tools"); dismissWindow(id: "workspace")
+                    if workbench.toolsPresentation.current == nil {
+                        openWindow(id: "project-tools", value: workbench.toolsPresentation.start())
+                    }
+                    dismissWindow(id: "workspace")
                 case .userCancelled:
                     review.stop(); restoreGateway(); workbench.sceneStatus = "空间已取消，可重新进入"
                 default: review.stop(); restoreGateway(); workbench.error = "沉浸式空间未打开，请重试"
@@ -310,6 +315,7 @@ struct VisionProjectSceneCoordinator: ViewModifier {
     }
     private func restoreGateway() {
         workbench.projectImmersed = false; workbench.editorVisible = false
+        workbench.toolsPresentation.end()
         dismissWindow(id: "project-cameras")
         openWindow(id: "workspace", value: "workspace"); dismissWindow(id: "project-tools")
     }
@@ -397,8 +403,6 @@ struct VisionWorkbenchRoot: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("ATLAS / VISION PRO").font(.callout.monospaced()).tracking(3).foregroundStyle(.cyan)
                         Text("工程工作台").font(.system(size: 44, weight: .medium))
-                        Text("打开工程，进入地图与机器人所在的三维空间。")
-                            .font(.title3).foregroundStyle(.secondary)
                     }
                     Spacer()
                     Image(systemName: "square.stack.3d.up").font(.system(size: 66, weight: .ultraLight)).foregroundStyle(.cyan)
@@ -456,8 +460,6 @@ struct VisionWorkbenchRoot: View {
                         }.buttonStyle(.borderedProminent).tint(Color(red: 0.08, green: 0.48, blue: 0.54)).accessibilityIdentifier("workbench-open-local")
                         Button("载入工程文件", systemImage: "doc.zipper") { importPresented = true }
                             .accessibilityIdentifier("workbench-import")
-                        Text("支持 Mac 导出的 ZIP 完整工程、双工作区工程及 JSON 配置。")
-                            .font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                     }.padding(28).frame(maxWidth: .infinity, minHeight: 340, alignment: .topLeading).background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 24))
                 }
@@ -468,7 +470,7 @@ struct VisionWorkbenchRoot: View {
                     Label("机器人与任务", systemImage: "point.3.connected.trianglepath.dotted")
                     Label("空间检查与回放", systemImage: "cube.transparent")
                 }.font(.callout).foregroundStyle(.secondary)
-                Button("打开历史单模型示教") { workbench.legacyActive = true }.font(.caption)
+                Button("历史示教") { workbench.legacyActive = true }
             }.padding(44).disabled(workbench.loading)
         }.task {
             discovery.start()

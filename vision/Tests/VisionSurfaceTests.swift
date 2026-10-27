@@ -94,6 +94,66 @@ enum VisionSurfaceTests {
         lit.removeFromParent(); axes.addChild(flat)
         let map = try await capture("unlit-after-light-change")
         precondition(before == map, "Changing robot lights must not change unlit map colors")
+
+        // Render the actual visionOS-compatible graph. A uniform test normal
+        // isolates the Web lighting formula from perspective and occlusion.
+        let workpiece = Entity()
+        var workpieceParts: [ModelEntity] = []
+        for (_, surface, _) in parts {
+            var data = surface
+            data.normals = Array(repeating: SIMD3<Float>(0, 0, 1), count: data.positions.count)
+            let entity = try await VisionSurfaceRenderer.makeEntity(data, mapSurface: true)
+            precondition(entity.model!.materials[0] is ShaderGraphMaterial)
+            precondition(entity.components[DynamicLightShadowComponent.self]?.castsShadow == false)
+            workpiece.addChild(entity); workpieceParts.append(entity)
+        }
+        flat.removeFromParent(); axes.addChild(workpiece)
+        let normal = (axes.transform.matrix * SIMD4<Float>(0, 0, 1, 0)).xyz
+        for part in workpieceParts { VisionSurfaceRenderer.updateMapLight(part, direction: normal) }
+        let aligned = try await capture("workpiece-aligned")
+        for index in mask {
+            for channel in 0..<3 {
+                precondition(abs(Int(aligned[index + channel]) - Int(before[index + channel])) <= 3,
+                             "A fully lit workpiece must preserve the Web source/height color without extra tone mapping")
+            }
+        }
+        let tangent = (axes.transform.matrix * SIMD4<Float>(1, 0, 0, 0)).xyz
+        for part in workpieceParts { VisionSurfaceRenderer.updateMapLight(part, direction: tangent) }
+        let shaded = try await capture("workpiece-shaded")
+        func webShaded(_ byte: UInt8) -> Int {
+            let srgb = Float(byte) / 255
+            let linear = (srgb <= 0.04045 ? srgb / 12.92 : pow((srgb + 0.055) / 1.055, 2.4)) * 0.68
+            return Int(((linear <= 0.0031308 ? linear * 12.92 : 1.055 * pow(linear, 1 / 2.4) - 0.055) * 255).rounded())
+        }
+        for index in mask {
+            for channel in 0..<3 {
+                precondition(abs(Int(shaded[index + channel]) - webShaded(before[index + channel])) <= 3,
+                             "Workpiece shading must match the Web's 68% linear ambient term")
+            }
+        }
+        for part in workpieceParts { VisionSurfaceRenderer.updateMapLight(part, direction: -normal) }
+        let reverse = try await capture("workpiece-reverse")
+        precondition(reverse == aligned, "Both sides of a workpiece must use the same Web surface shading")
+        workpiece.removeFromParent()
+        let background = try await capture("obstacle-background")
+        for (name, group) in [("workpiece", workpiece), ("points", flat), ("robot", lit)] {
+            axes.addChild(group)
+            group.components.set(OpacityComponent(opacity: 1))
+            let opaque = try await capture("obstacle-\(name)-opaque")
+            group.components.set(OpacityComponent(opacity: 0.5))
+            let partial = try await capture("obstacle-\(name)-partial")
+            group.components.set(OpacityComponent(opacity: 0))
+            let hidden = try await capture("obstacle-\(name)-hidden")
+            func difference(_ image: [UInt8]) -> Double {
+                Double(mask.reduce(0) { $0 + abs(Int(image[$1]) - Int(background[$1])) }) / Double(mask.count)
+            }
+            precondition(difference(partial) > 1 && difference(partial) < difference(opaque) - 3,
+                         "\(name) must fade gradually with ancestor opacity, including shader graph surfaces")
+            precondition(difference(hidden) < 1, "\(name) must fully uncover the surroundings at zero opacity")
+            group.removeFromParent()
+        }
+        print("RealityKit obstacle fade: shader graph workpieces, unlit point materials and PBR robots partially fade and fully uncover the background.")
+        print("RealityKit workpieces: shader graph, Web linear RGB/lighting parity, no extra tone mapping, and two-sided surfaces passed.")
         print("RealityKit surfaces: CAD normals, source PBR materials, directional shading (range \(Int(range))), shadows, stable map colors and repeatable light setup passed.")
     }
 }

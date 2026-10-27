@@ -24,29 +24,41 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     @Published private(set) var travelling = false
     @Published var measuring = false
     @Published private(set) var navigationMessage = ""
+    @Published private(set) var placingProject = false
+    @Published private(set) var proximityPassthrough = true
+    @Published private(set) var proximityMessage = ""
+    @Published var floorGridVisible = true { didSet { floorGrid?.isEnabled = floorGridVisible } }
+    @Published private(set) var floorGridSpacing: Float = 1
+    var requiresPassthrough: Bool { placingProject || proximityPassthrough }
+    #if targetEnvironment(simulator)
+    @Published var simulatedObstacleDistance: Float = 3
+    #endif
     let root = Entity(), stage = Entity(), axes = Entity(), content = Entity(), annotation = Entity()
     private let landing = Entity(), environment = Entity(), lighting = Entity()
+    private var floorGrid: Entity?
     private let mapGroup = CollisionGroup(rawValue: 1 << 4)
     private let robotGroup = CollisionGroup(rawValue: 1 << 5)
     private var travelTask: Task<Void, Never>?
     private var entryPoint: SIMD3<Float>?
-    private var entryAttempts = 0
-    private var trackingWait = 0.0
     private var referenceFloorBounds: (low: SIMD3<Float>, high: SIMD3<Float>)?
     private var entities: [String: Entity] = [:]
     private var meshes: [String: ModelEntity] = [:]
     private var mapDetails = Set<String>()
     private var subscriptions: [EventSubscription] = []
-    private var session: ARKitSession?
-    private var world: WorldTrackingProvider?
+    private let groundTracking = VisionGroundTracking()
+    private var physicalFloorHeight: Float { groundTracking.floorHeight }
     private var positioned = false
     private var generation = UUID()
     private var detailTask: Task<Void, Never>?
     private var detailRequest = Set<String>()
     private var detailRevision = UUID()
     private var time = 0.0, lastDetail = 0.0, lastUI = 0.0
+    private var mapLightDirection: SIMD3<Float>?
     private var firstPoint: SIMD3<Float>?
     private var focusPoint: SIMD3<Float>?
+    private var obstacleFade = VisionObstacleFade()
+    private var passthroughVisible = false
+    private var obstacleOpacity: Float = -1
     var clip: VisionSceneClip? { clipIndex.flatMap { manifest?.clips.indices.contains($0) == true ? manifest?.clips[$0] : nil } }
     var hasClips: Bool { manifest?.clips.isEmpty == false }
     var hasCameras: Bool { manifest?.cameraNodes.isEmpty == false }
@@ -66,15 +78,35 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         axes.transform = Transform(matrix: TeachingCoordinates.zUpToAR)
         axes.addChild(lighting)
         content.addChild(annotation); content.addChild(landing); root.addChild(environment)
+        root.addChild(groundTracking.surfacesRoot)
+        groundTracking.onScanning = { [weak self] scanning in
+            guard let self else { return }
+            self.placingProject = scanning
+            if scanning {
+                self.resetObstacleFade()
+                self.lifeSize = false
+                self.positioned = false; self.stage.isEnabled = false; self.environment.isEnabled = false
+                self.root.components.set(OpacityComponent(opacity: 1))
+            }
+        }
+        groundTracking.onPlacement = { [weak self] transform in self?.applyGroundPlacement(transform) }
+        groundTracking.onAnchorMotion = { [weak self] delta in
+            guard let self else { return }
+            // Preserve sandbox/locomotion offsets if ARKit refines its origin.
+            self.stage.transform = Transform(matrix: delta * self.stage.transform.matrix)
+        }
+        groundTracking.onMessage = { [weak self] message in self?.navigationMessage = message }
     }
     func prepare(_ scene: VisionSceneManifest, immersiveProject: Bool = false) async throws {
         stop(); generation = UUID(); let token = generation
-        self.immersiveProject = immersiveProject; lifeSize = immersiveProject; measuring = false; entryPoint = nil
-        referenceFloorBounds = nil
+        self.immersiveProject = immersiveProject; lifeSize = false; measuring = false; entryPoint = nil
+        placingProject = immersiveProject; stage.isEnabled = !immersiveProject; environment.isEnabled = !immersiveProject
+        referenceFloorBounds = nil; floorGrid = nil; floorGridSpacing = 1
         root.components.set(OpacityComponent(opacity: 1)); environment.children.forEach { $0.removeFromParent() }
         busy = true; error = ""; defer { busy = false }
         try scene.validate(); manifest = scene; clipIndex = nil; time = 0; progress = 0
         entities.removeAll(); meshes.removeAll(); mapDetails.removeAll(); clearSelection()
+        mapLightDirection = nil
         content.children.filter { $0 !== annotation && $0 !== landing }.forEach { $0.removeFromParent() }
         clearDestination()
         let assets = Dictionary(uniqueKeysWithValues: scene.assets.map { ($0.id, $0) })
@@ -103,8 +135,15 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
                 if #available(visionOS 26.0, *) { entity.components.set(ManipulationComponent.HitTarget(redirectedEntity: stage)) }
                 content.addChild(entity)
             }
-            if immersiveProject { addEnvironment(scene) }
-            configureManipulation(); status = immersiveProject ? "点选地面选择落点；在沙盘中可快速前往远处" : "双手捏住沙盘缩放和旋转；双击局部进入原大查看"
+            if immersiveProject {
+                addEnvironment(scene)
+                let ground = scene.robotRoot.flatMap { entities[$0]?.position(relativeTo: content).z } ?? scene.bounds.min[2]
+                let grid = try await VisionFloorGrid.make(low: SIMD3(scene.bounds.min), high: SIMD3(scene.bounds.max), ground: ground)
+                guard token == generation, !Task.isCancelled else { throw CancellationError() }
+                floorGrid = grid.entity; floorGridSpacing = grid.spacing
+                grid.entity.isEnabled = floorGridVisible; content.addChild(grid.entity)
+            }
+            configureManipulation(); status = immersiveProject ? "进入后自动识别地面；多个候选时注视并捏合选择" : "双手捏住沙盘缩放和旋转；双击局部进入原大查看"
         } catch {
             content.children.filter { $0 !== annotation && $0 !== landing }.forEach { $0.removeFromParent() }
             manifest = nil; entities.removeAll(); meshes.removeAll(); throw error
@@ -147,12 +186,14 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         let extent = SIMD3<Float>(model.maximum.x - model.minimum.x, model.maximum.y - model.minimum.y, model.maximum.z - model.minimum.z)
         let radius = detailed ? Float(0.002) : max(0.002, simd_length(extent) / 180)
         let surface: VisionSceneMaterial? = node.role == "part" ? node.material ?? .robotDefault : nil
+        let mapSurface = node.role == "map" && useMesh
         let data = try await Task.detached(priority: .userInitiated) {
             try VisionMeshData(model: model, mode: useMesh ? .mesh : .points, quality: .full, pointRadius: radius,
-                               primitiveBudget: budget, includeNormals: surface != nil)
+                               primitiveBudget: budget, includeNormals: surface != nil || mapSurface)
         }.value
         try Task.checkCancellation()
-        let entity = try await VisionSurfaceRenderer.makeEntity(data, surface: surface)
+        let entity = try await VisionSurfaceRenderer.makeEntity(data, surface: surface, mapSurface: mapSurface)
+        if mapSurface, let direction = mapLightDirection { VisionSurfaceRenderer.updateMapLight(entity, direction: direction) }
         if surface != nil { entity.components.set(ImageBasedLightReceiverComponent(imageBasedLight: lighting)) }
         entity.components.set(VisionSceneSelection(nodeID: node.id, name: node.name, role: node.role))
         entity.components.set(InputTargetComponent()); entity.components.set(HoverEffectComponent())
@@ -164,15 +205,10 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     func begin(in scene: RealityViewContent) async {
         immersed = true; positioned = false
-        entryAttempts = 0; trackingWait = 0
-        #if !targetEnvironment(simulator)
-        let session = ARKitSession(), provider = WorldTrackingProvider(); self.session = session; world = provider
-        do { try await session.run([provider]) } catch { self.error = "空间定位暂不可用，可先查看沙盘" }
-        #endif
-        if immersiveProject {
-            root.components.set(OpacityComponent(opacity: 0))
-            if device() != nil { enterProject() } else if !error.isEmpty { overview(); positioned = true }
-        } else { overview() }
+        let token = generation
+        await groundTracking.start(detectFloor: immersiveProject)
+        guard token == generation, immersed, !Task.isCancelled else { return }
+        if !immersiveProject { overview() }
         if !Task.isCancelled {
             subscriptions.append(scene.subscribe(to: SceneEvents.Update.self) { [weak self] event in
                 Task { @MainActor in self?.update(delta: event.deltaTime) }
@@ -197,16 +233,29 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         travelTask?.cancel(); travelTask = nil; travelling = false
         detailTask?.cancel(); detailTask = nil
         subscriptions.forEach { $0.cancel() }; subscriptions.removeAll()
-        session?.stop(); session = nil; world = nil
+        groundTracking.stop(); placingProject = false
+        resetObstacleFade()
     }
-    private func device() -> simd_float4x4? {
-        #if targetEnvironment(simulator)
-        var value = matrix_identity_float4x4; value.columns.3 = SIMD4(0, 1.6, 0, 1); return value
-        #else
-        guard let anchor = world?.queryDeviceAnchor(atTimestamp: CACurrentMediaTime()), anchor.isTracked else { return nil }
-        return anchor.originFromAnchorTransform
-        #endif
+    func immersionChanged(_ amount: Double?) { passthroughVisible = amount.map { $0 < 0.01 } ?? false }
+    private func resetObstacleFade() {
+        obstacleFade = VisionObstacleFade(); proximityPassthrough = true; proximityMessage = ""
+        obstacleOpacity = -1
+        stage.components.set(OpacityComponent(opacity: 1)); environment.components.set(OpacityComponent(opacity: 1))
     }
+    private func device() -> simd_float4x4? { groundTracking.device() }
+    private func applyGroundPlacement(_ transform: simd_float4x4) {
+        content.position = .zero
+        stage.transform = Transform(matrix: transform)
+        stage.isEnabled = true; environment.isEnabled = immersiveProject
+        root.components.set(OpacityComponent(opacity: 1))
+        lifeSize = true; positioned = true; clearDestination(); configureManipulation(); refreshDetail(at: .zero)
+    }
+    func alignProjectToFloor() {
+        guard immersed, immersiveProject else { return }
+        travelTask?.cancel(); travelling = false; playing = false; measuring = false
+        clearSelection(); clearDestination(); groundTracking.beginPlacement()
+    }
+    func selectFloor(_ id: UUID) { groundTracking.select(id) }
     private func placeStage(scale: Float, focus: SIMD3<Float>, vertical: Float) {
         var view = device() ?? matrix_identity_float4x4
         if device() == nil { view.columns.3 = SIMD4(0, 1.6, 0, 1) }
@@ -219,10 +268,12 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     func overview() {
         guard let scene = manifest else { return }
+        groundTracking.cancelPlacement(); stage.isEnabled = true
         travelTask?.cancel(); travelling = false; root.components.set(OpacityComponent(opacity: 1)); clearDestination()
         let low = SIMD3(scene.bounds.min), high = SIMD3(scene.bounds.max), size = high - low
         placeStage(scale: min(0.7, max(0.0001, 1.4 / max(size.x, size.y, size.z, 0.1))), focus: SIMD3((low.x + high.x) / 2, (low.y + high.y) / 2, low.z), vertical: -0.45)
         lifeSize = false; environment.isEnabled = immersiveProject; configureManipulation(); refreshDetail(at: nil)
+        if immersiveProject { positioned = true }
         navigationMessage = "双手捏住沙盘缩放、转动；点选地面后进入该位置"
     }
     func detail(at point: SIMD3<Float>? = nil) {
@@ -235,7 +286,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         let target = point ?? focusPoint ?? robotOrigin ?? .zero
         // Keep the map floor below the observer. Centering a robot's base at
         // eye height would put its entire floor in front of the control panel.
-        let eyeHeight = max(0.8, device()?.translation.y ?? 1.6)
+        let eyeHeight = max(0.8, (device()?.translation.y ?? 1.6) - physicalFloorHeight)
         let ground = robotOrigin?.z ?? scene.bounds.min[2]
         let vertical = min(-0.15, target.z - ground - eyeHeight)
         focusPoint = target; placeStage(scale: 1, focus: target, vertical: vertical); lifeSize = true
@@ -277,7 +328,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     private func hasClearance(at point: SIMD3<Float>) -> Bool {
         guard let reality = root.scene else { return false }
-        let height = max(1.2, min(2.1, device()?.translation.y ?? 1.6))
+        let height = max(1.2, min(2.1, (device()?.translation.y ?? 1.6) - physicalFloorHeight))
         // Shape resources are sized in world metres. Transform both the sweep
         // and its radius explicitly, so a miniature and a 1:1 scene agree.
         let scale = abs(content.scale(relativeTo: nil).x)
@@ -288,6 +339,12 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         return hits.isEmpty
     }
     func enterProject() {
+        if let transform = groundTracking.confirmedPlacement {
+            applyGroundPlacement(transform)
+            navigationMessage = "已回到地图原点 · 点选地面可继续游走"
+        } else { alignProjectToFloor() }
+    }
+    private func enterNearRobot() {
         guard let scene = manifest, let head = device() else { navigationMessage = "等待头显空间定位…"; return }
         let low = SIMD3(scene.bounds.min), high = SIMD3(scene.bounds.max)
         let robot = scene.robotRoot.flatMap { entities[$0]?.position(relativeTo: content) }
@@ -299,16 +356,13 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
             placeObserver(at: ground, heading: VisionSceneNavigation.horizontal(robot-ground), head: head)
             root.components.set(OpacityComponent(opacity: 1)); navigationMessage = "点选地面选择落点，捏合「前往此处」；转身查看周围"
         } else {
-            entryAttempts += 1
-            if entryAttempts >= 12 || positioned {
-                overview(); navigationMessage = "暂未找到合适的入口，请在沙盘中点选地面落点"
-            }
+            overview(); navigationMessage = "机器人附近暂未找到空旷位置，可在沙盘中点选地面落点"
         }
     }
     private func placeObserver(at ground: SIMD3<Float>, heading: SIMD3<Float>?, head: simd_float4x4) {
         let rotation = heading.map { VisionSceneNavigation.orientation(projectForward: $0, head: head) } ?? stage.orientation
         content.position = -ground
-        stage.transform = Transform(scale: SIMD3(repeating: 1), rotation: rotation, translation: VisionSceneNavigation.groundAnchor(head: head))
+        stage.transform = Transform(scale: SIMD3(repeating: 1), rotation: rotation, translation: VisionSceneNavigation.groundAnchor(head: head, floorHeight: physicalFloorHeight))
         lifeSize = true; positioned = true; configureManipulation(); refreshDetail(at: ground)
     }
     func proposeDestination(_ point: SIMD3<Float>) {
@@ -362,10 +416,10 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     func turn(_ radians: Float) {
         guard lifeSize, !travelling, let head = device() else { return }
         clearDestination()
-        let pivot = VisionSceneNavigation.groundAnchor(head: head), rotation = simd_quatf(angle: radians, axis: SIMD3(0, 1, 0))
+        let pivot = VisionSceneNavigation.groundAnchor(head: head, floorHeight: physicalFloorHeight), rotation = simd_quatf(angle: radians, axis: SIMD3(0, 1, 0))
         stage.position = pivot + rotation.act(stage.position-pivot); stage.orientation = rotation * stage.orientation
     }
-    func returnToRobot() { entryPoint = nil; enterProject(); clearDestination() }
+    func returnToRobot() { guard !placingProject else { return }; entryPoint = nil; enterNearRobot(); clearDestination() }
     func setMeasurement(_ enabled: Bool) { measuring = enabled; clearSelection(); clearDestination() }
     private func configureManipulation() {
         // Geometry HitTargets redirect manipulation here. An enclosing box
@@ -391,6 +445,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         }
     }
     func select(_ item: VisionSceneSelection, point: SIMD3<Float>) {
+        guard !immersiveProject || obstacleFade.amount < 0.8 else { return }
         if immersiveProject && !measuring {
             if item.role == "map" || item.role == "ground" { proposeDestination(point); return }
             clearDestination(); selection = item.name
@@ -438,16 +493,18 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     private func update(delta: Double) {
         guard immersed else { return }
-        if !positioned {
-            if device() != nil { if immersiveProject { enterProject() } else { overview() } }
-            else if immersiveProject {
-                trackingWait += delta
-                if trackingWait > 5 {
-                    overview(); positioned = true
-                    navigationMessage = "空间定位尚未就绪，先以沙盘查看；定位恢复后可选择「进入」"
+        groundTracking.update(delta: delta)
+        updateObstacleFade(delta: delta)
+        if let head = device() {
+            let direction = simd_normalize((head * SIMD4(VisionSurfaceRenderer.mapViewLight, 0)).xyz)
+            if mapLightDirection.map({ simd_dot($0, direction) < 0.99999 }) ?? true {
+                mapLightDirection = direction
+                for node in manifest?.nodes ?? [] where node.role == "map" {
+                    if let mesh = meshes[node.id] { VisionSurfaceRenderer.updateMapLight(mesh, direction: direction) }
                 }
             }
         }
+        if !positioned && !immersiveProject && device() != nil { overview() }
         if playing, let clip {
             time = min(clip.totalDurationMs, time + min(delta, 0.1) * 1000); applyPlayback()
             if time >= clip.totalDurationMs { playing = false }
@@ -456,6 +513,45 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         if lifeSize, CACurrentMediaTime() - lastDetail > 1, let device = device() {
             lastDetail = CACurrentMediaTime(); refreshDetail(at: content.convert(position: device.translation, from: nil))
         }
+    }
+    private func updateObstacleFade(delta: Double) {
+        guard immersiveProject, !placingProject else { return }
+        let sample: VisionObstacleSample
+        #if targetEnvironment(simulator)
+        sample = simulatedObstacleDistance < 0 ? .unavailable : simulatedObstacleDistance > 2.5 ? .clear : .obstacle(simulatedObstacleDistance)
+        #else
+        sample = groundTracking.obstacleSample
+        #endif
+        obstacleFade.update(sample, delta: delta, passthroughVisible: passthroughVisible)
+        let needsPassthrough = !lifeSize || obstacleFade.needsPassthrough
+        if proximityPassthrough != needsPassthrough { proximityPassthrough = needsPassthrough }
+        // The miniature is the existing fallback when room sensing is denied.
+        // Keep it usable over real surroundings, without its enclosing sky.
+        let opacity: Float = !lifeSize && sample == .unavailable ? 1 : 1 - obstacleFade.amount
+        // Fully hidden geometry must not intercept input or manipulate an
+        // invisible sandbox. Re-enabling preserves all transforms and state.
+        stage.isEnabled = opacity > 0
+        environment.isEnabled = lifeSize && opacity > 0
+        if abs(opacity - obstacleOpacity) > 0.0001 {
+            // Fade every virtual surface, including the sky, reference floor,
+            // paths and models. The wrist control and SwiftUI windows remain.
+            stage.components.set(OpacityComponent(opacity: opacity))
+            environment.components.set(OpacityComponent(opacity: opacity))
+            obstacleOpacity = opacity
+        }
+        let message: String
+        switch sample {
+        case .unavailable:
+            #if targetEnvironment(simulator)
+            message = "模拟环境感知中断 · 已保留真实环境"
+            #else
+            message = groundTracking.obstacleStatus.isEmpty ? "环境感知暂不可用，已保留真实环境" : groundTracking.obstacleStatus
+            #endif
+        case .obstacle(let distance) where distance < 2:
+            message = String(format: "前方障碍物约 %.1f m · %@", distance, distance <= 1 ? "优先显示真实环境" : "真实环境正在渐显")
+        default: message = obstacleFade.amount > 0.02 ? "正在平滑恢复沉浸画面" : ""
+        }
+        if proximityMessage != message { proximityMessage = message }
     }
     private func refreshDetail(at point: SIMD3<Float>?) {
         guard let scene = manifest else { return }

@@ -5,13 +5,15 @@ import AppKit
 import UIKit
 #endif
 
-/// Point-cloud colors remain unlit. Robot surfaces use their source material
-/// parameters, geometric normals, and a stable light rig in project coordinates.
+/// Point clouds remain unlit; map/workpiece meshes use the Web surface shader.
+/// Robot surfaces retain their source PBR materials and project-space light rig.
 @MainActor
 enum VisionSurfaceRenderer {
     private static var environment: EnvironmentResource?
+    private static var mapMaterial: ShaderGraphMaterial?
+    static let mapViewLight = simd_normalize(SIMD3<Float>(0.32, 0.46, 0.83))
 
-    static func makeEntity(_ data: VisionMeshData, surface: VisionSceneMaterial? = nil) async throws -> ModelEntity {
+    static func makeEntity(_ data: VisionMeshData, surface: VisionSceneMaterial? = nil, mapSurface: Bool = false) async throws -> ModelEntity {
         var descriptor = MeshDescriptor(name: "Atlas surface")
         descriptor.positions = MeshBuffers.Positions(data.positions)
         if !data.normals.isEmpty { descriptor.normals = MeshBuffers.Normals(data.normals) }
@@ -34,6 +36,15 @@ enum VisionSurfaceRenderer {
             material.metallic = .init(floatLiteral: surface.metallic)
             material.faceCulling = .none
             entity = ModelEntity(mesh: mesh, materials: [material])
+        } else if mapSurface && data.isMesh {
+            if mapMaterial == nil {
+                mapMaterial = try await ShaderGraphMaterial(named: "/Root/AtlasMapSurface", from: Data(mapShader.utf8))
+            }
+            var material = mapMaterial!
+            try material.setParameter(name: "ColorTexture", value: .textureResource(texture))
+            try material.setParameter(name: "LightDirection", value: .simd3Float(mapViewLight))
+            material.faceCulling = .none
+            entity = ModelEntity(mesh: mesh, materials: [material])
         } else {
             var material = UnlitMaterial()
             material.color = .init(tint: .white, texture: .init(texture))
@@ -44,6 +55,78 @@ enum VisionSurfaceRenderer {
         entity.components.set(DynamicLightShadowComponent(castsShadow: surface != nil && data.isMesh))
         return entity
     }
+
+    static func updateMapLight(_ entity: ModelEntity, direction: SIMD3<Float>) {
+        guard var model = entity.model, var material = model.materials.first as? ShaderGraphMaterial else { return }
+        // The parameter is validated when the material is created. Changing
+        // only this uniform preserves geometry and color textures while walking.
+        try? material.setParameter(name: "LightDirection", value: .simd3Float(direction))
+        model.materials = [material]; entity.model = model
+    }
+
+    // Matches PointCloudViewer's flat, two-sided mesh shading exactly:
+    // linear RGB * (0.68 + 0.32 * abs(dot(viewNormal, viewLight))).
+    // The light is rotated into world space by the headset pose; normals are
+    // transformed by RealityKit, so sandbox scaling/rotation also stays correct.
+    // Keep RealityKit's normal textured-color output path. Bypassing its post
+    // process also bypasses exposure compensation and washes out source RGB.
+    private static let mapShader = """
+    #usda 1.0
+    (defaultPrim = "Root")
+    def Xform "Root" {
+        def Material "AtlasMapSurface" {
+            asset inputs:ColorTexture
+            float3 inputs:LightDirection = (0.32, 0.46, 0.83)
+            token outputs:mtlx:surface.connect = </Root/AtlasMapSurface/Surface.outputs:out>
+            def Shader "Texture" {
+                uniform token info:id = "ND_image_color3"
+                asset inputs:file.connect = </Root/AtlasMapSurface.inputs:ColorTexture>
+                string inputs:filtertype = "closest"
+                color3f outputs:out
+            }
+            def Shader "Normal" {
+                uniform token info:id = "ND_normal_vector3"
+                string inputs:space = "world"
+                float3 outputs:out
+            }
+            def Shader "Dot" {
+                uniform token info:id = "ND_dotproduct_vector3"
+                float3 inputs:in1.connect = </Root/AtlasMapSurface/Normal.outputs:out>
+                float3 inputs:in2.connect = </Root/AtlasMapSurface.inputs:LightDirection>
+                float outputs:out
+            }
+            def Shader "Absolute" {
+                uniform token info:id = "ND_absval_float"
+                float inputs:in.connect = </Root/AtlasMapSurface/Dot.outputs:out>
+                float outputs:out
+            }
+            def Shader "Directional" {
+                uniform token info:id = "ND_multiply_float"
+                float inputs:in1.connect = </Root/AtlasMapSurface/Absolute.outputs:out>
+                float inputs:in2 = 0.32
+                float outputs:out
+            }
+            def Shader "Light" {
+                uniform token info:id = "ND_add_float"
+                float inputs:in1.connect = </Root/AtlasMapSurface/Directional.outputs:out>
+                float inputs:in2 = 0.68
+                float outputs:out
+            }
+            def Shader "ShadedColor" {
+                uniform token info:id = "ND_multiply_color3FA"
+                color3f inputs:in1.connect = </Root/AtlasMapSurface/Texture.outputs:out>
+                float inputs:in2.connect = </Root/AtlasMapSurface/Light.outputs:out>
+                color3f outputs:out
+            }
+            def Shader "Surface" {
+                uniform token info:id = "ND_realitykit_unlit_surfaceshader"
+                color3f inputs:color.connect = </Root/AtlasMapSurface/ShadedColor.outputs:out>
+                bool inputs:applyPostProcessToneMap = 1
+                token outputs:out
+            }
+        }
+    }
+    """
 
     static func configureLighting(_ lighting: Entity) async throws {
         guard lighting.components[ImageBasedLightComponent.self] == nil else { return }

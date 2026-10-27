@@ -19,7 +19,9 @@ enum VisionSceneNavigation {
         let angle = atan2(simd_cross(arSource, target).y, simd_dot(arSource, target))
         return simd_quatf(angle: angle, axis: SIMD3(0, 1, 0))
     }
-    static func groundAnchor(head: simd_float4x4) -> SIMD3<Float> { SIMD3(head.columns.3.x, 0, head.columns.3.z) }
+    static func groundAnchor(head: simd_float4x4, floorHeight: Float = 0) -> SIMD3<Float> {
+        SIMD3(head.columns.3.x, floorHeight, head.columns.3.z)
+    }
     static func standable(point: SIMD3<Float>, normal: SIMD3<Float>, low: SIMD3<Float>, high: SIMD3<Float>) -> Bool {
         [point.x, point.y, point.z, normal.x, normal.y, normal.z].allSatisfy(\.isFinite)
             && point.x >= low.x - 0.05 && point.x <= high.x + 0.05

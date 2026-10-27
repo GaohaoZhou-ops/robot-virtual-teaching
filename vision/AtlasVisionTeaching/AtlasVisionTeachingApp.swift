@@ -7,7 +7,7 @@ struct AtlasVisionTeachingApp: App {
     @StateObject private var review = VisionSceneController()
     @StateObject private var workbench = VisionWorkbench()
     @State private var immersionStyle: ImmersionStyle = .mixed
-    @State private var projectImmersion: ImmersionStyle = .full
+    @State private var projectImmersion: ImmersionStyle = .mixed
 
     private var toolWindowRestoration: SceneRestorationBehavior {
         if #available(visionOS 26.0, *) { return .disabled }
@@ -29,11 +29,13 @@ struct AtlasVisionTeachingApp: App {
         } defaultValue: { "workspace" }
         .defaultSize(width: 1440, height: 1000)
 
-        WindowGroup(id: "project-tools", for: String.self) { _ in
-            VisionProjectToolsView().environmentObject(review).environmentObject(workbench)
+        WindowGroup(id: "project-tools", for: String.self) { value in
+            VisionProjectToolsView(windowID: value.wrappedValue ?? "project-tools")
+                .environmentObject(review).environmentObject(workbench)
         } defaultValue: { "project-tools" }
-        .defaultSize(width: 660, height: 260)
+        .defaultSize(VisionProjectToolsView.defaultSize)
         .windowResizability(.contentSize)
+        .defaultWorldScaling(.dynamic)
         .defaultWindowPlacement { _, _ in WindowPlacement(.utilityPanel) }
         .restorationBehavior(toolWindowRestoration)
 
@@ -52,7 +54,11 @@ struct AtlasVisionTeachingApp: App {
 
         ImmersiveSpace(id: "project-space") {
             VisionProjectImmersiveView().environmentObject(review).environmentObject(workbench)
-        }.immersionStyle(selection: $projectImmersion, in: .full)
+                .onChange(of: review.requiresPassthrough, initial: true) { _, passthrough in
+                    projectImmersion = passthrough ? .mixed : .full
+                }
+                .onImmersionChange { _, value in review.immersionChanged(value.amount) }
+        }.immersionStyle(selection: $projectImmersion, in: .mixed, .full)
 
         WindowGroup(id: "spatial-controls", for: String.self) { _ in
             VisionSpatialToolsWindow().environmentObject(session).environmentObject(spatial)

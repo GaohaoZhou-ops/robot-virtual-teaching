@@ -159,7 +159,10 @@ try {
     'vision/AtlasVisionTeaching/VisionSceneModels.swift', 'vision/AtlasVisionTeaching/VisionSceneStore.swift',
     'vision/AtlasVisionTeaching/VisionSceneCameraRenderer.swift', 'vision/Tests/VisionSceneCameraTests.swift',
     'vision/AtlasVisionTeaching/VisionSurfaceRenderer.swift', 'vision/Tests/VisionSurfaceTests.swift',
-    'vision/AtlasVisionTeaching/VisionSceneNavigation.swift', 'vision/Tests/VisionSceneTests.swift', '-o', binary]);
+    'vision/AtlasVisionTeaching/VisionSceneNavigation.swift', 'vision/AtlasVisionTeaching/VisionFloorPlacement.swift',
+    'vision/AtlasVisionTeaching/VisionToolsPresentation.swift', 'vision/Tests/VisionToolsPresentationTests.swift',
+    'vision/AtlasVisionTeaching/VisionObstacleProximity.swift', 'vision/Tests/VisionObstacleTests.swift',
+    'vision/Tests/VisionFloorPlacementTests.swift', 'vision/Tests/VisionSceneTests.swift', '-o', binary]);
   await run(binary, [base, directory]);
   assert.equal(downloads, scene.assets.length + 1, 'native cache reuses valid assets and repairs exactly one corrupted asset');
   if (process.argv.includes('--ui')) {
