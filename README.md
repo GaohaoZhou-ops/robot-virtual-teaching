@@ -6,14 +6,9 @@
 
 [GitHub 仓库](https://github.com/GaohaoZhou-ops/robot-virtual-teaching) · [完整文档](docs/README.md) · [Vision Pro](vision/README.md)
 
-<details>
-<summary>查看地图示教工作台截图</summary>
-
-![地图示教工作台：三维工位、机器人姿态、停车点任务树与 Zivid 仿真视图](images/map-teaching.png)
+[![地图示教工作台：三维工位、机器人姿态、停车点任务树与 Zivid 仿真视图](images/map-teaching.png)](images/map-teaching.png)
 
 地图示教工作台：在同一场景中调整机器人姿态、组织停车点任务，并检查相机取景。
-
-</details>
 
 <a id="核心能力"></a>
 
@@ -24,6 +19,21 @@
 | 在完整地图或局部工位中组织机器人示教任务 | [项目概览](docs/overview.md) · [示教流程](docs/teaching-workflow.md) |
 | 用 iPad / iPhone 记录相机参考 Pose，或与电脑协作 | [AR 示教](docs/mobile-teaching.md) · [画面协作](docs/collaboration.md) |
 | 在 Vision Pro 中查看完整工程、沉浸游走和空间示教 | [Vision Pro 使用指南](vision/README.md) |
+
+<table>
+  <tr>
+    <td width="50%" align="center" valign="middle">
+      <a href="docs/mobile-teaching.md"><img src="images/iPad.png" width="420" alt="iPad AR 示教：在真实工位中查看模型并记录相机 Pose"></a>
+    </td>
+    <td width="50%" align="center" valign="middle">
+      <a href="vision/README.md"><img src="images/vision-pro.png" width="182" alt="Apple Vision Pro 头显"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/mobile-teaching.md"><strong>iPad · AR 示教</strong></a><br>现场放置工件，逐个记录相机参考 Pose</td>
+    <td align="center"><a href="vision/README.md"><strong>Vision Pro · 空间工作台</strong></a><br>1:1 沉浸游走，查看机器人与双相机取景</td>
+  </tr>
+</table>
 
 <a id="快速启动"></a>
 
