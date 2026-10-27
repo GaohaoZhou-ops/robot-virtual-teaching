@@ -1434,6 +1434,7 @@ export default function PointCloudViewer({
   robotLoadState,
   robotPose,
   robotJointValues,
+  robotTelemetry = false,
   lockedRobotJointNames = [],
   robotControlEnabled = false,
   robotHeightLocked = false,
@@ -1594,6 +1595,8 @@ export default function PointCloudViewer({
   const lastZividCameraPoseSignatureRef = useRef('');
   const robotPoseRef = useRef(normalizeRobotPose(robotPose));
   const robotJointValuesRef = useRef(normalizeRobotJointValues(robotJointValues));
+  const robotTelemetryRef = useRef(robotTelemetry);
+  robotTelemetryRef.current = robotTelemetry;
   const robotArmSoftLimitRatio = useContext(RobotJointLimitContext);
   const robotArmSoftLimitOverrides = useContext(RobotJointSoftRangesContext);
   const robotArmSoftLimitOverridesRef = useRef(robotArmSoftLimitOverrides);
@@ -1821,7 +1824,7 @@ export default function PointCloudViewer({
     robotJointValuesRef.current = normalized;
     const robot = loadedRobotRef.current;
     if (!robot) return normalized;
-    applyRobotJointValues(robot, normalized);
+    applyRobotJointValues(robot, normalized, { measured: robotTelemetryRef.current });
     robotLayerRef.current?.updateMatrixWorld(true);
     return writeRobotJointDataset(controlsRef.current?.domElement, robot, source);
   };
@@ -3169,7 +3172,7 @@ export default function PointCloudViewer({
         }, active.pose);
       }
     }
-  }, [mapData?.geometry, robotJointValues]);
+  }, [mapData?.geometry, robotJointValues, robotTelemetry]);
 
   useEffect(() => {
     writeRobotJointLockDataset(
@@ -8259,12 +8262,14 @@ export default function PointCloudViewer({
                     <button
                       type="button"
                       className={`robot-control-toggle ${robotControlActive ? 'is-active' : ''}`}
-                      disabled={!showRobot || robotTrajectoryActive || teachingPoseEditing}
-                      onClick={() => setRobotControlMode(!robotControlEnabledRef.current)}
+                      disabled={!showRobot || (!robotTelemetry && (robotTrajectoryActive || teachingPoseEditing))}
+                      onClick={() => robotTelemetry ? focusRobot() : setRobotControlMode(!robotControlEnabledRef.current)}
                       aria-label="定位机器人模型"
                       aria-pressed={robotControlActive}
                       title={
-                        teachingPoseEditing
+                        robotTelemetry
+                          ? '定位真机孪生模型，仅调整视角'
+                          : teachingPoseEditing
                           ? '姿态调整期间固定所属停车点；确认修改或按 Esc 结束后可移动底盘'
                           : robotTrajectoryActive
                           ? '示教轨迹播放期间由规划器接管机器人，暂停或停止后可恢复手动控制'

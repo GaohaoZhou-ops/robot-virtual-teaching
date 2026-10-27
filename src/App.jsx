@@ -54,6 +54,8 @@ import SpaceMouseControl from './components/SpaceMouseControl.jsx';
 import StartPage from './components/StartPage.jsx';
 import { WorkSyncControl, WorkSyncAuthorization } from './components/WorkSyncControl.jsx';
 import { useWorkSync } from './hooks/useWorkSync.js';
+import { useRobotTwin } from './hooks/useRobotTwin.js';
+import { robotTwinDisplayPose } from './lib/robotTwin.js';
 import VisionWorkbenchBridge from './components/VisionWorkbenchBridge.jsx';
 import { isVisionWorkbench } from './lib/visionWorkbench.js';
 import { useProjectImportProgress } from './hooks/useProjectImportProgress.js';
@@ -6567,9 +6569,14 @@ export default function App() {
     return buildExport({ ...current, robot: current.selectedRobot, transfer: current.workspaceTransfer,
       view2d: view2dRef.current, view3d: view3dRef.current });
   };
+  const robotTwin = useRobotTwin(JSON.stringify([appPage, teachingSpaceMode, mapData?.mapId, selectedRobot?.relativePath]));
+  const displayedRobotPose = useMemo(() => robotTwin.active
+    ? robotTwinDisplayPose(robotPose, robotTwin.pose) : robotPose, [robotTwin.active, robotTwin.pose, robotPose]);
+  const displayedRobotJoints = useMemo(() => robotTwin.active
+    ? { ...robotJointValues, ...robotTwin.joints } : robotJointValues, [robotTwin.active, robotTwin.joints, robotJointValues]);
   const workSync = useWorkSync({
     deviceName: isVisionWorkbench() ? 'Vision Pro 工作台' : /Mac/.test(navigator.platform) ? 'Mac 浏览器' : /Win/.test(navigator.platform) ? 'Windows 浏览器' : '浏览器设备',
-    ready: () => sessionReadyRef.current && !workspaceSwitchingRef.current && !loadState.loading
+    ready: () => !robotTwin.active && sessionReadyRef.current && !workspaceSwitchingRef.current && !loadState.loading
       && teachingCaptureState.status !== 'capturing',
     identity: syncIdentity,
     project: () => {
@@ -6637,6 +6644,21 @@ export default function App() {
     saveCheckpoint: saveWorkSyncCheckpoint,
   }, JSON.stringify([sessionState.status, teachingSpaceMode, mapData?.mapId,
     mapData?.sourceHash, mapData?.name, selectedRobot?.relativePath, independentTeachingName]));
+
+  useEffect(() => { if (workSync.link) robotTwin.disconnect(); }, [workSync.link?.id]);
+  const twinDisabledReason = workSync.link || workSync.pending ? '请先结束离线协作或等待中的授权申请。'
+    : appPage !== APP_PAGE_WORKBENCH || !mapData?.geometry || robotLoadState.status !== 'loaded'
+      ? '请先进入工作台并加载场景和机器人模型。'
+      : loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'
+        || polylineTeachingBusy || polylineTeachingOpen || robotSettingsModalOpen || robotParkingGhost?.editing
+        ? '请先结束当前加载、采集或姿态编辑。' : '';
+  const twinControl = { ...robotTwin, disabledReason: twinDisabledReason,
+    connect: (address, password) => {
+      if (twinDisabledReason) return false;
+      stopTeachingTaskPlayback(false);
+      setRobotControlEnabled(false); setRobotParkingGhost(null); setShowRobotModel(true);
+      return robotTwin.connect(address, password);
+    } };
 
   const openCacheAction = (kind, entry = null) => {
     if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current) return;
@@ -6978,7 +7000,7 @@ export default function App() {
             <span>{isVisionWorkbench() ? 'VISION' : 'LAN'}</span>
             <strong>{isVisionWorkbench() ? '本机工作台' : ':21990'}</strong>
           </div>
-          <WorkSyncControl sync={workSync} />
+          <WorkSyncControl sync={workSync} twin={twinControl} />
         </WorkbenchToolbar>
       </header>
 
@@ -7020,7 +7042,7 @@ export default function App() {
                   <span key={axis} data-axis={axis}>
                     <i className={`axis ${axis}`}>{axis.toUpperCase()}</i>
                     <b>{selectedRobot && robotLoadState.status === 'loaded'
-                      ? (Math.round(robotPose.position[axis] * 1000) / 1000).toFixed(3)
+                      ? (Math.round(displayedRobotPose.position[axis] * 1000) / 1000).toFixed(3)
                       : '—'}</b>
                   </span>
                 ))}
@@ -7123,12 +7145,13 @@ export default function App() {
                 showRobot={showRobotModel}
                 onShowRobotChange={handleShowRobotChange}
                 robotLoadState={robotLoadState}
-                robotPose={robotPose}
-                robotJointValues={robotJointValues}
+                robotPose={displayedRobotPose}
+                robotJointValues={displayedRobotJoints}
+                robotTelemetry={robotTwin.active}
                 lockedRobotJointNames={lockedRobotJointNames}
-                robotControlEnabled={robotControlEnabled}
+                robotControlEnabled={!robotTwin.active && robotControlEnabled}
                 robotHeightLocked={robotHeightLocked}
-                robotTrajectoryActive={['playing', 'paused'].includes(teachingPlayback.status)}
+                robotTrajectoryActive={robotTwin.active || ['playing', 'paused'].includes(teachingPlayback.status)}
                 teachingPlayback={teachingPlayback}
                 robotParkingGhost={mobileComputation?.preview || robotParkingGhost}
                 teachingCaptureBusy={teachingCaptureState.status === 'capturing'}
@@ -7153,8 +7176,8 @@ export default function App() {
                 ignoredCollisionJointNames={ignoredRobotCollisionJointNames}
                 onIgnoredCollisionJointNamesChange={setIgnoredRobotCollisionJointNames}
                 onRobotLoadState={handleRobotLoadState}
-                onRobotPoseChange={handleRobotPoseChange}
-                onRobotJointValuesChange={handleRobotJointValuesChange}
+                onRobotPoseChange={robotTwin.active ? undefined : handleRobotPoseChange}
+                onRobotJointValuesChange={robotTwin.active ? undefined : handleRobotJointValuesChange}
                 onResetRobotJointPose={zeroRobotJoints}
                 onRobotControlChange={handleRobotControlChange}
                 onRobotHeightLockChange={handleRobotHeightLockChange}
@@ -7296,8 +7319,9 @@ export default function App() {
           validation={validation}
           robot={selectedRobot}
           robotLoadState={robotLoadState}
-          robotPose={robotPose}
-          robotJointValues={robotJointValues}
+          robotPose={displayedRobotPose}
+          robotJointValues={displayedRobotJoints}
+          robotTelemetry={robotTwin.active}
           lockedRobotJointNames={lockedRobotJointNames}
           meshRenderQuality={meshRenderQuality}
           onMeshRenderQualityChange={setMeshRenderQuality}
@@ -7481,7 +7505,7 @@ export default function App() {
           sessionState={sessionState}
           projectDirectoryState={projectDirectoryState}
           busy={loadState.loading || Boolean(cacheActionDialog?.busy)}
-          syncControl={<WorkSyncControl sync={workSync} />}
+          syncControl={<WorkSyncControl sync={workSync} twin={twinControl} />}
           onGlobalReset={() => openCacheAction('reset')}
           resetDisabled={independentSwitchBlocked}
           onNewProject={beginNewProject}

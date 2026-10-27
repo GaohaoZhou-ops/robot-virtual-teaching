@@ -244,6 +244,21 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
+# Digital-twin checks normally write into test-artifacts/robot-twin/.
+# Ignore standalone copies of live readings, session diagnostics and captures
+# at root/tests too; keep robot_twin_*.py/.mjs runners and nested fixtures visible.
+/robot-twin/
+/robot-twin-*/
+/tests/robot-twin/
+/tests/robot-twin-*/
+/robot-twin.[zZ][iI][pP]
+/robot-twin-*.[zZ][iI][pP]
+/tests/robot-twin.[zZ][iI][pP]
+/tests/robot-twin-*.[zZ][iI][pP]
+/robot-twin-*.[pP][nN][gG]
+/tests/robot-twin-*.[pP][nN][gG]
+/robot-twin-*.json
+/tests/robot-twin-*.json
 # Standalone copies of display-settings and robot-coordinate review bundles.
 # Keep component source, maintained test helpers and nested fixtures visible.
 /display-settings-*/
@@ -1300,11 +1315,17 @@ Desktop.ini
 /teaching-tasks/
 /teaching-tasks-*/
 /teaching-tasks (*)/
-# Supplied robot source, extracted copies and locally repackaged variants.
+# Supplied robot source, extracted copies and locally repackaged variants,
+# including duplicate downloads and protocol-inspection workspaces when TMPDIR
+# points into the repository. These references are not application source.
 /ABXBrainSystem/
 /ABXBrainSystem.[zZ][iI][pP]
 /ABXBrainSystem-*/
 /ABXBrainSystem-*.[zZ][iI][pP]
+/ABXBrainSystem (*)/
+/ABXBrainSystem (*).[zZ][iI][pP]
+/abx-brain-readonly-*/
+/tests/abx-brain-readonly-*/
 /380B平地巡检.[zZ][iI][pP]
 /380B平地巡检/
 

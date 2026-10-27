@@ -2,6 +2,7 @@ import json
 import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
+from work_sync_ui_smoke import offline, close_sync
 
 ROOT = Path(__file__).resolve().parents[1]
 CONNECTION = json.loads(Path(os.environ['VISION_WORKBENCH_CONNECTION']).read_text())
@@ -49,7 +50,8 @@ with sync_playwright() as p:
     expect(host.locator('body')).to_contain_text('Vision Pro 双向同步', timeout=20000)
     task(host, 'Mac 回传任务')
     expect(peer.locator('body')).to_contain_text('Mac 回传任务', timeout=20000)
-    peer.get_by_role('button', name='断开链接', exact=True).click()
+    offline(peer).get_by_role('button', name='断开链接', exact=True).click()
+    close_sync(peer)
     expect(peer.locator('.work-sync[data-sync-phase="idle"]')).to_be_visible()
     expect(peer.locator('body')).to_contain_text('Vision Pro 双向同步')
     peer.reload()

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link2, Unplug, ShieldCheck, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { Link2, Unplug, ShieldCheck, RefreshCw, Radio, ArrowLeft, X } from 'lucide-react';
+import { RobotTwinPanel } from './RobotTwinPanel.jsx';
 import './WorkSyncControl.css';
 
-export function WorkSyncControl({ sync }) {
+function OfflineWorkSyncControl({ sync }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!sync.link) return undefined;
@@ -21,12 +22,12 @@ export function WorkSyncControl({ sync }) {
     : sync.role === 'host' ? '其他设备访问本服务后，可在此申请同步；请保持本页面打开'
       : '申请同步主机工程；需主机授权后开始同步';
   return (
-    <div className={`work-sync ${connected ? 'is-connected' : ''}`} data-sync-phase={sync.phase} data-sync-role={sync.role}>
+    <div className={`work-sync-offline ${connected ? 'is-connected' : ''}`}>
       <div className="work-sync__actions">
         <button type="button" className="work-sync__button" disabled={unavailable}
           title={title} onClick={connected ? () => sync.disconnect() : sync.request}>
           {connected ? <Unplug size={13} /> : <Link2 size={13} />}
-          {connected ? '断开链接' : '同步作业'}
+          {connected ? '断开链接' : '申请离线协作'}
         </button>
         {connected && sync.role === 'peer' && <button type="button" className="work-sync__renew"
           title="随时重新申请；主机再次批准后，授权有效期重新计算 5 分钟" onClick={sync.request}>
@@ -36,6 +37,48 @@ export function WorkSyncControl({ sync }) {
       {status && <span className={`work-sync__status ${sync.error ? 'is-error' : ''}`} role="status" title={status}>{status}</span>}
     </div>
   );
+}
+
+export function WorkSyncControl({ sync, twin }) {
+  const dialog = useRef(null);
+  const titleId = useId();
+  const [page, setPage] = useState('choose');
+  const [open, setOpen] = useState(false);
+  const closeAfterConnect = useCallback(() => setOpen(false), []);
+  const stopTwin = () => { twin?.disconnect(); setOpen(false); };
+  useEffect(() => {
+    if (open && !dialog.current.open) dialog.current.showModal();
+    else if (!open && dialog.current.open) dialog.current.close();
+  }, [open]);
+  const status = twin?.active ? (twin.phase === 'live' ? '真机孪生 · 只读同步中' : twin.phase === 'connecting' ? '真机孪生 · 连接中' : '真机孪生 · 数据暂不可用')
+    : sync.error || (sync.link ? '离线协作 · 已连接' : sync.pending ? '离线协作 · 等待授权' : sync.reason || '');
+  return <div className={`work-sync ${twin?.active || sync.link ? 'is-connected' : ''}`} data-twin-phase={twin?.phase || 'idle'}
+    data-sync-phase={sync.phase} data-sync-role={sync.role}>
+    <button type="button" className="work-sync__button" onClick={twin?.active ? stopTwin : () => { setPage('choose'); setOpen(true); }}>
+      {twin?.active ? <Unplug size={13} /> : <Link2 size={13} />}{twin?.active ? '停止同步' : '同步作业'}
+    </button>
+    {status && <span className={`work-sync__status ${twin?.phase === 'stale' ? 'is-error' : ''}`} role="status" title={twin?.error || status}>{status}</span>}
+    <dialog ref={dialog} className="work-sync-dialog work-sync-mode-dialog" aria-labelledby={titleId}
+      onClose={() => setOpen(false)} onCancel={() => setOpen(false)}
+      onKeyDown={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()}>
+      <div className="work-sync-dialog__heading">
+        {page !== 'choose' && <button type="button" className="work-sync-dialog__icon" aria-label="返回模式选择" onClick={() => setPage('choose')}><ArrowLeft size={18} /></button>}
+        <Link2 size={20} /><span>同步作业</span>
+        <button type="button" className="work-sync-dialog__icon work-sync-dialog__close" aria-label="关闭同步作业" onClick={() => setOpen(false)}><X size={18} /></button>
+      </div>
+      <h2 id={titleId}>{page === 'choose' ? '选择同步模式' : page === 'offline' ? '离线协作' : '真机孪生'}</h2>
+      {page === 'choose' ? <div className="work-sync-mode-options">
+        <button type="button" onClick={() => setPage('offline')}><Link2 size={23} /><strong>离线协作</strong><span>多设备同步当前工程、示教进度与结果</span><small>{sync.link ? '已连接' : '沿用现有协作功能'}</small></button>
+        <button type="button" onClick={() => setPage('twin')}><Radio size={23} /><strong>真机孪生</strong><span>读取局域网机器人定位与姿态，映射到虚拟空间</span><small>{twin?.active ? '已启用 · 只读' : '只读 · 不发送运动指令'}</small></button>
+      </div> : page === 'offline' ? <>
+        <p>共享当前工程，每 3 秒双向同步一次；连接需主机授权。</p>
+        {twin?.active ? <p className="work-sync-dialog__note">请先断开真机孪生，再进行离线协作。</p> : <>
+          <OfflineWorkSyncControl sync={sync} />
+          {sync.role === 'host' && !sync.link && <p className="work-sync-dialog__note">当前设备为主机。其他设备打开本工作台后，在此申请离线协作；请保持主机页面打开以接收授权请求。</p>}
+        </>}
+      </> : <RobotTwinPanel twin={twin ? { ...twin, disconnect: stopTwin } : twin} open={open} onConnected={closeAfterConnect} />}
+    </dialog>
+  </div>;
 }
 
 export function WorkSyncAuthorization({ sync }) {

@@ -1,6 +1,6 @@
 """Reset a synced host in disposable profiles without erasing the peer's work."""
 from playwright.sync_api import sync_playwright, expect
-from work_sync_ui_smoke import BASE_URL, CHROME, seed_host, home, approve, control, shared_snapshots
+from work_sync_ui_smoke import BASE_URL, CHROME, seed_host, home, approve, control, shared_snapshots, offline, close_sync
 from teaching_transfer_ui_smoke import snapshot
 
 
@@ -20,7 +20,8 @@ def run():
             peer.goto(BASE_URL, wait_until='networkidle')
             peer.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
             approve(host, peer)
-            expect(peer.get_by_role('button', name='断开链接', exact=True)).to_be_visible()
+            expect(offline(peer).get_by_role('button', name='断开链接', exact=True)).to_be_visible()
+            close_sync(peer)
             _, before = shared_snapshots(host, peer)
             host.get_by_role('button', name='全局重置', exact=True).click()
             dialog = host.get_by_role('alertdialog', name='确认全局重置？', exact=True)

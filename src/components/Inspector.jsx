@@ -126,6 +126,7 @@ export default function Inspector({
   robotLoadState,
   robotPose,
   robotJointValues,
+  robotTelemetry = false,
   lockedRobotJointNames = [],
   meshRenderQuality = 'auto',
   onMeshRenderQualityChange,
@@ -406,6 +407,7 @@ export default function Inspector({
             aria-label={jointWindowOpen ? '隐藏全关节浮动窗口' : '打开全关节浮动窗口'}
             aria-pressed={jointWindowOpen}
             title="浮动显示全部机器人关节，不遮断地图与相机操作"
+            disabled={robotTelemetry}
             onClick={() => setJointWindowOpen((current) => !current)}
           >
             <SlidersHorizontal size={12} />
@@ -441,7 +443,8 @@ export default function Inspector({
         })}
       </nav>
 
-      <div className="inspector-scroll" data-page-scroll={activePage} ref={scrollRef}>
+      {robotTelemetry && <p className="robot-twin-inspector-note">真机孪生 · 只读观察中。断开后继续离线示教。</p>}
+      <div className="inspector-scroll" data-page-scroll={activePage} ref={scrollRef} inert={robotTelemetry ? '' : undefined}>
         {activePage === 'navigation' && (
           <div
             className="inspector-page inspector-page--navigation"
@@ -995,7 +998,7 @@ export default function Inspector({
       )}
 
       <FloatingRobotJointPanel
-        open={jointWindowOpen && !polylineOpen}
+        open={jointWindowOpen && !polylineOpen && !robotTelemetry}
         teachingPoseEditing={Boolean(editingTeachingPoseId)}
         onClose={() => setJointWindowOpen(false)}
         robot={robot}

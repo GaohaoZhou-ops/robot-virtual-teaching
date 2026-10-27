@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:work-sync": "node tests/work_sync_smoke.mjs",
+    "test:robot-twin": "node tests/robot_twin_smoke.mjs",
     "test:connectivity": "node tests/graph_connectivity_smoke.mjs",
     "test:model-editor": "node tests/model_editing_smoke.mjs",
     "test:model-composition": "node tests/model_composition_smoke.mjs",

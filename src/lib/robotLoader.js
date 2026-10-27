@@ -906,14 +906,7 @@ export function configureRobotArmSoftLimits(robot, ratio, overrides = {}) {
   return movableJoints;
 }
 
-export const setRobotJointValue = (joint, rawValue) => {
-  if (!joint || !movableJointTypes.has(joint.userData?.jointType)) return 0;
-  const limit = getRobotJointLimits(joint);
-  const value = THREE.MathUtils.clamp(
-    Number(rawValue) || 0,
-    Number.isFinite(limit.lower) ? limit.lower : Number.NEGATIVE_INFINITY,
-    Number.isFinite(limit.upper) ? limit.upper : Number.POSITIVE_INFINITY,
-  );
+const applyJointTransform = (joint, value) => {
   const axis = new THREE.Vector3(...(joint.userData.jointAxis || [0, 0, 1])).normalize();
   const restPosition = joint.userData.restPosition || [0, 0, 0];
   const restQuaternion = joint.userData.restQuaternion || [0, 0, 0, 1];
@@ -928,7 +921,17 @@ export const setRobotJointValue = (joint, rawValue) => {
   return value;
 };
 
-export function applyRobotJointValues(robot, values) {
+export const setRobotJointValue = (joint, rawValue) => {
+  if (!joint || !movableJointTypes.has(joint.userData?.jointType)) return 0;
+  const limit = getRobotJointLimits(joint);
+  return applyJointTransform(joint, THREE.MathUtils.clamp(
+    Number(rawValue) || 0,
+    Number.isFinite(limit.lower) ? limit.lower : Number.NEGATIVE_INFINITY,
+    Number.isFinite(limit.upper) ? limit.upper : Number.POSITIVE_INFINITY,
+  ));
+};
+
+export function applyRobotJointValues(robot, values, { measured = false } = {}) {
   const normalized = normalizeRobotJointValues(values);
   if (!robot) return normalized;
   robot.traverse((object) => {
@@ -938,7 +941,10 @@ export function applyRobotJointValues(robot, values) {
     const internalValue = object.userData.jointType === 'prismatic'
       ? serializedValue
       : THREE.MathUtils.degToRad(serializedValue);
-    setRobotJointValue(object, internalValue);
+    // Telemetry is a measured pose, not a proposed offline motion target.
+    // Its display must not be altered by teaching soft/coupled joint limits.
+    if (measured) applyJointTransform(object, internalValue);
+    else setRobotJointValue(object, internalValue);
   });
   robot.updateMatrixWorld(true);
   return readRobotJointValues(robot);

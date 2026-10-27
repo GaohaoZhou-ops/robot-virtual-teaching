@@ -24,8 +24,23 @@ def control(page):
     return page.locator('.work-sync:visible')
 
 
+def offline(page):
+    panel = page.get_by_role('dialog', name='离线协作', exact=True)
+    if not panel.is_visible():
+        page.get_by_role('button', name='同步作业', exact=True).click()
+        page.get_by_role('dialog', name='选择同步模式', exact=True).get_by_role('button', name='离线协作').click()
+    return panel
+
+
+def close_sync(page):
+    button = page.get_by_role('button', name='关闭同步作业', exact=True)
+    if button.is_visible():
+        button.click()
+
+
 def approve(host, peer):
-    peer.get_by_role("button", name="同步作业", exact=True).click()
+    offline(peer).get_by_role('button', name='申请离线协作', exact=True).click()
+    close_sync(peer)
     dialog = host.get_by_role("dialog", name="允许另一台设备同步作业？", exact=True)
     dialog.wait_for()
     dialog.get_by_role("button", name="允许同步（5 分钟）", exact=True).click()
@@ -109,7 +124,8 @@ def run():
             expect(button).to_be_enabled()
             lan = peer.locator('.start-page__system > span').last.bounding_box()
             assert button.bounding_box()["x"] > lan["x"] + lan["width"]
-            button.click()
+            offline(peer).get_by_role('button', name='申请离线协作', exact=True).click()
+            close_sync(peer)
             dialog = host.get_by_role("dialog", name="允许另一台设备同步作业？", exact=True)
             dialog.wait_for()
             host.screenshot(path="/tmp/atlas-work-sync-authorization.png", animations="disabled")
@@ -119,8 +135,9 @@ def run():
             approve(host, peer)
             ready(peer, MODE)
             home(peer)
-            expect(host.get_by_role("button", name="断开链接", exact=True)).to_be_visible()
-            expect(peer.get_by_role("button", name="断开链接", exact=True)).to_be_visible()
+            expect(offline(host).get_by_role("button", name="断开链接", exact=True)).to_be_visible()
+            close_sync(host)
+            expect(offline(peer).get_by_role("button", name="断开链接", exact=True)).to_be_visible()
             first_host, first_peer = shared_snapshots(host, peer)
             Path('/tmp/atlas-work-sync-initial-snapshots.json').write_text(json.dumps({"host": first_host, "peer": first_peer}, ensure_ascii=False))
             assert first_host["positions"] == first_peer["positions"]
@@ -131,7 +148,8 @@ def run():
             renewal = host.get_by_role("dialog", name="重新授权同步作业", exact=True)
             renewal.wait_for()
             renewal.get_by_role("button", name="允许同步（5 分钟）", exact=True).click()
-            expect(control(peer).get_by_role("status")).to_contain_text("授权剩余")
+            expect(offline(peer).get_by_role("status")).to_contain_text("授权剩余")
+            close_sync(peer)
 
             host_tree, peer_tree = teaching(host), teaching(peer)
             rename_parking(host_tree, f"{MODE}-inside", "Mac 停车点 A")
@@ -158,7 +176,8 @@ def run():
             shared_host, shared_peer = shared_snapshots(host, peer)
             assert shared_host["project"]["virtualTeaching"] == shared_peer["project"]["virtualTeaching"]
             assert shared_peer["project"]["virtualTeaching"]["tasks"][0]["parkingPoints"][0]["poses"][0]["cameraCapture"]
-            peer.get_by_role("button", name="断开链接", exact=True).click()
+            offline(peer).get_by_role("button", name="断开链接", exact=True).click()
+            close_sync(peer)
             expect(control(host)).to_have_attribute("data-sync-phase", "idle", timeout=8_000)
             expect(control(peer)).to_have_attribute("data-sync-phase", "idle")
             assert snapshot(host, MODE)["project"]["virtualTeaching"] == shared_host["project"]["virtualTeaching"]
@@ -174,7 +193,8 @@ def run():
             host.wait_for_timeout(6500)
             assert snapshot(peer, MODE)["mapId"] == peer_map_id, "reauthorization retains the local workspace"
             assert snapshot(host, MODE)["project"]["virtualTeaching"]["tasks"][0]["parkingPoints"][1]["poses"][0]["name"] == "断开后继续示教"
-            host.get_by_role("button", name="断开链接", exact=True).click()
+            offline(host).get_by_role("button", name="断开链接", exact=True).click()
+            close_sync(host)
             expect(control(peer)).to_have_attribute("data-sync-phase", "idle", timeout=8_000)
             persisted = snapshot(peer, MODE)["project"]["virtualTeaching"]
             peer.reload(wait_until="networkidle")
