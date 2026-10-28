@@ -72,6 +72,8 @@ def select_color(page, layer, mode):
         button.click()
     expect(button).to_have_attribute('data-color-mode', mode)
     page.keyboard.press('Escape')
+    # Close both submenu and parent; a canvas screenshot also captures popovers.
+    page.keyboard.press('Escape')
 
 
 def run():

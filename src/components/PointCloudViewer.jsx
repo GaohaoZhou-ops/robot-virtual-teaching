@@ -1577,6 +1577,7 @@ export default function PointCloudViewer({
   const precisionPanRef = useRef(null);
   const focusAnimationRef = useRef(null);
   const robotFollowPositionRef = useRef(null);
+  const twinWorkspaceViewRef = useRef(null);
   const twinFollowRef = useRef(null);
   const [twinFollowEnabled, setTwinFollowEnabled] = useState(false);
   const pointerInteractionRef = useRef(null);
@@ -1705,6 +1706,30 @@ export default function PointCloudViewer({
     }
     if (restore) viewActionsRef.current?.apply(follow.previousView, 'twin-follow-ended');
   }, []);
+  useLayoutEffect(() => {
+    const saved = twinWorkspaceViewRef.current;
+    if (saved && saved.geometry !== mapData?.geometry) {
+      // A different project owns its own view; never restore the old map's camera.
+      twinWorkspaceViewRef.current = null;
+      return;
+    }
+    if (robotTelemetry) {
+      // Capture before the animation loop can frame the fleet or start following.
+      if (!saved) {
+        const view = viewActionsRef.current?.capture();
+        if (view) twinWorkspaceViewRef.current = { geometry: mapData?.geometry, view };
+      }
+    } else if (saved) {
+      twinWorkspaceViewRef.current = null;
+      stopTwinFollow(false);
+      if (focusAnimationRef.current) {
+        cancelAnimationFrame(focusAnimationRef.current);
+        focusAnimationRef.current = null;
+      }
+      pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
+      viewActionsRef.current?.apply(saved.view, 'twin-ended');
+    }
+  }, [robotTelemetry, mapData?.geometry, stopTwinFollow]);
   useEffect(() => {
     if (!robotTelemetry || !isActive || !showRobot || robotLoadState?.status !== 'loaded') stopTwinFollow();
   }, [robotTelemetry, isActive, showRobot, robotLoadState?.status, stopTwinFollow]);
@@ -1816,7 +1841,8 @@ export default function PointCloudViewer({
   const objectLayers = useMemo(() => teachingSpaceMode === 'map'
     ? placedObjectLayers(mapData, workspaceTransfer) : null, [mapData, workspaceTransfer, teachingSpaceMode]);
   const placedObjectPointCount = objectLayers?.objectRanges.reduce((count, range) => count + range.count, 0) || 0;
-  const hasObjectColorControl = teachingSpaceMode === 'map' && workspaceTransfer?.kind === 'placement';
+  const hasObjectColorControl = teachingSpaceMode === 'map'
+    && (workspaceTransfer?.kind === 'placement' || Boolean(objectLayers));
   const isHeightColor = (colorMode === 'height' && sourcePointCount > placedObjectPointCount)
     || (placedObjectPointCount > 0 && placedObjectColorMode === 'height');
   const colorModeIndex = Math.max(
@@ -3946,8 +3972,9 @@ export default function PointCloudViewer({
     });
     let lastReportedView = '';
     const reportCameraView = (force = false) => {
-      // Following is a temporary observation view, not the saved offline view.
-      if (twinFollowRef.current) return;
+      // Fleet overview, manual navigation and following all belong to the
+      // temporary twin session. Keep the offline workspace's saved camera.
+      if (robotTelemetryRef.current || twinFollowRef.current) return;
       const nextView = captureCameraView();
       const signature = cameraViewSignature(nextView);
       if (!signature || (!force && signature === lastReportedView)) return;
@@ -7825,6 +7852,43 @@ export default function PointCloudViewer({
     controls.update();
   };
 
+  const restoreViewPreset = (preset) => {
+    const camera = cameraRef.current, controls = controlsRef.current;
+    const previous = viewActionsRef.current?.capture();
+    if (!camera || !controls || !previous || !mapData?.geometry?.boundingBox) return;
+    const origin = teachingSpaceMode === 'independent' ? mapOriginGroupRef.current?.position : new THREE.Vector3();
+    if (preset === 'origin' && !origin) return;
+    stopTwinFollow(false);
+    if (focusAnimationRef.current) {
+      cancelAnimationFrame(focusAnimationRef.current);
+      focusAnimationRef.current = null;
+    }
+    pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
+    let view;
+    if (preset === 'origin') {
+      view = { ...previous, target: origin, position: camera.position.clone().sub(controls.target).add(origin),
+        projectionOffset: { x: 0, y: 0 } };
+    } else {
+      const bounds = mapData.geometry.boundingBox.clone();
+      if (showRobotRef.current) {
+        const robotBounds = robotTelemetryRef.current ? twinSceneRef.current?.bounds()
+          : loadedRobotRef.current && setRobotVisualBounds(new THREE.Box3(), robotLayerRef.current);
+        if (robotBounds && !robotBounds.isEmpty()) bounds.union(robotBounds);
+      }
+      const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+      const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
+      const limitingHalfFov = Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect));
+      const distance = Math.max(sphere.radius, 1) / Math.sin(limitingHalfFov) * 1.15;
+      const direction = preset === 'top' ? new THREE.Vector3(0, 0, 1)
+        : preset === 'side' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, -1, 0);
+      view = { position: sphere.center.clone().addScaledVector(direction, distance), target: sphere.center,
+        up: preset === 'top' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1),
+        zoom: 1, projectionOffset: { x: 0, y: 0 } };
+    }
+    viewActionsRef.current.apply(view, `preset-${preset}`);
+    controls.domElement.focus({ preventScroll: true });
+  };
+
   const focusMapOrigin = () => {
     stopTwinFollow(false);
     const controls = controlsRef.current;
@@ -8505,13 +8569,27 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`机器人模型、全身坐标系、Zivid 光学坐标系、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`还原视角、机器人模型、全身坐标系、Zivid 光学坐标系、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
               panelClassName="viewer-display-menu"
             >
               <ViewerDisplaySettings expanded={displaySettingsSection} onExpandedChange={setDisplaySettingsSection}
                 sections={[
+                  { id: 'view', label: '还原视角', icon: RotateCcw,
+                    description: '地图原点 · 俯视 · 侧视 · 正视', content: <div className="viewer-display-presets">
+                      {[
+                        { id: 'origin', label: '地图原点', icon: Crosshair, description: '定位地图坐标原点' },
+                        { id: 'top', label: '俯视图', icon: Layers, description: '从上方观察 XY 平面' },
+                        { id: 'side', label: '侧视图', icon: Box, description: '从侧面观察 YZ 平面' },
+                        { id: 'front', label: '正视图', icon: Eye, description: '从正面观察 XZ 平面' },
+                      ].map(({ id, label, icon: Icon, description }) => <button key={id} type="button" aria-label={label}
+                        disabled={!isActive || (id === 'origin' && teachingSpaceMode === 'independent' && !mapOriginPose)}
+                        title={id === 'origin' && teachingSpaceMode === 'independent' && !mapOriginPose
+                          ? '当前独立示教尚未关联地图原点' : description}
+                        onClick={() => restoreViewPreset(id)}><Icon size={15} aria-hidden="true" />
+                        <span><strong>{label}</strong><small>{description}</small></span></button>)}
+                    </div> },
                   { id: 'robot', label: '机器人与相机', icon: Bot,
                     description: '模型显示 · 透明度 · 全身坐标系', content: <>
                       <div className="viewer-display-settings__robot">

@@ -223,6 +223,7 @@ try:
             canvas = page.locator('.three-canvas')
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
             before = reading(canvas)
+            offline_view = camera_view(canvas)
             expect(page.get_by_role('button', name='机器人后上方跟随视角')).to_have_count(0)
             page.get_by_role('button', name='同步作业', exact=True).click()
             page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
@@ -499,13 +500,12 @@ try:
             expect(canvas).to_have_attribute('data-robot-control-enabled', 'false')
             page.get_by_role('button', name='视图工具', exact=True).click()
             page.screenshot(path=str(artifacts / ('live-scene.png' if args.live else 'fixture-scene.png')))
-            before_stop_view = camera_view(canvas)
             follow_view.click()
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
             expect(follow_view).to_have_count(0)
-            assert all(abs(a - b) < 1e-6 for a, b in zip(camera_view(canvas), before_stop_view)), 'disconnect restores the view before following'
+            assert all(abs(a - b) < 1e-6 for a, b in zip(camera_view(canvas), offline_view)), 'disconnect restores the view before the twin session'
             expect(page.get_by_role('button', name='同步作业', exact=True)).to_be_visible()
             expect(page.get_by_role('dialog')).to_have_count(0)
             expect(page.get_by_role('complementary', name='任务监控台', exact=True)).to_have_count(0)

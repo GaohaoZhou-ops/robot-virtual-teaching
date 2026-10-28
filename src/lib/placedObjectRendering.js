@@ -2,10 +2,9 @@ import { Euler, Matrix4, MathUtils, Quaternion, Vector3 } from 'three';
 
 // Vertex ranges describe appended objects, never spatial bounding boxes: a
 // workpiece may overlap the original scan without changing the scan's colors.
-export function placedObjectLayers(map, transfer) {
-  const layers = transfer?.geometryLayers;
+export function validatePlacedObjectLayers(map, layers) {
   const count = map?.pointCount ?? map?.positions?.length / 3;
-  if (transfer?.kind !== 'placement' || layers?.version !== 1
+  if (layers?.version !== 1
     || layers.pointCount !== count || layers.sourceHash !== map?.sourceHash
     || !Array.isArray(layers.objectRanges)) return null;
   let end = 0;
@@ -17,11 +16,19 @@ export function placedObjectLayers(map, transfer) {
   return layers;
 }
 
+export function placedObjectLayers(map, transfer) {
+  // Display groups also travel with portable geometry. They do not require a
+  // binding to another device's independent workspace or original source files.
+  return validatePlacedObjectLayers(map, transfer?.kind === 'placement' ? transfer.geometryLayers : null)
+    || validatePlacedObjectLayers(map, map?.geometryLayers)
+    || validatePlacedObjectLayers(map, map?.geometry?.userData?.geometryLayers);
+}
+
 export function appendPlacedObjectLayers(map, background, transfer, objectPointCount) {
   const previous = placedObjectLayers(background, transfer);
   return {
     version: 1, pointCount: map.pointCount, sourceHash: map.sourceHash,
-    complete: transfer?.kind !== 'placement' || previous?.complete === true,
+    complete: previous ? previous.complete === true : transfer?.kind !== 'placement',
     objectRanges: [...(previous?.objectRanges || []), { start: background.pointCount, count: objectPointCount }],
   };
 }

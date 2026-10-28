@@ -50,7 +50,7 @@
 .work-sync-mode-dialog .work-sync__status { position: static; max-width: 100%; white-space: normal; font-size: 12px; margin-top: 8px; }
 .robot-twin-field { display: grid; gap: 8px; margin: 16px 0; font-size: 12px; color: #b2c5c1; }
 .robot-twin-panel input:not([type='checkbox']) { box-sizing: border-box; width: 100%; border: 1px solid #405a55; border-radius: 5px; padding: 11px; background: #0d191c; color: #dbe9e6; font: inherit; font-size: 14px; }
-.robot-twin-panel input:disabled { opacity: .65; }
+.robot-twin-panel input:not([type='checkbox']):disabled { opacity: .65; }
 .robot-twin-panel__state { display: flex; gap: 8px; align-items: center; font-size: 12px; color: #b2c5c1; padding-top: 5px; }
 .robot-twin-panel__state span { margin-left: auto; font-size: 11px; }
 .robot-twin-panel__state.is-live { color: #8bd7b8; }

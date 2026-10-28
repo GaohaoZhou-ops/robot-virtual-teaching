@@ -1,9 +1,15 @@
+import { normalizeMeshRenderQuality } from './mapGeometry.js';
+
 // Shared, JSON-only synchronization. Entity arrays are addressed by ID, never
 // by index, so edits to different parking points in one task remain independent.
 export const WORK_SYNC_INTERVAL = 3000;
 export const WORK_SYNC_LEASE = 5 * 60 * 1000;
 const collections = ['waypoints', 'edges', 'abxRoutes', 'teachingTasks', 'jointPoses'];
-const fields = new Set([...collections, 'independentTeachingName']);
+const fields = new Set([...collections, 'independentTeachingName', 'displaySettings']);
+const colorModes = new Set(['height', 'source', 'white']);
+const displayFlags = { showPaths3D: true, annotationsOnTop3D: true, showParkingPoints3D: true,
+  showWaypoints3D: true, showWaypointNames3D: true, showPathNames3D: false, showHeightLegend3D: true };
+const displayFields = new Set(['pointColorMode', 'placedObjectColorMode', 'meshRenderQuality', ...Object.keys(displayFlags)]);
 const unsafeKeys = new Set(['__proto__', 'prototype', 'constructor']);
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
@@ -22,6 +28,14 @@ export function syncDocument(project) {
   return JSON.parse(JSON.stringify(Object.fromEntries([
     ...collections.map((key) => [key, project[key] || []]),
     ['independentTeachingName', project.workspace?.independentTeachingName || ''],
+    ['displaySettings', {
+      pointColorMode: colorModes.has(project.workspace?.pointColorMode) ? project.workspace.pointColorMode : 'height',
+      placedObjectColorMode: colorModes.has(project.workspace?.placedObjectColorMode) ? project.workspace.placedObjectColorMode
+        : colorModes.has(project.workspace?.pointColorMode) ? project.workspace.pointColorMode : 'height',
+      meshRenderQuality: normalizeMeshRenderQuality(project.rendering?.meshQuality),
+      ...Object.fromEntries(Object.entries(displayFlags).map(([key, fallback]) => [key,
+        typeof project.workspace?.[key] === 'boolean' ? project.workspace[key] : fallback])),
+    }],
   ])));
 }
 
@@ -42,6 +56,16 @@ export function validateSyncDocument(document) {
   if (!object(document) || Object.keys(document).some((key) => !fields.has(key))
     || collections.some((key) => !idArray(document[key]))
     || typeof document.independentTeachingName !== 'string') throw new Error('同步工程数据无效');
+  // Accept older checkpoints without display settings. New settings are a
+  // complete, bounded allowlist; camera position and editing state stay local.
+  if (own(document, 'displaySettings')) {
+    const display = document.displaySettings;
+    if (!object(display) || Object.keys(display).length !== displayFields.size
+      || Object.keys(display).some((key) => !displayFields.has(key))
+      || !colorModes.has(display.pointColorMode) || !colorModes.has(display.placedObjectColorMode)
+      || normalizeMeshRenderQuality(display.meshRenderQuality) !== display.meshRenderQuality
+      || Object.keys(displayFlags).some((key) => typeof display[key] !== 'boolean')) throw new Error('同步显示配置无效');
+  }
   return document;
 }
 

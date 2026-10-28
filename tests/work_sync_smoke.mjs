@@ -203,6 +203,23 @@ try {
   assert.equal(peerAdapter.state.installs, 1, 'resume must not replace an existing local workspace');
   assert.deepEqual(hostAdapter.state.document, peerAdapter.state.document);
   assert.equal(peerAdapter.state.document.teachingTasks[0].parkingPoints[1].poses.length, 4);
+  // Old clients saved the right color settings but lost the geometry groups.
+  // Reauthorization refreshes that bundle once without discarding offline edits.
+  await peerClient.disconnect(); await hostClient.tick();
+  const oldCheckpoint = peerAdapter.state.checkpoints.get('host-local');
+  delete oldCheckpoint.resourceVersion;
+  delete oldCheckpoint.document.displaySettings;
+  peerAdapter.state.document = edit(peerAdapter.state.document, 'right', 'legacy-offline-pose');
+  hostAdapter.state.document.displaySettings.pointColorMode = 'white';
+  peerAdapter.state.document.displaySettings.pointColorMode = 'source';
+  await connect(); await peerClient.tick(); await hostClient.tick();
+  assert.equal(peerAdapter.state.installs, 2, 'old geometry resources are refreshed');
+  assert.deepEqual(hostAdapter.state.document, peerAdapter.state.document);
+  assert.equal(peerAdapter.state.document.teachingTasks[0].parkingPoints[1].poses.length, 5);
+  assert.equal(peerAdapter.state.document.displaySettings.pointColorMode, 'white', 'new shared settings come from the host');
+  await peerClient.disconnect(); await hostClient.tick();
+  await connect(); await peerClient.tick(); await hostClient.tick();
+  assert.equal(peerAdapter.state.installs, 2, 'updated resources are reused on subsequent reconnects');
   const retained = copy(peerAdapter.state.document);
   intercept = () => { throw new Error('switch network failure'); };
   await assert.rejects(peerClient.prepareTwin(), /switch network failure/);

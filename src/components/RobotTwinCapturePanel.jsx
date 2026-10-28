@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Camera, Check, CheckCheck, Cloud, Image, ListChecks, Maximize2, RefreshCw, X } from 'lucide-react';
 import { useRobotTwinCaptureHistory } from '../hooks/useRobotTwinCaptureHistory.js';
+import { ALGORITHM_PHASES, TASK_PHASES } from '../lib/robotTwinMonitor.js';
 import RobotTwinPointCloud from './RobotTwinPointCloud.jsx';
 import RobotTwinCaptureImage from './RobotTwinCaptureImage.jsx';
 import './RobotTwinCapturePanel.css';
@@ -140,6 +141,53 @@ function CompletedResults({ history, monitor, capture, selectedSide, onSelect })
   </aside>;
 }
 
+function CaptureTaskInfo({ twin, capture, selectedSide }) {
+  const task = capture.runId && twin.monitor?.task?.id === capture.runId ? twin.monitor.task : null;
+  const stale = twin.monitorPhase !== 'live';
+  const created = capture.createdAt ? new Date(capture.createdAt) : null;
+  const timestamp = created && Number.isFinite(created.getTime())
+    ? created.toLocaleString('zh-CN', { hour12: false }) : '未提供采集时间';
+  const consumed = task ? Math.min(task.totalPoints, task.completedPoints + task.skippedPoints) : 0;
+  const phase = task ? task.navigationWaiting && task.phase === 'running' ? '导航停障'
+    : TASK_PHASES[task.phase] || '状态未知' : '历史采集';
+  return <section className="robot-twin-capture-info" aria-label="采集任务信息" data-capture-id={capture.id}>
+    <div className="robot-twin-capture-info__heading"><span><ListChecks size={14} />采集任务</span>
+      {twin.selectedRobot?.name && <span className="robot-twin-capture-info__robot">
+        <i style={{ backgroundColor: twin.selectedRobot.color }} aria-hidden="true" />{twin.selectedRobot.name}</span>}</div>
+    <div className="robot-twin-capture-info__task"><h3>{capture.taskName || '未提供任务名称'}</h3>
+      <span className="robot-twin-capture-info__phase">{task ? `所属作业 · ${phase}` : phase}{task && stale ? ' · 上次读取' : ''}</span></div>
+    <dl className="robot-twin-capture-info__fields">
+      <div><dt>停车点</dt><dd>{capture.parkingName || '—'}</dd></div>
+      <div><dt>采集动作</dt><dd>{capture.pointName || '—'}</dd></div>
+      <div><dt>采集时间</dt><dd><time dateTime={created && Number.isFinite(created.getTime()) ? capture.createdAt : undefined}>{timestamp}</time></dd></div>
+    </dl>
+    {task?.totalPoints > 0 && <div className="robot-twin-capture-info__progress">
+      <span>作业当前进度{stale ? ' · 上次读取' : ''}</span>
+      <progress aria-label="采集所属任务当前进度" value={consumed} max={task.totalPoints} />
+      <span>完成 <strong>{task.completedPoints} / {task.totalPoints}</strong> 步{task.skippedPoints > 0 ? ` · 跳过 ${task.skippedPoints} 步` : ''}</span>
+    </div>}
+    <div className="robot-twin-capture-info__results">
+      {['left', 'right'].map((side) => {
+        const info = capture.sides[side], complete = info.state === 'complete';
+        const tone = info.abnormal ? info.severity === 'suspected' ? 'suspected' : 'defect'
+          : info.error || info.state === 'failed' ? 'warning' : complete ? 'clear' : 'pending';
+        const status = info.abnormal ? `${info.detectionCount} 处${tone === 'suspected' ? '疑似' : ''}异常`
+          : info.error ? '读取异常' : complete ? '未检测到异常' : ALGORITHM_PHASES[info.state] || '等待算法结果';
+        const labels = [...new Set((info.boxes || []).map((box) => box.label).filter(Boolean))];
+        const detail = info.error || (complete ? labels.join('、') || '本次采集算法已完成'
+          : info.state === 'skipped' ? '本次采集未执行算法' : info.state === 'failed' ? '本次算法未能完成' : '结果就绪后自动更新');
+        return <div key={side} className="robot-twin-capture-info__result" data-side={side} data-severity={tone}
+          data-selected={selectedSide === side}>
+          <div><Camera size={13} /><strong>{side === 'left' ? '左' : '右'} Zivid</strong>
+            <span>{info.abnormal ? <AlertTriangle size={12} /> : complete && <CheckCheck size={12} />}{status}</span></div>
+          <p>{detail}{info.abnormal && tone === 'defect' && info.suspectedCount > 0 ? ` · 含 ${info.suspectedCount} 处疑似` : ''}</p>
+        </div>;
+      })}
+    </div>
+    {capture.error && <p className="robot-twin-capture-info__warning" role="status">采集信息读取失败：{capture.error}</p>}
+  </section>;
+}
+
 function CaptureDialog({ twin, capture, mode, setMode, assets, selectedSide, onSelect, onLatest, visible, close }) {
   const ref = useRef(null), closeButton = useRef(null), title = useId();
   const history = useRobotTwinCaptureHistory(twin.readCaptureHistory, capture.runId || twin.monitor?.task?.id, visible);
@@ -160,9 +208,9 @@ function CaptureDialog({ twin, capture, mode, setMode, assets, selectedSide, onS
       <CompletedResults history={history} monitor={twin.monitor} capture={capture} selectedSide={selectedSide} onSelect={onSelect} />
       <div className="robot-twin-capture-dialog__viewer">
         <div className="robot-twin-capture-dialog__toolbar"><ViewButtons mode={mode} setMode={setMode} />
-          {onLatest && <button type="button" className="robot-twin-capture__latest" onClick={onLatest}><RefreshCw size={12} />回到最新</button>}
-          <span>{[capture.taskName, capture.parkingName, capture.pointName].filter(Boolean).join(' / ')}</span></div>
+          {onLatest && <button type="button" className="robot-twin-capture__latest" onClick={onLatest}><RefreshCw size={12} />回到最新</button>}</div>
         <CaptureViews capture={capture} mode={mode} assets={assets} selectedSide={selectedSide} />
+        <CaptureTaskInfo twin={twin} capture={capture} selectedSide={selectedSide} />
       </div>
     </div>
   </dialog>, document.body);

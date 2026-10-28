@@ -158,6 +158,9 @@ coverage/
 playwright-report/
 blob-report/
 test-results/
+# Display-sync, capture-task details and view-preset reviews use
+# test-artifacts/{work-sync-display,capture-task-info,view-presets}/.
+# Screenshots, exported projects and temporary review runners stay local.
 /test-artifacts/
 /screenshots/
 /test-downloads/
@@ -919,6 +922,15 @@ playwright/.auth/
 /tests/atlas-independent-test-*/
 /atlas-independent-test-*.[zZ][iI][pP]
 /tests/atlas-independent-test-*.[zZ][iI][pP]
+# Offline-sync diagnostic bundles can contain browser state, project resources
+# and session headers. Keep standalone copies at root/tests out of Git while
+# preserving work_sync_* regression runners and nested fixtures.
+/atlas-work-sync-*/
+/tests/atlas-work-sync-*/
+/atlas-work-sync-*.[zZ][iI][pP]
+/tests/atlas-work-sync-*.[zZ][iI][pP]
+/atlas-work-sync-*.[hH][aA][rR]
+/tests/atlas-work-sync-*.[hH][aA][rR]
 # Browser-state snapshots contain complete local teaching results.
 /atlas-work-sync-*.json
 /tests/atlas-work-sync-*.json

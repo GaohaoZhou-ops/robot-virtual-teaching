@@ -178,7 +178,7 @@ import {
 } from './lib/sessionStore.js';
 import { linkedWorkspaceRelation, prepareLinkedProjectImport } from './lib/linkedProject.js';
 import { prepareWorkspaceCollectionImport } from './lib/projectWorkspaceCollection.js';
-import { placedObjectLayers, recoverPlacedObjectLayers } from './lib/placedObjectRendering.js';
+import { placedObjectLayers, recoverPlacedObjectLayers, validatePlacedObjectLayers } from './lib/placedObjectRendering.js';
 import {
   clearProjectDirectoryBinding,
   loadProjectDirectoryBinding,
@@ -420,10 +420,13 @@ function createGeometryCache(
     ? sourceIndex
     : sourceIndex?.length ? Uint32Array.from(sourceIndex) : null;
   const sphere = geometry.boundingSphere;
+  const geometryLayers = validatePlacedObjectLayers({ pointCount: positionAttribute.count, sourceHash },
+    sourceDetails.geometryLayers || geometry.userData.geometryLayers);
   return {
     geometryCacheVersion: GEOMETRY_CACHE_VERSION,
     byteLength: Number(sourceByteLength) || positions.byteLength + (colors?.byteLength || 0),
     pointCount: positionAttribute.count,
+    ...(geometryLayers ? { geometryLayers } : {}),
     positionBuffer: exactArrayBuffer(positions),
     colorBuffer: colors ? exactArrayBuffer(colors) : null,
     indexBuffer: meshIndices ? exactArrayBuffer(meshIndices) : null,
@@ -497,6 +500,8 @@ function restoreGeometryFromCache(record) {
     geometry.computeBoundingSphere();
   }
   geometry.userData.geometrySource = 'session-cache';
+  const geometryLayers = validatePlacedObjectLayers(record, record.geometryLayers);
+  if (geometryLayers) geometry.userData.geometryLayers = geometryLayers;
   return geometry;
 }
 
@@ -6594,7 +6599,8 @@ export default function App() {
     readDocument: () => syncDocument(normalizeProject(syncPayload())),
     applyDocument: (document) => {
       const current = latestWorkspaceRef.current;
-      const next = Object.fromEntries(Object.entries(document)
+      const { displaySettings, ...sharedDocument } = document;
+      const next = Object.fromEntries(Object.entries(sharedDocument)
         .map(([key, value]) => [key, retainSyncReferences(current[key], value)]));
       const temporaryPoints = current.waypoints.filter((point) => point.source === TEMPORARY_MAP_ROUTE_SOURCE);
       if (temporaryPoints.length) {
@@ -6605,10 +6611,22 @@ export default function App() {
           (edge.source === TEMPORARY_MAP_ROUTE_SOURCE || temporaryIds.has(edge.from) || temporaryIds.has(edge.to))
           && ids.has(edge.from) && ids.has(edge.to))];
       }
-      latestWorkspaceRef.current = { ...current, ...next };
+      latestWorkspaceRef.current = { ...current, ...next, ...displaySettings };
       setWaypoints(next.waypoints); setEdges(next.edges); setAbxRoutes(next.abxRoutes);
       setTeachingTasks(next.teachingTasks); setJointPoses(next.jointPoses);
       setIndependentTeachingName(next.independentTeachingName);
+      if (displaySettings) {
+        setPointColorMode(displaySettings.pointColorMode);
+        setPlacedObjectColorMode(displaySettings.placedObjectColorMode);
+        setMeshRenderQuality(displaySettings.meshRenderQuality);
+        setShowPaths3D(displaySettings.showPaths3D);
+        setAnnotationsOnTop3D(displaySettings.annotationsOnTop3D);
+        setShowParkingPoints3D(displaySettings.showParkingPoints3D);
+        setShowWaypoints3D(displaySettings.showWaypoints3D);
+        setShowWaypointNames3D(displaySettings.showWaypointNames3D);
+        setShowPathNames3D(displaySettings.showPathNames3D);
+        setShowHeightLegend3D(displaySettings.showHeightLegend3D);
+      }
       // Each operator keeps their own selection, unless that entity was deleted.
       setSelectedWaypointId((id) => next.waypoints.some((point) => point.id === id) ? id : null);
       setSelectedEdgeId((id) => next.edges.some((edge) => edge.id === id) ? id : null);
@@ -6621,12 +6639,13 @@ export default function App() {
       if (!current.mapData?.geometry || workspaceSwitchingRef.current || loadState.loading) throw new Error('请先完成当前工程加载');
       const localIdentity = syncIdentity();
       const payload = syncPayload();
-      // Only the active workspace is shared. A binding to the host's other
-      // local workspace would otherwise leave the peer unable to save its ZIP.
+      // Only the active workspace is shared. Keep its display groups in the
+      // geometry resource, independently of the host's local workspace binding.
       payload.workspace.transfer = null;
       const document = syncDocument(normalizeProject(payload));
       const map = current.mapData;
       const mapResource = createGeometryCache(map.geometry, map.bounds, map.byteLength, map.sourceHash, map.sourceHashKind, {
+        geometryLayers: placedObjectLayers(map, current.workspaceTransfer),
         fileModifiedAt: map.fileModifiedAt, mimeType: map.mimeType, loadedAt: map.loadedAt,
         sourceKind: map.sourceKind, sourceBlob: map.sourceBlob, teachingSpaceMode: current.teachingSpaceMode,
         teachingGroupId: map.teachingGroupId,

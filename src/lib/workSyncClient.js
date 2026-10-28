@@ -1,6 +1,9 @@
 import { applySyncOperations, diffSyncDocument, rebaseSyncDocument, WORK_SYNC_INTERVAL } from './workSyncDocument.js';
 
 const PREFIX = '/__atlas/work-sync';
+// Older checkpoints predate portable map/object display groups. Refresh their
+// geometry once, while merging the peer's offline teaching edits as before.
+const RESOURCE_VERSION = 1;
 
 // One client per browser tab. The adapter is intentionally independent of React
 // so delayed replies, lease expiry and retries can be exercised without a UI.
@@ -155,7 +158,8 @@ export class WorkSyncClient {
     this.updateActivity();
   }
   async checkpoint(context) {
-    await this.adapter.saveCheckpoint?.({ projectKey: context.projectKey, localIdentity: context.localIdentity, document: context.base });
+    await this.adapter.saveCheckpoint?.({ projectKey: context.projectKey, localIdentity: context.localIdentity,
+      resourceVersion: RESOURCE_VERSION, document: context.base });
   }
   async disconnect(message = '连接已断开，本地结果已保留') {
     const link = this.state.link;
@@ -236,19 +240,29 @@ export class WorkSyncClient {
     if (!this.valid(epoch)) return;
     const previous = await this.adapter.loadCheckpoint?.(link.project.key);
     if (!this.valid(epoch)) return;
-    if (previous?.projectKey === link.project.key && previous.localIdentity === this.adapter.identity()) {
+    const canResume = previous?.projectKey === link.project.key && previous.localIdentity === this.adapter.identity();
+    const resumeDocument = () => {
+      const current = this.adapter.readDocument();
+      // Settings first introduced by this release have no old shared baseline;
+      // don't treat the peer's restored defaults as unsynchronized edits.
+      const baseline = !previous.document.displaySettings && current.displaySettings
+        ? { ...previous.document, displaySettings: current.displaySettings } : previous.document;
+      return rebaseSyncDocument(initial.document, baseline, current);
+    };
+    if (canResume && previous.resourceVersion === RESOURCE_VERSION) {
       void this.reportTransfer(link, epoch, { phase: '合并本地工程与协作结果', progress: 0.9 });
-      const merged = rebaseSyncDocument(initial.document, previous.document, this.adapter.readDocument());
-      this.adapter.applyDocument(merged);
+      this.adapter.applyDocument(resumeDocument());
     } else {
       const bytes = await this.api(`/links/${link.id}/bundle`, { method: 'GET', download: true,
         onProgress: (loaded, total) => { void this.reportTransfer(link, epoch, { phase: '接收工程包',
           progress: 0.5 + (total ? Math.min(1, loaded / total) : 0) * 0.25,
           detail: `${(loaded / 1048576).toFixed(1)}${total ? ` / ${(total / 1048576).toFixed(1)}` : ''} MB` }); } });
       if (!this.valid(epoch) || link.expiresAt <= Date.now()) return;
+      const merged = canResume ? resumeDocument() : null;
       await this.adapter.installInitial(bytes, link.project, () => this.valid(epoch) && link.expiresAt > Date.now(),
         (value) => { void this.reportTransfer(link, epoch, { ...value, progress: 0.75 + Math.min(1, Number(value.progress) || 0) * 0.23 }); });
       if (!this.valid(epoch)) return;
+      if (merged) this.adapter.applyDocument(merged);
     }
     this.context = { id: link.id, projectKey: link.project.key, localIdentity: this.adapter.identity(),
       base: initial.document, revision: 0, sequence: 0, flight: null };

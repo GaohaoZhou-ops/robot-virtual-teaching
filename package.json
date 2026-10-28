@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:work-sync": "node tests/work_sync_smoke.mjs",
+    "test:work-sync": "node tests/work_sync_smoke.mjs && node tests/work_sync_display_smoke.mjs",
     "test:robot-twin": "node tests/robot_twin_smoke.mjs && node tests/robot_twin_fleet_smoke.mjs && node tests/robot_twin_appearance_smoke.mjs",
     "test:fake-robot": "node tests/fake_robot_smoke.mjs",
     "test:connectivity": "node tests/graph_connectivity_smoke.mjs",

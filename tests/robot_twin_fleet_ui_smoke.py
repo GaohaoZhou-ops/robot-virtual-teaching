@@ -60,6 +60,16 @@ def status(index):
 def requests(index):
     return {key: count for key, count in status(index)['requests'].items() if '/api/' in key}
 
+VIEW_KEYS = ['cameraX', 'cameraY', 'cameraZ', 'targetX', 'targetY', 'targetZ',
+             'cameraUpX', 'cameraUpY', 'cameraUpZ', 'opticalZoom', 'precisionPanX', 'precisionPanY']
+def camera_view(canvas):
+    return canvas.evaluate('(canvas, keys) => keys.map(key => Number(canvas.dataset[key]))', VIEW_KEYS)
+def expect_view(page, view):
+    page.wait_for_function('''([keys, expected]) => {
+      const data = document.querySelector('.three-canvas').dataset;
+      return keys.every((key, i) => Math.abs(Number(data[key]) - expected[i]) < 1e-6);
+    }''', arg=[VIEW_KEYS, view])
+
 try:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, executable_path=os.environ.get(
@@ -70,9 +80,14 @@ try:
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.add_init_script('localStorage.setItem("atlas-route-studio:robot-twin-profiles-v1", ' +
                              json.dumps(json.dumps({'version': 1, 'profiles': profiles, 'selectedIds': []})) + ');')
+        held_connections = []
+        hold_connections = True
         def safe_connect(route):
             assert route.request.post_data_json['address'] in addresses, 'Only connect to these two local fixtures'
-            route.continue_()
+            if hold_connections:
+                held_connections.append(route)
+            else:
+                route.continue_()
         page.route('**/__atlas/robot-twin/sessions', safe_connect)
         try:
             page.goto(BASE + '/workbench', wait_until='networkidle')
@@ -84,6 +99,8 @@ try:
             canvas = page.locator('.three-canvas')
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
             offline = [canvas.get_attribute(f'data-robot-{key}') for key in ['x', 'y', 'z', 'yaw']]
+            offline_view = camera_view(canvas)
+            offline_signature = canvas.get_attribute('data-view-signature')
             page.get_by_role('button', name='同步作业', exact=True).click()
             page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
             dialog = page.get_by_role('dialog', name='真机孪生', exact=True)
@@ -93,6 +110,14 @@ try:
             dialog.get_by_label('2 号机器人 · 管理员密码', exact=True).fill('incorrect')
             page.screenshot(path=str(ARTIFACTS / 'multi-selection.png'))
             dialog.get_by_role('button', name='连接并同步', exact=True).click()
+            expect(dialog.get_by_role('checkbox').first).to_be_disabled()
+            assert dialog.get_by_role('checkbox').evaluate_all(
+                '(inputs) => inputs.every(input => getComputedStyle(input).opacity === "0")'), 'disabled native checkboxes must remain invisible'
+            expect(dialog.locator('.robot-twin-success')).to_have_count(0)
+            page.screenshot(path=str(ARTIFACTS / 'connecting-cards.png'))
+            hold_connections = False
+            for connection in held_connections:
+                connection.continue_()
             expect(dialog.get_by_role('alert')).to_contain_text('密码')
             expect(dialog).to_be_visible()
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 1')
@@ -100,6 +125,7 @@ try:
             dialog.get_by_label('2 号机器人 · 管理员密码', exact=True).fill('admin-1')
             dialog.get_by_role('button', name='重试并同步所选机器人', exact=True).click()
             expect(dialog.locator('.robot-twin-success')).to_be_visible()
+            assert dialog.locator('.robot-twin-success__check').evaluate('(el) => el.getAnimations().length') > 0
             expect(dialog).not_to_be_visible(timeout=4000)
             assert requests(0)['POST /api/v1/access/login'] == login_a
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
@@ -153,16 +179,27 @@ try:
             expect(monitor).to_have_attribute('data-monitor-phase', 'live')
             assert len(json.loads(canvas.get_attribute('data-twin-robots'))) == 2
             command({'down': False})
+            assert any(abs(a-b) > .01 for a, b in zip(camera_view(canvas), offline_view)), 'fleet observation changes the live camera'
+            assert canvas.get_attribute('data-view-signature') == offline_signature, 'twin navigation must not replace the saved offline view'
             page.screenshot(path=str(ARTIFACTS / 'monitor-switch.png'))
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect(monitor).to_have_count(0)
             expect(canvas).to_have_attribute('data-twin-robots', '[]')
+            expect_view(page, offline_view)
             assert [canvas.get_attribute(f'data-robot-{key}') for key in ['x', 'y', 'z', 'yaw']] == offline
             expect(page.locator('.robot-twin-scene-label')).to_have_count(0)
             page.wait_for_timeout(700)
             before = [requests(0), requests(1)]
             page.wait_for_timeout(1600)
             assert [requests(0), requests(1)] == before, 'all polling must stop'
+            # A new session must capture the newly edited offline view, not the
+            # first session's camera. Stop while following this time.
+            canvas.press('ArrowUp')
+            page.wait_for_function('''original => {
+              const d = document.querySelector('.three-canvas').dataset;
+              return Math.abs(Number(d.cameraZ) - original[2]) > .001;
+            }''', arg=offline_view)
+            second_view = camera_view(canvas)
             # Remembered credentials work for the whole selection without auto-connecting on a card click.
             page.get_by_role('button', name='同步作业', exact=True).click()
             page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
@@ -172,7 +209,16 @@ try:
             expect(dialog.locator('.robot-twin-success')).to_be_visible()
             expect(dialog).not_to_be_visible(timeout=4000)
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
+            follow = page.get_by_role('button', name='机器人后上方跟随视角', exact=True)
+            follow.click()
+            expect(follow).to_have_attribute('aria-pressed', 'true')
             page.get_by_role('button', name='停止同步', exact=True).click()
+            expect_view(page, second_view)
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
+            # Normal workspace persistence must also keep the restored view.
+            page.reload(wait_until='networkidle')
+            expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
+            expect_view(page, second_view)
             assert not errors, errors
             for index in [0, 1]:
                 assert all(key.startswith('GET ') or key in ['POST /api/v1/access/login', 'POST /api/v1/body-cameras/preview', 'POST /api/v1/body-cameras/frame'] for key in requests(index))

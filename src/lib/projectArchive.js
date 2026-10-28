@@ -4,6 +4,7 @@ import { buildAbxTeachingExport } from './abxTeachingExport.js';
 import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { LINKED_WORKSPACE_MODES, validateLinkedWorkspaces } from './linkedProject.js';
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
+import { validatePlacedObjectLayers } from './placedObjectRendering.js';
 
 export const PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-project';
 export const LINKED_PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-linked-project';
@@ -638,6 +639,8 @@ const addEnvironmentResource = async (entries, mapResource, projectMap) => {
     geometry: {
       geometryCacheVersion: Number(mapResource.geometryCacheVersion) || 1,
       pointCount,
+      ...(validatePlacedObjectLayers(mapResource, mapResource.geometryLayers)
+        ? { layers: mapResource.geometryLayers } : {}),
       faceCount: indexBytes ? indexBytes.byteLength / indexStride / 3 : 0,
       bounds: mapResource.bounds || projectMap?.bounds || null,
       sphere: mapResource.sphere || null,
@@ -1252,11 +1255,13 @@ const hydrateEnvironmentResource = (project, files, manifest) => {
     && sourceHash
     && String(manifest.identities.map.sourceHash) !== String(sourceHash)
   ) throw new Error('manifest 绑定的地图与归档地图不匹配');
+  const geometryLayers = validatePlacedObjectLayers({ pointCount, sourceHash }, geometry.layers);
   return {
     geometryCacheVersion: 1,
     name: String(metadata.name || project.map?.fileName || 'portable-map.ply'),
     byteLength: Math.max(0, Number(metadata.original?.byteLength) || positionBytes.byteLength),
     pointCount,
+    ...(geometryLayers ? { geometryLayers } : {}),
     faceCount: indexBytes ? indexBytes.byteLength / indexStride / 3 : 0,
     positionBuffer: exactArrayBuffer(positionBytes),
     colorBuffer: colorBytes ? exactArrayBuffer(colorBytes) : null,
