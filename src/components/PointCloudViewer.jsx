@@ -45,6 +45,7 @@ import RobotCoordinateSettings from './RobotCoordinateSettings.jsx';
 import TeachingSurfaceCoverage from './TeachingSurfaceCoverage.jsx';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
+import { createViewportTouchNavigation } from '../lib/viewportTouchNavigation.js';
 import { applyScreenViewportGesture } from '../lib/ipadScreenViewport.js';
 import { createIndependentGround, viewportDistanceScale } from '../lib/viewportReference.js';
 import { createRobotTwinFollowCamera } from '../lib/robotTwinFollowCamera.js';
@@ -4705,6 +4706,16 @@ export default function PointCloudViewer({
       }
     };
 
+    const disposeTouchNavigation = createViewportTouchNavigation({ controls, navigation,
+      onStart: () => {
+        finishChassisPointerDrag(null, 'touch-navigation');
+        if (transformControls.dragging) { transformControls.reset(); transformControls.pointerUp({ button: 0 }); }
+        cancelPointerGesture(null, 'touch-navigation'); controls.enabled = true; claimKeyboardFocus('touch');
+      },
+      onChange: () => { syncDetailView(); reportCameraView(); },
+      onCancel: () => { finishChassisPointerDrag(null, 'touch-cancelled'); cancelPointerGesture(null, 'touch-cancelled'); },
+      onEnd: () => reportCameraView(true),
+    });
     renderer.domElement.addEventListener('pointerdown', onPickPointerDown, true);
     renderer.domElement.addEventListener('pointermove', onPickPointerMove, true);
     renderer.domElement.addEventListener('pointerup', onPickPointerUp, true);
@@ -5713,6 +5724,7 @@ export default function PointCloudViewer({
       }
       pendingWheelArbitration = null;
       updateChassisDragMode(false, 'scene-dispose');
+      disposeTouchNavigation();
       observer.disconnect();
       renderer.domElement.removeEventListener('wheel', progressiveWheelZoom, true);
       renderer.domElement.removeEventListener('pointerdown', onPickPointerDown, true);

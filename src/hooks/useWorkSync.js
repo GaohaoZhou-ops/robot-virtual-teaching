@@ -10,7 +10,7 @@ export function useWorkSync(adapter, projectRevision) {
     const bridge = new Proxy({}, { get: (_, key) => typeof current.current[key] === 'function'
       ? (...args) => current.current[key](...args) : current.current[key] });
     const instance = new WorkSyncClient({ adapter: bridge, onChange: setState,
-      ...(isVisionWorkbench() ? { openSocket: null, pollPending: true } : {}) });
+      ...(isVisionWorkbench() ? { openSocket: null } : {}) });
     client.current = instance; instance.start();
     const leave = () => instance.stop();
     const resume = (event) => { if (event.persisted) instance.start(); };

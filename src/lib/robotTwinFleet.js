@@ -45,8 +45,8 @@ export class RobotTwinFleet {
         if (current() && epoch === this.cameraEpoch) await client.cameraClient.start();
       },
       stopCamera: (message) => { if (current()) ++this.cameraEpoch; return client.cameraClient.stop(message); },
-      readCapture: (id, side, kind, signal) => client.api(`/captures/${id}/${side}/${kind}`,
-        { binary: true, timeoutMs: 65_000, signal }),
+      captureCache: client.captureCache,
+      readCapture: (id, side, kind, signal) => client.captureCache.read(id, side, kind, signal),
       readCaptureHistory: (runId, offset, signal) => client.api(`/capture-history/${runId}/${offset}`,
         { timeoutMs: 30_000, signal }),
     };

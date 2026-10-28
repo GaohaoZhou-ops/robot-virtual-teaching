@@ -17,6 +17,7 @@
 | 另存为 / 导出后在新浏览器恢复机器人卡片、端口及勾选状态 | `BASE_URL=http://127.0.0.1:22070 uv run --with playwright python tests/robot_twin_project_ui_smoke.py`（先启动独立 Vite 开发服务；测试不会连接机器人） |
 | 连续运动、跟随相机同步、显示延迟、相机后台解码与弱网布局稳定 | `BASE_URL=http://127.0.0.1:22067 uv run --with playwright python tests/robot_twin_smoothing_ui_smoke.py`（独立 Vite 开发服务；测试自行启动本地模拟机器人） |
 | 离线协作授权、增量合并、旧缓存升级及显示配置归档 | `npm run test:work-sync` |
+| 一次申请自动传输、打包进度、重复申请防护与通知通道不可用时恢复 | `uv run --with playwright python tests/work_sync_approval_ui_smoke.py`（先启动独立 Vite 开发服务，通过 `BASE_URL` 指定地址） |
 | 两端地图 / 独立对象颜色、实时显示设置、刷新导出与旧缓存修复 | `BASE_URL=http://127.0.0.1:22063 uv run --with playwright python tests/work_sync_display_ui_smoke.py`（先在该端口启动独立 Vite 开发服务） |
 | Vision Pro 原生坐标、网络与工程往返 | `npm run test:vision`（macOS） |
 | visionOS 构建与模拟器流程 | `./scripts/check-vision.sh --ui`（macOS + Xcode） |
@@ -51,6 +52,7 @@
 | 模型编辑鼠标旋转 / 平移 / 缩放、显示质量与完整导出 | `uv run --with playwright python tests/model_editor_viewport_ui_smoke.py`（先启动服务） |
 | 单 / 双模型切换移动、旋转、浏览模式保留视角与高倍缩放 | `uv run --with playwright python tests/model_editor_mode_view_ui_smoke.py`（先启动服务） |
 | 三页旋转灵敏度、平移方向、Shift 切换与深度缩放一致性 | `uv run --with playwright python tests/viewport_navigation_ui_smoke.py`（先启动服务） |
+| 三页触屏双指缩放 / 平移、手指增减、取消及高倍缩放 | `uv run --with playwright python tests/viewport_touch_ui_smoke.py`（先启动服务；Chrome 触屏模拟） |
 | 模型原点三维移动 / 旋转、数值双向同步、取消与导出一致性 | `uv run --with playwright python tests/model_editor_origin_gizmo_ui_smoke.py`（先启动服务） |
 | 模型编辑 Esc 退出、Ctrl / Cmd + Z 撤销、参数分组与导出一致性 | `uv run --with playwright python tests/model_editor_shortcuts_ui_smoke.py`（先启动服务） |
 | 示教回放顺序与首姿态恢复 | `npm run test:playback` |

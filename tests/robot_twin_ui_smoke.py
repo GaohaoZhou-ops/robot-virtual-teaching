@@ -79,10 +79,13 @@ class RobotFixture(BaseHTTPRequestHandler):
                 'message': '正在采集检测图像', 'completed_points': 2, 'completed_captures': fixture['captures'], 'elapsed_ms': 125000,
                 'algorithm_mode': 'execute', 'algorithm_state': 'processing',
                 'summary': {'point_count': 4, 'tasks': [{'name': fixture['task_name'], 'point_count': 4}]}}}
-        elif self.path == f"/api/v1/execution/captures?run_id={fixture['run_id']}&offset=0":
-            payload = {'ok': True, 'run_id': fixture['run_id'], 'total': fixture['captures'], 'next_offset': fixture['captures'],
+        elif re.fullmatch(r'/api/v1/execution/captures\?run_id=[a-f0-9]{32}&offset=\d+', self.path):
+            offset = int(self.path.rsplit('=', 1)[1])
+            requested_run = parse_qs(self.path.split('?', 1)[1])['run_id'][0]
+            count = fixture['captures'] if requested_run == fixture['run_id'] else 1
+            payload = {'ok': True, 'run_id': requested_run, 'total': count, 'next_offset': count,
                 'captures': [{'id': 'e' * 32, 'side': 'left', 'sequence': 1, 'task_name': fixture['task_name'],
-                              'parking_name': '一号停车点', 'point_name': '焊缝检测'}] if fixture['captures'] else []}
+                              'parking_name': '一号停车点', 'point_name': '焊缝检测'}] if count and offset == 0 else []}
         elif self.path == '/api/v1/cameras/jobs/' + 'e' * 32:
             payload = {'job': {'state': 'complete', 'cameras': {'left': {'inspection': {'state': 'processing'} if fixture['processing']
                 else {'state': 'complete', 'boxes': [{'label': '表面裂纹', 'x': 20, 'y': 40, 'width': 80, 'height': 10}]}}}}}
@@ -481,6 +484,8 @@ try:
                 fixture.update(run_id='c' * 32, task_name='下一站任务', captures=0, task_phase='running')
                 expect(monitor.locator('.task-monitor__task-name')).to_have_text('下一站任务')
                 expect(monitor.locator('.task-monitor__result')).to_have_count(0)
+                expect(monitor.get_by_role('region', name='Zivid 采集结果', exact=True)).to_have_attribute('data-capture-mode', 'selected')
+                monitor.get_by_role('button', name='回到最新', exact=True).click()
                 expect(monitor).to_contain_text('暂无算法结果')
                 expect(monitor.get_by_role('button', name='回到最新', exact=True)).to_have_count(0)
                 fixture['task_phase'] = 'idle'
@@ -674,5 +679,5 @@ finally:
         backup_server.shutdown()
         assert all((method == 'POST' and path in ['/api/v1/access/login', '/api/v1/body-cameras/preview', '/api/v1/body-cameras/frame']) or
             (method == 'GET' and (path in ['/api/v1/control-session', '/api/v1/slam', '/api/v1/state', '/api/v1/model', '/api/v1/execution', '/api/v1/execution/activity', '/api/v1/body-cameras']
-            or re.fullmatch(r'/api/v1/execution/captures\?run_id=[a-f0-9]{32}&offset=0', path)
+            or re.fullmatch(r'/api/v1/execution/captures\?run_id=[a-f0-9]{32}&offset=\d+', path)
             or path == '/api/v1/cameras/jobs/' + 'e' * 32)) for method, path in traffic), traffic

@@ -139,8 +139,8 @@ export function createRobotTaskMonitor(read) {
   };
 }
 
-// The enlarged viewer reads the complete index on demand. Keep ordinary task
-// polling small, and fetch metadata only (never images, captures or commands).
+// The connection's background photo cache pages through the complete index.
+// Keep ordinary task polling small; this endpoint fetches metadata only.
 export function createRobotCaptureHistory(read) {
   let currentRun, jobs = new Map();
   return async (runId, offset, signal) => {

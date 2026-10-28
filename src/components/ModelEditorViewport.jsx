@@ -4,6 +4,7 @@ import { TrackballControls } from 'three/examples/jsm/controls/TrackballControls
 import { Focus, Grid3X3, Box } from 'lucide-react';
 import { MODEL_EDITOR_DISPLAY_QUALITIES } from '../lib/modelEditorDisplay.js';
 import { configureViewportTrackball, createViewportNavigation, VIEWPORT_DRAG_THRESHOLD, VIEWPORT_FOV, viewportWheelDelta } from '../lib/viewportNavigation.js';
+import { createViewportTouchNavigation } from '../lib/viewportTouchNavigation.js';
 import ViewportInteractionModeButton from './ViewportInteractionModeButton.jsx';
 import { createModelOriginGizmo } from '../lib/modelOriginGizmo.js';
 import { createModelCropGizmo } from '../lib/modelCropGizmo.js';
@@ -433,6 +434,11 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     };
     const startInteraction = () => { setView('custom'); invalidate(); };
     syncInteractionMode();
+    const disposeTouchNavigation = createViewportTouchNavigation({ controls, navigation,
+      onStart: () => { cropGizmo.finish(true); originGizmo.finish(true); cancelGesture('touch-navigation'); claimFocus(); },
+      onCancel: () => { cropGizmo.finish(true); originGizmo.finish(true); cancelGesture('touch-cancelled'); },
+      onChange: startInteraction, onEnd: invalidate,
+    });
     canvas.addEventListener('pointerdown', pointerDown, true);
     canvas.addEventListener('pointermove', pointerMove, true);
     canvas.addEventListener('pointerup', pointerUp, true);
@@ -455,6 +461,7 @@ export default function ModelEditorViewport({ fileName, preview, originalPreview
     sceneRef.current = { sync, fit, syncInteractionMode }; resize(); sync();
     return () => {
       disposed = true; cancelAnimationFrame(frame); observer.disconnect();
+      disposeTouchNavigation();
       originGizmo.dispose();
       cropGizmo.dispose();
       cancelGesture();

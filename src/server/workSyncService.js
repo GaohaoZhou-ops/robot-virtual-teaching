@@ -82,7 +82,7 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
     requests: client === host ? [...requests.values()].map(({ peerToken, ...request }) => request) : [],
     pending: [...requests.values()].some((request) => request.peerToken === client.token),
     link: link && (client === host || client.token === link.peerToken)
-      ? { id: link.id, project: link.project, expiresAt: link.expiresAt, ready: Boolean(link.bundle), transfer: link.transfer,
+      ? { id: link.id, project: link.project, expiresAt: link.expiresAt, ready: Boolean(link.bundle && link.initialDocument), transfer: link.transfer,
         peerName: clients.get(link.peerToken)?.name || '另一台设备' } : null,
   });
   const updateProject = (client, project) => {
@@ -152,6 +152,10 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
       if (req.method === 'POST' && route === '/requests') {
         if (!host?.project || client === host) fail(409, '请在另一台设备上申请同步当前主机工程');
         if (link && link.peerToken !== client.token) fail(409, '主机正在与另一台设备同步');
+        if (link && !link.transfer.complete) { reply(res, 200, status(client)); return; }
+        if ([...requests.values()].some((request) => request.peerToken === client.token && request.projectKey === host.project.key)) {
+          reply(res, 201, status(client)); return;
+        }
         for (const [id, request] of requests) if (request.peerToken === client.token) requests.delete(id);
         const request = { id: randomUUID(), peerToken: client.token, name: client.name, ip: client.ip,
           projectKey: host.project.key, createdAt: now(), expiresAt: now() + WORK_SYNC_LEASE, renewal: Boolean(link) };
@@ -170,11 +174,12 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
           link.expiresAt = now() + leaseMs; requests.delete(request.id);
         } else {
           if (link) fail(409, '已有同步连接，请先断开');
-          validateSyncDocument(data.document);
+          const preparing = data.preparing === true;
+          if (!preparing) validateSyncDocument(data.document);
           link = { id: randomUUID(), peerToken: request.peerToken, project: { ...host.project }, expiresAt: now() + leaseMs,
-            document: structuredClone(data.document), initialDocument: structuredClone(data.document), revision: 0,
+            document: preparing ? null : structuredClone(data.document), initialDocument: preparing ? null : structuredClone(data.document), revision: 0,
             history: [], sequences: new Map(), bundle: null,
-            transfer: { phase: '上传工程包', progress: 0.25, complete: false } };
+            transfer: { phase: preparing ? '主机已同意，正在准备工程资源' : '上传工程包', progress: preparing ? 0 : 0.25, complete: false } };
           requests.clear();
         }
         statusVersion += 1;
@@ -189,6 +194,7 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
       }
       if (req.method === 'PUT' && action === 'bundle') {
         if (client !== host) fail(403, '仅主机可以提供初始工程');
+        if (!link.initialDocument) fail(409, '主机正在准备工程信息');
         let reportedAt = 0;
         const bytes = await body(req, true, (loaded, total) => {
           if (link?.id !== id || !total || now() - reportedAt < 200) return;
@@ -208,12 +214,23 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
         res.end(link.bundle); return;
       }
       if (req.method === 'GET' && action === 'bootstrap') {
+        if (!link.initialDocument) fail(409, '主机正在准备工程信息');
         reply(res, 200, { ...status(client), document: link.initialDocument, revision: 0 }); return;
+      }
+      if (req.method === 'PUT' && action === 'bootstrap') {
+        if (client !== host) fail(403, '仅主机可以提供初始工程');
+        const data = await body(req), current = authorized(client, id);
+        if (current.bundle || current.sequences.size) fail(409, '初始工程已开始传输');
+        validateSyncDocument(data.document);
+        current.document = structuredClone(data.document); current.initialDocument = structuredClone(data.document);
+        current.transfer = { phase: '上传工程包', progress: 0.25, complete: false };
+        statusVersion += 1; reply(res, 200, status(client)); return;
       }
       if (req.method === 'POST' && action === 'progress') {
         const data = await body(req), current = authorized(client, id);
-        if (client === host || !current.bundle) fail(403, '仅接收端可以报告工程恢复进度');
-        if (!Number.isFinite(data.progress) || data.progress < 0.5 || data.progress > 1
+        const preparing = client === host && !current.bundle;
+        if (client === host ? !preparing || data.progress > 0.25 : !current.bundle) fail(403, '当前阶段不允许报告此进度');
+        if (!Number.isFinite(data.progress) || data.progress < (preparing ? 0 : 0.5) || data.progress > (preparing ? 0.25 : 1)
           || typeof data.phase !== 'string' || data.phase.length > 100) fail(400, '工程同步进度无效');
         // Completion is acknowledged after the peer has restored, exchanged
         // and saved its project; uploading the ZIP alone is not completion.
@@ -228,6 +245,7 @@ export function createWorkSyncService({ now = Date.now, isLocal = isLocalRequest
       if (req.method === 'POST' && action === 'exchange') {
         const data = await body(req);
         const current = authorized(client, id);
+        if (!current.initialDocument) fail(409, '主机正在准备工程信息');
         if (!Number.isSafeInteger(data.sequence) || data.sequence < 1 || !Number.isSafeInteger(data.since) || data.since < 0) fail(400, '同步序号无效');
         const previous = current.sequences.get(client.id) || 0;
         if (data.sequence > previous) {

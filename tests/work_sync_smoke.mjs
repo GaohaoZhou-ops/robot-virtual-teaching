@@ -75,7 +75,10 @@ try {
     await server.api('/requests', { token: peer.token, code: 201 });
     return (await server.api('/status', { token: host.token, data: { project } })).requests[0];
   };
-  const stale = await request(), pending = await request();
+  const stale = await request(), duplicate = await request();
+  assert.equal(stale.id, duplicate.id, 'repeated requests preserve the pending approval');
+  await server.api('/decision', { token: host.token, data: { requestId: stale.id, allow: false } });
+  const pending = await request();
   assert.notEqual(stale.id, pending.id);
   await server.api('/decision', { token: peer.token, data: { requestId: pending.id, allow: true, document: initial }, code: 403 });
   await server.api('/decision', { token: host.token, data: { requestId: stale.id, allow: true, document: initial }, code: 409 });
@@ -160,6 +163,33 @@ try {
     await peerClient.tick(); assert.equal(peerClient.state.error, '');
     assert.equal(peerClient.state.phase, 'connected');
   };
+  // Consent now precedes packaging: failures and cancellation must release
+  // that early link, and a late package must never revive a cancelled transfer.
+  const originalBuild = hostAdapter.buildInitial;
+  hostAdapter.buildInitial = async (progress) => {
+    progress({ phase: '打包测试资源', progress: 0.2 });
+    throw new Error('Fixture packaging failed');
+  };
+  await peerClient.requestAuthorization(); await hostClient.tick();
+  await hostClient.decide(hostClient.state.requests[0].id, true); await peerClient.tick();
+  assert.match(hostClient.state.error, /Fixture packaging failed/);
+  assert.equal(hostClient.state.link, null); assert.equal(peerClient.state.link, null);
+  assert.equal(hostClient.preparing, false); assert.equal(hostClient.state.deciding, false);
+  assert.equal(peerAdapter.state.installs, 0);
+  let releasePacking;
+  hostAdapter.buildInitial = async () => {
+    await new Promise((resolve) => { releasePacking = resolve; });
+    return originalBuild();
+  };
+  await peerClient.requestAuthorization(); await hostClient.tick();
+  const cancelledApproval = hostClient.decide(hostClient.state.requests[0].id, true);
+  await waitFor(() => releasePacking);
+  await peerClient.tick(); assert.ok(peerClient.state.link);
+  await peerClient.disconnect(); await hostClient.tick();
+  releasePacking(); await cancelledApproval;
+  assert.equal(hostClient.state.link, null); assert.equal(peerClient.state.link, null);
+  assert.equal(hostClient.preparing, false); assert.equal(peerAdapter.state.installs, 0);
+  hostAdapter.buildInitial = originalBuild;
   const originalPersist = peerAdapter.persist;
   let releaseSave, saving = false;
   peerAdapter.persist = async () => { saving = true; await new Promise((resolve) => { releaseSave = resolve; }); await originalPersist(); };
@@ -244,8 +274,8 @@ try {
 } finally { hostClient.stop(); peerClient.stop(); await live.close(); }
 console.log('work sync: per-parking merge, in-flight edits, authorization, expiry, renewal, retries, disconnect and offline resume passed');
 
-// Actual notification sockets: idle and pending clients have no periodic HTTP
-// traffic, while approval starts the real 3-second exchange and revocation stops it.
+// Idle clients remain quiet. Explicitly pending requests poll status as a
+// fallback for mobile notification failures, without creating another request.
 const pushed = await harness();
 const traffic = { host: [], peer: [] };
 const watch = (name, local) => (url, options) => {
@@ -278,14 +308,39 @@ try {
   await until(() => quietHost.state.requests.length === 1, 'request arrives without host polling');
   const pendingCounts = [traffic.host.length, traffic.peer.length];
   await delay(WORK_SYNC_INTERVAL + 100);
-  assert.deepEqual([traffic.host.length, traffic.peer.length], pendingCounts, 'pending approval has no polling');
+  assert.equal(traffic.host.length, pendingCounts[0], 'the idle host still listens passively');
+  assert.ok(traffic.peer.length > pendingCounts[1], 'pending approval has an HTTP status fallback');
+  assert.equal(traffic.peer.filter((path) => path.endsWith('/requests')).length, 1);
   await quietHost.decide(quietHost.state.requests[0].id, false);
   await until(() => !quietPeer.state.pending, 'denial is pushed');
   assert.equal(quietPeer.events, null);
   await quietPeer.requestAuthorization();
   await until(() => quietHost.state.requests.length === 1, 'another request is pushed');
-  await quietHost.decide(quietHost.state.requests[0].id, true);
-  await until(() => quietPeer.state.phase === 'connected', 'initial data arrives following authorization');
+  const build = quietHostAdapter.buildInitial;
+  let finishPacking, packing = false;
+  quietHostAdapter.buildInitial = async (progress) => {
+    packing = true; progress({ phase: '打包测试资源', progress: 0.5 });
+    await new Promise((resolve) => { finishPacking = resolve; });
+    return build();
+  };
+  // Simulate a socket that stays open but no longer delivers notifications.
+  quietPeer.events.onmessage = () => {};
+  const approving = quietHost.decide(quietHost.state.requests[0].id, true);
+  await until(() => packing, 'host starts packaging');
+  await until(() => quietPeer.state.link?.transfer.phase === '打包测试资源', 'peer sees packaging automatically through HTTP fallback');
+  assert.equal(quietPeer.state.phase, 'preparing');
+  assert.equal(quietPeer.state.link.ready, false);
+  assert.equal(quietPeer.state.progress.progress, 0.125);
+  const preparingLink = quietPeer.state.link.id;
+  await pushed.api(`/links/${preparingLink}/bootstrap`, { token: quietPeer.token, method: 'GET', code: 409 });
+  await pushed.api(`/links/${preparingLink}/bootstrap`, { token: quietPeer.token, method: 'PUT', data: { document: initial }, code: 403 });
+  const requested = traffic.peer.filter((path) => path.endsWith('/requests')).length;
+  await quietPeer.requestAuthorization();
+  assert.equal(traffic.peer.filter((path) => path.endsWith('/requests')).length, requested, 'retrying during transfer only reads status');
+  assert.equal((await pushed.api('/requests', { token: quietPeer.token })).link.id, preparingLink, 'legacy repeated clicks also reuse the transfer');
+  assert.equal(quietHost.state.requests.length, 0);
+  finishPacking(); await approving; quietHostAdapter.buildInitial = build;
+  await until(() => quietPeer.state.phase === 'connected', 'initial data arrives without another request', WORK_SYNC_INTERVAL * 2 + 1000);
   quietHostAdapter.state.document = edit(quietHostAdapter.state.document, 'left', 'automatic-host');
   quietPeerAdapter.state.document = edit(quietPeerAdapter.state.document, 'right', 'automatic-peer');
   await until(() => JSON.stringify(quietHostAdapter.state.document) === JSON.stringify(quietPeerAdapter.state.document),

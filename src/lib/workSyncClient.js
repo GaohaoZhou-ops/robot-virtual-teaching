@@ -8,14 +8,14 @@ const RESOURCE_VERSION = 1;
 // One client per browser tab. The adapter is intentionally independent of React
 // so delayed replies, lease expiry and retries can be exercised without a UI.
 export class WorkSyncClient {
-  constructor({ adapter, onChange = () => {}, request = globalThis.fetch.bind(globalThis), pollPending = false,
+  constructor({ adapter, onChange = () => {}, request = globalThis.fetch.bind(globalThis),
     openSocket = globalThis.location ? (path) => {
       const url = new URL(path, globalThis.location.href);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       return new WebSocket(url);
     } : null }) {
     this.adapter = adapter; this.onChange = onChange; this.request = request;
-    this.openSocket = openSocket; this.pollPending = pollPending; this.listenLocal = false; this.projectSignature = null;
+    this.openSocket = openSocket; this.listenLocal = false; this.projectSignature = null;
     this.token = null; this.context = null; this.epoch = 0; this.running = false; this.timer = null;
     this.working = false; this.preparing = false; this.controllers = new Set();
     this.blockedLinks = new Set(); this.disconnecting = false; this.statusVersion = -1;
@@ -28,7 +28,7 @@ export class WorkSyncClient {
   start() {
     if (this.running) return;
     this.running = true;
-    this.emit({ phase: 'starting', link: null, pending: false, requests: [], deciding: false, progress: null, error: '', reason: '', lastSync: null });
+    this.emit({ phase: 'starting', link: null, pending: false, requesting: false, requests: [], deciding: false, progress: null, error: '', reason: '', lastSync: null });
     const epoch = this.epoch;
     // Remote browsers only discover their role once. No registration, polling
     // or project reads occur until the user presses Synchronize.
@@ -47,7 +47,7 @@ export class WorkSyncClient {
     if (this.token) this.request(`${PREFIX}/leave`, { method: 'POST', keepalive: true,
       headers: { Authorization: `Bearer ${this.token}` } }).catch(() => {});
     this.token = null; this.context = null; this.statusVersion = -1;
-    this.working = false; this.preparing = false;
+    this.working = false; this.preparing = false; this.requesting = false;
   }
   closeEvents() {
     clearTimeout(this.reconnect);
@@ -55,13 +55,17 @@ export class WorkSyncClient {
     socket?.close();
   }
   updateActivity() {
-    const linked = this.running && !this.switching && (this.state.link?.expiresAt > Date.now() || (this.pollPending && this.state.pending));
+    // An explicit pending request needs HTTP recovery as well as notifications:
+    // mobile browsers/proxies can lose the socket without delivering a close.
+    const linked = this.running && !this.switching && (this.state.link?.expiresAt > Date.now() || this.state.pending);
     if (linked && !this.timer) this.timer = setInterval(() => this.tick(), WORK_SYNC_INTERVAL);
     if (!linked) { clearInterval(this.timer); this.timer = null; }
     const listening = this.running && (this.listenLocal || this.state.pending || linked);
     if (!listening) { this.closeEvents(); return; }
     if (!this.token || !this.openSocket || this.events) return;
-    const socket = this.openSocket(`${PREFIX}/events?token=${encodeURIComponent(this.token)}`);
+    let socket;
+    try { socket = this.openSocket(`${PREFIX}/events?token=${encodeURIComponent(this.token)}`); }
+    catch { return; } // Pending/linked HTTP polling still drives the transfer.
     this.events = socket;
     socket.onmessage = ({ data }) => {
       if (this.events !== socket || !this.running) return;
@@ -165,27 +169,32 @@ export class WorkSyncClient {
     const link = this.state.link;
     if (link) this.blockedLinks.add(link.id);
     this.disconnecting = true;
-    this.epoch += 1; this.context = null; this.preparing = false;
+    this.epoch += 1; this.context = null; this.preparing = false; this.requesting = false;
     clearTimeout(this.expiration);
     for (const controller of this.controllers) controller.abort();
-    this.emit({ link: null, pending: false, phase: 'idle', reason: message, error: '', requests: [], progress: null, deciding: false });
+    this.emit({ link: null, pending: false, requesting: false, phase: 'idle', reason: message, error: '', requests: [], progress: null, deciding: false });
     this.updateActivity();
     await Promise.allSettled([this.adapter.persist?.(), link ? this.api(`/links/${link.id}/disconnect`) : undefined]);
     this.disconnecting = false;
   }
   async requestAuthorization() {
     if (this.disconnecting) return;
-    await this.starting;
-    if (!this.token) { await this.tick(); if (!this.token) return; }
+    if (this.requesting) return;
+    if (this.state.pending || this.state.link && !this.state.link.transfer?.complete) { await this.tick(); return; }
+    this.requesting = true; this.emit({ requesting: true });
     const epoch = this.epoch;
     try {
+      await this.starting;
+      if (!this.valid(epoch)) return;
+      if (!this.token) { await this.tick(); if (!this.token || !this.valid(epoch)) return; }
       const result = await this.api('/requests');
       if (this.valid(epoch)) this.acceptStatus(result);
     } catch (error) { if (this.valid(epoch)) this.emit({ error: error.message }); }
+    finally { if (this.valid(epoch)) { this.requesting = false; this.emit({ requesting: false }); } }
   }
   async decide(requestId, allow) {
     if (this.preparing) return;
-    const epoch = this.epoch;
+    const epoch = this.epoch, existingLink = this.state.link;
     this.preparing = true; this.emit({ deciding: true, error: '' });
     try {
       if (!allow || this.state.link) {
@@ -193,15 +202,23 @@ export class WorkSyncClient {
         if (this.valid(epoch)) this.acceptStatus(result);
         return;
       }
-      this.emit({ progress: { phase: '准备工程资源', progress: 0 } });
+      // Acknowledge consent before doing expensive packaging. Both devices now
+      // share one stable link and can show progress without another request.
+      const approval = await this.api('/decision', { data: { requestId, allow: true, preparing: true } });
+      if (!this.valid(epoch)) return;
+      this.acceptStatus(approval);
+      const link = approval.link, identity = this.adapter.identity();
+      const current = () => this.valid(epoch) && this.state.link?.id === link.id;
       const initial = await this.adapter.buildInitial((value) => {
-        if (this.valid(epoch)) this.emit({ progress: { ...value,
-          progress: Math.max(this.state.progress?.progress || 0, Math.min(1, Number(value.progress) || 0) * 0.25) } });
+        if (current()) void this.reportTransfer(link, epoch, { ...value,
+          progress: Math.max(this.state.progress?.progress || 0, Math.min(1, Number(value.progress) || 0) * 0.25) });
       });
-      if (!this.valid(epoch)) return;
-      if (this.adapter.identity() !== initial.localIdentity) throw new Error('工程已变化，请重新申请同步');
-      const result = await this.api('/decision', { data: { requestId, allow: true, document: initial.document } });
-      if (!this.valid(epoch)) return;
+      if (!current()) return;
+      if (this.adapter.identity() !== initial.localIdentity || identity !== initial.localIdentity) throw new Error('工程已变化，请重新申请同步');
+      await this.progressRequest?.catch(() => {});
+      if (!current()) return;
+      const result = await this.api(`/links/${link.id}/bootstrap`, { method: 'PUT', data: { document: initial.document } });
+      if (!current()) return;
       this.context = { id: result.link.id, projectKey: result.link.project.key, localIdentity: initial.localIdentity,
         base: initial.document, revision: 0, sequence: 0, flight: null };
       this.acceptStatus(result);
@@ -209,12 +226,14 @@ export class WorkSyncClient {
       if (this.valid(epoch)) { this.acceptStatus(uploaded); if (this.context) await this.checkpoint(this.context); }
     } catch (error) {
       if (this.valid(epoch)) {
-        if (this.context) await this.disconnect('初始工程传输未完成，可重新申请');
+        if (!existingLink && this.state.link) await this.disconnect('初始工程传输未完成，可重新申请');
         this.emit({ error: error.message });
       }
     } finally {
-      this.preparing = false;
-      if (this.valid(epoch)) this.emit({ deciding: false, ...(!this.state.link ? { progress: null } : {}) });
+      if (this.valid(epoch)) {
+        this.preparing = false;
+        this.emit({ deciding: false, ...(!this.state.link ? { progress: null } : {}) });
+      }
     }
   }
   async reportTransfer(link, epoch, progress, required = false) {

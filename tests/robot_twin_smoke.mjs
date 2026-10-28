@@ -194,6 +194,8 @@ const upstream = createServer(async (req, res) => {
   if (resultFailures) return send(res, 503, { error: 'results unavailable' });
   if (req.url === `/api/v1/execution/captures?run_id=${run.id}&offset=0`) return send(res, 200, {
     ok: true, run_id: run.id, captures: [capture], next_offset: 1, total: 1 });
+  if (req.url === `/api/v1/execution/captures?run_id=${run.id}&offset=1`) return send(res, 200, {
+    ok: true, run_id: run.id, captures: [], next_offset: 1, total: 1 });
   if (req.url === `/api/v1/cameras/jobs/${capture.id}`) return send(res, 200, { job: {
     state: 'complete', cameras: { left: { inspection: algorithmProcessing ? { state: 'processing' }
       : { state: 'complete', boxes: [{ label: '表面裂纹', x: 10, y: 20, width: 30, height: 40 }] } } } } });
@@ -293,6 +295,8 @@ try {
   await until(() => client.state.monitor?.results[0]?.state === 'complete');
   assert.equal(client.state.monitor.results[0].labels[0], '表面裂纹');
   assert.ok(!Object.hasOwn(client.state.monitor.results[0], 'output'), 'raw algorithm output is not sent to the console');
+  await until(() => !client.captureCache.historyLoading && client.captureCache.runs.get(run.id)?.scanned
+    && client.captureCache.runs.get(run.id).pending.size === 0);
   const jobReads = traffic.filter((entry) => entry.includes('/cameras/jobs/')).length;
   resultFailures = true;
   await until(() => Boolean(client.state.monitor?.resultsError));
@@ -312,9 +316,9 @@ try {
   assert.deepEqual(client.state.monitor.results, [], 'idle state clears previous task outputs');
   assert.ok(!JSON.stringify(client.state).includes(cookie));
   assert.ok(!JSON.stringify(client.state).includes(credential));
-  // Isolate rejected requests from the two legitimate background polling loops.
+  // Isolate rejected requests from the telemetry, monitor and photo index polls.
   await until(() => client.controllers.size === 0);
-  clearTimeout(client.timer); clearTimeout(client.monitorTimer);
+  clearTimeout(client.timer); clearTimeout(client.monitorTimer); clearTimeout(client.captureCache.historyTimer);
   const before = traffic.length;
   for (const path of ['/api/v1/control/jog', '/control', '/snapshot?path=/api/v1/control/enable']) {
     const result = await request(ROBOT_TWIN_PREFIX + path, { method: 'POST', headers: { 'X-Atlas-Robot-Twin': '1', Authorization: `Bearer ${client.token}` } });
@@ -324,6 +328,7 @@ try {
   assert.equal(denied.status, 403);
   assert.equal(traffic.length, before, 'rejected paths and cross-origin requests never reach robot');
   void client.poll(client.generation); void client.pollMonitor(client.generation);
+  void client.captureCache.syncHistory();
   stale = true;
   await until(() => client.state.phase === 'stale');
   assert.equal(client.state.pose.x, 1.25, 'retain last pose without odometry fallback');
@@ -355,7 +360,8 @@ try {
   assert.deepEqual([...new Set(traffic)].sort(), ['POST /api/v1/access/login', 'GET /api/v1/control-session',
     'GET /api/v1/model', 'GET /api/v1/slam', 'GET /api/v1/state', 'GET /api/v1/execution/activity', 'GET /api/v1/execution',
     'GET /api/v1/body-cameras', 'POST /api/v1/body-cameras/preview', 'POST /api/v1/body-cameras/frame',
-    `GET /api/v1/execution/captures?run_id=${run.id}&offset=0`, `GET /api/v1/cameras/jobs/${capture.id}`].sort());
+    `GET /api/v1/execution/captures?run_id=${run.id}&offset=0`, `GET /api/v1/execution/captures?run_id=${run.id}&offset=1`,
+    `GET /api/v1/cameras/jobs/${capture.id}`].sort());
 } finally {
   client.disconnect(); await service.close();
   await Promise.all([app, upstream].map((server) => new Promise((resolve) => server.close(resolve))));

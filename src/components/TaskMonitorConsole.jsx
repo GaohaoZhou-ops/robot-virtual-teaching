@@ -68,11 +68,11 @@ export default function TaskMonitorConsole({ twin, collapsed, onCollapsedChange 
   const [selection, setSelection] = useState(null);
   // A manually chosen capture stays on screen while fresh results arrive.
   // Keep its last metadata if it leaves the recent list or the robot goes idle.
-  const selected = selection && (!task || selection.taskId === task.id) ? selection : null;
-  const capture = selected ? monitor?.captures?.find((item) => item.id === selected.capture.id) || selected.capture : monitor?.latestCapture;
+  const selected = selection;
+  const capture = selected ? twin.captureCache.captures.get(selected.capture.id) || selected.capture
+    : monitor?.latestCapture || twin.captureCache.latestReady();
   useEffect(() => {
-    if (task && selection && selection.taskId !== task.id) setSelection(null);
-    else if (selected && capture && selected.capture !== capture) setSelection({ ...selected, capture });
+    if (selected && capture && selected.capture !== capture) setSelection({ ...selected, capture });
   }, [task?.id, selection, capture]);
   const selectResult = (item, detail, reveal = true) => {
     setSelection({ taskId: detail.runId || task?.id, key: item.key, side: item.camera, capture: detail });

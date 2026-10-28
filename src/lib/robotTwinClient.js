@@ -1,6 +1,7 @@
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL } from './robotTwin.js';
 import { ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_MONITOR_MAX_AGE } from './robotTwinMonitor.js';
 import { RobotTwinCameraClient } from './robotTwinCameraClient.js';
+import { RobotTwinCaptureCache } from './robotTwinCaptureCache.js';
 import { forgetRobotTwinCredential, rememberRobotTwinCredential } from './robotTwinCredentials.js';
 
 const isRobotAuthFailure = (error) => ['ROBOT_AUTH_FAILED', 'ROBOT_AUTH_REQUIRED'].includes(error.code);
@@ -17,6 +18,8 @@ export class RobotTwinClient {
     this.controllers = new Set();
     this.cameraClient = new RobotTwinCameraClient({ request: (path, options) => this.api(path, options),
       onChange: (camera) => this.publish({ camera }) });
+    this.captureCache = new RobotTwinCaptureCache({ request: (path, options) => this.api(path, options),
+      onChange: () => this.publish({ captureRevision: (this.state.captureRevision || 0) + 1 }) });
     this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, motionSample: null, error: '', authFailed: false, credentialError: '',
       monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state };
   }
@@ -50,6 +53,7 @@ export class RobotTwinClient {
     clearTimeout(this.timer); clearTimeout(this.expiry);
     clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
     this.cameraClient.reset();
+    this.captureCache.reset();
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
     this.release(this.token); this.token = null; this.profile = null;
@@ -157,6 +161,7 @@ export class RobotTwinClient {
       clearTimeout(this.monitorExpiry);
       this.publish({ monitor, monitorPhase: validFor > 0 ? 'live' : 'stale',
         monitorError: validFor > 0 ? '' : '任务数据已过期，等待恢复', monitorReceivedAt: Date.now() });
+      this.captureCache.observe(monitor);
       if (validFor > 0) this.monitorExpiry = setTimeout(() => {
         if (generation === this.generation) this.publish({ monitorPhase: 'stale', monitorError: '任务数据已过期，保留上次记录' });
       }, validFor);

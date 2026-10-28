@@ -69,10 +69,10 @@ try {
   const status = async (address) => (await fetch(address + '/__fake_robot/status')).json();
   assert.equal((await status(addresses[0])).activeCamera, null);
   assert.equal((await status(addresses[1])).activeCamera, 'head-left');
-  const beforeA = traffic[0].length, beforeB = traffic[1].length;
-  await accessA.readCapture(captureA, 'left', 'png');
-  assert.ok(traffic[0].slice(beforeA).some(([, path]) => path.endsWith(`/${captureA}/left/png`)));
-  assert.ok(!traffic[1].slice(beforeB).some(([, path]) => path.endsWith(`/${captureA}/left/png`)), 'old callbacks cannot fetch the new robot');
+  const photoA = await accessA.readCapture(captureA, 'left', 'png');
+  assert.equal(traffic[0].filter(([, path]) => path.endsWith(`/${captureA}/left/png`)).length, 1, 'viewing reuses the background download');
+  assert.equal(photoA, clients[0].captureCache.peek(captureA, 'left', 'png').value);
+  assert.notEqual(photoA, clients[1].captureCache.peek(captureA, 'left', 'png')?.value, 'old callbacks keep the original robot cache');
   times[0] += 1000;
   const oldX = fleet.state.robots[0].pose.x;
   await until(() => fleet.state.robots[0].pose.x !== oldX);
@@ -90,6 +90,7 @@ try {
   await delay(1700);
   assert.deepEqual(traffic.map((items) => items.length), counts, 'stop cancels every pose, task and video poll');
   assert.equal(fleet.state.active, false); assert.deepEqual(fleet.state.robots, []);
+  assert.ok(clients.every((client) => client.captureCache.assets.size === 0), 'disconnect clears every robot photo cache');
   assert.ok(traffic.flat().every(([method, path]) => method === 'GET' || /^\/api\/v1\/(access\/login|body-cameras\/(preview|frame))$/.test(path)), 'only authentication and read-only preview POSTs');
   // Cancel an in-flight batch; no late connection may repopulate the scene.
   const pending = fleet.connectMany(profiles); fleet.disconnect();

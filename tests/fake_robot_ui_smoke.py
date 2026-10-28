@@ -91,7 +91,7 @@ with sync_playwright() as p:
         expect(capture.get_by_role('img', name='右 Zivid点云', exact=True)).to_have_attribute('data-point-count', '32400')
         capture.get_by_role('button', name='放大双 Zivid 采集结果').click()
         pair_dialog = page.get_by_role('dialog', name='双 Zivid 采集结果', exact=True)
-        expect(pair_dialog.get_by_role('complementary', name='已完成算法列表')).to_be_visible()
+        expect(pair_dialog.get_by_role('complementary', name='采集记录列表')).to_be_visible()
         expect(pair_dialog.locator('.robot-twin-capture-history__error')).to_have_count(0)
         expect(pair_dialog.get_by_role('img', name='左 Zivid点云', exact=True)).to_be_visible()
         cloud_canvas = pair_dialog.get_by_role('img', name='左 Zivid点云', exact=True)
@@ -135,6 +135,14 @@ with sync_playwright() as p:
                       results=[item for item in history['results'] if item['captureId'] == oldest['id']])
         monitor_route = '**/__atlas/robot-twin/monitor'
         page.route(monitor_route, lambda route: route.fulfill(json={**frozen, 'taskAgeMs': 0}))
+        history_route = '**/__atlas/robot-twin/capture-history/**'
+        def frozen_history(route):
+            offset = int(route.request.url.rsplit('/', 1)[1])
+            rows = history['results'][offset:offset + 8]
+            route.fulfill(json=dict(runId=history['task']['id'], results=rows,
+                                   captures=history['captures'] if rows else [],
+                                   nextOffset=offset + len(rows), total=len(history['results']), pending=False, error=''))
+        page.route(history_route, frozen_history)
         expect(monitor.locator('.task-monitor__result')).to_have_count(2)
         old_row = monitor.locator(f'[data-result-key="{old_key}"]')
         old_row.get_by_role('button').click()
@@ -248,8 +256,8 @@ with sync_playwright() as p:
         assert len(cloud_reads) == reads_before_annotation, 'confidence changes reuse the same capture data'
         frozen.clear(); frozen.update(saved_history)
         expect(old_row).to_be_attached()
-        # Exercise a run longer than the compact monitor's recent window. Only
-        # selected media is fetched, using actual simulator PNG/XYZ responses.
+        # Exercise a run longer than the compact monitor's recent window. PNGs
+        # prefetch in the background; XYZ remains on demand.
         long_results, long_captures, history_requests = [], {}, []
         history_failure = [True]
         for index in range(18):
@@ -263,20 +271,23 @@ with sync_playwright() as p:
                                      'state': 'processing' if index == 17 else 'complete', 'received': True})
         recent = deepcopy(frozen['results'])
         for index, item in enumerate(recent):
-            item['sequence'] = 37 + index
+            item['sequence'] = 37 + len(recent) - index
         long_results.extend(recent)
         long_captures.update({item['id']: item for item in frozen['captures']})
-        history_route = '**/__atlas/robot-twin/capture-history/**'
+        first_history_page = [True]
         def full_history(route):
             history_requests.append(route.request.url)
             if history_failure[0]:
                 route.fulfill(status=502, json={'error': '模拟索引暂不可用'})
                 return
             offset = int(route.request.url.rsplit('/', 1)[1])
-            rows = long_results[offset:offset + 8]
+            # The synthetic fixture prepends records to an already observed
+            # index. Include that prefix once without resetting the connection.
+            rows = long_results[0 if first_history_page[0] else offset:offset + 8]
+            first_history_page[0] = False
             route.fulfill(json=dict(runId=history['task']['id'], results=rows,
                                    captures=[long_captures[key] for key in dict.fromkeys(item['captureId'] for item in rows)],
-                                   nextOffset=offset + len(rows), total=len(long_results),
+                                   nextOffset=min(offset + 8, len(long_results)), total=len(long_results),
                                    pending=any(item['state'] == 'processing' for item in rows), error=''))
         media_route = '**/__atlas/robot-twin/captures/c*/**'
         def history_media(route):
@@ -286,14 +297,13 @@ with sync_playwright() as p:
         page.route(history_route, full_history)
         page.route(media_route, history_media)
         capture.get_by_role('button', name='放大双 Zivid 采集结果').click()
-        list_panel = colored_dialog.get_by_role('complementary', name='已完成算法列表')
+        list_panel = colored_dialog.get_by_role('complementary', name='采集记录列表')
         expect(list_panel.get_by_text('列表未完整读取：模拟索引暂不可用')).to_be_visible()
         history_failure[0] = False
         list_panel.get_by_role('button', name='重新读取', exact=True).click()
-        complete_count = sum(item['state'] == 'complete' for item in long_results)
-        expect(list_panel.locator('[data-history-key]')).to_have_count(complete_count)
-        assert complete_count > 24
-        expect(list_panel.locator('[data-history-key^="c0000000000000000000000000000011:"]')).to_have_count(0)
+        expect(list_panel.locator('[data-history-key^="c"]')).to_have_count(36)
+        expect(list_panel.locator('[data-history-key^="c0000000000000000000000000000011:"]')).to_have_count(2)
+        expect(list_panel).to_contain_text('算法执行中')
         historical_id = 'c' + '0' * 31
         historical_row = list_panel.locator(f'[data-history-key="{historical_id}:right"]')
         historical_row.click()
@@ -306,7 +316,7 @@ with sync_playwright() as p:
         for item in long_results:
             if item['captureId'] == f'c{17:031x}':
                 item['state'] = 'complete'
-        expect(list_panel.locator('[data-history-key]')).to_have_count(complete_count + 2, timeout=10000)
+        expect(list_panel.locator('[data-history-key^="c0000000000000000000000000000011:"]').first).not_to_contain_text('算法执行中', timeout=10000)
         expect(colored_dialog).to_have_attribute('data-capture-id', historical_id)
         page.screenshot(path=str(artifacts / 'zivid-completed-history.png'))
         list_panel.locator(f'[data-history-key="c{1:031x}:left"]').focus()
@@ -323,8 +333,8 @@ with sync_playwright() as p:
         colored_dialog.get_by_role('button', name='关闭采集结果大窗').click()
         before_close = len(history_requests)
         page.wait_for_timeout(3500)
-        assert len(history_requests) == before_close, 'closing the large viewer stops history polling'
-        page.unroute(history_route)
+        assert len(history_requests) > before_close, 'closing the large viewer keeps background history polling'
+        page.unroute(history_route, full_history)
         page.unroute(media_route)
         old_row.get_by_role('button').click()
         capture.get_by_role('button', name='回到最新', exact=True).click()
@@ -332,11 +342,13 @@ with sync_playwright() as p:
         expect(capture).to_have_attribute('data-capture-id', newest['id'])
         old_row.get_by_role('button').click()
         frozen.update(task={**history['task'], 'id': 'a' * 32}, results=[], captures=[], latestCapture=None)
-        expect(capture).to_have_count(0)
+        expect(capture).to_have_attribute('data-capture-id', oldest['id'])
         frozen.update(deepcopy(history))
+        capture.get_by_role('button', name='回到最新', exact=True).click()
         expect(capture).to_have_attribute('data-capture-mode', 'latest')
         expect(capture).to_have_attribute('data-capture-id', newest['id'])
         page.unroute(monitor_route)
+        page.unroute(history_route)
         page.get_by_role('button', name='停止同步', exact=True).click()
         expect(page.get_by_role('complementary', name='图谱控制台', exact=True)).to_be_visible()
         assert [canvas.get_attribute(f'data-robot-{key}') for key in ['x', 'y', 'z', 'yaw']] == offline
@@ -345,7 +357,8 @@ with sync_playwright() as p:
         # The remembered-password path can reconnect to the same simulator.
         page.get_by_role('button', name='同步作业', exact=True).click()
         page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
-        dialog.get_by_text('本地模拟机器人', exact=True).click()
+        dialog.get_by_role('checkbox', name=f'本地模拟机器人 {ROBOT}', exact=True).check()
+        dialog.get_by_role('button', name='连接并同步', exact=True).click()
         expect(dialog.locator('.robot-twin-success')).to_contain_text('连接成功')
         expect(dialog).not_to_be_visible(timeout=3000)
         page.get_by_role('button', name='停止同步', exact=True).click()

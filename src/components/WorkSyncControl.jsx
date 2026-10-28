@@ -30,9 +30,9 @@ function OfflineWorkSyncControl({ sync }) {
   const countdown = `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')}`;
   const preparing = ['preparing', 'receiving'].includes(sync.phase) || sync.deciding;
   const status = sync.error || (preparing ? ''
-    : sync.pending ? '等待主机授权 · 可再次申请'
+    : sync.pending ? '等待主机授权 · 同意后自动开始'
       : connected ? `每 3 秒同步改动 · 授权剩余 ${countdown}` : sync.reason || '');
-  const unavailable = !connected && (sync.role === 'host' || sync.phase === 'starting');
+  const unavailable = !connected && (sync.role === 'host' || sync.phase === 'starting' || sync.pending || sync.requesting);
   const title = connected ? '断开后，两端已同步和示教的结果都会保留'
     : sync.role === 'host' ? '其他设备访问本服务后，可在此申请同步；请保持本页面打开'
       : '申请同步主机工程；需主机授权后开始同步';
@@ -42,10 +42,10 @@ function OfflineWorkSyncControl({ sync }) {
         <button type="button" className="work-sync__button" disabled={unavailable}
           title={title} onClick={connected ? () => sync.disconnect() : sync.request}>
           {connected ? <Unplug size={13} /> : <Link2 size={13} />}
-          {connected ? '断开链接' : '申请离线协作'}
+          {connected ? '断开链接' : sync.pending ? '等待主机授权' : sync.requesting ? '正在申请…' : '申请离线协作'}
         </button>
-        {connected && sync.role === 'peer' && <button type="button" className="work-sync__renew"
-          title="随时重新申请；主机再次批准后，授权有效期重新计算 5 分钟" onClick={sync.request}>
+        {connected && sync.role === 'peer' && <button type="button" className="work-sync__renew" disabled={!sync.link.transfer?.complete || sync.pending || sync.requesting}
+          title="工程同步完成后可重新申请；主机再次批准后，授权有效期重新计算 5 分钟" onClick={sync.request}>
           <RefreshCw size={11} />重新申请授权
         </button>}
       </div>

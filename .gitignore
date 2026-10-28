@@ -242,17 +242,32 @@ playwright/.auth/
 *.profdata
 
 # UI smoke-test captures in the repository root or beside the test scripts.
-# Keep source artwork and fixture media outside these filename patterns.
-/atlas-*.png
-/transfer-*.png
-/tests/atlas-*.png
-/tests/transfer-*.png
+# Include iPad gesture/sync reviews, converted previews and extension case variants.
+# Anchor output names so source artwork and nested fixture media stay trackable.
+/atlas-*.[pP][nN][gG]
+/atlas-*.[jJ][pP][gG]
+/atlas-*.[jJ][pP][eE][gG]
+/atlas-*.[wW][eE][bB][pP]
+/transfer-*.[pP][nN][gG]
+/transfer-*.[jJ][pP][gG]
+/transfer-*.[jJ][pP][eE][gG]
+/transfer-*.[wW][eE][bB][pP]
+/tests/atlas-*.[pP][nN][gG]
+/tests/atlas-*.[jJ][pP][gG]
+/tests/atlas-*.[jJ][pP][eE][gG]
+/tests/atlas-*.[wW][eE][bB][pP]
+/tests/transfer-*.[pP][nN][gG]
+/tests/transfer-*.[jJ][pP][gG]
+/tests/transfer-*.[jJ][pP][eE][gG]
+/tests/transfer-*.[wW][eE][bB][pP]
 # Digital-twin checks write into test-artifacts/{robot-twin,robot-twin-fleet}/.
 # Multi-robot selection, body-color, model-picking and monitor-switch captures
 # share the ignored artifact root; keep robot_twin_fleet_* and appearance tests.
 # Motion-latency and camera-frame retention reviews use
 # test-artifacts/robot-twin-smoothing/; keep robot_twin_motion_*,
 # robot_twin_camera_frames_* and robot_twin_smoothing_* regression sources.
+# Continuous-photo cache/decode checks use test-artifacts/robot-twin-capture/;
+# keep robot_twin_capture_* runners and the synthetic capture fixture in tests/.
 # Card-portability checks use test-artifacts/robot-twin-project/ for browser
 # captures. Fleet CPU profiles and motion samples use the same ignored root.
 # Save As/export/import checks may put their temporary project bundles inside
