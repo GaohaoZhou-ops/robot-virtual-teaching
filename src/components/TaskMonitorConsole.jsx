@@ -92,10 +92,20 @@ export default function TaskMonitorConsole({ twin, collapsed, onCollapsedChange 
   const algorithmState = task?.algorithmMode === 'skip' ? 'skipped' : task?.algorithmState;
   return (
     <aside className={`inspector-panel task-monitor ${alarmCount ? 'has-alarm' : ''} ${onlySuspected ? 'is-suspected' : ''} ${collapsed ? 'is-collapsed' : ''}`}
-      aria-label="任务监控台" data-panel-mode="task-monitor" data-collapsed={String(collapsed)} data-monitor-phase={twin.monitorPhase}>
+      aria-label="任务监控台" data-panel-mode="task-monitor" data-robot-id={twin.selectedId} data-collapsed={String(collapsed)} data-monitor-phase={twin.monitorPhase}>
       <div id="task-monitor-content" className="inspector-panel__content task-monitor__content"
         aria-hidden={collapsed} inert={collapsed ? '' : undefined}>
         <div className="inspector-heading"><div><span className="eyebrow">TASK MONITOR</span><h2>任务监控台</h2></div></div>
+        <div className="task-monitor__robot">
+          <i className="task-monitor__robot-color" style={{ backgroundColor: twin.selectedRobot?.color }} aria-hidden="true" />
+          <label htmlFor="task-monitor-robot">当前机器人</label>
+          <select id="task-monitor-robot" aria-label="当前监控机器人" value={twin.selectedId || ''}
+            onChange={(event) => twin.selectRobot(event.target.value)}>
+            {twin.robots.filter((robot) => robot.active).map((robot) => <option key={robot.id} value={robot.id}>
+              {robot.name}{robot.phase === 'stale' ? ' · 数据暂不可用' : robot.phase === 'connecting' ? ' · 连接中' : ''}
+            </option>)}
+          </select>
+        </div>
         <div className="task-monitor__connection">
           <span className={`task-monitor__connection-state ${live ? 'is-live' : ''}`} role="status">
             {live ? <Activity size={13} /> : twin.monitorPhase === 'stale' ? <WifiOff size={13} /> : <CircleDot size={13} />}

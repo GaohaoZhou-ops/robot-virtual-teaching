@@ -6576,6 +6576,10 @@ export default function App() {
     ? robotTwinDisplayPose(robotPose, robotTwin.pose) : robotPose, [robotTwin.active, robotTwin.pose, robotPose]);
   const displayedRobotJoints = useMemo(() => robotTwin.active
     ? { ...robotJointValues, ...robotTwin.joints } : robotJointValues, [robotTwin.active, robotTwin.joints, robotJointValues]);
+  const twinRobotInstances = useMemo(() => robotTwin.robots.filter((robot) => robot.active && robot.pose)
+    .map((robot) => ({ id: robot.id, name: robot.name, phase: robot.phase, color: robot.color,
+      pose: robotTwinDisplayPose(robotPose, robot.pose), joints: { ...robotJointValues, ...robot.joints } })),
+  [robotTwin.robots, robotPose, robotJointValues]);
   const workSync = useWorkSync({
     deviceName: isVisionWorkbench() ? 'Vision Pro 工作台' : /Mac/.test(navigator.platform) ? 'Mac 浏览器' : /Win/.test(navigator.platform) ? 'Windows 浏览器' : '浏览器设备',
     ready: () => !robotTwin.active && sessionReadyRef.current && !workspaceSwitchingRef.current && !loadState.loading
@@ -6659,15 +6663,15 @@ export default function App() {
       : loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'
         || polylineTeachingBusy || polylineTeachingOpen || robotSettingsModalOpen || robotParkingGhost?.editing
         ? '请先结束当前加载、采集或姿态编辑。' : '';
-  const twinControl = { ...robotTwin, error: twinTransitionError || robotTwin.error, disabledReason: twinDisabledReason,
-    connect: async (address, password, profileId) => {
+  const twinControl = { ...robotTwin, transitionError: twinTransitionError, disabledReason: twinDisabledReason,
+    connectMany: async (profiles) => {
       if (twinDisabledReason) return false;
       setTwinTransitionError('');
       try {
         await workSync.prepareTwin();
         stopTeachingTaskPlayback(false);
         setRobotControlEnabled(false); setRobotParkingGhost(null); setShowRobotModel(true);
-        return await robotTwin.connect(address, password, profileId);
+        return await robotTwin.connectMany(profiles);
       } catch (error) { setTwinTransitionError(error.message || '工程保存失败，请重试'); return false; }
     } };
 
@@ -7159,6 +7163,9 @@ export default function App() {
                 robotPose={displayedRobotPose}
                 robotJointValues={displayedRobotJoints}
                 robotTelemetry={robotTwin.active}
+                twinRobots={twinRobotInstances}
+                selectedTwinRobotId={robotTwin.selectedId}
+                onSelectTwinRobot={robotTwin.selectRobot}
                 lockedRobotJointNames={lockedRobotJointNames}
                 robotControlEnabled={!robotTwin.active && robotControlEnabled}
                 robotHeightLocked={robotHeightLocked}
@@ -7316,7 +7323,7 @@ export default function App() {
           )}
         </div>
 
-        {robotTwin.active ? <TaskMonitorConsole twin={robotTwin} collapsed={inspectorCollapsed} onCollapsedChange={setInspectorCollapsed} /> : <Inspector
+        {robotTwin.active ? <TaskMonitorConsole key={robotTwin.selectedId} twin={robotTwin} collapsed={inspectorCollapsed} onCollapsedChange={setInspectorCollapsed} /> : <Inspector
           mapData={mapData}
           pageRequest={inspectorPageRequest}
           polylineOpen={polylineTeachingOpen}

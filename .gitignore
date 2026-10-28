@@ -244,7 +244,9 @@ playwright/.auth/
 /transfer-*.png
 /tests/atlas-*.png
 /tests/transfer-*.png
-# Digital-twin checks normally write into test-artifacts/robot-twin/.
+# Digital-twin checks write into test-artifacts/{robot-twin,robot-twin-fleet}/.
+# Multi-robot selection, body-color, model-picking and monitor-switch captures
+# share the ignored artifact root; keep robot_twin_fleet_* and appearance tests.
 # Ignore standalone copies of live readings, session diagnostics and captures
 # at root/tests too; keep robot_twin_*.py/.mjs runners and nested fixtures visible.
 # The shared artifact directory also holds robot-card, body-camera, arrow-spacing
@@ -275,6 +277,12 @@ playwright/.auth/
 /tests/robot-twin-*.[hH][aA][rR]
 /robot-twin-*.json
 /tests/robot-twin-*.json
+# Continuous pose/monitor diagnostics may use line-delimited JSON. Scope these
+# to standalone output names; maintained sources and nested fixtures stay visible.
+/robot-twin-*.jsonl
+/tests/robot-twin-*.jsonl
+/robot-twin-*.ndjson
+/tests/robot-twin-*.ndjson
 
 # Simulator PID/locks/logs live in .atlas-cache/fake-robot/; twin, confidence,
 # history-list and offline-to-twin UI captures use test-artifacts/{robot-twin,

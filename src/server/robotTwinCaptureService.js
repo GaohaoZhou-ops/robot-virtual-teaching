@@ -9,9 +9,11 @@ const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 export async function streamRobotCapture(session, res, { id, side, kind }) {
   if (!/^[a-f0-9]{32}$/.test(id) || !['left', 'right'].includes(side) || !['png', 'xyzbin'].includes(kind)) fail(400, '采集文件参数无效');
   session.captureReads ||= new Set();
-  if (session.captureReads.size >= 2) fail(429, '正在读取其他采集文件，请稍后重试');
+  if (session.captureReads.size >= 2) fail(429, '正在读取其他采集文件，请稍后重试', 'ROBOT_CAPTURE_BUSY');
   const controller = new AbortController(); session.captureReads.add(controller);
-  const cancel = () => { if (!res.writableEnded) controller.abort(); };
+  const cancel = () => {
+    if (!res.writableEnded) { controller.abort(); session.captureReads.delete(controller); }
+  };
   res.once('close', cancel);
   const signal = AbortSignal.any([controller.signal, session.controller.signal, AbortSignal.timeout(60_000)]);
   const maxBytes = kind === 'png' ? 64 * 1024 * 1024 : 120_000_016;

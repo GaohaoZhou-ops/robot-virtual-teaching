@@ -1,6 +1,6 @@
 .task-monitor { --monitor-accent: #79d8b0; }
 .task-monitor::before { background: var(--monitor-accent); }
-.task-monitor .task-monitor__content { grid-template-rows: 67px auto auto minmax(0, 1fr); }
+.task-monitor .task-monitor__content { grid-template-rows: 67px auto auto auto minmax(0, 1fr); }
 .task-monitor.has-alarm::before { background: #ff6659; }
 .task-monitor.has-alarm .inspector-collapse-toggle { color: #ff9a8d; border-color: #9b4c43; }
 .task-monitor__alarm { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-bottom: 1px solid #b64f4770; background: #8e2b282e; color: #ff8e83; }
@@ -140,3 +140,15 @@ button.task-monitor__result-row { cursor: pointer; }
 .task-monitor-camera-dialog > footer { padding: 12px 16px; border-top: 1px solid #273e33; }
 .task-monitor-camera-dialog .task-monitor-camera__meta { margin: 0; font-size: 10px; }
 .task-monitor-camera-dialog .task-monitor__warning { margin: 10px 0 0; }
+
+.task-monitor__robot { display: flex; align-items: center; gap: 10px; padding: 0 14px 12px; }
+.task-monitor__robot label { color: #8da9a0; font-size: 11px; white-space: nowrap; }
+.task-monitor__robot select { min-width: 0; flex: 1; padding: 8px; border: 1px solid #36534a; border-radius: 5px; background: #142522; color: #c9e5d8; font: inherit; font-size: 12px; }
+.robot-twin-scene-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.robot-twin-scene-label { position: absolute; top: 0; left: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; border: 1px solid #567a78; border-radius: 5px; padding: 5px 9px; background: #132521e8; color: #abc9c0; font: 11px system-ui; cursor: pointer; }
+.robot-twin-scene-label.is-selected { color: #d7ffe9; border-color: #9ae3bc; background: #214b3cee; box-shadow: 0 0 0 2px #8bd7b82b; }
+.robot-twin-scene-label.is-stale { border-style: dashed; color: #e0bd8b; }
+.robot-twin-scene-label:focus-visible { outline: 2px solid #a4edc4; outline-offset: 2px; }
+.task-monitor__robot-color { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.robot-twin-scene-label { border-color: var(--twin-color); color: var(--twin-color); }
+.robot-twin-scene-label.is-selected { border-color: var(--twin-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--twin-color) 35%, transparent); }

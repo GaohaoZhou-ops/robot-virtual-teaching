@@ -6,6 +6,24 @@ import RobotTwinPointCloud from './RobotTwinPointCloud.jsx';
 import RobotTwinCaptureImage from './RobotTwinCaptureImage.jsx';
 import './RobotTwinCapturePanel.css';
 
+async function readCaptureAsset(read, id, side, kind, signal) {
+  for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted();
+    try { return await read(id, side, kind, signal); }
+    catch (error) {
+      // Rapid switching can race server-side cancellation of the previous pair.
+      // Only retry this bounded, local concurrency response, never authentication.
+      if (error.code !== 'ROBOT_CAPTURE_BUSY' || attempt >= 3) throw error;
+      await new Promise((resolve, reject) => {
+        signal.throwIfAborted();
+        const cancel = () => { clearTimeout(timer); reject(signal.reason); };
+        const timer = setTimeout(() => { signal.removeEventListener('abort', cancel); resolve(); }, 150 * (attempt + 1));
+        signal.addEventListener('abort', cancel, { once: true });
+      });
+    }
+  }
+}
+
 async function decodeCloud(blob, signal) {
   const buffer = await blob.arrayBuffer(); signal.throwIfAborted();
   return new Promise((resolve, reject) => {
@@ -37,7 +55,7 @@ function useAsset(read, id, side, kind, available, enabled) {
     setState({ key, phase: 'loading' });
     void (async () => {
       try {
-        const { blob } = await read(id, side, kind, controller.signal);
+        const { blob } = await readCaptureAsset(read, id, side, kind, controller.signal);
         if (!active) return;
         const cloud = kind === 'xyzbin' ? await decodeCloud(blob, controller.signal) : null;
         if (!active) return;

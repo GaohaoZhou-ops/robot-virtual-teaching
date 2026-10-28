@@ -1,4 +1,5 @@
 import { DEFAULT_ROBOT_TWIN_ADDRESS } from './robotTwin.js';
+import { robotTwinColor } from './robotTwinAppearance.js';
 
 export const ROBOT_TWIN_PROFILES_KEY = 'atlas-route-studio:robot-twin-profiles-v1';
 
@@ -33,24 +34,29 @@ export function loadRobotTwinProfiles(currentAddress) {
           const address = normalizeRobotProfileAddress(item.address);
           if (ids.has(item.id) || addresses.has(address)) continue;
           ids.add(item.id); addresses.add(address);
-          profiles.push({ id: item.id, name: item.name.trim().slice(0, 64), address });
+          const color = /^#[0-9a-f]{6}$/i.test(item.color || '') ? item.color
+            : robotTwinColor(item.id, new Set(profiles.map((profile) => profile.color)));
+          profiles.push({ id: item.id, name: item.name.trim().slice(0, 64), address, color });
         } catch { /* A damaged card must not hide the remaining saved robots. */ }
       }
-      return { profiles, selectedId: ids.has(saved.selectedId) ? saved.selectedId : profiles[0]?.id || '' };
+      const selectedId = ids.has(saved.selectedId) ? saved.selectedId : profiles[0]?.id || '';
+      const selectedIds = Array.isArray(saved.selectedIds)
+        ? [...new Set(saved.selectedIds.filter((id) => ids.has(id)))] : selectedId ? [selectedId] : [];
+      return { profiles, selectedId, selectedIds };
     }
   } catch { /* Browser storage may be unavailable; connection still works. */ }
   let address = normalizeRobotProfileAddress(DEFAULT_ROBOT_TWIN_ADDRESS);
   try { if (currentAddress) address = normalizeRobotProfileAddress(currentAddress); } catch { /* Use the known default. */ }
-  return { profiles: [{ id: 'default-robot', name: 'ABX 机器人', address }], selectedId: 'default-robot' };
+  return { profiles: [{ id: 'default-robot', name: 'ABX 机器人', address, color: robotTwinColor('default-robot') }], selectedId: 'default-robot', selectedIds: ['default-robot'] };
 }
 
-export function saveRobotTwinProfiles({ profiles, selectedId }) {
+export function saveRobotTwinProfiles({ profiles, selectedId, selectedIds = selectedId ? [selectedId] : [] }) {
   try {
     if (!globalThis.localStorage) return false;
-    // Explicitly persist only connection labels and addresses, never passwords,
+    // Explicitly persist only connection labels, addresses and colors, never passwords,
     // authentication tokens, live readings or project state.
-    globalThis.localStorage.setItem(ROBOT_TWIN_PROFILES_KEY, JSON.stringify({ version: 1, selectedId,
-      profiles: profiles.map(({ id, name, address }) => ({ id, name, address })) }));
+    globalThis.localStorage.setItem(ROBOT_TWIN_PROFILES_KEY, JSON.stringify({ version: 1, selectedId: selectedIds[0] || '', selectedIds,
+      profiles: profiles.map(({ id, name, address, color }) => ({ id, name, address, color })) }));
     return true;
   } catch { return false; }
 }

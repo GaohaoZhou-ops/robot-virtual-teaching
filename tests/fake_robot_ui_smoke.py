@@ -44,6 +44,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='同步作业', exact=True).click()
         page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
         dialog = page.get_by_role('dialog', name='真机孪生', exact=True)
+        dialog.get_by_role('checkbox', name='ABX 机器人 192.168.0.112:9090', exact=True).uncheck()
         dialog.get_by_role('button', name='添加机器人', exact=True).click()
         dialog.get_by_label('机器人名称', exact=True).fill('本地模拟机器人')
         dialog.get_by_label('机器人地址', exact=True).fill(ROBOT)

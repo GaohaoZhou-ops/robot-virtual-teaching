@@ -65,18 +65,20 @@ export function WorkSyncControl({ sync, twin }) {
   const waiting = sync.pending && !sync.link;
   useEffect(() => {
     if (twin?.authFailed) { setPage('twin'); setOpen(true); }
-  }, [twin?.authFailed]);
+  }, [twin?.authFailureKey]);
   useEffect(() => {
     if (open && !dialog.current.open) dialog.current.showModal();
     else if (!open && dialog.current.open) dialog.current.close();
   }, [open]);
-  const status = twin?.active ? (twin.phase === 'live' ? '真机孪生 · 只读同步中' : twin.phase === 'connecting' ? '真机孪生 · 连接中' : '真机孪生 · 数据暂不可用')
+  const status = twin?.active ? (twin.phase === 'live' ? `真机孪生 · ${twin.connectedCount} 台同步中` : twin.phase === 'connecting' ? '真机孪生 · 连接中' : '真机孪生 · 数据暂不可用')
     : sync.error || (sync.link ? sync.link.transfer?.complete ? '离线协作 · 工程同步完成' : '离线协作 · 工程同步中' : sync.pending ? '离线协作 · 等待授权' : sync.reason || '');
   return <div className={`work-sync ${twin?.active || sync.link ? 'is-connected' : ''}`} data-twin-phase={twin?.phase || 'idle'}
     data-sync-phase={sync.phase} data-sync-role={sync.role} data-sync-complete={String(Boolean(sync.link?.transfer?.complete))}>
-    <button type="button" className="work-sync__button" onClick={twin?.active ? stopTwin : () => { setPage('choose'); setOpen(true); }}>
+    <div className="work-sync__actions"><button type="button" className="work-sync__button" onClick={twin?.active ? stopTwin : () => { setPage('choose'); setOpen(true); }}>
       {twin?.active ? <Unplug size={13} /> : <Link2 size={13} />}{twin?.active ? '停止同步' : '同步作业'}
     </button>
+    {twin?.active && <button type="button" className="work-sync__button work-sync__manage" aria-label="管理同步机器人"
+      title="管理同步机器人" onClick={() => { setPage('twin'); setOpen(true); }}><Radio size={13} /></button>}</div>
     {transferring && !twin?.active && !sync.error ? <WorkSyncProgress sync={sync} compact />
       : status && <span className={`work-sync__status ${sync.error || twin?.phase === 'stale' ? 'is-error' : ''}`} role="status" title={twin?.error || status}>{status}</span>}
     <dialog ref={dialog} className={`work-sync-dialog work-sync-mode-dialog ${page === 'twin' ? 'is-twin' : ''}`} aria-labelledby={titleId}

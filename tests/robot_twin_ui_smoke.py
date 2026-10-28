@@ -29,6 +29,11 @@ fixture = {'stale': False, 'x': 2.5, 'y': -3.25, 'yaw': 1, 'task_phase': 'runnin
            'run_id': 'd' * 32, 'task_name': '设备巡检任务', 'captures': 1, 'freeze_video': False}
 
 
+def select_robot(panel, name):
+    for checkbox in panel.get_by_role('checkbox').all():
+        checkbox.set_checked(checkbox.get_attribute('aria-label').startswith(name + ' '))
+
+
 class RobotFixture(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass
@@ -223,7 +228,7 @@ try:
             page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
             dialog = page.get_by_role('dialog', name='真机孪生', exact=True)
             if not args.live:
-                expect(dialog.get_by_role('radio', name='ABX 机器人 192.168.0.112:9090', exact=True)).to_be_checked()
+                expect(dialog.get_by_role('checkbox', name='ABX 机器人 192.168.0.112:9090', exact=True)).to_be_checked()
                 dialog.get_by_role('button', name='编辑机器人 ABX 机器人', exact=True).click()
                 dialog.get_by_label('机器人地址', exact=True).fill('invalid-address')
                 dialog.get_by_role('button', name='保存机器人', exact=True).click()
@@ -245,11 +250,12 @@ try:
                 expect(dialog.get_by_role('alert')).to_contain_text('此地址已保存为“测试机器人 A”')
                 dialog.get_by_role('button', name='取消编辑').click()
                 dialog.get_by_role('button', name='删除机器人 测试机器人 B', exact=True).click()
-                expect(dialog.get_by_role('radio', name=f'测试机器人 B {backup_address}', exact=True)).to_have_count(0)
+                expect(dialog.get_by_role('checkbox', name=f'测试机器人 B {backup_address}', exact=True)).to_have_count(0)
                 dialog.get_by_role('button', name='撤销删除').click()
-                expect(dialog.get_by_role('radio', name=f'测试机器人 B {backup_address}', exact=True)).to_be_checked()
+                expect(dialog.get_by_role('checkbox', name=f'测试机器人 B {backup_address}', exact=True)).to_be_checked()
+                select_robot(dialog, '测试机器人 B')
                 dialog.get_by_label('管理员密码', exact=True).fill('do-not-persist-this-password')
-                dialog.get_by_text('测试机器人 A', exact=True).click()
+                select_robot(dialog, '测试机器人 A')
                 expect(dialog.get_by_label('管理员密码', exact=True)).to_have_value('')
                 assert not traffic, 'saving, deleting and selecting uncached cards must not contact any robot'
                 page.screenshot(path=str(artifacts / 'robot-cards.png'))
@@ -521,8 +527,8 @@ try:
                 page.get_by_role('button', name='同步作业', exact=True).click()
                 page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
                 second = page.get_by_role('dialog', name='真机孪生', exact=True)
-                expect(second.get_by_role('radio', name=f'测试机器人 A {address}', exact=True)).to_be_checked()
-                second.get_by_text('测试机器人 B', exact=True).click()
+                expect(second.get_by_role('checkbox', name=f'测试机器人 A {address}', exact=True)).to_be_checked()
+                select_robot(second, '测试机器人 B')
                 assert len(traffic) == request_count, 'card selection alone must not connect'
                 ports_before = len(robot_ports)
                 second.get_by_label('管理员密码', exact=True).fill(backup_server.password)
@@ -545,7 +551,8 @@ try:
                 panel = page.get_by_role('dialog', name='真机孪生', exact=True)
                 # Cached A fails once after its password changes; B is retained.
                 server.password = 'fixture-robot-A-changed'
-                panel.get_by_text('测试机器人 A', exact=True).click()
+                select_robot(panel, '测试机器人 A')
+                panel.get_by_role('button', name='连接并同步', exact=True).click()
                 expect(panel.get_by_role('alert')).to_contain_text('重新输入管理员密码')
                 expect(panel.get_by_label('管理员密码', exact=True)).to_be_focused()
                 credentials = page.evaluate("JSON.parse(localStorage.getItem('atlas-route-studio:robot-twin-credentials-v1')).credentials")
@@ -576,8 +583,8 @@ try:
                 page.get_by_role('button', name='同步作业', exact=True).click()
                 page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
                 restored = page.get_by_role('dialog', name='真机孪生', exact=True)
-                expect(restored.get_by_role('radio', name=f'测试机器人 A {address}', exact=True)).to_be_checked()
-                expect(restored.get_by_role('radio', name=f'测试机器人 B {backup_address}', exact=True)).to_have_count(1)
+                expect(restored.get_by_role('checkbox', name=f'测试机器人 A {address}', exact=True)).to_be_checked()
+                expect(restored.get_by_role('checkbox', name=f'测试机器人 B {backup_address}', exact=True)).to_have_count(1)
                 expect(restored.get_by_label('管理员密码', exact=True)).to_have_count(0)
                 stored = page.evaluate("localStorage.getItem('atlas-route-studio:robot-twin-profiles-v1')")
                 assert 'do-not-persist-this-password' not in stored and 'password' not in stored
@@ -590,23 +597,23 @@ try:
                     'http://' + address: server.password, 'http://' + backup_address: backup_server.password}
                 request_count = len(traffic)
                 restored.get_by_role('button', name='删除机器人 测试机器人 B', exact=True).click()
-                expect(restored.get_by_role('radio', name=f'测试机器人 A {address}', exact=True)).to_be_checked()
+                expect(restored.get_by_role('checkbox', name=f'测试机器人 A {address}', exact=True)).to_be_checked()
                 assert len(saved_credentials()) == 1, 'deleting an unselected card also removes its saved password'
                 restored.get_by_role('button', name='撤销删除').click()
                 assert len(saved_credentials()) == 2
                 assert len(traffic) == request_count, 'deleting or undoing a cached card must not connect'
                 page.screenshot(path=str(artifacts / 'remembered-robot-cards.png'))
 
-                # A temporary outage retains the cache. Clicking an already
-                # selected card retries automatically, including after a reload.
+                # A temporary outage retains the cache. Explicit batch submission
+                # retries the checked robot without entering a password again.
                 page.route('**/__atlas/robot-twin/sessions', lambda route: route.fulfill(status=502,
                     content_type='application/json', body=json.dumps({'error': '连接测试：服务暂不可用'})), times=1)
-                restored.get_by_text('测试机器人 A', exact=True).click()
+                restored.get_by_role('button', name='连接并同步', exact=True).click()
                 expect(restored.get_by_role('alert')).to_contain_text('服务暂不可用')
                 expect(restored.get_by_label('管理员密码', exact=True)).to_have_count(0)
                 assert len(saved_credentials()) == 2
                 assert len(traffic) == request_count
-                restored.get_by_text('测试机器人 A', exact=True).click()
+                restored.get_by_role('button', name='连接并同步', exact=True).click()
                 expect(restored.locator('.robot-twin-success')).to_contain_text('连接成功')
                 expect(restored).not_to_be_visible(timeout=2500)
 
@@ -621,7 +628,8 @@ try:
                 page.wait_for_timeout(1200)
                 assert len(traffic) == request_count, 'auth failure waits for input without retrying a rejected password'
                 ports_before = len(robot_ports)
-                restored.get_by_text('测试机器人 B', exact=True).click()
+                select_robot(restored, '测试机器人 B')
+                restored.get_by_role('button', name='连接并同步', exact=True).click()
                 expect(restored.locator('.robot-twin-success')).to_contain_text('连接成功')
                 expect(restored).not_to_be_visible(timeout=2500)
                 assert set(robot_ports[ports_before:]) == {backup_server.server_port}
@@ -640,13 +648,13 @@ try:
                 assert not saved_credentials(), 'changing the address must not reuse the old robot password'
                 for name in ['测试机器人 A', '已重命名机器人 B', 'ABX 机器人']:
                     restored.get_by_role('button', name=f'删除机器人 {name}', exact=True).click()
-                expect(restored.get_by_role('radio')).to_have_count(0)
+                expect(restored.get_by_role('checkbox')).to_have_count(0)
                 expect(restored.get_by_role('button', name='连接并同步', exact=True)).to_be_disabled()
                 assert len(traffic) == request_count, 'card management never connects'
                 page.reload(wait_until='networkidle')
                 page.get_by_role('button', name='同步作业', exact=True).click()
                 page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
-                expect(restored.get_by_role('radio')).to_have_count(0)
+                expect(restored.get_by_role('checkbox')).to_have_count(0)
             assert not errors, errors
             print(json.dumps({'mode': 'live robot' if args.live else 'fixture', 'snapshots': len(snapshots),
                               'livePose': live['pose'], 'jointCount': len(NAMES), 'offlineRestored': True,

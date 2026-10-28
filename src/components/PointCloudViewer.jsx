@@ -1,3 +1,4 @@
+import { RobotTwinScene } from '../lib/robotTwinScene.js';
 import { configureRobotJointCoupling, getRobotJointCouplingPairs, robotJointCouplingViolations } from '../lib/robotJointCoupling.js';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -1437,6 +1438,9 @@ export default function PointCloudViewer({
   robotPose,
   robotJointValues,
   robotTelemetry = false,
+  twinRobots = [],
+  selectedTwinRobotId = '',
+  onSelectTwinRobot,
   lockedRobotJointNames = [],
   robotControlEnabled = false,
   robotHeightLocked = false,
@@ -1524,6 +1528,10 @@ export default function PointCloudViewer({
   const visionCoverageRenderingEnabledRef = useRef(true);
   const teachingSurfaceTintOpacityRef = useRef(TEACHING_SURFACE_TINT_OPACITY);
   const robotLayerRef = useRef(null);
+  const twinSceneRef = useRef(null);
+  const focusTwinRobotsRef = useRef(null);
+  const twinSceneInputsRef = useRef(null);
+  twinSceneInputsRef.current = { robots: twinRobots, selectedId: selectedTwinRobotId, onSelect: onSelectTwinRobot };
   const showRobotRef = useRef(showRobot);
   const loadedRobotRef = useRef(null);
   const robotParkingGhostLayerRef = useRef(null);
@@ -3807,6 +3815,8 @@ export default function PointCloudViewer({
     waypointGroupRef.current = waypointGroup;
     visionCoverageGroupRef.current = visionCoverageGroup;
     robotLayerRef.current = robotLayer;
+    const twinScene = new RobotTwinScene(scene, mount, (id) => twinSceneInputsRef.current.onSelect?.(id));
+    twinSceneRef.current = twinScene;
     robotParkingGhostLayerRef.current = robotParkingGhostLayer;
     robotPoseRef.current = applyRobotPose(robotLayer, robotPoseRef.current);
     writeRobotPoseDataset(renderer.domElement, robotPoseRef.current);
@@ -4526,6 +4536,17 @@ export default function PointCloudViewer({
         return;
       }
 
+      if (robotTelemetryRef.current) {
+        scene.updateMatrixWorld(true); camera.updateMatrixWorld(true);
+        if (setRayFromPointer(event)) {
+          const id = twinScene.pick(raycaster);
+          renderer.domElement.dataset.lastPickType = id ? 'twin-robot' : 'none';
+          renderer.domElement.dataset.lastPickId = id || '';
+          if (id) twinSceneInputsRef.current.onSelect?.(id);
+        }
+        return;
+      }
+
       // Polyline clicks belong to the teaching panel; retain the camera's
       // pointer lifecycle without also selecting or clearing navigation items.
       if (polylineOpenRef.current) return;
@@ -4612,6 +4633,7 @@ export default function PointCloudViewer({
       }
     };
     const onSceneDoubleClick = (event) => {
+      if (robotTelemetryRef.current) return;
       // The first click can focus a teaching parking point and move the camera
       // before the second click. Keep that gesture's original waypoint target.
       const waypoint = firstClickWaypoint || selectionAtPointer(event);
@@ -4820,6 +4842,11 @@ export default function PointCloudViewer({
     // This also refreshes the scene when the workbench's animation loop is hidden.
     const captureCollaborationViewport = (target) => {
       if (renderer.getContext().isContextLost()) return false;
+      const twinInputs = twinSceneInputsRef.current;
+      twinScene.sync(loadedRobotRef.current, robotLayer, twinInputs.robots, twinInputs.selectedId, showRobotRef.current);
+      robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
+        || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
+      twinScene.project(camera, renderer.domElement);
       renderer.render(scene, camera);
       const source = renderer.domElement;
       if (!source.width || !source.height) return false;
@@ -5605,11 +5632,23 @@ export default function PointCloudViewer({
           + ((ghostPulse - 0.96) / 0.16) * 0.22;
         renderer.domElement.dataset.parkingGhostPulse = ghostPulse.toFixed(3);
       }
+      const twinInputs = twinSceneInputsRef.current;
+      twinScene.sync(loadedRobotRef.current, robotLayer, twinInputs.robots, twinInputs.selectedId, showRobotRef.current);
+      robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
+        || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
+      const twinRoster = twinInputs.robots.map((robot) => robot.id).join(',');
+      if (twinScene.framedRoster !== twinRoster) {
+        twinScene.framedRoster = twinRoster;
+        if (twinInputs.robots.length > 1) focusTwinRobotsRef.current?.();
+      }
+      twinScene.project(camera, renderer.domElement);
       renderer.render(scene, camera);
     });
 
     return () => {
       renderer.setAnimationLoop(null);
+      twinScene.dispose();
+      if (twinSceneRef.current === twinScene) twinSceneRef.current = null;
       stopTwinFollow(false);
       viewportPanel.removeEventListener('pointerdown', onViewportInteraction, true);
       viewportPanel.removeEventListener('click', onViewportInteraction, true);
@@ -5770,6 +5809,7 @@ export default function PointCloudViewer({
     chassisDragInteractionRef.current?.exit?.('robot-change');
     clearRobotDragHistory();
     robotChassisHandleRef.current = null;
+    twinSceneRef.current?.clear();
     loadedRobotRef.current = null;
     canvas.dataset.chassisDragHandleReady = 'false';
     setVisibleRobotFrames(new Set());
@@ -5968,6 +6008,7 @@ export default function PointCloudViewer({
       if (loadedRobotRef.current === loadedRobot) loadedRobotRef.current = null;
       clearRobotJointDataset(canvas);
       if (chassisControlGuide) disposeRobotModel(chassisControlGuide.group);
+      twinSceneRef.current?.clear();
       if (loadedRobot) disposeRobotModel(loadedRobot);
     };
   }, [mapData?.geometry, robotDescriptor]);
@@ -7832,6 +7873,21 @@ export default function PointCloudViewer({
     controls.update();
   };
 
+  const focusTwinRobots = () => {
+    const controls = controlsRef.current, camera = cameraRef.current;
+    const bounds = twinSceneRef.current?.bounds();
+    if (!controls || !camera || !bounds || bounds.isEmpty()) return;
+    stopTwinFollow();
+    if (focusAnimationRef.current) { cancelAnimationFrame(focusAnimationRef.current); focusAnimationRef.current = null; }
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const direction = camera.position.clone().sub(controls.target).normalize();
+    controls.target.copy(sphere.center);
+    camera.position.copy(sphere.center).addScaledVector(direction, sphere.radius * 3.1 * Math.max(1, 1 / camera.aspect));
+    camera.zoom = 1; camera.updateProjectionMatrix(); controls.update();
+    viewActionsRef.current?.refreshClipping();
+  };
+  focusTwinRobotsRef.current = focusTwinRobots;
+
   const toggleTwinFollow = () => {
     if (twinFollowRef.current) { stopTwinFollow(); return; }
     const controls = controlsRef.current, camera = cameraRef.current;
@@ -8236,6 +8292,9 @@ export default function PointCloudViewer({
               disabled={!isActive || !showRobot || robotLoadState?.status !== 'loaded'}
               title={twinFollowEnabled ? '退出跟随并恢复之前的视角' : '从机器人后上方观察局部场景，随定位和朝向自动跟随'}
               onClick={toggleTwinFollow}><Eye size={13} />{twinFollowEnabled ? '退出跟随' : '跟随视角'}</button>}
+            {robotTelemetry && twinRobots.length > 1 && <button type="button" className="robot-twin-follow-toggle"
+              aria-label="查看全部机器人" disabled={!isActive || !showRobot} onClick={focusTwinRobots}>
+              <Bot size={13} />全部机器人</button>}
             {!robotTelemetry && <button type="button" className="polyline-teaching-launch" aria-label={polylineOpen ? '图谱控制台' : '表面折线示教'} aria-pressed={polylineOpen}
               aria-controls={polylineOpen ? 'inspector-panel-content' : 'inspector-polyline-content'}
               disabled={!isActive || (!polylineOpen && (robotLoadState?.status !== 'loaded' || externalRobotTrajectoryActive || teachingCaptureBusy || teachingPoseEditing || !mapData?.faceCount))}

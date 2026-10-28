@@ -72,6 +72,7 @@ with sync_playwright() as playwright:
         chooser.get_by_role('button', name='真机孪生').click()
         twin = peer.get_by_role('dialog', name='真机孪生', exact=True)
         expect(twin.get_by_text('请先结束离线协作或等待中的授权申请。', exact=True)).to_have_count(0)
+        twin.get_by_role('checkbox', name='ABX 机器人 192.168.0.112:9090', exact=True).uncheck()
         twin.get_by_role('button', name='添加机器人', exact=True).click()
         twin.get_by_label('机器人名称', exact=True).fill('离线同步后连接模拟器')
         twin.get_by_label('机器人地址', exact=True).fill(ROBOT)
@@ -92,7 +93,7 @@ with sync_playwright() as playwright:
         assert snapshot(peer, MODE)['mapId'] == saved['mapId']
         peer.get_by_role('button', name='同步作业', exact=True).click()
         chooser.get_by_role('button', name='真机孪生').click()
-        twin.get_by_text('离线同步后连接模拟器', exact=True).click()
+        twin.get_by_role('button', name='连接并同步', exact=True).click()
         expect(twin.locator('.robot-twin-success')).to_contain_text('连接成功')
         expect(twin).not_to_be_visible(timeout=5000)
         peer.get_by_role('button', name='停止同步', exact=True).click()
