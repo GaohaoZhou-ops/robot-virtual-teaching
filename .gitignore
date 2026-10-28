@@ -250,6 +250,9 @@ playwright/.auth/
 # Digital-twin checks write into test-artifacts/{robot-twin,robot-twin-fleet}/.
 # Multi-robot selection, body-color, model-picking and monitor-switch captures
 # share the ignored artifact root; keep robot_twin_fleet_* and appearance tests.
+# Motion-latency and camera-frame retention reviews use
+# test-artifacts/robot-twin-smoothing/; keep robot_twin_motion_*,
+# robot_twin_camera_frames_* and robot_twin_smoothing_* regression sources.
 # Ignore standalone copies of live readings, session diagnostics and captures
 # at root/tests too; keep robot_twin_*.py/.mjs runners and nested fixtures visible.
 # The shared artifact directory also holds robot-card, body-camera, arrow-spacing
@@ -278,14 +281,14 @@ playwright/.auth/
 # Network captures may contain session headers as well as live frame payloads.
 /robot-twin-*.[hH][aA][rR]
 /tests/robot-twin-*.[hH][aA][rR]
-/robot-twin-*.json
-/tests/robot-twin-*.json
+/robot-twin-*.[jJ][sS][oO][nN]
+/tests/robot-twin-*.[jJ][sS][oO][nN]
 # Continuous pose/monitor diagnostics may use line-delimited JSON. Scope these
 # to standalone output names; maintained sources and nested fixtures stay visible.
-/robot-twin-*.jsonl
-/tests/robot-twin-*.jsonl
-/robot-twin-*.ndjson
-/tests/robot-twin-*.ndjson
+/robot-twin-*.[jJ][sS][oO][nN][lL]
+/tests/robot-twin-*.[jJ][sS][oO][nN][lL]
+/robot-twin-*.[nN][dD][jJ][sS][oO][nN]
+/tests/robot-twin-*.[nN][dD][jJ][sS][oO][nN]
 
 # Simulator PID/locks/logs live in .atlas-cache/fake-robot/; twin, confidence,
 # history-list and offline-to-twin UI captures use test-artifacts/{robot-twin,

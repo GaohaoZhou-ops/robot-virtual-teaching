@@ -406,7 +406,8 @@ try:
                 assert server.active_camera == 'head-left'
                 fixture['freeze_video'] = True
                 expect(cameras).to_have_attribute('data-camera-phase', 'stale')
-                expect(cameras.locator('img')).to_have_count(0)
+                expect(cameras.locator('img')).to_be_visible()
+                expect(cameras.locator('.task-monitor-camera__live')).to_have_count(0)
                 expect(page.locator('.work-sync:visible')).to_have_attribute('data-twin-phase', 'live')
                 fixture['freeze_video'] = False
                 expect(cameras).to_have_attribute('data-camera-phase', 'live')
@@ -423,8 +424,8 @@ try:
             }''', arg=first_frame)
             if not args.live:
                 fixture['freeze_video'] = True
-                expect(expanded_camera.locator('img')).to_have_count(0)
-                expect(expanded_camera.get_by_role('status')).to_contain_text('画面已过期')
+                expect(expanded_camera.get_by_role('status')).to_contain_text('保留最后一帧')
+                expect(expanded_camera.locator('img')).to_be_visible()
                 fixture['freeze_video'] = False
                 expect(expanded_camera.locator('img')).to_be_visible()
             page.screenshot(path=str(artifacts / ('live-camera-expanded.png' if args.live else 'fixture-camera-expanded.png')))

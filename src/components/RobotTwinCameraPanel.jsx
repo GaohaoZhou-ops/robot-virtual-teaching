@@ -8,6 +8,7 @@ function CameraFrame({ camera, status, onError, children }) {
     {camera?.imageUrl ? <img src={camera.imageUrl} alt={`${BODY_CAMERAS[camera.selected]}实时画面`} onError={onError} />
       : <div><Camera size={25} /><span>{camera?.catalogPhase === 'error' ? '相机列表不可用' : status}</span></div>}
     {camera?.phase === 'live' && <span className="task-monitor-camera__live"><span />LIVE</span>}
+    {camera?.imageUrl && camera.phase === 'stale' && <span className="task-monitor-camera__stale" role="status" title={camera.error}>画面未更新 · 保留最后一帧</span>}
     {children}
   </div>;
 }
@@ -36,7 +37,7 @@ function CameraPreviewDialog({ camera, status, onError, onClose }) {
       <button ref={closeRef} type="button" aria-label="关闭放大画面" title="关闭放大画面（Esc）" onClick={onClose}><X size={18} /></button></header>
     <CameraFrame camera={camera} status={status} onError={onError} />
     <footer><CameraMeta camera={camera} status={status} />
-      {camera.error && <p className="task-monitor__warning" role="status">{camera.error}</p>}</footer>
+      {camera.error && !camera.imageUrl && <p className="task-monitor__warning" role="status">{camera.error}</p>}</footer>
   </dialog>, document.body);
 }
 
@@ -72,7 +73,7 @@ export default function RobotTwinCameraPanel({ twin, collapsed }) {
         title="放大画面" disabled={!wanted} onClick={() => setExpanded(true)}><Maximize2 size={13} /></button>
     </CameraFrame>
     <CameraMeta camera={camera} status={status} />
-    {(camera?.catalogError || camera?.error) && <p className="task-monitor__warning" role="status">{camera.catalogError || camera.error}</p>}
+    {(camera?.catalogError || (camera?.error && !camera.imageUrl)) && <p className="task-monitor__warning" role="status">{camera.catalogError || camera.error}</p>}
     {expanded && wanted && !collapsed && <CameraPreviewDialog camera={camera} status={status} onError={frameError} onClose={() => setExpanded(false)} />}
   </section>;
 }

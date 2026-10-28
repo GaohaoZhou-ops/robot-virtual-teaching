@@ -116,12 +116,13 @@ button.task-monitor__result-row { cursor: pointer; }
 .task-monitor-camera__controls button.is-on { border-color: #79d8b0; color: #b6edcf; background: #1b3b2e; }
 .task-monitor-camera button:disabled, .task-monitor-camera select:disabled { opacity: .45; cursor: default; }
 .task-monitor-camera button:focus-visible, .task-monitor-camera select:focus-visible { outline: 1px solid var(--monitor-accent); outline-offset: 3px; }
-.task-monitor-camera__stage { position: relative; aspect-ratio: 16 / 9; background: #050d0b; border: 1px solid #273e33; overflow: hidden; display: grid; place-items: center; }
-.task-monitor-camera__stage img { display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+.task-monitor-camera__stage { position: relative; width: 100%; min-width: 0; box-sizing: border-box; aspect-ratio: 16 / 9; background: #050d0b; border: 1px solid #273e33; overflow: hidden; display: grid; place-items: center; }
+.task-monitor-camera__stage img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
 .task-monitor-camera__stage > div { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #628773; font-size: 11px; }
 .task-monitor-camera__stage > div svg { stroke-width: 1; }
 .task-monitor-camera__live { position: absolute; left: 8px; top: 8px; display: flex; align-items: center; gap: 5px; padding: 4px 6px; background: #06150bd9; color: #9ae0b3; font: 8px 'SFMono-Regular', Menlo, monospace; letter-spacing: .1em; }
 .task-monitor-camera__live > span { width: 4px; height: 4px; border-radius: 50%; background: #82db9f; }
+.task-monitor-camera__stale { position: absolute; left: 8px; bottom: 8px; padding: 4px 6px; background: #161406df; color: #dac687; font-size: 10px; }
 .task-monitor-camera__meta { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin: 9px 0 0; color: #6e9980; font: 9px 'SFMono-Regular', Menlo, monospace; }
 .task-monitor-camera__meta > span:first-child { display: flex; align-items: center; gap: 5px; }
 .task-monitor-camera .task-monitor__warning { margin-top: 10px; }

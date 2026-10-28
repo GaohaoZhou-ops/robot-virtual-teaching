@@ -12,6 +12,8 @@
 
 | 范围 | 入口 |
 | --- | --- |
+| 孪生协议、批量连接、运动插值与相机换帧生命周期 | `npm run test:robot-twin` |
+| 连续运动、跟随相机同步、显示延迟、相机后台解码与弱网布局稳定 | `BASE_URL=http://127.0.0.1:22067 uv run --with playwright python tests/robot_twin_smoothing_ui_smoke.py`（独立 Vite 开发服务；测试自行启动本地模拟机器人） |
 | 离线协作授权、增量合并、旧缓存升级及显示配置归档 | `npm run test:work-sync` |
 | 两端地图 / 独立对象颜色、实时显示设置、刷新导出与旧缓存修复 | `BASE_URL=http://127.0.0.1:22063 uv run --with playwright python tests/work_sync_display_ui_smoke.py`（先在该端口启动独立 Vite 开发服务） |
 | Vision Pro 原生坐标、网络与工程往返 | `npm run test:vision`（macOS） |

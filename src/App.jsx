@@ -6582,7 +6582,7 @@ export default function App() {
   const displayedRobotJoints = useMemo(() => robotTwin.active
     ? { ...robotJointValues, ...robotTwin.joints } : robotJointValues, [robotTwin.active, robotTwin.joints, robotJointValues]);
   const twinRobotInstances = useMemo(() => robotTwin.robots.filter((robot) => robot.active && robot.pose)
-    .map((robot) => ({ id: robot.id, name: robot.name, phase: robot.phase, color: robot.color,
+    .map((robot) => ({ id: robot.id, name: robot.name, phase: robot.phase, color: robot.color, motionSample: robot.motionSample,
       pose: robotTwinDisplayPose(robotPose, robot.pose), joints: { ...robotJointValues, ...robot.joints } })),
   [robotTwin.robots, robotPose, robotJointValues]);
   const workSync = useWorkSync({

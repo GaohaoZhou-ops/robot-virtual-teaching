@@ -12,7 +12,7 @@ export class RobotTwinClient {
     this.controllers = new Set();
     this.cameraClient = new RobotTwinCameraClient({ request: (path, options) => this.api(path, options),
       onChange: (camera) => this.publish({ camera }) });
-    this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '', authFailed: false, credentialError: '',
+    this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, motionSample: null, error: '', authFailed: false, credentialError: '',
       monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state };
   }
 
@@ -48,7 +48,7 @@ export class RobotTwinClient {
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
     this.release(this.token); this.token = null; this.profile = null;
-    this.publish({ active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '', authFailed: false, credentialError: '', profileId: null,
+    this.publish({ active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, motionSample: null, error: '', authFailed: false, credentialError: '', profileId: null,
       monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null });
   }
 
@@ -73,6 +73,7 @@ export class RobotTwinClient {
       snapshot: { ...snapshot, localizationFresh: Boolean(poseFresh), jointCount: jointsFresh ? snapshot.jointCount : 0 },
       error: live ? '' : snapshot.warnings?.join('；') || '正在等待有效的实时定位与姿态',
       lastReceivedAt: Date.now(),
+      motionSample: { time: performance.now(), id: snapshot.sampledAt },
     });
     const durations = [poseFresh ? poseMs : 0, jointsFresh ? jointMs : 0].filter((value) => value > 0);
     if (durations.length) this.expiry = setTimeout(() => {

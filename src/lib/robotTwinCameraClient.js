@@ -3,18 +3,37 @@ import { ROBOT_CAMERA_INTERVAL, ROBOT_CAMERA_MAX_AGE, isBodyCamera } from './rob
 const initialState = () => ({ cameras: [], catalogPhase: 'idle', catalogError: '', selected: '',
   phase: 'idle', wanted: false, imageUrl: null, error: '', width: 0, height: 0, fps: 0 });
 
+async function decodeFrame(url, signal) {
+  // Protocol-only Node tests have no image decoder; browsers always predecode.
+  if (typeof Image === 'undefined') return null;
+  const image = new Image(); image.decoding = 'async';
+  let abort;
+  try {
+    signal.throwIfAborted();
+    const cancelled = new Promise((_, reject) => {
+      abort = () => { image.src = ''; reject(signal.reason); };
+      signal.addEventListener('abort', abort, { once: true });
+    });
+    image.src = url;
+    await Promise.race([image.decode(), cancelled]);
+    return image;
+  } finally { if (abort) signal.removeEventListener('abort', abort); }
+}
+
 export class RobotTwinCameraClient {
-  constructor({ request, onChange = () => {} }) {
-    this.request = request; this.onChange = onChange;
+  constructor({ request, onChange = () => {}, decode = decodeFrame }) {
+    this.request = request; this.onChange = onChange; this.decode = decode;
     this.epoch = 0; this.catalogEpoch = 0; this.state = initialState();
   }
   publish(update) { this.state = { ...this.state, ...update }; this.onChange(this.state); }
   clearImage() {
     if (this.state.imageUrl) URL.revokeObjectURL(this.state.imageUrl);
+    if (this.previousImageUrl) URL.revokeObjectURL(this.previousImageUrl);
+    this.previousImageUrl = null; this.decodedImage = null;
   }
   cancel() {
     clearTimeout(this.timer); clearTimeout(this.expiry); this.controller?.abort();
-    this.clearImage(); this.lastSequence = ''; this.frameTimes = []; this.errors = 0;
+    this.clearImage(); this.lastSequence = ''; this.frameTimes = [];
   }
   reset() {
     ++this.epoch; ++this.catalogEpoch; this.catalogController?.abort(); this.cancel();
@@ -68,6 +87,7 @@ export class RobotTwinCameraClient {
   async frame(epoch) {
     if (epoch !== this.epoch || !this.state.wanted) return;
     const started = performance.now(); let delay = ROBOT_CAMERA_INTERVAL;
+    let pendingUrl;
     try {
       const { blob, headers } = await this.request('/camera/frame', { binary: true,
         headers: { 'X-Atlas-Camera-Revision': String(epoch) }, signal: this.controller.signal });
@@ -76,7 +96,15 @@ export class RobotTwinCameraClient {
         || blob.type !== 'image/jpeg') throw new Error('相机画面与当前选择不匹配');
       const sequence = headers.get('X-Atlas-Frame-Sequence');
       if (sequence !== this.lastSequence) {
-        const imageUrl = URL.createObjectURL(blob); this.clearImage(); this.lastSequence = sequence;
+        pendingUrl = URL.createObjectURL(blob);
+        const decoded = await this.decode(pendingUrl, this.controller.signal);
+        if (epoch !== this.epoch || !this.state.wanted) return;
+        // Keep the displayed URL valid until its decoded replacement has been
+        // presented. Retain one previous frame for both sidebar and dialog.
+        if (this.previousImageUrl) URL.revokeObjectURL(this.previousImageUrl);
+        this.previousImageUrl = this.state.imageUrl;
+        this.decodedImage = decoded;
+        const imageUrl = pendingUrl; pendingUrl = null; this.lastSequence = sequence;
         const now = performance.now(); this.frameTimes.push(now); this.frameTimes = this.frameTimes.filter((time) => time >= now - 3000);
         const fps = this.frameTimes.length > 1 ? (this.frameTimes.length - 1) * 1000 / (now - this.frameTimes[0]) : 0;
         this.publish({ imageUrl, phase: 'live', error: '', width: Number(headers.get('X-Atlas-Frame-Width')),
@@ -84,17 +112,17 @@ export class RobotTwinCameraClient {
         clearTimeout(this.expiry);
         this.expiry = setTimeout(() => {
           if (epoch !== this.epoch) return;
-          this.clearImage(); this.publish({ imageUrl: null, phase: 'stale', error: '画面已过期，正在等待新帧' });
+          this.publish({ phase: 'stale', error: '画面暂未更新，保留最后一帧，正在等待恢复' });
         }, ROBOT_CAMERA_MAX_AGE);
       }
-      this.errors = 0;
     } catch (error) {
       if (epoch !== this.epoch || !this.state.wanted) return;
-      clearTimeout(this.expiry); this.clearImage();
-      this.publish({ imageUrl: null, phase: 'stale', error: error.message });
-      if ([401, 403, 409].includes(error.status) || ++this.errors >= 8) { await this.stop(error.message); return; }
+      clearTimeout(this.expiry);
+      this.publish({ phase: 'stale', error: error.name === 'EncodingError' ? '新画面解码失败，等待下一帧' : error.message });
+      if ([401, 403, 409].includes(error.status)) { await this.stop(error.message); return; }
       delay = 600;
     } finally {
+      if (pendingUrl) URL.revokeObjectURL(pendingUrl);
       if (epoch === this.epoch && this.state.wanted) this.timer = setTimeout(() => void this.frame(epoch), Math.max(0, delay - (performance.now() - started)));
     }
   }

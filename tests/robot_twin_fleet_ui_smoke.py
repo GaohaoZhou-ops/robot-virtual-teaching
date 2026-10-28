@@ -78,6 +78,10 @@ try:
         page.set_default_timeout(25000)
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
+        page.add_init_script('''window.twinSuccessAnimations = 0;
+          document.addEventListener('animationstart', event => {
+            if (event.target.classList.contains('robot-twin-success__check')) window.twinSuccessAnimations++;
+          }, true);''')
         page.add_init_script('localStorage.setItem("atlas-route-studio:robot-twin-profiles-v1", ' +
                              json.dumps(json.dumps({'version': 1, 'profiles': profiles, 'selectedIds': []})) + ');')
         held_connections = []
@@ -126,7 +130,14 @@ try:
             dialog.get_by_role('button', name='重试并同步所选机器人', exact=True).click()
             expect(dialog.locator('.robot-twin-success')).to_be_visible()
             assert dialog.locator('.robot-twin-success__check').evaluate('(el) => el.getAnimations().length') > 0
+            # One robot can temporarily lose a poll during the success mark.
+            # Recovery must not remount/replay the batch's animation.
+            command({'down': True})
+            expect(page.locator('.robot-twin-scene-label.is-stale')).to_have_count(1)
+            expect(dialog.locator('.robot-twin-success')).to_be_visible()
+            command({'down': False})
             expect(dialog).not_to_be_visible(timeout=4000)
+            assert page.evaluate('window.twinSuccessAnimations') == 1
             assert requests(0)['POST /api/v1/access/login'] == login_a
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
             monitor = page.get_by_role('complementary', name='任务监控台', exact=True)
@@ -208,6 +219,7 @@ try:
             dialog.get_by_role('button', name='连接并同步', exact=True).click()
             expect(dialog.locator('.robot-twin-success')).to_be_visible()
             expect(dialog).not_to_be_visible(timeout=4000)
+            assert page.evaluate('window.twinSuccessAnimations') == 2, 'exactly one animation per connection attempt'
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
             follow = page.get_by_role('button', name='机器人后上方跟随视角', exact=True)
             follow.click()

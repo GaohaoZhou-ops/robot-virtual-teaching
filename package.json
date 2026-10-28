@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "test:work-sync": "node tests/work_sync_smoke.mjs && node tests/work_sync_display_smoke.mjs",
-    "test:robot-twin": "node tests/robot_twin_smoke.mjs && node tests/robot_twin_fleet_smoke.mjs && node tests/robot_twin_appearance_smoke.mjs",
+    "test:robot-twin": "node tests/robot_twin_smoke.mjs && node tests/robot_twin_fleet_smoke.mjs && node tests/robot_twin_appearance_smoke.mjs && node tests/robot_twin_motion_smoke.mjs && node tests/robot_twin_camera_frames_smoke.mjs",
     "test:fake-robot": "node tests/fake_robot_smoke.mjs",
     "test:connectivity": "node tests/graph_connectivity_smoke.mjs",
     "test:model-editor": "node tests/model_editing_smoke.mjs",

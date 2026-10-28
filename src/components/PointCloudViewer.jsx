@@ -3153,6 +3153,7 @@ export default function PointCloudViewer({
   endEffectorObjectChangeRef.current = () => updateEndEffectorTarget(false);
 
   useEffect(() => {
+    if (robotTelemetry) return; // The animation loop presents buffered telemetry.
     const nextPose = normalizeRobotPose(robotPose);
     if (!sameRobotPose(nextPose, robotPoseRef.current)) clearRobotDragHistory();
     robotPoseRef.current = nextPose;
@@ -3160,7 +3161,7 @@ export default function PointCloudViewer({
     const canvas = controlsRef.current?.domElement;
     writeRobotPoseDataset(canvas, nextPose);
     updateRobotParkingGhostGuide(robotParkingGhostVisualRef.current, nextPose, canvas);
-  }, [mapData?.geometry, robotPose]);
+  }, [mapData?.geometry, robotPose, robotTelemetry]);
 
   useLayoutEffect(() => {
     const robot = loadedRobotRef.current;
@@ -3177,6 +3178,7 @@ export default function PointCloudViewer({
   }, [robotArmSoftLimitRatio, robotArmSoftLimitOverrides, robotArmJointCouplingEnabled]);
 
   useLayoutEffect(() => {
+    if (robotTelemetry) return;
     const changed = !sameNumericValues(normalizeRobotJointValues(robotJointValues), robotJointValuesRef.current);
     if (changed) clearRobotDragHistory();
     const appliedValues = applyRobotJointStateToScene(robotJointValues, 'external-control');
@@ -4865,14 +4867,30 @@ export default function PointCloudViewer({
         pixelStep,
       };
     };
+    const updateTwinScene = () => {
+      const twinInputs = twinSceneInputsRef.current;
+      twinScene.sync(loadedRobotRef.current, robotLayer, twinInputs.robots, twinInputs.selectedId, showRobotRef.current);
+      const frame = twinScene.update(performance.now());
+      if (frame) {
+        robotPoseRef.current = frame.pose;
+        robotJointValuesRef.current = writeRobotJointDataset(renderer.domElement, loadedRobotRef.current, 'twin-interpolated');
+        writeRobotPoseDataset(renderer.domElement, frame.pose);
+      }
+      robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
+        || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
+      return twinInputs;
+    };
     // Capture synchronously after rendering, before WebGL discards its buffer.
     // This also refreshes the scene when the workbench's animation loop is hidden.
     const captureCollaborationViewport = (target) => {
       if (renderer.getContext().isContextLost()) return false;
-      const twinInputs = twinSceneInputsRef.current;
-      twinScene.sync(loadedRobotRef.current, robotLayer, twinInputs.robots, twinInputs.selectedId, showRobotRef.current);
-      robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
-        || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
+      updateTwinScene();
+      const following = twinFollowRef.current;
+      if (following && robotTelemetryRef.current) {
+        const view = following.tracker.update(robotPoseRef.current);
+        camera.position.copy(view.position); controls.target.copy(view.target);
+        camera.up.set(0, 0, 1); camera.lookAt(controls.target); camera.updateMatrixWorld(true);
+      }
       twinScene.project(camera, renderer.domElement);
       renderer.render(scene, camera);
       const source = renderer.domElement;
@@ -4906,6 +4924,7 @@ export default function PointCloudViewer({
     renderer.setAnimationLoop(() => {
       const deltaSeconds = Math.min(frameClock.getDelta(), 0.05);
       if (!renderActiveRef.current) return;
+      const twinInputs = updateTwinScene();
       const pressedKeys = pressedKeysRef.current;
       const keyboardImpulses = keyboardImpulseRef.current;
       const robotControlActive =
@@ -5359,7 +5378,7 @@ export default function PointCloudViewer({
       keyboardImpulses.clear();
       const twinFollow = twinFollowRef.current;
       if (twinFollow && robotTelemetryRef.current) {
-        const view = twinFollow.tracker.update(robotPoseRef.current, deltaSeconds);
+        const view = twinFollow.tracker.update(robotPoseRef.current);
         camera.position.copy(view.position); controls.target.copy(view.target);
         camera.up.set(0, 0, 1); camera.lookAt(controls.target);
         syncDetailView();
@@ -5659,10 +5678,6 @@ export default function PointCloudViewer({
           + ((ghostPulse - 0.96) / 0.16) * 0.22;
         renderer.domElement.dataset.parkingGhostPulse = ghostPulse.toFixed(3);
       }
-      const twinInputs = twinSceneInputsRef.current;
-      twinScene.sync(loadedRobotRef.current, robotLayer, twinInputs.robots, twinInputs.selectedId, showRobotRef.current);
-      robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
-        || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
       const twinRoster = twinInputs.robots.map((robot) => robot.id).join(',');
       if (twinScene.framedRoster !== twinRoster) {
         twinScene.framedRoster = twinRoster;

@@ -19,14 +19,12 @@ export function createRobotTwinFollowCamera(pose, robotHeight = 1.8) {
   frame();
   return {
     position, target,
-    update(next, deltaSeconds) {
-      if (![next?.position?.x, next?.position?.y, next?.position?.z, next?.rpy?.yaw, deltaSeconds].every(Number.isFinite)) return frame();
-      const alpha = -Math.expm1(-10 * Math.max(0, Math.min(deltaSeconds, 0.05)));
-      base.x += (next.position.x - base.x) * alpha;
-      base.y += (next.position.y - base.y) * alpha;
-      base.z += (next.position.z - base.z) * alpha;
-      const turn = next.rpy.yaw * Math.PI / 180 - yaw;
-      yaw += Math.atan2(Math.sin(turn), Math.cos(turn)) * alpha;
+    update(next) {
+      if (![next?.position?.x, next?.position?.y, next?.position?.z, next?.rpy?.yaw].every(Number.isFinite)) return frame();
+      // The model and camera consume the same interpolated frame. A second
+      // camera-only low-pass filter adds lag and makes the robot slide in view.
+      base.set(next.position.x, next.position.y, next.position.z);
+      yaw = next.rpy.yaw * Math.PI / 180;
       return frame();
     },
   };

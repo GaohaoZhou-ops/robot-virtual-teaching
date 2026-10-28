@@ -3,6 +3,7 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { applyRobotJointValues, setRobotVisualBounds } from './robotLoader.js';
 import { tintRobotTwinBody } from './robotTwinAppearance.js';
 import { applyRobotModelOpacity } from './robotDisplay.js';
+import { RobotTwinMotion } from './robotTwinMotion.js';
 
 function isVisibleRobotMesh(object) {
   if (!object.isMesh || object.userData.robotChassisDragTarget) return false;
@@ -19,7 +20,7 @@ function isVisibleRobotMesh(object) {
 export class RobotTwinScene {
   constructor(scene, mount, onSelect) {
     this.scene = scene; this.mount = mount; this.onSelect = onSelect;
-    this.entries = new Map();
+    this.entries = new Map(); this.motion = new Map();
     this.labels = document.createElement('div');
     this.labels.className = 'robot-twin-scene-labels'; mount.append(this.labels);
     this.projected = new THREE.Vector3(); this.cameraPoint = new THREE.Vector3();
@@ -37,7 +38,7 @@ export class RobotTwinScene {
 
   clear() {
     for (const entry of this.entries.values()) this.remove(entry);
-    this.entries.clear(); this.base = null; this.robots = null;
+    this.entries.clear(); this.motion.clear(); this.base = null; this.robots = null;
   }
 
   sync(base, baseLayer, robots, selectedId, visible) {
@@ -46,10 +47,13 @@ export class RobotTwinScene {
     if (this.base !== base) this.clear();
     this.base = base; this.baseLayer = baseLayer; this.robots = robots; this.selectedId = selectedId; this.visible = visible; this.opacity = opacity;
     const wanted = new Set(base ? robots.map((robot) => robot.id) : []);
+    for (const id of this.motion.keys()) if (!wanted.has(id)) this.motion.delete(id);
     for (const [id, entry] of this.entries) {
       if (!wanted.has(id) || entry.selected !== (id === selectedId)) { this.remove(entry); this.entries.delete(id); }
     }
     for (const robot of base ? robots : []) {
+      if (!this.motion.has(robot.id)) this.motion.set(robot.id, new RobotTwinMotion());
+      this.motion.get(robot.id).push(robot);
       const selected = robot.id === selectedId;
       let entry = this.entries.get(robot.id);
       if (!entry) {
@@ -73,14 +77,9 @@ export class RobotTwinScene {
         entry = { group, model, ring, label, selected, tint }; this.entries.set(robot.id, entry);
       }
       entry.robot = robot; entry.group.visible = visible;
-      const { position, rpy } = robot.pose;
-      entry.group.position.set(position.x, position.y, position.z);
-      entry.group.rotation.set(...[rpy.roll, rpy.pitch, rpy.yaw].map(THREE.MathUtils.degToRad), 'XYZ');
       if (entry.model) {
-        applyRobotJointValues(entry.model, robot.joints, { measured: true });
         applyRobotModelOpacity(entry.model, opacity);
       }
-      entry.group.updateMatrixWorld(true);
       entry.label.textContent = robot.name;
       entry.label.style.setProperty('--twin-color', robot.color);
       entry.label.title = `${robot.name} · ${robot.phase === 'live' ? '实时同步' : '数据暂不可用'} · 点击查看任务`;
@@ -88,6 +87,26 @@ export class RobotTwinScene {
       entry.label.setAttribute('aria-label', `查看机器人 ${robot.name}`);
       entry.label.setAttribute('aria-pressed', String(selected));
     }
+  }
+
+  update(now) {
+    let selected = null;
+    for (const [id, entry] of this.entries) {
+      const frame = this.motion.get(id).read(now) || entry.robot;
+      const { position, rpy } = frame.pose;
+      entry.rendered = frame;
+      entry.group.position.set(position.x, position.y, position.z);
+      entry.group.rotation.set(...[rpy.roll, rpy.pitch, rpy.yaw].map(THREE.MathUtils.degToRad), 'XYZ');
+      if (entry.selected) {
+        this.baseLayer.position.copy(entry.group.position);
+        this.baseLayer.quaternion.copy(entry.group.quaternion);
+        applyRobotJointValues(this.base, frame.joints, { measured: true });
+        this.baseLayer.updateMatrixWorld(true);
+        selected = frame;
+      } else applyRobotJointValues(entry.model, frame.joints, { measured: true });
+      entry.group.updateMatrixWorld(true);
+    }
+    return selected;
   }
 
   pick(raycaster) {
@@ -115,7 +134,7 @@ export class RobotTwinScene {
     const width = canvas.clientWidth, viewHeight = canvas.clientHeight;
     const positions = [];
     for (const [id, entry] of this.entries) {
-      const p = entry.robot.pose.position;
+      const p = (entry.rendered || entry.robot).pose.position;
       this.projected.set(p.x, p.y, p.z + height + 0.16);
       this.cameraPoint.copy(this.projected).applyMatrix4(camera.matrixWorldInverse);
       this.projected.project(camera);

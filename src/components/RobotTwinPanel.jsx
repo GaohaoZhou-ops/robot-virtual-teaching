@@ -15,6 +15,7 @@ export function RobotTwinPanel({ twin, open, onConnected }) {
   const [passwords, setPasswords] = useState({});
   const [attemptedIds, setAttemptedIds] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [successShown, setSuccessShown] = useState(false);
   const editorName = useRef(null);
   const connecting = useRef(false);
   const passwordInputs = useRef(new Map());
@@ -24,11 +25,16 @@ export function RobotTwinPanel({ twin, open, onConnected }) {
   const stateFor = (profile) => twin?.robots?.find((item) => item.id === profile.id);
   const credentialFor = (profile) => !stateFor(profile)?.authFailed
     ? credentials.find((item) => item.id === profile.id && item.address === profile.address) : null;
-  const connected = open && !busy && attemptedIds.length > 0
+  const batchReady = open && !busy && attemptedIds.length > 0
     && attemptedIds.every((id) => twin?.robots?.some((item) => item.id === id && item.phase === 'live'));
+  // Success belongs to the whole connection attempt, not to live/stale
+  // telemetry updates. Once shown, brief polling gaps cannot remount the mark.
+  const connected = open && successShown && attemptedIds.length > 0
+    && attemptedIds.every((id) => twin?.robots?.some((item) => item.id === id && item.active && !item.authFailed));
   const pending = selected.filter((profile) => !stateFor(profile)?.active);
+  useEffect(() => { if (batchReady) setSuccessShown(true); }, [batchReady]);
   useEffect(() => {
-    if (!open) { setPasswords({}); setEditor(null); setEditorError(''); setAttemptedIds([]); }
+    if (!open) { setPasswords({}); setEditor(null); setEditorError(''); setAttemptedIds([]); setSuccessShown(false); }
   }, [open]);
   useEffect(() => { if (editor) editorName.current?.focus(); }, [Boolean(editor)]);
   useEffect(() => {
@@ -45,7 +51,7 @@ export function RobotTwinPanel({ twin, open, onConnected }) {
   const connect = async (event) => {
     event.preventDefault();
     if (!twin || connecting.current || twin.disabledReason || !selected.length || editor) return;
-    connecting.current = true; setBusy(true); setRemoved(null);
+    connecting.current = true; setBusy(true); setRemoved(null); setSuccessShown(false);
     setAttemptedIds(selected.map((profile) => profile.id));
     try { await twin.connectMany(selected.map((profile) => ({ ...profile,
       password: credentialFor(profile)?.password ?? passwords[profile.id] ?? '' }))); }

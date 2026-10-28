@@ -257,7 +257,7 @@ try {
   assert.equal(cameraTraffic.filter((item) => item.path.endsWith('/preview')).length, previewCount);
   freezeFrames = true;
   await until(() => client.state.camera.phase === 'stale');
-  assert.equal(client.state.camera.imageUrl, null, 'never display a frozen frame as live');
+  assert.ok(client.state.camera.imageUrl, 'keep the latest image while explicitly marking it stale');
   assert.equal(client.state.phase, 'live', 'camera freshness is independent of robot pose');
   freezeFrames = false;
   await until(() => client.state.camera.phase === 'live');
