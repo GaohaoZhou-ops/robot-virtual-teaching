@@ -2543,7 +2543,7 @@ code {
   background: linear-gradient(90deg, transparent, rgba(30, 24, 9, 0.36), transparent);
 }
 
-.viewer-menu__trigger.robot-collision-distance {
+.robot-collision-distance {
   --collision-tone: var(--cyan);
   --collision-rgb: 89, 219, 232;
   display: inline-flex;
@@ -2561,14 +2561,6 @@ code {
   font: 500 9px "SFMono-Regular", Menlo, monospace;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.viewer-menu__trigger.robot-collision-distance:hover,
-.viewer-menu__trigger.robot-collision-distance:focus-visible,
-.viewer-menu__trigger.robot-collision-distance.is-open {
-  border-color: rgba(var(--collision-rgb), 0.5);
-  color: var(--collision-tone);
-  background: rgba(var(--collision-rgb), 0.12);
 }
 
 .robot-collision-distance.is-disabled {
@@ -3837,6 +3829,7 @@ code {
 .viewer-display-settings__waypoint-names,
 .viewer-display-settings__path-names,
 .viewer-display-settings__coverage,
+.robot-distance-settings__status,
 .robot-distance-settings__visibility {
   display: flex;
   align-items: center;
@@ -3853,6 +3846,7 @@ code {
 .viewer-display-settings__waypoint-names > span,
 .viewer-display-settings__path-names > span,
 .viewer-display-settings__coverage > span,
+.robot-distance-settings__status > span,
 .robot-distance-settings__visibility > span {
   display: inline-flex;
   align-items: center;

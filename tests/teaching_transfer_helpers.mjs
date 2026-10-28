@@ -1,6 +1,7 @@
 import { buildExport } from '../src/lib/io.js';
 import { buildProjectArchive } from '../src/lib/projectArchive.js';
 import { unzipSync } from 'fflate';
+import { expandProjectResources } from '../src/lib/projectResourceStorage.js';
 import { Box3, BoxGeometry, Float32BufferAttribute, PlaneGeometry } from 'three';
 
 export function teachingTransferFixture(mode = 'map') {
@@ -54,7 +55,7 @@ export async function transferFixtureFiles(fixture) {
   const archive = await buildProjectArchive(fixture.config.config.project, {
     mapResource: fixture.map, existingRobotPackage: fixture.map.portableRobotPackage,
   });
-  return unzipSync(archive.bytes);
+  return (await expandProjectResources(unzipSync(archive.bytes))).files;
 }
 
 // A small room and a separate workpiece make 3D manipulation observable without

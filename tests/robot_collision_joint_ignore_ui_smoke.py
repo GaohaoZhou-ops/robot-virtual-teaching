@@ -11,13 +11,12 @@ from export_separation_ui_smoke import load_project, wait_ready
 from project_save_target_ui_smoke import switch_mode
 from robot_distance_warning_ui_smoke import CHROME, make_fixtures
 from topbar_tools_helpers import topbar_action
-from viewer_tools_helpers import viewer_tool
+from viewer_tools_helpers import display_settings_section, viewer_tool
 
 
 def open_settings(page):
-    menu = page.get_by_role('dialog', name='3D 距离警告', exact=True)
-    if not menu.count():
-        page.get_by_role('button', name='碰撞保护距离', exact=True).click()
+    display_settings_section(page, '距离警告')
+    menu = page.get_by_role('dialog', name='距离警告设置', exact=True)
     toggle = menu.get_by_role('button', name='设置忽略关节', exact=True)
     if toggle.get_attribute('aria-expanded') != 'true':
         toggle.click()
@@ -185,21 +184,21 @@ def run():
                 menu.get_by_role('switch', name='显示距离警告').click()
                 expect(warning).to_be_visible()
                 page.screenshot(path=f'/tmp/atlas-ignored-joints-{mode}.png', full_page=True)
-                menu.get_by_role('button', name='关闭距离警告').click()
+                page.get_by_role('button', name='关闭显示设置', exact=True).click()
 
                 # Exclusions remain configurable while the detector is disabled.
                 viewer_tool(page, name='关闭碰撞保护').click()
                 expect(canvas).to_have_attribute('data-collision-state', 'disabled')
-                expect(page.get_by_role('button', name='碰撞保护距离')).to_have_text('检测关闭')
                 menu = open_settings(page)
+                expect(menu.get_by_label('碰撞保护距离', exact=True)).to_have_text('检测关闭')
                 expect(menu.get_by_role('checkbox')).to_have_count(9)
                 left.uncheck()
-                menu.get_by_role('button', name='关闭距离警告').click()
+                page.get_by_role('button', name='关闭显示设置', exact=True).click()
                 viewer_tool(page, name='开启碰撞保护').click()
                 assert_filtered(canvas, ['right_L1_mount'], 'torso_link', 'left_L1')
                 open_settings(page).get_by_role('checkbox', name='忽略 left_L1_mount', exact=True).check()
                 assert_filtered(canvas, ['left_L1_mount', 'right_L1_mount'], 'torso_link')
-                page.get_by_role('button', name='关闭距离警告').click()
+                page.get_by_role('button', name='关闭显示设置', exact=True).click()
 
                 with page.expect_download() as download:
                     start_project_download(page)

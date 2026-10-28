@@ -3,6 +3,7 @@ import io
 import json
 import tempfile
 import zipfile
+from archive_helpers import logical_archive_files
 from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
@@ -72,17 +73,18 @@ def saved_bytes(page, name):
 
 def assert_pair(data):
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
-        manifest = json.loads(archive.read("manifest.json"))
+        files = logical_archive_files(archive)
+        manifest = json.loads(files["manifest.json"])
         assert manifest["format"] == "atlas-route-studio-linked-project"
         assert manifest["statistics"]["workspaceCount"] == 2
         projects = {}
         for mode in ("map", "independent"):
             prefix = f"workspaces/{mode}/"
-            projects[mode] = json.loads(archive.read(prefix + "config/project.json"))
-            assert prefix + "environment/positions.f32le" in archive.namelist()
-            assert prefix + "robot/files/transfer/robot.urdf" in archive.namelist()
+            projects[mode] = json.loads(files[prefix + "config/project.json"])
+            assert prefix + "environment/positions.f32le" in files
+            assert prefix + "robot/files/transfer/robot.urdf" in files
             assert any(name.startswith(prefix + "teaching-data/") and name.endswith(".png")
-                       for name in archive.namelist())
+                       for name in files)
             assert not any(point.get("source") == "temporary-map-route" for point in projects[mode]["waypoints"])
         return projects
 
@@ -176,9 +178,10 @@ def run():
                 # A malformed companion must leave both existing workspaces intact.
                 bad = Path(temporary) / "missing-companion.zip"
                 with zipfile.ZipFile(path) as source, zipfile.ZipFile(bad, "w") as dest:
-                    for name in source.namelist():
+                    files = logical_archive_files(source)
+                    for name in files:
                         if name != "workspaces/independent/environment/positions.f32le":
-                            dest.writestr(name, source.read(name))
+                            dest.writestr(name, files[name])
                 page.locator("input[data-project-guide-input]").set_input_files(str(bad))
                 error = page.get_by_role("alertdialog", name="工程加载失败")
                 error.get_by_text("工程包缺少", exact=False).wait_for()

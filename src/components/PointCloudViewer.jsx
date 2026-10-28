@@ -1642,7 +1642,6 @@ export default function PointCloudViewer({
     () => createRobotCollisionStatus(),
   );
   const [showDistanceWarnings, setShowDistanceWarnings] = useState(true);
-  const [distanceSettingsOpen, setDistanceSettingsOpen] = useState(false);
   const [collisionJointSettingsOpen, setCollisionJointSettingsOpen] = useState(false);
   const collisionJointOptions = useMemo(() => robotLoadState?.status === 'loaded'
     ? getRobotCollisionJointOptions(loadedRobotRef.current) : [], [robotDescriptor, robotLoadState?.status]);
@@ -8411,51 +8410,6 @@ export default function PointCloudViewer({
                 onPolylineOpenChange?.(!polylineOpen);
               }}><Route size={13} />{polylineOpen ? '图谱控制台' : '折线示教'}</button>}
             <ViewerMenu
-              key={`distance-${resolutionMapKey}`}
-              label="距离警告"
-              triggerLabel="碰撞保护距离"
-              triggerClassName={`robot-collision-distance is-${collisionButtonState}`}
-              triggerContent={<>
-                {collisionButtonState === 'safe'
-                  ? <ShieldCheck size={13} aria-hidden="true" />
-                  : <ShieldAlert size={13} aria-hidden="true" />}
-                <span aria-live="polite" aria-atomic="true">{collisionDistanceLabel}</span>
-              </>}
-              triggerProps={{
-                'data-collision-state': collisionButtonState,
-                'data-collision-distance': collisionProtectionEnabled ? collisionDistanceMillimeters ?? '' : '',
-              }}
-              title={['距离警告设置', robotCollisionStatus.message, robotCollisionStatus.detail].filter(Boolean).join(' · ')}
-              icon={ShieldAlert}
-              isActive={isActive}
-              open={distanceSettingsOpen}
-              onOpenChange={setDistanceSettingsOpen}
-            >
-              <div className="robot-distance-settings__visibility">
-                <span><Eye size={13} /> 显示警告</span>
-                <button
-                  type="button"
-                  role="switch"
-                  className="distance-warning-toggle"
-                  aria-label="显示距离警告"
-                  aria-checked={showDistanceWarnings}
-                  title="在 3D 视图右上角显示距离警告"
-                  onClick={() => setShowDistanceWarnings((current) => !current)}
-                >
-                  {showDistanceWarnings ? <Eye size={12} /> : <EyeOff size={12} />}
-                  <span>{showDistanceWarnings ? '显示' : '隐藏'}</span>
-                </button>
-              </div>
-              <RobotCollisionJointSettings
-                options={collisionJointOptions}
-                ignoredJointNames={ignoredCollisionJointNames}
-                onChange={onIgnoredCollisionJointNamesChange}
-                expanded={collisionJointSettingsOpen}
-                onExpandedChange={setCollisionJointSettingsOpen}
-                ready={collisionControlReady}
-              />
-            </ViewerMenu>
-            <ViewerMenu
               key={`tools-${resolutionMapKey}`}
               label="视图工具"
               title="视角、路径点与机器人控制"
@@ -8605,7 +8559,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`还原视角、机器人模型、全身坐标系、Zivid 光学坐标系、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`还原视角、机器人模型、全身坐标系、Zivid 光学坐标系、距离警告、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
               panelClassName="viewer-display-menu"
@@ -8656,6 +8610,45 @@ export default function PointCloudViewer({
                         <output>{Math.round(robotOpacity * 100)}%</output>
                       </label>
                       <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames} />
+                  </> },
+                  { id: 'distance', label: '距离警告', icon: ShieldAlert,
+                    description: '距离状态 · 警告显示 · 忽略关节', content: <>
+                      <div className="robot-distance-settings__status">
+                        <span>最近环境距离</span>
+                        <output className={`robot-collision-distance is-${collisionButtonState}`}
+                          aria-label="碰撞保护距离" aria-live="polite" aria-atomic="true"
+                          data-collision-state={collisionButtonState}
+                          data-collision-distance={collisionProtectionEnabled ? collisionDistanceMillimeters ?? '' : ''}
+                          title={[robotCollisionStatus.message, robotCollisionStatus.detail].filter(Boolean).join(' · ')}>
+                          {collisionButtonState === 'safe'
+                            ? <ShieldCheck size={13} aria-hidden="true" />
+                            : <ShieldAlert size={13} aria-hidden="true" />}
+                          <span>{collisionDistanceLabel}</span>
+                        </output>
+                      </div>
+                      <div className="robot-distance-settings__visibility">
+                        <span><Eye size={13} /> 显示警告</span>
+                        <button
+                          type="button"
+                          role="switch"
+                          className="distance-warning-toggle"
+                          aria-label="显示距离警告"
+                          aria-checked={showDistanceWarnings}
+                          title="在 3D 视图右上角显示距离警告"
+                          onClick={() => setShowDistanceWarnings((current) => !current)}
+                        >
+                          {showDistanceWarnings ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{showDistanceWarnings ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>
+                      <RobotCollisionJointSettings
+                        options={collisionJointOptions}
+                        ignoredJointNames={ignoredCollisionJointNames}
+                        onChange={onIgnoredCollisionJointNamesChange}
+                        expanded={collisionJointSettingsOpen}
+                        onExpandedChange={setCollisionJointSettingsOpen}
+                        ready={collisionControlReady}
+                      />
                   </> },
                   { id: 'map', label: '地图与对象', icon: Palette,
                     description: hasObjectColorControl ? '地图颜色 · 对象颜色 · 高程色卡' : '点云颜色 · 高程色卡', content: <>

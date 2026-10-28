@@ -24,6 +24,7 @@
     "test:archive": "node tests/project_archive_smoke.mjs",
     "test:linked-project": "node tests/linked_project_smoke.mjs",
     "test:project-collection": "node tests/project_collection_smoke.mjs",
+    "test:project-storage": "node tests/project_resource_storage_smoke.mjs",
     "test:independent-alignment": "node tests/independent_teaching_alignment_smoke.mjs",
     "test:teaching-data": "node tests/teaching_data_export_smoke.mjs",
     "test:independent-export": "node tests/independent_teaching_export_smoke.mjs",

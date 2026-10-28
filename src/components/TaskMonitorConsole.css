@@ -108,14 +108,10 @@ button.task-monitor__result-row { cursor: pointer; }
 .task-monitor summary:focus-visible { outline: 1px solid var(--monitor-accent); outline-offset: 3px; }
 .task-monitor-camera__refresh { display: flex; margin-left: auto; padding: 3px; border: 0; color: #8cb6b2; background: none; cursor: pointer; }
 .task-monitor-camera__controls { display: flex; gap: 7px; margin-bottom: 10px; }
-.task-monitor-camera__select { position: relative; flex: 1; min-width: 0; }
-.task-monitor-camera__controls select { appearance: none; -webkit-appearance: none; width: 100%; height: 100%; min-width: 0; color: #c5d9cd; background: #0c1b18; border: 1px solid #345447; border-radius: 3px; padding: 8px 36px 8px 8px; font: inherit; font-size: 11px; }
-.task-monitor-camera__select-arrow { position: absolute; inset: 0 0 0 auto; aspect-ratio: 1; display: grid; place-items: center; color: #c5d9cd; pointer-events: none; }
-.task-monitor-camera__select select:disabled + .task-monitor-camera__select-arrow { opacity: .45; }
-.task-monitor-camera__controls button { display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #426756; background: #163127; color: #b3d9bf; border-radius: 3px; padding: 7px 9px; cursor: pointer; font: inherit; font-size: 10px; white-space: nowrap; }
-.task-monitor-camera__controls button.is-on { border-color: #79d8b0; color: #b6edcf; background: #1b3b2e; }
-.task-monitor-camera button:disabled, .task-monitor-camera select:disabled { opacity: .45; cursor: default; }
-.task-monitor-camera button:focus-visible, .task-monitor-camera select:focus-visible { outline: 1px solid var(--monitor-accent); outline-offset: 3px; }
+.task-monitor-camera__controls > button { display: flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid #426756; background: #163127; color: #b3d9bf; border-radius: 3px; padding: 7px 9px; cursor: pointer; font: inherit; font-size: 10px; white-space: nowrap; }
+.task-monitor-camera__controls > button.is-on { border-color: #79d8b0; color: #b6edcf; background: #1b3b2e; }
+.task-monitor-camera button:disabled { opacity: .45; cursor: default; }
+.task-monitor-camera button:not(.viewer-select__trigger):focus-visible { outline: 1px solid var(--monitor-accent); outline-offset: 3px; }
 .task-monitor-camera__stage { position: relative; width: 100%; min-width: 0; box-sizing: border-box; aspect-ratio: 16 / 9; background: #050d0b; border: 1px solid #273e33; overflow: hidden; display: grid; place-items: center; }
 .task-monitor-camera__stage img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; min-height: 0; object-fit: contain; }
 .task-monitor-camera__stage > div { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #628773; font-size: 11px; }
@@ -142,9 +138,8 @@ button.task-monitor__result-row { cursor: pointer; }
 .task-monitor-camera-dialog .task-monitor-camera__meta { margin: 0; font-size: 10px; }
 .task-monitor-camera-dialog .task-monitor__warning { margin: 10px 0 0; }
 
-.task-monitor__robot { display: flex; align-items: center; gap: 10px; padding: 0 14px 12px; }
+.task-monitor__robot { display: flex; align-items: center; gap: 10px; padding: 6px 14px; }
 .task-monitor__robot label { color: #8da9a0; font-size: 11px; white-space: nowrap; }
-.task-monitor__robot select { min-width: 0; flex: 1; padding: 8px; border: 1px solid #36534a; border-radius: 5px; background: #142522; color: #c9e5d8; font: inherit; font-size: 12px; }
 .robot-twin-scene-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .robot-twin-scene-label { position: absolute; top: 0; left: 0; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; border: 1px solid #567a78; border-radius: 5px; padding: 5px 9px; background: #132521e8; color: #abc9c0; font: 11px system-ui; cursor: pointer; }
 .robot-twin-scene-label.is-selected { color: #d7ffe9; border-color: #9ae3bc; background: #214b3cee; box-shadow: 0 0 0 2px #8bd7b82b; }

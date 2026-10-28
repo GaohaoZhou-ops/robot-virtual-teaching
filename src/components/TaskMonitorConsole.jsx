@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { Activity, AlertTriangle, Check, CheckCheck, CircleDot, Clock3, ListChecks, PanelRightClose, PanelRightOpen, ScanSearch, ShieldCheck, WifiOff } from 'lucide-react';
+import { Activity, AlertTriangle, Bot, Check, CheckCheck, CircleDot, Clock3, ListChecks, PanelRightClose, PanelRightOpen, ScanSearch, ShieldCheck, WifiOff } from 'lucide-react';
 import { ALGORITHM_PHASES, CAMERA_NAMES, FINISHED_TASK_PHASES, TASK_PHASES, isRobotDetectionAlarm } from '../lib/robotTwinMonitor.js';
 import { formatRobotDetectionConfidence, isSuspectedRobotDetection } from '../lib/robotTwinInspection.js';
 import './TaskMonitorConsole.css';
 import RobotTwinCameraPanel from './RobotTwinCameraPanel.jsx';
 import RobotTwinCapturePanel from './RobotTwinCapturePanel.jsx';
+import ViewerSelect from './ViewerSelect.jsx';
 
 const duration = (milliseconds) => {
   const seconds = Math.floor(milliseconds / 1000);
@@ -99,12 +100,10 @@ export default function TaskMonitorConsole({ twin, collapsed, onCollapsedChange 
         <div className="task-monitor__robot">
           <i className="task-monitor__robot-color" style={{ backgroundColor: twin.selectedRobot?.color }} aria-hidden="true" />
           <label htmlFor="task-monitor-robot">当前机器人</label>
-          <select id="task-monitor-robot" aria-label="当前监控机器人" value={twin.selectedId || ''}
-            onChange={(event) => twin.selectRobot(event.target.value)}>
-            {twin.robots.filter((robot) => robot.active).map((robot) => <option key={robot.id} value={robot.id}>
-              {robot.name}{robot.phase === 'stale' ? ' · 数据暂不可用' : robot.phase === 'connecting' ? ' · 连接中' : ''}
-            </option>)}
-          </select>
+          <ViewerSelect id="task-monitor-robot" label="当前机器人" ariaLabel="当前监控机器人" icon={Bot}
+            value={twin.selectedId || ''} onChange={twin.selectRobot} isActive={!collapsed} placeholder="暂无已连接机器人"
+            options={twin.robots.filter((robot) => robot.active).map((robot) => ({ value: robot.id, color: robot.color,
+              label: `${robot.name}${robot.phase === 'stale' ? ' · 数据暂不可用' : robot.phase === 'connecting' ? ' · 连接中' : ''}` }))} />
         </div>
         <div className="task-monitor__connection">
           <span className={`task-monitor__connection-state ${live ? 'is-live' : ''}`} role="status">
@@ -164,9 +163,9 @@ export default function TaskMonitorConsole({ twin, collapsed, onCollapsedChange 
               onSelect={(item, detail) => selectResult(item, detail, false)}
               onLatest={selected ? () => setSelection(null) : undefined} collapsed={collapsed} />
             {monitor?.results.length > 0 ? <>
-              <p className="task-monitor__result-count">{monitor.resultTotal > monitor.results.length ? `最近 ${monitor.results.length} 条 / 共 ${monitor.resultTotal} 条` : `${monitor.results.length} 条采集记录`} · 最新在前</p>
+              <p className="task-monitor__result-count">{monitor.resultTotal > monitor.results.length ? `最近 ${monitor.results.length} 条 / 共 ${monitor.resultTotal} 条` : `${monitor.results.length} 条采集记录`} · 最旧在前</p>
               <ul className="task-monitor__results" role="list" aria-label="算法结果列表" tabIndex={0} onKeyDown={(event) => event.stopPropagation()}>
-              {monitor.results.map((item) => {
+              {[...monitor.results].reverse().map((item) => {
                 const detail = !item.demo && ['left', 'right'].includes(item.camera)
                   ? monitor.captures?.find((entry) => entry.id === item.captureId) : null;
                 return <AlgorithmResult key={`${task?.id}:${item.key}`} item={item} selected={selected?.key === item.key}

@@ -6,6 +6,9 @@ import { LINKED_WORKSPACE_MODES, validateLinkedWorkspaces } from './linkedProjec
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
 import { validatePlacedObjectLayers } from './placedObjectRendering.js';
 import { normalizeRobotTwinProfiles } from './robotTwinProfiles.js';
+import { projectGeometryRecipes } from './projectGeometryStorage.js';
+import { RESOURCE_PROJECT_FORMAT, compactProjectResources, expandProjectResources,
+  logicalStorageManifest, physicalStorageManifest, updateStorageReferences } from './projectResourceStorage.js';
 
 export const PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-project';
 export const LINKED_PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-linked-project';
@@ -1011,12 +1014,15 @@ export async function buildProjectArchive(payload, options = {}) {
   const { entries, manifest, project } = await (options.companionWorkspace || options.independentHistory?.length
     ? buildWorkspaceCollectionEntries(payload, options)
     : options.linkedWorkspace ? buildLinkedProjectEntries(payload, options) : buildProjectEntries(payload, options));
+  const recipes = await projectGeometryRecipes(payload, options, entries);
+  const compact = await compactProjectResources(entries, manifest, recipes, options.onProgress);
   options.onProgress?.({ phase: '压缩便携工程', detail: `${manifest.statistics.fileCount} 个文件` });
-  const bytes = await zipEntries(entries);
+  const bytes = await zipEntries(compact.entries);
   return {
     bytes,
     blob: new Blob([bytes], { type: 'application/zip' }),
     manifest,
+    storage: compact.storage,
     project,
     byteLength: bytes.byteLength,
   };
@@ -1162,7 +1168,7 @@ const progressRange = (onProgress, start, end) => onProgress && ((value) => onPr
   progress: start + Math.min(1, Math.max(0, Number(value.progress) || 0)) * (end - start),
 }));
 
-const verifyArchiveFiles = async (files, manifest, onProgress) => {
+const verifyArchiveFiles = async (files, manifest, onProgress, digests = new WeakMap()) => {
   const linked = [LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format);
   if (!linked && Number(manifest.archiveVersion) < 2) return;
   if (!Array.isArray(manifest.files) || !manifest.files.length) {
@@ -1179,7 +1185,8 @@ const verifyArchiveFiles = async (files, manifest, onProgress) => {
     if (Number(record.byteLength) !== file.byteLength) {
       throw new Error(`工程包文件长度校验失败：${path}`);
     }
-    const digest = await sha256Bytes(file);
+    const digest = digests.get(file) || await sha256Bytes(file);
+    digests.set(file, digest);
     if (digest !== String(record.sha256 || '').toLowerCase()) {
       throw new Error(`工程包 SHA-256 校验失败：${path}`);
     }
@@ -1338,12 +1345,20 @@ const hydrateRobotResource = (project, files, manifest) => {
 };
 
 const readProjectEntries = async (files, options = {}) => {
+  options = { ...options, digests: options.digests || new WeakMap() };
   const {
     onProgress,
     source = 'zip',
     manifestLabel = source === 'zip' ? 'ZIP 清单' : '工程清单',
   } = options;
   validateArchiveEntryPaths(files);
+  if (!options.nested && readJsonEntry(files, PROJECT_ARCHIVE_MANIFEST, manifestLabel).format === RESOURCE_PROJECT_FORMAT) {
+    const expanded = await expandProjectResources(files, progressRange(onProgress, 0, 0.5));
+    const imported = await readProjectEntries(expanded.files, { ...options, digests: expanded.digests,
+      onProgress: progressRange(onProgress, 0.5, 1) });
+    return { ...imported, manifest: { ...imported.manifest, archiveStorage: expanded.storage },
+      archiveFileCount: Object.keys(files).filter((path) => !path.endsWith('/')).length };
+  }
   const manifest = readJsonEntry(
     files,
     PROJECT_ARCHIVE_MANIFEST,
@@ -1357,7 +1372,7 @@ const readProjectEntries = async (files, options = {}) => {
     }
     // The root manifest and each child share one validation range. A child's
     // local percentage must never restart the overall archive progress.
-    await verifyArchiveFiles(files, manifest, progressRange(onProgress, 0, 0.5));
+    await verifyArchiveFiles(files, manifest, progressRange(onProgress, 0, 0.5), options.digests);
     const workspaceCount = Object.keys(manifest.workspaces || {}).length + manifest.independentHistory.length;
     let workspaceIndex = 0;
     const readWorkspace = async (descriptor, mode, prefix) => {
@@ -1398,7 +1413,7 @@ const readProjectEntries = async (files, options = {}) => {
       || !LINKED_WORKSPACE_MODES.includes(manifest.activeMode)) {
       throw new Error('双边工程包版本或结构不受支持');
     }
-    await verifyArchiveFiles(files, manifest, progressRange(onProgress, 0, 0.5));
+    await verifyArchiveFiles(files, manifest, progressRange(onProgress, 0, 0.5), options.digests);
     const workspaces = {};
     for (const [index, mode] of LINKED_WORKSPACE_MODES.entries()) {
       const descriptor = manifest.workspaces?.[mode];
@@ -1427,7 +1442,7 @@ const readProjectEntries = async (files, options = {}) => {
   if (archiveVersion > PROJECT_ARCHIVE_VERSION) {
     throw new Error(`工程包版本 ${archiveVersion} 高于当前支持版本 ${PROJECT_ARCHIVE_VERSION}`);
   }
-  await verifyArchiveFiles(files, manifest, onProgress);
+  await verifyArchiveFiles(files, manifest, onProgress, options.digests);
   const projectPath = normalizeArchivePath(
     manifest.projectFile || PROJECT_ARCHIVE_CONFIG,
     '工程配置路径',
@@ -1505,11 +1520,11 @@ export async function queryProjectDirectoryPermission(directoryHandle, request =
 
 export async function readProjectDirectoryMetadata(directoryHandle) {
   const manifestBytes = await readDirectoryBytes(directoryHandle, PROJECT_ARCHIVE_MANIFEST);
-  const manifest = readJsonEntry(
+  const manifest = logicalStorageManifest(readJsonEntry(
     { [PROJECT_ARCHIVE_MANIFEST]: manifestBytes },
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
-  );
+  ));
   if (manifest.format !== PROJECT_ARCHIVE_FORMAT) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
@@ -1543,7 +1558,7 @@ export async function readProjectDirectoryHandle(directoryHandle, options = {}) 
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
   );
-  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
+  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT, RESOURCE_PROJECT_FORMAT].includes(manifest.format)) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
   const paths = manifestPaths(manifest);
@@ -1606,7 +1621,7 @@ export async function readProjectDirectoryFiles(fileList, options = {}) {
     PROJECT_ARCHIVE_MANIFEST,
     '工程清单',
   );
-  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT].includes(manifest.format)) {
+  if (![PROJECT_ARCHIVE_FORMAT, LINKED_PROJECT_ARCHIVE_FORMAT, WORKSPACE_PROJECT_ARCHIVE_FORMAT, RESOURCE_PROJECT_FORMAT].includes(manifest.format)) {
     throw new Error('所选文件夹不是虚拟示教平台工程目录');
   }
   const paths = manifestPaths(manifest);
@@ -1876,7 +1891,7 @@ export async function updateProjectDirectory(directoryHandle, payload, options =
   statistics.robotFileCount = fileRecords
     .filter((record) => String(record.path).startsWith('robot/')).length;
   const projectRecord = updatedRecords.get(projectPath);
-  const manifest = {
+  let manifest = {
     ...previousManifest,
     archiveVersion: PROJECT_ARCHIVE_VERSION,
     schemaVersion: project.schemaVersion,
@@ -1896,6 +1911,10 @@ export async function updateProjectDirectory(directoryHandle, payload, options =
     },
   };
 
+  const storageUpdate = await updateStorageReferences(manifest, changedPaths.map((path) => updatedRecords.get(path)),
+    (path) => readDirectoryBytes(directoryHandle, path));
+  manifest = storageUpdate.manifest;
+
   // New assets are committed before the config that references them; manifest is the final commit marker.
   const writeOrder = changedPaths.sort((left, right) => {
     const priority = (path) => (
@@ -1903,11 +1922,12 @@ export async function updateProjectDirectory(directoryHandle, payload, options =
     );
     return priority(left) - priority(right) || left.localeCompare(right);
   });
+  for (const { path, bytes } of storageUpdate.preserved) await writeDirectoryBytes(directoryHandle, path, bytes);
   for (const path of writeOrder) {
     await writeDirectoryBytes(directoryHandle, path, entries[path][0]);
   }
-  await writeDirectoryBytes(directoryHandle, PROJECT_ARCHIVE_MANIFEST, jsonBytes(manifest));
-  return { manifest, rawPayload: project, savedAt, writtenFileCount: writeOrder.length + 1 };
+  await writeDirectoryBytes(directoryHandle, PROJECT_ARCHIVE_MANIFEST, jsonBytes(physicalStorageManifest(manifest)));
+  return { manifest, rawPayload: project, savedAt, writtenFileCount: writeOrder.length + storageUpdate.preserved.length + 1 };
 }
 
 const hasZipSignature = (bytes) => (

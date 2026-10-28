@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, ChevronDown, Maximize2, Power, RefreshCw, Video, VideoOff, X } from 'lucide-react';
+import { Camera, Maximize2, Power, RefreshCw, Video, VideoOff, X } from 'lucide-react';
 import { BODY_CAMERAS } from '../lib/robotTwinCamera.js';
+import ViewerSelect from './ViewerSelect.jsx';
 
 function CameraFrame({ camera, status, onError, children }) {
   return <div className="task-monitor-camera__stage">
@@ -55,14 +56,11 @@ export default function RobotTwinCameraPanel({ twin, collapsed }) {
       <button type="button" className="task-monitor-camera__refresh" aria-label="刷新相机列表" disabled={wanted || loading || twin.phase === 'connecting'}
         onClick={() => void twin.loadCameras()}><RefreshCw size={12} /></button></div>
     <div className="task-monitor-camera__controls">
-      <div className="task-monitor-camera__select">
-        <select aria-label="选择本体相机" value={camera?.selected || ''} disabled={loading || !camera?.cameras.length}
-          onChange={(event) => twin.selectCamera(event.target.value)}>
-          {!camera?.selected && <option value="">{loading ? '正在读取相机…' : '暂无可用相机'}</option>}
-          {camera?.cameras.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>{item.label}{item.available ? '' : '（未发现）'}</option>)}
-        </select>
-        <span className="task-monitor-camera__select-arrow" aria-hidden="true"><ChevronDown size={12} /></span>
-      </div>
+      <ViewerSelect label="本体相机" ariaLabel="选择本体相机" icon={Camera}
+        value={camera?.selected || ''} onChange={twin.selectCamera} disabled={loading} isActive={!collapsed}
+        placeholder={loading ? '正在读取相机…' : '暂无可用相机'}
+        options={(camera?.cameras || []).map((item) => ({ value: item.id, disabled: !item.available,
+          label: `${item.label}${item.available ? '' : '（未发现）'}` }))} />
       <button type="button" role="switch" aria-checked={wanted} aria-label="本体相机实时画面" className={wanted ? 'is-on' : ''}
         disabled={!wanted && (!camera?.selected || camera.phase === 'stopping' || loading || twin.phase === 'connecting')}
         onClick={() => { if (wanted) void twin.stopCamera(); else void twin.startCamera(); }}>

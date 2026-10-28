@@ -64,8 +64,11 @@ with sync_playwright() as p:
         monitor = page.get_by_role('complementary', name='任务监控台', exact=True)
         expect(monitor).to_contain_text('模拟巡检任务', timeout=15000)  # The simulator has a 10-second idle phase.
         cameras = monitor.get_by_role('region', name='本体相机', exact=True)
-        picker = cameras.get_by_role('combobox', name='选择本体相机')
-        expect(picker.locator('option')).to_have_count(6)
+        picker = cameras.get_by_role('button', name='选择本体相机', exact=True)
+        picker.click()
+        camera_options = page.get_by_role('listbox', name='选择本体相机', exact=True)
+        expect(camera_options.get_by_role('option')).to_have_count(6)
+        page.keyboard.press('Escape')
         cameras.get_by_role('switch', name='本体相机实时画面').click()
         expect(cameras).to_have_attribute('data-camera-phase', 'live')
         expect(cameras.get_by_role('img', name='头部左目实时画面')).to_be_visible()
@@ -76,7 +79,8 @@ with sync_playwright() as p:
         assert expanded.locator('img').evaluate('(image) => image.complete && image.naturalWidth === 480')
         page.screenshot(path=str(artifacts / 'camera.png'))
         expanded.get_by_role('button', name='关闭放大画面').click()
-        picker.select_option('wrist-right')
+        picker.click()
+        camera_options.get_by_role('option', name='右手腕', exact=True).click()
         expect(cameras.get_by_role('img', name='右手腕实时画面')).to_be_visible()
         assert robot_status()['activeCamera'] == 'wrist-right'
         expect(monitor.get_by_role('list', name='算法结果列表', exact=True).get_by_role('listitem').first).to_be_visible(timeout=25000)

@@ -4,7 +4,7 @@ import os
 
 from playwright.sync_api import expect, sync_playwright
 
-from viewer_tools_helpers import viewer_tool
+from viewer_tools_helpers import display_settings_section, viewer_tool
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:22120")
@@ -87,10 +87,12 @@ def run():
         canvas = page.locator(".three-canvas")
         expect(canvas).to_have_attribute("data-collision-state", "waiting")
         expect(canvas).to_have_attribute("data-collision-worker", "inactive")
+        display_settings_section(page, '距离警告')
         expect(page.get_by_label("碰撞保护距离", exact=True)).to_have_text("等待检测")
         # The default can still be disabled while waiting for a robot.
-        toggle.click()
+        viewer_tool(page, name="关闭碰撞保护").click()
         expect(viewer_tool(page, name="开启碰撞保护")).to_be_disabled()
+        display_settings_section(page, '距离警告')
         expect(page.get_by_label("碰撞保护距离", exact=True)).to_have_text("检测关闭")
         topbar_action(page, name="加载机器人", exact=True).click()
         page.get_by_role("option", name="加载机器人 botx_abx_zivid_m70").click()
@@ -118,15 +120,13 @@ def run():
         assert "base_link" in excluded
         assert any(name.startswith("wheel_") for name in excluded)
         assert "arm_right_baselink" not in excluded
-        distance_readout = page.locator(".panel-3d .panel-heading").get_by_label("碰撞保护距离", exact=True)
+        distance_menu = display_settings_section(page, '距离警告')
+        distance_readout = distance_menu.get_by_label("碰撞保护距离", exact=True)
         expect(distance_readout).to_have_attribute("data-collision-state", "safe")
         assert "非底盘结构安全" in distance_readout.get_attribute("title")
         assert distance_readout.inner_text() == "≥100 mm"
         expect(page.get_by_label("机器人距离警告", exact=True)).to_have_count(0)
-        distance_box = distance_readout.bounding_box()
-        settings_box = page.get_by_role("button", name="显示设置", exact=True).bounding_box()
-        assert distance_box["x"] + distance_box["width"] < settings_box["x"]
-        assert abs(distance_box["y"] - settings_box["y"]) < 1
+        expect(page.locator(".panel-3d .panel-heading").get_by_label("碰撞保护距离", exact=True)).to_have_count(0)
         print("default protection waits for a robot, then automatically displays the safe distance", flush=True)
 
         probe = tuple(
@@ -145,6 +145,7 @@ def run():
         assert canvas.get_attribute("data-collision-worker") == "inactive"
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         expect(page.get_by_label("机器人距离警告", exact=True)).to_have_count(0)
+        display_settings_section(page, '距离警告')
         expect(distance_readout).to_have_text("检测关闭")
         viewer_tool(page, name="开启碰撞保护").click()
         expect(canvas).to_have_attribute("data-collision-state", "safe")
@@ -176,6 +177,7 @@ def run():
         assert probe_link in collision_links
         assert int(canvas.get_attribute("data-collision-mesh-samples")) > 0
         assert canvas.get_attribute("data-collision-highlight-color") == "#ff4545"
+        display_settings_section(page, '距离警告')
         expect(distance_readout).to_have_attribute("data-collision-state", "collision")
         assert "检测到环境干涉" in distance_readout.get_attribute("title")
         assert "红色部件" in distance_readout.get_attribute("title")
@@ -187,6 +189,7 @@ def run():
         assert "检测到环境干涉" in warning.inner_text()
         assert page.locator(".zivid-camera-collision-alert").count() == 0
         print("collision distance and robot highlights updated", flush=True)
+        page.get_by_role("button", name="关闭显示设置", exact=True).click()
         camera_panel = page.locator('.zivid-camera-panel[data-camera-slot="left"]')
         camera_panel.get_by_role("button", name="放大 Zivid 相机视图").click()
         camera_dialog = page.get_by_role("dialog", name="Zivid 2 M70 相机大图")
@@ -221,6 +224,7 @@ def run():
                 assert 0.008 < distance < 0.1
                 assert snapshot["collisionNearLinks"]
                 assert snapshot["collisionHighlightColor"] == "#ffc84a"
+                display_settings_section(page, '距离警告')
                 expect(distance_readout).to_have_attribute("data-collision-state", "near")
                 assert "进入 100 mm 安全边界" in distance_readout.get_attribute("title")
                 displayed_distance = float(distance_readout.inner_text().removesuffix(" mm"))
@@ -229,7 +233,6 @@ def run():
                 assert "距离低于 10 cm 安全阈值" in warning.inner_text()
                 assert page.locator(".zivid-camera-collision-alert").count() == 0
                 page.screenshot(path="/tmp/atlas-distance-warning-near.png", full_page=True)
-                page.get_by_role("button", name="碰撞保护距离", exact=True).click()
                 warning_switch = page.get_by_role("switch", name="显示距离警告", exact=True)
                 expect(warning_switch).to_be_checked()
                 warning_switch.click()
@@ -240,7 +243,7 @@ def run():
                 expect(canvas).to_have_attribute("data-collision-highlight-color", "#ffc84a")
                 warning_switch.click()
                 expect(warning).to_be_visible()
-                page.get_by_role("button", name="关闭距离警告", exact=True).click()
+                page.get_by_role("button", name="关闭显示设置", exact=True).click()
                 canvas.focus()
             if observed_near and state == "safe":
                 observed_safe_after_near = True
@@ -257,6 +260,7 @@ def run():
         assert observed_safe_after_near
         assert canvas.get_attribute("data-collision-highlighted-links") == ""
         assert canvas.get_attribute("data-collision-highlight-color") == "none"
+        display_settings_section(page, '距离警告')
         expect(distance_readout).to_have_attribute("data-collision-state", "safe")
         expect(warning).to_have_count(0)
         assert page.locator(".zivid-camera-collision-alert").count() == 0
@@ -274,6 +278,7 @@ def run():
         assert page.get_by_label("自碰撞保护", exact=True).count() == 0
         expect(canvas).to_have_attribute("data-collision-worker", "dedicated")
         expect(canvas).to_have_attribute("data-collision-protection-enabled", "true")
+        display_settings_section(page, '距离警告')
         expect(distance_readout).to_be_visible()
         assert viewer_tool(page, name="关闭碰撞保护").get_attribute(
             "aria-pressed"

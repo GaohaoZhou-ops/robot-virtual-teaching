@@ -5,6 +5,7 @@ import { linkedWorkspaceRelation, prepareLinkedProjectImport } from '../src/lib/
 import { buildProjectArchive, readProjectArchive, readProjectDirectoryFiles, saveProjectArchive } from '../src/lib/projectArchive.js';
 import { normalizeProject } from '../src/lib/io.js';
 import { writeBackTeachingWorkspace } from '../src/lib/teachingTransfer.js';
+import { expandProjectResources } from '../src/lib/projectResourceStorage.js';
 
 const modes = ['map', 'independent'];
 const archiveOptions = (pair, mode) => ({
@@ -22,7 +23,8 @@ for (const kind of ['placement', 'extraction']) {
     const archive = await archiveFor(pair, mode);
     assert.equal(archive.manifest.format, 'atlas-route-studio-linked-project');
     assert.equal(archive.manifest.statistics.workspaceCount, 2);
-    const files = unzipSync(archive.bytes);
+    const physicalFiles = unzipSync(archive.bytes);
+    const { files } = await expandProjectResources(physicalFiles);
     assert.ok(modes.every((side) => files[`workspaces/${side}/environment/positions.f32le`]));
     assert.ok(modes.every((side) => files[`workspaces/${side}/robot/files/transfer/robot.urdf`]));
     const restored = await readProjectArchive(archive.bytes);
@@ -51,7 +53,7 @@ for (const kind of ['placement', 'extraction']) {
       await writeBackTeachingWorkspace(prepared.independent, prepared.map);
     }
     // A directory picker can enumerate child manifests before the root.
-    const directoryFiles = Object.entries(files).reverse().map(([path, bytes]) => ({
+    const directoryFiles = Object.entries(physicalFiles).reverse().map(([path, bytes]) => ({
       name: path.split('/').at(-1), webkitRelativePath: `pair/${path}`,
       arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
     }));

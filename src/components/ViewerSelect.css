@@ -1,0 +1,18 @@
+.viewer-select { flex: 1; min-width: 0; }
+.viewer-select .viewer-menu { min-width: 0; }
+.viewer-select .viewer-select__trigger { width: 100%; min-width: 0; height: 34px; justify-content: space-between; font-size: 11px; }
+.viewer-select__trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.viewer-select__trigger > svg { flex-shrink: 0; }
+.viewer-select__trigger:disabled { opacity: .45; cursor: default; }
+.viewer-select__trigger:focus-visible { outline: 1px solid var(--cyan); outline-offset: 3px; }
+.viewer-select__panel > .viewer-menu__heading { position: sticky; top: 0; z-index: 1; background: #0d1e23; }
+.viewer-select__options { padding: 5px; }
+.viewer-select__option { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 10px; border: 1px solid transparent; background: transparent; color: var(--muted); text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.viewer-select__option > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-select__option > i { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.viewer-select__option > svg { flex-shrink: 0; visibility: hidden; }
+.viewer-select__option[aria-selected="true"] { color: var(--cyan); background: #59dbe810; }
+.viewer-select__option[aria-selected="true"] > svg { visibility: visible; }
+.viewer-select__option:hover:not(:disabled), .viewer-select__option:focus-visible { border-color: #59dbe833; background: #59dbe810; color: var(--cyan); outline: none; }
+.viewer-select__option:focus-visible { box-shadow: inset 2px 0 var(--cyan); }
+.viewer-select__option:disabled { opacity: .4; cursor: default; }

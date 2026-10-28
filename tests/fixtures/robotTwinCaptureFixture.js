@@ -9,7 +9,7 @@ let mounted = true, collapsed = false, runId = 'a'.repeat(32), latest = null;
 const id = (n) => n.toString(16).padStart(32, '0');
 const task = () => ({ id: runId, phase: 'running', tasks: [], taskName: '连续拍摄测试', totalPoints: 10,
   completedPoints: captures.length, completedCaptures: captures.length, skippedPoints: 0, elapsedMs: 1000 });
-const monitor = () => ({ task: task(), captures: latest ? [latest] : [], results: results.filter((item) => item.captureId === latest?.id),
+const monitor = () => ({ task: task(), captures: latest ? [latest] : [], results: results.filter((item) => item.captureId === latest?.id).reverse(),
   latestCapture: latest, resultsFresh: true, resultTotal: results.length });
 const noop = () => {};
 const fixture = window.captureFixture = { calls: [], aborted: [], urls: new Set(), decodes: [], holdDecode: false };

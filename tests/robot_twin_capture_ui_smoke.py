@@ -57,6 +57,10 @@ with sync_playwright() as p:
         dialog = page.get_by_role('dialog', name='双 Zivid 采集结果', exact=True)
         history = dialog.get_by_role('complementary', name='采集记录列表')
         expect(history.get_by_role('button')).to_have_count(6)
+        assert history.locator('[data-history-key]').evaluate_all('(rows) => rows.map(row => row.dataset.historyKey)') == [
+            f'{capture_id:032x}:{side}' for capture_id in (1, 2, 3) for side in ('left', 'right')]
+        assert page.locator('.task-monitor__result').evaluate_all('(rows) => rows.map(row => row.dataset.resultKey)') == [
+            f'{3:032x}:left', f'{3:032x}:right']
         expect(history).to_contain_text('算法执行中')
         history.locator(f'[data-history-key="{3:032x}:left"]').click()
         expect(dialog).to_have_attribute('data-capture-id', f'{2:032x}')
@@ -90,6 +94,8 @@ with sync_playwright() as p:
         page.evaluate('captureFixture.mount()')
         expect(panel).to_have_attribute('data-capture-id', f'{5:032x}')
         panel.get_by_role('button', name='放大双 Zivid 采集结果').click()
+        expect(history.locator('[data-history-key]').first).to_have_attribute('data-history-key', f'{1:032x}:left')
+        expect(history.locator('[data-history-key]').last).to_have_attribute('data-history-key', f'{5:032x}:right')
         history.locator(f'[data-history-key="{1:032x}:left"]').click()
         expect(dialog).to_have_attribute('data-capture-id', f'{1:032x}')
         assert dialog.locator('img').evaluate_all('(images) => images.map(image => image.src)') == first_urls

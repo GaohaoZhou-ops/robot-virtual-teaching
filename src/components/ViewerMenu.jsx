@@ -5,6 +5,7 @@ import { ChevronDown, X } from 'lucide-react';
 export default function ViewerMenu({
   children,
   label,
+  panelLabel = `3D ${label}`,
   triggerLabel = label,
   triggerClassName = '',
   triggerContent,
@@ -134,7 +135,7 @@ export default function ViewerMenu({
           id={menuId}
           className={`viewer-menu__panel ${panelClassName}`}
           role="dialog"
-          aria-label={`3D ${label}`}
+          aria-label={panelLabel}
           tabIndex={-1}
           style={position}
         >

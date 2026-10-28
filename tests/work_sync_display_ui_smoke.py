@@ -1,5 +1,7 @@
 """Offline collaboration preserves separate map/object colors and geometry groups."""
 import json
+import io
+import zipfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 from teaching_transfer_ui_smoke import BASE_URL, CHROME, ready
@@ -15,6 +17,9 @@ with sync_playwright() as p:
     host = browser.new_context(viewport={'width': 1440, 'height': 1000}).new_page()
     peer = browser.new_context(viewport={'width': 1440, 'height': 1000}).new_page()
     errors = []
+    uploaded_bundles = []
+    host.on('request', lambda request: uploaded_bundles.append(request.post_data_buffer)
+            if request.method == 'PUT' and request.url.endswith('/bundle') else None)
     for page in [host, peer]:
         page.set_default_timeout(30000)
         page.on('pageerror', lambda error: errors.append(str(error)))
@@ -42,6 +47,12 @@ with sync_playwright() as p:
         peer.goto(BASE_URL, wait_until='networkidle')
         peer.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
         approve(host, peer)
+        with zipfile.ZipFile(io.BytesIO(uploaded_bundles[0])) as archive:
+            envelope = json.loads(archive.read('manifest.json'))
+            assert envelope['format'] == 'atlas-route-studio-resource-project'
+            assert any(part['kind'] == 'positions' for part in
+                       envelope['references']['environment/positions.f32le']['parts'])
+            assert 'independentHistory' not in envelope['projectManifest']
         ready(peer, 'map')
         expect(control(peer)).to_have_attribute('data-sync-complete', 'true', timeout=30000)
         canvas = peer.locator('.three-canvas')

@@ -7,6 +7,7 @@ import { normalizeProject } from '../src/lib/io.js';
 import { projectCollectionFixture, projectCollectionOptions } from './project_collection_helpers.mjs';
 import { linkedProjectFixture } from './linked_project_helpers.mjs';
 import { writeBackTeachingWorkspace } from '../src/lib/teachingTransfer.js';
+import { expandProjectResources } from '../src/lib/projectResourceStorage.js';
 
 const collection = await projectCollectionFixture();
 const original = structuredClone(collection);
@@ -52,12 +53,13 @@ for (const mode of ['map', 'independent']) {
       assert.deepEqual(relation.matrixImports, prior.matrixImports);
     }
   }
-  const files = unzipSync(archive.bytes);
+  const physicalFiles = unzipSync(archive.bytes);
+  const { files } = await expandProjectResources(physicalFiles);
   for (const prefix of ['workspaces/map/', 'workspaces/independent/', 'independent-history/1/', 'independent-history/2/']) {
     assert.ok(files[prefix + 'robot/files/transfer/meshes/body.stl']);
     assert.ok(Object.keys(files).some((path) => path.startsWith(prefix + 'teaching-data/') && path.endsWith('.png')));
   }
-  const directory = await readProjectDirectoryFiles(Object.entries(files).reverse().map(([path, bytes]) => ({
+  const directory = await readProjectDirectoryFiles(Object.entries(physicalFiles).reverse().map(([path, bytes]) => ({
     name: path.split('/').at(-1), webkitRelativePath: `collection/${path}`,
     arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
   })));

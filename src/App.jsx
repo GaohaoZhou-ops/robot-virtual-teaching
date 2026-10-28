@@ -6666,7 +6666,10 @@ export default function App() {
       const existingRobotPackage = portableRobotPackageRef.current?.relativePath === current.selectedRobot?.relativePath
         ? portableRobotPackageRef.current : null;
       const { buildProjectArchive } = await import('./lib/projectArchive.js');
-      const archive = await buildProjectArchive(payload, { mapResource, existingRobotPackage, onProgress });
+      const archive = await buildProjectArchive(payload, { mapResource, existingRobotPackage, onProgress,
+        geometryTransfer: current.workspaceTransfer,
+        loadGeometrySource: (identity) => loadIndependentDisplaySource(sessionIdRef.current, identity),
+      });
       return { bytes: archive.bytes, document, localIdentity };
     },
     installInitial: async (bytes, project, isActive, onProgress) => {

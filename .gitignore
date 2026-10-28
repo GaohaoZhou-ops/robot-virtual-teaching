@@ -1304,6 +1304,9 @@ env/
 AtlasModelThumbnails/
 *.log
 *.log.[0-9]*
+# Compressed service/test logs are local diagnostics too.
+*.log.[gG][zZ]
+*.log.[zZ][iI][pP]
 *.pid
 *.pid.lock
 *.sqlite
@@ -1335,6 +1338,11 @@ pnpm-debug.log*
 *.part
 *.crdownload
 *.download
+
+# Ad-hoc archive/resource-size probes created with mktemp, including copies
+# from /tmp. Keep maintained project_* tests and nested fixtures trackable.
+/atlas-archive-analysis.*.mjs
+/tests/atlas-archive-analysis.*.mjs
 
 # README reorganization previews/backups copied from the temporary workspace.
 # Scope to the repository root so maintained documentation and HTML stay visible.

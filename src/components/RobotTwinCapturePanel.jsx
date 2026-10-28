@@ -115,10 +115,10 @@ function CaptureHistory({ history, capture, selectedSide, onSelect }) {
   const order = new Map((history.captures || []).map((item, index) => [item.id, index]));
   const records = [...entries.values()].filter((item) => !item.demo && ['left', 'right'].includes(item.camera)
     && captures.has(item.captureId) && (captures.get(item.captureId).sides[item.camera].image || item.received && item.state === 'complete'))
-    .sort((a, b) => (order.get(a.captureId) ?? -1) - (order.get(b.captureId) ?? -1) || b.sequence - a.sequence || b.key.localeCompare(a.key));
+    .sort((a, b) => (order.get(b.captureId) ?? -1) - (order.get(a.captureId) ?? -1) || a.sequence - b.sequence || a.key.localeCompare(b.key));
   return <aside className="robot-twin-capture-history" aria-label="采集记录列表" aria-busy={Boolean(history.loading)}>
     <div className="robot-twin-capture-history__heading"><ListChecks size={15} /><h3>采集记录</h3><span>{records.length}</span></div>
-    <p className="robot-twin-capture-history__hint">本次连接的全部照片 · 最新在前</p>
+    <p className="robot-twin-capture-history__hint">本次连接的全部照片 · 最旧在前</p>
     <div className="robot-twin-capture-history__scroll">
       <ul>{records.map((item) => {
         const selected = item.captureId === capture.id && item.camera === (selectedSide || 'right');

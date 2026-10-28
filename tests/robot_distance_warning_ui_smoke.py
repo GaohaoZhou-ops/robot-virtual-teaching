@@ -67,7 +67,7 @@ def run():
                 canvas = page.locator('.three-canvas')
                 expected_state = 'collision' if state == 'mixed' else state
                 expect(canvas).to_have_attribute('data-collision-state', expected_state)
-                distance_button = page.get_by_role('button', name='碰撞保护距离', exact=True)
+                expect(page.get_by_role('button', name='碰撞保护距离', exact=True)).to_have_count(0)
                 display_button = page.get_by_role('button', name='显示设置', exact=True)
                 display_button.click()
                 display_menu = page.get_by_role('dialog', name='3D 显示设置', exact=True)
@@ -75,20 +75,31 @@ def run():
                 expect(display_settings_section(page, '显示质量').get_by_role('combobox', name='点云显示密度')).to_be_visible()
                 expect(display_menu.get_by_role('switch', name='显示距离警告')).to_have_count(0)
                 expect(display_menu.get_by_role('button', name='设置忽略关节')).to_have_count(0)
-                distance_button.click()
-                distance_menu = page.get_by_role('dialog', name='3D 距离警告', exact=True)
-                expect(display_menu).to_have_count(0)
+                display_settings_section(page, '距离警告')
+                distance_menu = page.get_by_role('dialog', name='距离警告设置', exact=True)
+                distance_heading = display_menu.get_by_role('button', name='距离警告', exact=True)
+                expect(display_menu).to_be_visible()
+                expect(distance_menu.get_by_label('碰撞保护距离', exact=True)).to_have_attribute('data-collision-state', expected_state)
                 expect(distance_menu.get_by_role('switch', name='显示距离警告')).to_be_visible()
                 expect(distance_menu.get_by_role('button', name='设置忽略关节')).to_be_visible()
-                expect(distance_button).to_have_attribute('aria-expanded', 'true')
+                expect(distance_heading).to_have_attribute('aria-expanded', 'true')
                 for width in (1600, 1024):
                     page.set_viewport_size({'width': width, 'height': 960})
+                    page.wait_for_function('''element => {
+                      const rect = element.getBoundingClientRect();
+                      return rect.left >= 8 && rect.right <= innerWidth - 8
+                        && rect.top >= 8 && rect.bottom <= innerHeight - 8;
+                    }''', arg=distance_menu.element_handle())
                     bounds = distance_menu.bounding_box()
-                    assert bounds['x'] >= 12 and bounds['x'] + bounds['width'] <= width - 12
-                    assert bounds['y'] >= 12 and bounds['y'] + bounds['height'] <= 960 - 12
+                    assert bounds['x'] >= 8 and bounds['x'] + bounds['width'] <= width - 8
+                    assert bounds['y'] >= 8 and bounds['y'] + bounds['height'] <= 960 - 8
                 page.keyboard.press('Escape')
                 expect(distance_menu).to_have_count(0)
-                expect(distance_button).to_be_focused()
+                expect(distance_heading).to_be_focused()
+                expect(display_menu).to_be_visible()
+                page.keyboard.press('Escape')
+                expect(display_menu).to_have_count(0)
+                expect(display_button).to_be_focused()
                 page.set_viewport_size({'width': 1600, 'height': 960})
                 warning = page.get_by_label('机器人距离警告', exact=True)
                 if state == 'safe':
@@ -112,7 +123,8 @@ def run():
                         assert warning.evaluate('(el) => getComputedStyle(el).pointerEvents') == 'none'
                     page.set_viewport_size({'width': 1600, 'height': 960})
                     page.screenshot(path=f'/tmp/atlas-distance-warning-{state}.png', full_page=True)
-                    distance_button.press('ArrowDown')
+                    display_button.press('ArrowDown')
+                    distance_heading.press('ArrowRight')
                     switch = page.get_by_role('switch', name='显示距离警告', exact=True)
                     expect(switch).to_be_checked()
                     switch.click()
@@ -121,15 +133,15 @@ def run():
                     expect(canvas).to_have_attribute('data-collision-protection-enabled', 'true')
                     expect(canvas).to_have_attribute('data-collision-state', expected_state)
                     expect(canvas).to_have_attribute('data-collision-worker', 'dedicated')
-                    page.get_by_role('button', name='关闭距离警告', exact=True).click()
-                    distance_button.click()
+                    page.get_by_role('button', name='关闭显示设置', exact=True).click()
+                    display_settings_section(page, '距离警告')
                     expect(switch).not_to_be_checked()
                     switch.focus()
                     page.keyboard.press('Space')
                     expect(switch).to_be_checked()
                     expect(warning).to_be_visible()
                     page.screenshot(path=f'/tmp/atlas-distance-warning-settings-{state}.png', full_page=True)
-                    display_button.click()
+                    display_settings_section(page, '地图与对象')
                     expect(distance_menu).to_have_count(0)
                     expect(display_menu).to_be_visible()
                 assert page.locator('.zivid-camera-collision-alert').count() == 0

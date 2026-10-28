@@ -6,7 +6,7 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
-from archive_helpers import start_project_download
+from archive_helpers import start_project_download, logical_archive_files
 from export_separation_ui_smoke import load_project
 from teaching_transfer_ui_smoke import BASE_URL, CHROME, ready
 from topbar_tools_helpers import topbar_action
@@ -48,15 +48,16 @@ def state(page):
 
 def validate_zip(path):
     with zipfile.ZipFile(path) as archive:
-        manifest = json.loads(archive.read("manifest.json"))
+        files = logical_archive_files(archive)
+        manifest = json.loads(files["manifest.json"])
         assert manifest["format"] == "atlas-route-studio-workspace-project"
         assert manifest["statistics"]["independentHistoryCount"] == 2
         assert manifest["statistics"]["independentWorkspaceCount"] == 3
         for record in manifest["files"]:
-            data = archive.read(record["path"])
+            data = files[record["path"]]
             assert hashlib.sha256(data).hexdigest() == record["sha256"]
         for descriptor in [*manifest["workspaces"].values(), *manifest["independentHistory"]]:
-            assert descriptor["prefix"] + "robot/files/transfer/meshes/body.stl" in archive.namelist()
+            assert descriptor["prefix"] + "robot/files/transfer/meshes/body.stl" in files
 
 
 def restore_group(page, group):
@@ -138,9 +139,10 @@ def run():
             # A missing historical mesh leaves all existing workspaces intact.
             bad = Path(temporary) / "missing-history.zip"
             with zipfile.ZipFile(path) as archive, zipfile.ZipFile(bad, "w") as target:
-                for name in archive.namelist():
+                files = logical_archive_files(archive)
+                for name in files:
                     if name != "independent-history/2/robot/files/transfer/meshes/body.stl":
-                        target.writestr(name, archive.read(name))
+                        target.writestr(name, files[name])
             before = state(page)
             page.locator("input[data-project-guide-input]").set_input_files(str(bad))
             error = page.get_by_role("alertdialog", name="工程加载失败")
