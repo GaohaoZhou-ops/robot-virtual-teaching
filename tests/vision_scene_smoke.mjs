@@ -14,6 +14,7 @@ import { createVisionSceneService } from '../src/server/visionSceneService.js';
 import { sampleTeachingTrajectorySegment } from '../src/lib/teachingPlayback.js';
 import { applyRobotJointValues, disposeRobotModel } from '../src/lib/robotLoader.js';
 import { visionSceneFixture } from './vision_scene_fixture.mjs';
+import { normalizeProject } from '../src/lib/io.js';
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-vision-scene-'));
 const middleware = createVisionSceneService({ directory: path.join(directory, 'server') });
@@ -97,6 +98,20 @@ try {
     assert.equal(sum, source); assert.deepEqual(actual.sort(), expected.sort()); geometry.dispose();
   }
   scene = await buildVisionScenePackage({ ...fixture, onAsset: async (asset, buffer) => buffers.set(asset.id, buffer) });
+  assert.deepEqual(scene.paths.find(p => p.id === 'route-edge').points, [[-2, -1, 0], [2, -1, 0]], 'canonical waypoint poses retain a nonzero route');
+  assert.deepEqual(scene.markers.find(m => m.id === 'waypoint-a').position, [-2, -1, 0]);
+  // Exercise the import normalizer and both historical coordinate shapes.
+  // Nonzero Z also catches accidental X/Y/Z reordering or flattening.
+  const navigation = { waypoints: [
+    { id: 'a', pose: { x: 4, y: -3, z: .25 }, position: { x: 99, y: 99, z: 99 } },
+    { id: 'b', position: { x: 8, y: 2, z: .5 } },
+    { id: 'c', x: 12, y: -5, z: .75 },
+  ], edges: [{ id: 'ab', from: 'a', to: 'b' }, { id: 'bc', from: 'b', to: 'c' }] };
+  for (const input of [navigation, normalizeProject(navigation)]) {
+    const exported = await buildVisionScenePackage({ mapData: fixture.mapData, waypoints: input.waypoints, edges: input.edges });
+    assert.deepEqual(exported.markers.map(m => m.position), [[4, -3, .25], [8, 2, .5], [12, -5, .75]]);
+    assert.deepEqual(exported.paths.map(p => p.points), [[[4, -3, .25], [8, 2, .5]], [[8, 2, .5], [12, -5, .75]]]);
+  }
   assert.equal(scene.clips.length, 1); assert.equal(scene.nodes.filter(n => n.joint).length, 3);
   assert.ok(!scene.nodes.some(n => n.name === 'collision-only'));
   assert.ok(scene.nodes.filter(n => n.role === 'map').every(n => n.material == null), 'map colors remain unlit');
@@ -157,6 +172,7 @@ try {
     'ipad/AtlasTeaching/ProjectStore.swift', 'ipad/AtlasTeaching/ModelGeometry.swift', 'vision/AtlasVisionTeaching/VisionPoseMath.swift',
     'vision/AtlasVisionTeaching/VisionMeshData.swift', 'ipad/AtlasTeaching/ZividFieldOfView.swift',
     'vision/AtlasVisionTeaching/VisionSceneModels.swift', 'vision/AtlasVisionTeaching/VisionSceneStore.swift',
+    'vision/AtlasVisionTeaching/VisionScenePaths.swift', 'vision/AtlasVisionTeaching/VisionFloorGrid.swift', 'vision/Tests/VisionScenePathTests.swift',
     'vision/AtlasVisionTeaching/VisionSceneCameraRenderer.swift', 'vision/Tests/VisionSceneCameraTests.swift',
     'vision/AtlasVisionTeaching/VisionSurfaceRenderer.swift', 'vision/Tests/VisionSurfaceTests.swift',
     'vision/AtlasVisionTeaching/VisionSceneNavigation.swift', 'vision/AtlasVisionTeaching/VisionFloorPlacement.swift',

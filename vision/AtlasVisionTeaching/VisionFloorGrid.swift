@@ -13,6 +13,13 @@ enum VisionFloorGrid {
     private typealias GridColor = UIColor
     #endif
 
+    static func referenceFloor(low: SIMD3<Float>, high: SIMD3<Float>, ground: Float) -> ModelEntity {
+        let floor = ModelEntity(mesh: .generateBox(size: SIMD3(max(4, high.x-low.x+2), max(4, high.y-low.y+2), 0.02)),
+                                materials: [UnlitMaterial(color: GridColor(red: 0.07, green: 0.105, blue: 0.115, alpha: 1))])
+        floor.position = SIMD3((low.x+high.x)/2, (low.y+high.y)/2, ground-0.012)
+        return floor
+    }
+
     static func make(low: SIMD3<Float>, high: SIMD3<Float>, ground: Float) async throws -> (entity: Entity, spacing: Float) {
         let root = Entity(); root.name = "地面网格"
         // Project coordinates are Z-up metres. Keep lines aligned to the

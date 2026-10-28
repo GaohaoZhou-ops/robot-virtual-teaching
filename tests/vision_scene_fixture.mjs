@@ -49,5 +49,8 @@ export function visionSceneFixture() {
   const mobile = { id: 'mobile', name: '移动视点', mobileTransform: new THREE.Matrix4().makeTranslation(-1, -1, .1).toArray(),
     mobileCapture: { samples: [{ id: 'key', kind: 'keyframe', segmentId: 'a', cameraPose: { position: { x: .1, y: .2, z: .8 } } }] } };
   return { mapData: { geometry, name: '空间检查演练', mapId: 'scene-fixture' }, robotModel: robot, robotDescriptor: { id: 'fixture', name: '完整机械臂' },
-    robotPose, robotJointValues, tasks: [task, mobile], waypoints: [{ id: 'a', x: -2, y: -1, z: 0 }, { id: 'b', x: 2, y: -1, z: 0 }], edges: [{ id: 'edge', from: 'a', to: 'b' }], tip, cameras };
+    robotPose, robotJointValues, tasks: [task, mobile], waypoints: [
+      { id: 'a', pose: { x: -2, y: -1, z: 0, roll: 0, pitch: 0, yaw: 0 } },
+      { id: 'b', pose: { x: 2, y: -1, z: 0, roll: 0, pitch: 0, yaw: 0 } },
+    ], edges: [{ id: 'edge', from: 'a', to: 'b' }], tip, cameras };
 }

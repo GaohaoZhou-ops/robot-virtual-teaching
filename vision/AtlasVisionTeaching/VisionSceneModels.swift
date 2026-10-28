@@ -113,6 +113,11 @@ struct VisionSceneManifest: Codable, Identifiable {
         let mapAssets = Set(nodes.filter { $0.role == "map" }.compactMap(\.asset))
         return assets.contains { mapAssets.contains($0.id) && $0.manifest.indices == 0 }
     }
+    // Navigation/parking points locate the traversable surface. A raised robot
+    // base or a captured camera pose must not lift a solid floor over the routes.
+    var navigationGroundHeight: Float? {
+        markers.filter { $0.kind == "parking" }.map { $0.position[2] }.min()
+    }
     func validate() throws {
         func vector(_ v: [Float], _ count: Int) -> Bool { v.count == count && v.allSatisfy(\.isFinite) }
         func name(_ v: String) -> Bool { !v.isEmpty && v.count <= 512 }

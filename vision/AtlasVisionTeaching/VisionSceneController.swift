@@ -29,6 +29,12 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     @Published private(set) var proximityMessage = ""
     @Published var floorGridVisible = true { didSet { floorGrid?.isEnabled = floorGridVisible } }
     @Published private(set) var floorGridSpacing: Float = 1
+    @Published var parkingLabelsVisible = UserDefaults.standard.object(forKey: "visionParkingLabelsVisible") as? Bool ?? true {
+        didSet {
+            parkingLabels?.isEnabled = parkingLabelsVisible
+            UserDefaults.standard.set(parkingLabelsVisible, forKey: "visionParkingLabelsVisible")
+        }
+    }
     var requiresPassthrough: Bool { placingProject || proximityPassthrough }
     #if targetEnvironment(simulator)
     @Published var simulatedObstacleDistance: Float = 3
@@ -36,6 +42,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     let root = Entity(), stage = Entity(), axes = Entity(), content = Entity(), annotation = Entity()
     private let landing = Entity(), environment = Entity(), lighting = Entity()
     private var floorGrid: Entity?
+    private var parkingLabels: Entity?
     private let mapGroup = CollisionGroup(rawValue: 1 << 4)
     private let robotGroup = CollisionGroup(rawValue: 1 << 5)
     private var travelTask: Task<Void, Never>?
@@ -101,7 +108,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         stop(); generation = UUID(); let token = generation
         self.immersiveProject = immersiveProject; lifeSize = false; measuring = false; entryPoint = nil
         placingProject = immersiveProject; stage.isEnabled = !immersiveProject; environment.isEnabled = !immersiveProject
-        referenceFloorBounds = nil; floorGrid = nil; floorGridSpacing = 1
+        referenceFloorBounds = nil; floorGrid = nil; floorGridSpacing = 1; parkingLabels = nil
         root.components.set(OpacityComponent(opacity: 1)); environment.children.forEach { $0.removeFromParent() }
         busy = true; error = ""; defer { busy = false }
         try scene.validate(); manifest = scene; clipIndex = nil; time = 0; progress = 0
@@ -125,8 +132,9 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
                 if let joint = node.joint { applyJoint(joint, value: joint.value, to: entity) }
             }
             let extent = SIMD3(scene.bounds.max) - SIMD3(scene.bounds.min), width = max(0.006, simd_length(extent) / 1800)
-            try await addPaths(scene.paths, width: width)
-            let markerMesh = MeshResource.generateSphere(radius: max(0.025, simd_length(extent) / 600))
+            content.addChild(try await VisionScenePaths.make(scene.paths, width: width))
+            let markerRadius = max(0.025, simd_length(extent) / 600)
+            let markerMesh = MeshResource.generateSphere(radius: markerRadius)
             for marker in scene.markers {
                 let entity = ModelEntity(mesh: markerMesh, materials: [UnlitMaterial(color: marker.kind == "camera" ? .systemYellow : .systemMint)])
                 entity.position = SIMD3(marker.position); entity.name = marker.name
@@ -135,9 +143,12 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
                 if #available(visionOS 26.0, *) { entity.components.set(ManipulationComponent.HitTarget(redirectedEntity: stage)) }
                 content.addChild(entity)
             }
+            let labels = try await VisionParkingLabels.make(scene.markers, markerRadius: markerRadius)
+            guard token == generation, !Task.isCancelled else { throw CancellationError() }
+            parkingLabels = labels; labels.isEnabled = parkingLabelsVisible; content.addChild(labels)
             if immersiveProject {
                 addEnvironment(scene)
-                let ground = scene.robotRoot.flatMap { entities[$0]?.position(relativeTo: content).z } ?? scene.bounds.min[2]
+                let ground = groundHeight(scene)
                 let grid = try await VisionFloorGrid.make(low: SIMD3(scene.bounds.min), high: SIMD3(scene.bounds.max), ground: ground)
                 guard token == generation, !Task.isCancelled else { throw CancellationError() }
                 floorGrid = grid.entity; floorGridSpacing = grid.spacing
@@ -149,32 +160,10 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
             manifest = nil; entities.removeAll(); meshes.removeAll(); throw error
         }
     }
-    // Keep every route segment, but batch nearby segments instead of issuing one
-    // draw call per line. Mesh chunks also keep cancellation and culling useful.
-    private func addPaths(_ paths: [VisionScenePath], width: Float) async throws {
-        var positions: [SIMD3<Float>] = [], indices: [UInt32] = []
-        func flush() async throws {
-            guard !positions.isEmpty else { return }
-            try Task.checkCancellation()
-            var descriptor = MeshDescriptor(name: "Scene routes")
-            descriptor.positions = MeshBuffers.Positions(positions); descriptor.primitives = .triangles(indices)
-            let mesh = try await MeshResource(from: [descriptor])
-            content.addChild(ModelEntity(mesh: mesh, materials: [UnlitMaterial(color: .systemCyan)]))
-            positions.removeAll(keepingCapacity: true); indices.removeAll(keepingCapacity: true)
-        }
-        for path in paths {
-            for pair in zip(path.points, path.points.dropFirst()) {
-                let a = SIMD3(pair.0), b = SIMD3(pair.1), delta = b - a
-                guard simd_length(delta) > 0.00001 else { continue }
-                let direction = simd_normalize(delta)
-                let u = simd_normalize(simd_cross(direction, abs(direction.z) < 0.9 ? SIMD3(0, 0, 1) : SIMD3(0, 1, 0))) * width / 2
-                let v = simd_normalize(simd_cross(direction, u)) * width / 2, first = UInt32(positions.count)
-                positions += [a-u-v, a+u-v, a+u+v, a-u+v, b-u-v, b+u-v, b+u+v, b-u+v]
-                indices += [0,2,1, 0,3,2, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7].map { first + $0 }
-                if positions.count >= 32768 { try await flush() }
-            }
-            try await flush()
-        }
+    private func groundHeight(_ scene: VisionSceneManifest) -> Float {
+        scene.navigationGroundHeight
+            ?? scene.robotRoot.flatMap { entities[$0]?.position(relativeTo: content).z }
+            ?? scene.bounds.min[2]
     }
     private func makeMesh(_ asset: VisionSceneAsset, node: VisionSceneNode, detailed: Bool) async throws -> ModelEntity {
         let model = try await VisionSceneStore.shared.model(asset)
@@ -287,7 +276,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         // Keep the map floor below the observer. Centering a robot's base at
         // eye height would put its entire floor in front of the control panel.
         let eyeHeight = max(0.8, (device()?.translation.y ?? 1.6) - physicalFloorHeight)
-        let ground = robotOrigin?.z ?? scene.bounds.min[2]
+        let ground = groundHeight(scene)
         let vertical = min(-0.15, target.z - ground - eyeHeight)
         focusPoint = target; placeStage(scale: 1, focus: target, vertical: vertical); lifeSize = true
         refreshDetail(at: target)
@@ -298,13 +287,10 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         sky.scale = SIMD3(-1, 1, 1); environment.addChild(sky)
         // Sparse point clouds and isolated workpieces have no continuous floor.
         // A point-cloud map can also contain placed mesh models; it still needs
-        // a continuous reference plane at the robot's ground level.
+        // a continuous reference plane below its navigation/parking points.
         if scene.hasPointCloudMap || scene.coordinateFrame == "virtual_origin" {
             let low = SIMD3(scene.bounds.min), high = SIMD3(scene.bounds.max)
-            let ground = scene.robotRoot.flatMap { entities[$0]?.position(relativeTo: content).z } ?? low.z
-            let floor = ModelEntity(mesh: .generateBox(size: SIMD3(max(4, high.x-low.x+2), max(4, high.y-low.y+2), 0.02)),
-                                    materials: [UnlitMaterial(color: UIColor(red: 0.07, green: 0.105, blue: 0.115, alpha: 1))])
-            floor.position = SIMD3((low.x+high.x)/2, (low.y+high.y)/2, ground-0.012)
+            let floor = VisionFloorGrid.referenceFloor(low: low, high: high, ground: groundHeight(scene))
             let half = SIMD3<Float>(max(4, high.x-low.x+2)/2, max(4, high.y-low.y+2)/2, 0.3)
             referenceFloorBounds = (floor.position-half, floor.position+half)
             floor.components.set(VisionSceneSelection(nodeID: "reference-floor", name: "参考地面", role: "ground"))

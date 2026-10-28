@@ -19,6 +19,7 @@ import simd
         let scene = try decoder.decode(VisionSceneManifest.self, from: data); try scene.validate()
         precondition(scene.cameraNodes.count == 2, "Both optical frames survive project export")
         precondition(scene.hasPointCloudMap, "A mixed map still needs a continuous navigation reference floor")
+        try await VisionScenePathTests.run(scene)
         var meshOnly = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         let pointAssets = Set(scene.assets.filter { $0.manifest.indices == 0 }.map(\.id))
         meshOnly["nodes"] = (meshOnly["nodes"] as! [[String: Any]]).map { node in

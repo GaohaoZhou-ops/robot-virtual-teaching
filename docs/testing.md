@@ -20,6 +20,7 @@
 | 一次申请自动传输、打包进度、重复申请防护与通知通道不可用时恢复 | `uv run --with playwright python tests/work_sync_approval_ui_smoke.py`（先启动独立 Vite 开发服务，通过 `BASE_URL` 指定地址） |
 | 两端地图 / 独立对象颜色、实时显示设置、刷新导出与旧缓存修复 | `BASE_URL=http://127.0.0.1:22063 uv run --with playwright python tests/work_sync_display_ui_smoke.py`（先在该端口启动独立 Vite 开发服务） |
 | Vision Pro 原生坐标、网络与工程往返 | `npm run test:vision`（macOS） |
+| Vision Pro 完整场景、路网坐标、参考地面遮挡与原生离屏渲染 | `npm run test:vision:scene`（macOS；`VISION_ROUTE_ARTIFACTS` 可指定路网渲染截图目录） |
 | visionOS 构建与模拟器流程 | `./scripts/check-vision.sh --ui`（macOS + Xcode） |
 | iPad 模型 / 协议 / 配对 | `npm run test:ipad` |
 | 机器人预设文件格式、关节单位、限位、型号匹配及工程保存 | `npm run test:robot-presets` |

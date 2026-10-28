@@ -272,14 +272,14 @@ struct VisionProjectToolsView: View {
     private var projectActions: some View {
         ViewThatFits(in: .horizontal) {
             HStack(spacing: 18) {
-                playbackButton; scaleButton; editorButton; camerasButton
+                playbackButton; scaleButton; editorButton; camerasButton; parkingLabelsToggle
             }.fixedSize(horizontal: true, vertical: false)
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 18) { playbackButton; scaleButton }
-                HStack(spacing: 18) { editorButton; camerasButton }
+                HStack(spacing: 18) { editorButton; camerasButton; parkingLabelsToggle }
             }.fixedSize(horizontal: true, vertical: false)
             VStack(alignment: .leading, spacing: 18) {
-                playbackButton; scaleButton; editorButton; camerasButton
+                playbackButton; scaleButton; editorButton; camerasButton; parkingLabelsToggle
             }.fixedSize(horizontal: true, vertical: false)
         }
         .lineLimit(1)
@@ -310,6 +310,12 @@ struct VisionProjectToolsView: View {
             else { openWindow(id: "project-cameras", value: "project-cameras") }
         }.disabled(!review.hasCameras || review.placingProject)
             .tint(review.cameraWindowVisible ? .cyan : nil).accessibilityIdentifier("project-cameras")
+    }
+
+    private var parkingLabelsToggle: some View {
+        Toggle("显示停车点标签", systemImage: "tag", isOn: $review.parkingLabelsVisible)
+            .toggleStyle(.button).tint(.cyan)
+            .accessibilityIdentifier("project-parking-labels")
     }
 }
 
@@ -487,6 +493,8 @@ struct VisionSceneToolsView: View {
                 } label: { Image(systemName: "rectangle.portrait.and.arrow.right") }
                     .accessibilityLabel("返回工作台").accessibilityIdentifier("scene-exit")
             }
+            Toggle("显示停车点标签", systemImage: "tag", isOn: $review.parkingLabelsVisible)
+                .toggleStyle(.button).tint(.cyan).accessibilityIdentifier("scene-parking-labels")
             if review.clip != nil {
                 Slider(value: Binding(get: { review.progress }, set: { review.scrub($0) }), in: 0...1)
                     .accessibilityLabel("回放进度").accessibilityIdentifier("scene-timeline")

@@ -10,6 +10,9 @@ import { placedObjectLayers, placedObjectMask } from './placedObjectRendering.js
 
 const identity = () => new THREE.Matrix4().toArray();
 const point = (p) => [Number(p?.x) || 0, Number(p?.y) || 0, Number(p?.z) || 0];
+// normalizeProject stores navigation coordinates in pose; retain the legacy
+// position/plain-point inputs used by older scene callers as well.
+const waypointPoint = (waypoint) => point(waypoint.pose || waypoint.position || waypoint);
 const poseMatrix = (value) => {
   const p = normalizeRobotPose(value);
   return new THREE.Matrix4().compose(new THREE.Vector3(...point(p.position)),
@@ -146,10 +149,10 @@ export async function buildVisionScenePackage({ mapData, robotModel, robotDescri
       .filter((clip) => clip.poseCount > 0 && clip.totalDurationMs > 0);
   }
   const waypointsByID = new Map(waypoints.map((w) => [w.id, w]));
-  for (const waypoint of waypoints) scene.markers.push({ id: `waypoint-${waypoint.id}`, name: waypoint.name || '停车点', kind: 'parking', position: point(waypoint.position || waypoint) });
+  for (const waypoint of waypoints) scene.markers.push({ id: `waypoint-${waypoint.id}`, name: waypoint.name || '停车点', kind: 'parking', position: waypointPoint(waypoint) });
   for (const edge of edges) {
     const from = waypointsByID.get(edge.from), to = waypointsByID.get(edge.to);
-    if (from && to) scene.paths.push({ id: `route-${edge.id || scene.paths.length}`, name: '地图路网', points: [point(from.position || from), point(to.position || to)] });
+    if (from && to) scene.paths.push({ id: `route-${edge.id || scene.paths.length}`, name: '地图路网', points: [waypointPoint(from), waypointPoint(to)] });
   }
   for (const task of tasks) {
     const positions = [];
