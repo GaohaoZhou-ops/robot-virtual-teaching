@@ -57,6 +57,7 @@ import { WorkSyncControl, WorkSyncAuthorization } from './components/WorkSyncCon
 import { useWorkSync } from './hooks/useWorkSync.js';
 import { useRobotTwin } from './hooks/useRobotTwin.js';
 import { robotTwinDisplayPose } from './lib/robotTwin.js';
+import { loadRobotTwinProfiles, restoreRobotTwinProfiles } from './lib/robotTwinProfiles.js';
 import VisionWorkbenchBridge from './components/VisionWorkbenchBridge.jsx';
 import { isVisionWorkbench } from './lib/visionWorkbench.js';
 import { useProjectImportProgress } from './hooks/useProjectImportProgress.js';
@@ -1141,6 +1142,7 @@ export default function App() {
 
     const project = current.mapData
       ? buildExport({
+          robotTwin: loadRobotTwinProfiles(),
           transfer: current.workspaceTransfer,
           independentTeachingName: current.independentTeachingName,
           directoryAutosaveSuspended: current.directoryAutosaveSuspended,
@@ -2633,6 +2635,9 @@ export default function App() {
         await restoreWorkspaceCollection(sessionIdRef.current, collection, activeMode);
         const presetSource = collection.workspaces.map || collection.workspaces.independent;
         sharedRobotPresetsRef.current = await importSharedRobotPresets(sessionIdRef.current, presetSource?.config?.config?.project);
+        if (!restoreRobotTwinProfiles(collection.workspaces[collection.activeMode]?.config?.config?.project?.robotTwin)) {
+          notify('工程已恢复，但机器人连接配置未能保存，请检查浏览器存储后重新加载工程', 'warning');
+        }
         for (const mode of Object.keys(collection.workspaces)) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
         }
@@ -2650,6 +2655,9 @@ export default function App() {
         advanceProjectImport(0.8, '恢复工作区与示教结果');
         await restoreLinkedWorkspaces(sessionIdRef.current, workspaces, normalizeTeachingSpaceMode(requestedMode));
         sharedRobotPresetsRef.current = await importSharedRobotPresets(sessionIdRef.current, workspaces.map?.config?.config?.project);
+        if (!restoreRobotTwinProfiles(workspaces[importedFile.manifest?.activeMode || 'map']?.config?.config?.project?.robotTwin)) {
+          notify('工程已恢复，但机器人连接配置未能保存，请检查浏览器存储后重新加载工程', 'warning');
+        }
         for (const mode of ['map', 'independent']) {
           await clearProjectDirectoryBinding(mode).catch(() => undefined);
         }
@@ -3024,6 +3032,9 @@ export default function App() {
           : importedFile.source === 'zip'
             ? 'ZIP 工程包'
             : '工程配置';
+      if (!restoreRobotTwinProfiles(project.robotTwin)) {
+        notify('工程已加载，但机器人连接配置未能保存，请检查浏览器存储后重新加载工程', 'warning');
+      }
       notify(
         `${sourceLabel}已加载${importedFile.portable ? '（完整）' : ''} · ${project.waypoints.length} 导航点 / ${project.teachingTasks.length} 示教任务${importedFile.manifest ? ` / ${importedFile.manifest?.statistics?.cameraFrameCount || 0} 相机帧` : ''}${importedFile.portable ? ' · 地图与机器人资源已恢复' : ''}${importedFile.source === 'directory' ? ' · 已启用增量保存' : ''}`,
       );
@@ -4537,6 +4548,7 @@ export default function App() {
   );
 
   const currentExportPayload = () => buildExport({
+    robotTwin: loadRobotTwinProfiles(),
     abxRoutes,
     transfer: workspaceTransfer,
     independentTeachingName,

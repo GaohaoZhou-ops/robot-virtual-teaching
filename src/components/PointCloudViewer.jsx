@@ -473,19 +473,16 @@ const writeRobotJointLockDataset = (canvas, lockedJointNames) => {
   canvas.dataset.robotJointLockedNames = JSON.stringify(names);
 };
 
-const writeRobotJointDataset = (canvas, robot, source = 'scene') => {
+const writeRobotJointDataset = (canvas, robot, source = 'scene', measured = null) => {
   if (!robot) return {};
-  robot.updateMatrixWorld(true);
-  const values = readRobotJointValues(robot);
+  if (!measured) robot.updateMatrixWorld(true);
+  const values = measured?.values || readRobotJointValues(robot);
+  const joints = measured?.joints || Object.keys(values).map((name) => robot.getObjectByName(name)).filter(Boolean);
   const transforms = Object.fromEntries(
-    Object.keys(values).flatMap((name) => {
-      const joint = robot.getObjectByName(name);
-      if (!joint) return [];
-      return [[name, {
-        position: joint.position.toArray(),
-        quaternion: joint.quaternion.toArray(),
-      }]];
-    }),
+    joints.map((joint) => [joint.name, {
+      position: joint.position.toArray(),
+      quaternion: joint.quaternion.toArray(),
+    }]),
   );
   if (!canvas) return values;
   canvas.dataset.robotJointValues = JSON.stringify(values);
@@ -1984,6 +1981,7 @@ export default function PointCloudViewer({
   }, [pendingPolylineRequest?.id, isActive, robotLoadState?.status, onPolylineOpenChange]);
 
   const reportZividCameraPoses = (force = false) => {
+    if (robotTelemetryRef.current && !force) return;
     const frames = zividCameraFramesRef.current;
     if (!frames.left && !frames.right) return;
     const now = performance.now();
@@ -4791,23 +4789,31 @@ export default function PointCloudViewer({
       if (!hud) return;
       const now = performance.now();
       const meta = SPACEMOUSE_AXIS_HUD_META[selectedAxis] || SPACEMOUSE_AXIS_HUD_META.x;
-      hud.dataset.axis = selectedAxis;
-      hud.querySelector('[data-axis-code]').textContent = meta.code;
-      hud.querySelector('[data-axis-label]').textContent = meta.label;
-      hud.querySelector('[data-axis-group]').textContent = `${meta.group} / SINGLE AXIS`;
+      // Replacing even identical text nodes invalidates layout on every frame.
+      // The axis label changes only when the user selects another axis.
+      if (hud.dataset.axis !== selectedAxis) {
+        hud.dataset.axis = selectedAxis;
+        hud.querySelector('[data-axis-code]').textContent = meta.code;
+        hud.querySelector('[data-axis-label]').textContent = meta.label;
+        hud.querySelector('[data-axis-group]').textContent = `${meta.group} / SINGLE AXIS`;
+      }
 
       if (!ready) {
         spaceMouseHudMotionActive = false;
         spaceMouseHudHideAt = -Infinity;
-        hud.classList.remove('is-visible', 'is-active');
-        hud.dataset.state = 'hidden';
-        hud.setAttribute('aria-hidden', 'true');
+        if (hud.dataset.state !== 'hidden') {
+          hud.classList.remove('is-visible', 'is-active');
+          hud.dataset.state = 'hidden';
+          hud.setAttribute('aria-hidden', 'true');
+        }
       } else if (motionActive) {
         spaceMouseHudMotionActive = true;
         spaceMouseHudHideAt = Infinity;
-        hud.classList.add('is-visible', 'is-active');
-        hud.dataset.state = 'active';
-        hud.setAttribute('aria-hidden', 'false');
+        if (hud.dataset.state !== 'active') {
+          hud.classList.add('is-visible', 'is-active');
+          hud.dataset.state = 'active';
+          hud.setAttribute('aria-hidden', 'false');
+        }
       } else if (spaceMouseHudMotionActive) {
         spaceMouseHudMotionActive = false;
         spaceMouseHudHideAt = now + SPACEMOUSE_AXIS_HUD_HOLD_MS;
@@ -4867,14 +4873,20 @@ export default function PointCloudViewer({
         pixelStep,
       };
     };
+    let lastTwinJointReport = 0, reportedTwinJoints = null, reportedTwinJointRevision = -1;
     const updateTwinScene = () => {
       const twinInputs = twinSceneInputsRef.current;
       twinScene.sync(loadedRobotRef.current, robotLayer, twinInputs.robots, twinInputs.selectedId, showRobotRef.current);
-      const frame = twinScene.update(performance.now());
+      const now = performance.now();
+      const frame = twinScene.update(now, twinFollowRef.current ? twinInputs.selectedId : '');
       if (frame) {
+        if (robotPoseRef.current !== frame.pose) writeRobotPoseDataset(renderer.domElement, frame.pose);
         robotPoseRef.current = frame.pose;
-        robotJointValuesRef.current = writeRobotJointDataset(renderer.domElement, loadedRobotRef.current, 'twin-interpolated');
-        writeRobotPoseDataset(renderer.domElement, frame.pose);
+        robotJointValuesRef.current = frame.joints.values;
+        if (reportedTwinJoints !== frame.joints || (reportedTwinJointRevision !== frame.joints.revision && now - lastTwinJointReport >= 100)) {
+          writeRobotJointDataset(renderer.domElement, loadedRobotRef.current, 'twin-telemetry', frame.joints);
+          reportedTwinJoints = frame.joints; reportedTwinJointRevision = frame.joints.revision; lastTwinJointReport = now;
+        }
       }
       robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
         || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
@@ -5401,7 +5413,7 @@ export default function PointCloudViewer({
         const metersPerPixel = camera.position.distanceTo(controls.target)
           / (camera.zoom * focalPixels);
         const scale = viewportDistanceScale(metersPerPixel);
-        const signature = scale ? `${scale.meters}:${scale.pixels.toFixed(2)}:${metersPerPixel}` : '';
+        const signature = scale ? `${scale.meters}:${scale.pixels.toFixed(2)}:${metersPerPixel.toPrecision(6)}` : '';
         if (signature !== lastDistanceScaleSignature) {
           lastDistanceScaleSignature = signature;
           const element = distanceScaleRef.current;
@@ -8371,9 +8383,6 @@ export default function PointCloudViewer({
               disabled={!isActive || !showRobot || robotLoadState?.status !== 'loaded'}
               title={twinFollowEnabled ? '退出跟随并恢复之前的视角' : '从机器人后上方观察局部场景，随定位和朝向自动跟随'}
               onClick={toggleTwinFollow}><Eye size={13} />{twinFollowEnabled ? '退出跟随' : '跟随视角'}</button>}
-            {robotTelemetry && twinRobots.length > 1 && <button type="button" className="robot-twin-follow-toggle"
-              aria-label="查看全部机器人" disabled={!isActive || !showRobot} onClick={focusTwinRobots}>
-              <Bot size={13} />全部机器人</button>}
             {!robotTelemetry && <button type="button" className="polyline-teaching-launch" aria-label={polylineOpen ? '图谱控制台' : '表面折线示教'} aria-pressed={polylineOpen}
               aria-controls={polylineOpen ? 'inspector-panel-content' : 'inspector-polyline-content'}
               disabled={!isActive || (!polylineOpen && (robotLoadState?.status !== 'loaded' || externalRobotTrajectoryActive || teachingCaptureBusy || teachingPoseEditing || !mapData?.faceCount))}

@@ -68,7 +68,8 @@ export function updateRobotCoordinateAxes(display, robot, camera, canvas, select
     display.frames = getRobotCoordinateFrames(robot);
   }
   const visibleNames = [], visibleOpticalSides = new Set();
-  const focalPixels = canvas.clientHeight / (2 * Math.tan(MathUtils.degToRad(camera.fov / 2)));
+  // No screen-size/layout read is needed while coordinate guides are hidden.
+  const focalPixels = selectedNames.size ? canvas.clientHeight / (2 * Math.tan(MathUtils.degToRad(camera.fov / 2))) : 0;
   const setData = (key, value) => { if (canvas.dataset[key] !== value) canvas.dataset[key] = value; };
   display.markers.forEach(marker => { marker.visible = false; });
   for (const { name, frame, opticalSide } of display.frames) {

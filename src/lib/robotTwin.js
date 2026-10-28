@@ -1,5 +1,5 @@
 export const ROBOT_TWIN_PREFIX = '/__atlas/robot-twin';
-export const ROBOT_TWIN_INTERVAL = 200;
+export const ROBOT_TWIN_INTERVAL = 500;
 export const ROBOT_TWIN_MAX_AGE = 1500;
 export const DEFAULT_ROBOT_TWIN_ADDRESS = '192.168.0.112:9090';
 

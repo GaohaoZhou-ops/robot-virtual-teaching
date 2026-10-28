@@ -253,6 +253,14 @@ playwright/.auth/
 # Motion-latency and camera-frame retention reviews use
 # test-artifacts/robot-twin-smoothing/; keep robot_twin_motion_*,
 # robot_twin_camera_frames_* and robot_twin_smoothing_* regression sources.
+# Card-portability checks use test-artifacts/robot-twin-project/ for browser
+# captures. Fleet CPU profiles and motion samples use the same ignored root.
+# Save As/export/import checks may put their temporary project bundles inside
+# the repository when TMPDIR is overridden; keep runners and fixtures visible.
+/atlas-twin-project-*/
+/tests/atlas-twin-project-*/
+/atlas-twin-project-*.[zZ][iI][pP]
+/tests/atlas-twin-project-*.[zZ][iI][pP]
 # Ignore standalone copies of live readings, session diagnostics and captures
 # at root/tests too; keep robot_twin_*.py/.mjs runners and nested fixtures visible.
 # The shared artifact directory also holds robot-card, body-camera, arrow-spacing

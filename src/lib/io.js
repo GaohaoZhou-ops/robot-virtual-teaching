@@ -12,6 +12,7 @@ import { ZIVID_M70_PROFILE } from './zividCamera.js';
 import { withoutTemporaryMapNavigation } from './teachingNavigation.js';
 import { abxNodeLabel, abxNodeName } from './abxRoute.js';
 import { normalizeIndependentTeachingName } from './independentTeachingName.js';
+import { normalizeRobotTwinProfiles } from './robotTwinProfiles.js';
 
 const numberOr = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -738,6 +739,7 @@ export function normalizeProject(payload) {
     view2d: payload.view2d || null,
     view3d: payload.view3d || null,
     rendering: payload.rendering || null,
+    robotTwin: normalizeRobotTwinProfiles(payload.robotTwin),
     workspace: {
       teachingSpaceMode,
       independentTeachingName: normalizeIndependentTeachingName(workspace.independentTeachingName),
@@ -773,6 +775,7 @@ export function normalizeProject(payload) {
 
 export function buildExport({
   mapData,
+  robotTwin,
   teachingSpaceMode = mapData?.teachingSpaceMode,
   heightRange,
   waypoints,
@@ -818,6 +821,7 @@ export function buildExport({
   const coordinateFrame = teachingCoordinateFrame(normalizedTeachingSpaceMode);
   return {
     schemaVersion: '1.3',
+    ...(robotTwin ? { robotTwin: normalizeRobotTwinProfiles(robotTwin) } : {}),
     ...(abxRoutes.length ? { abxRoutes: structuredClone(abxRoutes) } : {}),
     exportedAt: new Date().toISOString(),
     coordinateSystem: {

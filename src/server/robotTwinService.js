@@ -96,9 +96,10 @@ export function createRobotTwinService() {
   async function snapshot(session) {
     // Multiple tabs/requests for one session cannot multiply the robot poll rate.
     if (session.pending) return session.pending;
-    if (session.cached && Date.now() - session.sampledAt < ROBOT_TWIN_INTERVAL) return session.cached;
+    if (session.cached && Date.now() - session.polledAt < ROBOT_TWIN_INTERVAL) return session.cached;
     session.pending = (async () => {
       const started = Date.now();
+      session.polledAt = started;
       const results = await Promise.allSettled([
         readRobot(session, '/api/v1/slam'), readRobot(session, '/api/v1/state'),
       ]);
@@ -119,6 +120,7 @@ export function createRobotTwinService() {
   }
 
   const middleware = async (req, res, next) => {
+    const requestStarted = performance.now();
     const pathname = req.url?.split('?')[0];
     if (pathname !== ROBOT_TWIN_PREFIX && !pathname?.startsWith(`${ROBOT_TWIN_PREFIX}/`)) return next();
     try {
@@ -151,7 +153,9 @@ export function createRobotTwinService() {
           session.camera = createRobotCamera(session);
           const token = randomBytes(32).toString('hex');
           session.lastSeen = Date.now(); sessions.set(token, session);
-          reply(res, 201, { token, address: session.address, snapshot: initial });
+          reply(res, 201, { token, address: session.address,
+            snapshot: { ...initial, serverProcessingMs: performance.now() - requestStarted,
+              nextPollAfterMs: Math.max(0, ROBOT_TWIN_INTERVAL - (Date.now() - session.polledAt)) } });
         } finally { pending -= 1; }
         return;
       }
@@ -206,7 +210,9 @@ export function createRobotTwinService() {
         // Durations survive client/server clock differences and cached replies.
         const heldMs = Date.now() - result.sampledAt;
         reply(res, 200, { ...result, poseValidForMs: Math.max(0, result.poseValidForMs - heldMs),
-          jointsValidForMs: Math.max(0, result.jointsValidForMs - heldMs) });
+          jointsValidForMs: Math.max(0, result.jointsValidForMs - heldMs),
+          serverProcessingMs: performance.now() - requestStarted,
+          nextPollAfterMs: Math.max(0, ROBOT_TWIN_INTERVAL - (Date.now() - session.polledAt)) });
       } catch (error) {
         if (error.status === 401) { void dispose(session); sessions.delete(token); }
         throw error;

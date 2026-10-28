@@ -950,6 +950,41 @@ export function applyRobotJointValues(robot, values, { measured = false } = {}) 
   return readRobotJointValues(robot);
 }
 
+// Telemetry animation keeps a small joint index instead of traversing every
+// visual/collision mesh on each frame. It writes measured transforms only;
+// offline edits continue to use the normal limit/coupling-aware functions.
+export function createRobotMeasuredJointUpdater(robot) {
+  const entries = [], values = {}, rotation = new THREE.Quaternion();
+  robot.traverse((joint) => {
+    if (!movableJointTypes.has(joint.userData?.jointType)) return;
+    const prismatic = joint.userData.jointType === 'prismatic';
+    const value = Number(joint.userData.jointValue) || 0;
+    values[joint.name] = prismatic ? value : THREE.MathUtils.radToDeg(value);
+    entries.push({ joint, prismatic,
+      axis: new THREE.Vector3(...(joint.userData.jointAxis || [0, 0, 1])).normalize(),
+      position: new THREE.Vector3().fromArray(joint.userData.restPosition || [0, 0, 0]),
+      quaternion: new THREE.Quaternion().fromArray(joint.userData.restQuaternion || [0, 0, 0, 1]) });
+  });
+  return { joints: entries.map(({ joint }) => joint), values, revision: 0,
+    apply(measured) {
+      let changed = false;
+      for (const { joint, prismatic, axis, position, quaternion } of entries) {
+        const value = measured[joint.name];
+        if (!Number.isFinite(value) || Math.abs(value - values[joint.name]) < 1e-9) continue;
+        const internal = prismatic ? value : THREE.MathUtils.degToRad(value);
+        joint.position.copy(position); joint.quaternion.copy(quaternion);
+        if (prismatic) joint.position.addScaledVector(axis, internal);
+        else joint.quaternion.multiply(rotation.setFromAxisAngle(axis, internal));
+        joint.userData.jointValue = internal;
+        values[joint.name] = value; changed = true;
+      }
+      if (changed) this.revision++;
+      // The renderer updates world matrices once for the complete scene.
+      return changed;
+    },
+  };
+}
+
 export function readRobotJointValues(robot) {
   const values = {};
   robot?.traverse((object) => {

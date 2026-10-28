@@ -16,20 +16,23 @@ ARTIFACTS.mkdir(parents=True, exist_ok=True)
 FIXTURE = r'''
 import { createFakeRobotServer } from './scripts/lib/fake_robot_server.mjs';
 import { createInterface } from 'node:readline';
-const times = [0, 0], offsets = [0, 0], down = [false, false];
+const times = [0, 0], offsets = [0, 0], down = [false, false], stale = [false, false];
+let moving = false, motionStarted = 0;
+const motion = () => moving ? performance.now() - motionStarted : 0;
 const servers = [0, 1].map((index) => {
-  const server = createFakeRobotServer({ instance: 'same-task-ids', password: `admin-${index}`, clock: () => times[index] });
+  const server = createFakeRobotServer({ instance: 'same-task-ids', password: `admin-${index}`, clock: () => times[index] + motion() });
   const handler = server.listeners('request')[0]; server.removeAllListeners('request');
   server.on('request', (req, res) => {
     if (down[index] && req.url.startsWith('/api/')) { res.writeHead(503); res.end('{}'); return; }
     const end = res.end.bind(res), writeHead = res.writeHead.bind(res);
-    if (req.url === '/api/v1/slam' || req.url === '/api/v1/execution') {
+    if (['/api/v1/slam', '/api/v1/state', '/api/v1/execution'].includes(req.url)) {
       let headers, code;
       res.writeHead = (status, values) => { code = status; headers = values; return res; };
       res.end = (bytes, ...args) => {
       try {
         const payload = JSON.parse(bytes);
-        if (payload.sample?.pose) { payload.sample.pose.x_m = (index ? 1.7 : -1.7) + offsets[index]; payload.sample.pose.y_m = 0; payload.sample.pose.yaw_rad = 0; }
+        if (payload.sample?.pose) { payload.sample.pose.x_m = (index ? 1.7 : -1.7) + offsets[index] + motion() * .0003; payload.sample.pose.y_m = 0; payload.sample.pose.yaw_rad = 0; }
+        if (stale[index]) { if (payload.sample) payload.fresh = false; if (payload.robot) payload.robot.state_fresh = false; }
         if (payload.run) payload.run.task_name = index ? '二号巡检任务' : '一号巡检任务';
         bytes = Buffer.from(JSON.stringify(payload)); headers = { ...headers, 'Content-Length': bytes.length };
       } catch {}
@@ -46,6 +49,8 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   const command = JSON.parse(line);
   if (command.move) { offsets[0] += 0.25; offsets[1] -= 0.25; times[0] += 300; times[1] += 300; }
   if (command.down !== undefined) down[1] = command.down;
+  if (command.stale !== undefined) stale[1] = command.stale;
+  if (command.motion !== undefined) { moving = command.motion; motionStarted = performance.now(); }
 });
 '''
 fixture = subprocess.Popen(['node', '--input-type=module', '-e', FIXTURE], cwd=ROOT,
@@ -132,10 +137,11 @@ try:
             assert dialog.locator('.robot-twin-success__check').evaluate('(el) => el.getAnimations().length') > 0
             # One robot can temporarily lose a poll during the success mark.
             # Recovery must not remount/replay the batch's animation.
-            command({'down': True})
+            command({'stale': True})
             expect(page.locator('.robot-twin-scene-label.is-stale')).to_have_count(1)
+            expect(page.locator('.work-sync > .work-sync__status')).to_have_count(0)
             expect(dialog.locator('.robot-twin-success')).to_be_visible()
-            command({'down': False})
+            command({'stale': False})
             expect(dialog).not_to_be_visible(timeout=4000)
             assert page.evaluate('window.twinSuccessAnimations') == 1
             assert requests(0)['POST /api/v1/access/login'] == login_a
@@ -220,10 +226,43 @@ try:
             expect(dialog.locator('.robot-twin-success')).to_be_visible()
             expect(dialog).not_to_be_visible(timeout=4000)
             assert page.evaluate('window.twinSuccessAnimations') == 2, 'exactly one animation per connection attempt'
+            expect(page.get_by_role('button', name='查看全部机器人', exact=True)).to_have_count(0)
+            expect(page.locator('.work-sync > .work-sync__status')).to_have_count(0)
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
             follow = page.get_by_role('button', name='机器人后上方跟随视角', exact=True)
             follow.click()
             expect(follow).to_have_attribute('aria-pressed', 'true')
+            command({'motion': True})
+            page.wait_for_timeout(1100)
+            performance = page.evaluate('''async () => {
+              const {RobotTwinScene} = await import('/src/lib/robotTwinScene.js');
+              const update=RobotTwinScene.prototype.update, costs=[], frames=[];
+              RobotTwinScene.prototype.update=function(...args) {
+                const start=performance.now(), result=update.apply(this,args);
+                costs.push(performance.now()-start); return result;
+              };
+              try { await new Promise(done=>{
+                const start=performance.now();
+                const read=()=>{
+                  const d=document.querySelector('.three-canvas').dataset;
+                  frames.push({robots:JSON.parse(d.twinRobots),smoothed:d.smoothedTwinRobot,selected:d.selectedTwinRobot,
+                    joints:Number(d.robotJointApplyRevision)});
+                  if(performance.now()-start<2500)requestAnimationFrame(read);else done();
+                };requestAnimationFrame(read);
+              }); return {costs,frames}; }
+              finally {RobotTwinScene.prototype.update=update;}
+            }''')
+            frames = performance['frames']
+            assert all(frame['smoothed'] == frame['selected'] for frame in frames)
+            changes = {selected: sum(next(robot['x'] for robot in b['robots'] if robot['selected'] == selected)
+                != next(robot['x'] for robot in a['robots'] if robot['selected'] == selected)
+                for a, b in zip(frames, frames[1:])) for selected in [True, False]}
+            assert changes[True] > (len(frames) - 1) * .9, changes
+            assert changes[False] <= 7, changes
+            assert frames[-1]['joints'] - frames[0]['joints'] <= 28, 'diagnostics must not serialize joints every render frame'
+            costs = sorted(performance['costs'])
+            print(json.dumps({'followFrames': len(frames), 'otherRobotUpdates': changes[False],
+                'sceneUpdateMedianMs': costs[len(costs)//2], 'sceneUpdateP95Ms': costs[int(len(costs)*.95)]}))
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect_view(page, second_view)
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')

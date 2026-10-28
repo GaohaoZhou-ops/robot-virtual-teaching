@@ -3,7 +3,7 @@ import { Bot, Check, Pencil, Plus, Radio, Trash2, Undo2 } from 'lucide-react';
 import { MAX_TWIN_ROBOTS } from '../lib/robotTwinFleet.js';
 import { robotTwinColor } from '../lib/robotTwinAppearance.js';
 import { DEFAULT_ROBOT_TWIN_ADDRESS } from '../lib/robotTwin.js';
-import { loadRobotTwinProfiles, normalizeRobotProfileAddress, robotProfileAddressLabel, saveRobotTwinProfiles } from '../lib/robotTwinProfiles.js';
+import { loadRobotTwinProfiles, normalizeRobotProfileAddress, robotProfileAddressLabel, saveRobotTwinProfiles, ROBOT_TWIN_PROFILES_CHANGED } from '../lib/robotTwinProfiles.js';
 import { forgetRobotTwinCredential, loadRobotTwinCredentials, rememberRobotTwinCredential } from '../lib/robotTwinCredentials.js';
 
 export function RobotTwinPanel({ twin, open, onConnected }) {
@@ -32,6 +32,11 @@ export function RobotTwinPanel({ twin, open, onConnected }) {
   const connected = open && successShown && attemptedIds.length > 0
     && attemptedIds.every((id) => twin?.robots?.some((item) => item.id === id && item.active && !item.authFailed));
   const pending = selected.filter((profile) => !stateFor(profile)?.active);
+  useEffect(() => {
+    const restore = () => { setSaved(loadRobotTwinProfiles()); setPasswords({}); setRemoved(null); setEditor(null); };
+    window.addEventListener(ROBOT_TWIN_PROFILES_CHANGED, restore);
+    return () => window.removeEventListener(ROBOT_TWIN_PROFILES_CHANGED, restore);
+  }, []);
   useEffect(() => { if (batchReady) setSuccessShown(true); }, [batchReady]);
   useEffect(() => {
     if (!open) { setPasswords({}); setEditor(null); setEditorError(''); setAttemptedIds([]); setSuccessShown(false); }

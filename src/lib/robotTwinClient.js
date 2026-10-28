@@ -4,6 +4,11 @@ import { RobotTwinCameraClient } from './robotTwinCameraClient.js';
 import { forgetRobotTwinCredential, rememberRobotTwinCredential } from './robotTwinCredentials.js';
 
 const isRobotAuthFailure = (error) => ['ROBOT_AUTH_FAILED', 'ROBOT_AUTH_REQUIRED'].includes(error.code);
+// Use the proxy's remaining rate-limit window. Subtracting a browser round
+// trip can arrive just before that window and repeatedly return cached data.
+const nextPollDelay = (snapshot, elapsed) => Number.isFinite(snapshot.nextPollAfterMs)
+  ? Math.max(25, Math.min(ROBOT_TWIN_INTERVAL, snapshot.nextPollAfterMs))
+  : Math.max(100, ROBOT_TWIN_INTERVAL + 10 - elapsed);
 
 export class RobotTwinClient {
   constructor({ request = (...args) => globalThis.fetch(...args), onChange = () => {} } = {}) {
@@ -62,8 +67,13 @@ export class RobotTwinClient {
 
   accept(snapshot, elapsed, generation) {
     clearTimeout(this.expiry);
-    const poseMs = snapshot.poseValidForMs - elapsed;
-    const jointMs = snapshot.jointsValidForMs - elapsed;
+    // Remaining lifetimes were already aged at the proxy's response time.
+    // Charge only browser/proxy transport, not the upstream wait a second time
+    // (nor authentication/model loading before the initial snapshot existed).
+    const processing = Number.isFinite(snapshot.serverProcessingMs) ? Math.max(0, snapshot.serverProcessingMs) : 0;
+    const transportMs = Math.max(0, elapsed - processing);
+    const poseMs = snapshot.poseValidForMs - transportMs;
+    const jointMs = snapshot.jointsValidForMs - transportMs;
     const poseFresh = snapshot.localizationFresh && snapshot.pose && poseMs > 0;
     const jointsFresh = jointMs > 0;
     const live = poseFresh && jointsFresh && snapshot.jointCount === snapshot.expectedJointCount;
@@ -95,7 +105,8 @@ export class RobotTwinClient {
       const remembered = !this.profile || rememberRobotTwinCredential(this.profile, password);
       this.publish({ address: result.address, credentialError: remembered ? '' : '浏览器未能记住此密码，下次连接时需要重新输入。' });
       this.accept(result.snapshot, performance.now() - started, generation);
-      this.timer = setTimeout(() => this.poll(generation), ROBOT_TWIN_INTERVAL);
+      this.pollFailures = 0;
+      this.timer = setTimeout(() => this.poll(generation), nextPollDelay(result.snapshot, performance.now() - started));
       void this.pollMonitor(generation);
       void this.cameraClient.load();
       return true;
@@ -116,18 +127,21 @@ export class RobotTwinClient {
       const snapshot = await this.api('/snapshot');
       if (generation !== this.generation) return;
       this.accept(snapshot, performance.now() - started, generation);
+      this.pollFailures = 0;
+      delay = nextPollDelay(snapshot, performance.now() - started);
     } catch (error) {
       if (generation !== this.generation) return;
-      clearTimeout(this.expiry);
-      this.publish({ phase: 'stale', error: error.message,
-        snapshot: this.state.snapshot ? { ...this.state.snapshot, localizationFresh: false, jointCount: 0 } : null });
+      // One failed read does not invalidate a still-fresh previous sample.
+      // Its existing deadline continues to mark genuine expiry while retrying.
+      this.publish({ error: error.message });
       if (error.status === 401) {
         this.cameraClient.reset();
         this.token = null; clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
         this.publish({ monitorPhase: 'stale', monitorError: error.message });
         return;
       }
-      delay = 1500;
+      this.pollFailures = (this.pollFailures || 0) + 1;
+      delay = Math.min(3000, ROBOT_TWIN_INTERVAL * 2 ** Math.min(this.pollFailures - 1, 3));
     }
     if (generation === this.generation) this.timer = setTimeout(() => this.poll(generation), delay);
   }

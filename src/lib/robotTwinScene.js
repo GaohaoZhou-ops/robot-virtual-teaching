@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { applyRobotJointValues, setRobotVisualBounds } from './robotLoader.js';
+import { createRobotMeasuredJointUpdater, setRobotVisualBounds } from './robotLoader.js';
 import { tintRobotTwinBody } from './robotTwinAppearance.js';
 import { applyRobotModelOpacity } from './robotDisplay.js';
 import { RobotTwinMotion } from './robotTwinMotion.js';
@@ -38,7 +38,7 @@ export class RobotTwinScene {
 
   clear() {
     for (const entry of this.entries.values()) this.remove(entry);
-    this.entries.clear(); this.motion.clear(); this.base = null; this.robots = null;
+    this.entries.clear(); this.motion.clear(); this.followId = ''; this.base = null; this.robots = null;
   }
 
   sync(base, baseLayer, robots, selectedId, visible) {
@@ -52,8 +52,6 @@ export class RobotTwinScene {
       if (!wanted.has(id) || entry.selected !== (id === selectedId)) { this.remove(entry); this.entries.delete(id); }
     }
     for (const robot of base ? robots : []) {
-      if (!this.motion.has(robot.id)) this.motion.set(robot.id, new RobotTwinMotion());
-      this.motion.get(robot.id).push(robot);
       const selected = robot.id === selectedId;
       let entry = this.entries.get(robot.id);
       if (!entry) {
@@ -74,11 +72,13 @@ export class RobotTwinScene {
         const label = document.createElement('button'); label.type = 'button';
         label.addEventListener('click', (event) => { event.stopPropagation(); this.onSelect(robot.id); });
         this.labels.append(label);
-        entry = { group, model, ring, label, selected, tint }; this.entries.set(robot.id, entry);
+        entry = { group, model, ring, label, selected, tint,
+          joints: createRobotMeasuredJointUpdater(model || base) }; this.entries.set(robot.id, entry);
       }
       entry.robot = robot; entry.group.visible = visible;
-      if (entry.model) {
+      if (entry.model && entry.opacity !== opacity) {
         applyRobotModelOpacity(entry.model, opacity);
+        entry.opacity = opacity;
       }
       entry.label.textContent = robot.name;
       entry.label.style.setProperty('--twin-color', robot.color);
@@ -89,22 +89,36 @@ export class RobotTwinScene {
     }
   }
 
-  update(now) {
+  update(now, followId = '') {
+    if (this.followId !== followId) {
+      this.motion.clear(); this.followId = followId;
+    }
     let selected = null;
     for (const [id, entry] of this.entries) {
-      const frame = this.motion.get(id).read(now) || entry.robot;
+      const following = id === followId;
+      const sample = entry.robot.motionSample || entry.robot;
+      if (!following && !entry.following && entry.sample === sample) {
+        if (entry.selected) selected = entry.presentation;
+        continue;
+      }
+      let frame = entry.robot;
+      if (following) {
+        if (!this.motion.has(id)) this.motion.set(id, new RobotTwinMotion());
+        const motion = this.motion.get(id);
+        motion.push(entry.robot); frame = motion.read(now) || frame;
+      }
+      entry.sample = sample; entry.following = following;
       const { position, rpy } = frame.pose;
       entry.rendered = frame;
       entry.group.position.set(position.x, position.y, position.z);
       entry.group.rotation.set(...[rpy.roll, rpy.pitch, rpy.yaw].map(THREE.MathUtils.degToRad), 'XYZ');
+      entry.joints.apply(frame.joints);
+      entry.presentation = { pose: frame.pose, joints: entry.joints };
       if (entry.selected) {
         this.baseLayer.position.copy(entry.group.position);
         this.baseLayer.quaternion.copy(entry.group.quaternion);
-        applyRobotJointValues(this.base, frame.joints, { measured: true });
-        this.baseLayer.updateMatrixWorld(true);
-        selected = frame;
-      } else applyRobotJointValues(entry.model, frame.joints, { measured: true });
-      entry.group.updateMatrixWorld(true);
+        selected = entry.presentation;
+      }
     }
     return selected;
   }
@@ -151,6 +165,7 @@ export class RobotTwinScene {
     }
     canvas.dataset.twinRobots = JSON.stringify(positions);
     canvas.dataset.selectedTwinRobot = this.selectedId || '';
+    canvas.dataset.smoothedTwinRobot = this.followId || '';
   }
 
   dispose() { this.clear(); this.labels.remove(); }

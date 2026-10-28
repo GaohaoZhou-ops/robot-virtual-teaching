@@ -5,6 +5,7 @@ import { TEACHING_DATA_FORMAT } from './teachingData.js';
 import { LINKED_WORKSPACE_MODES, validateLinkedWorkspaces } from './linkedProject.js';
 import { validateWorkspaceCollection } from './projectWorkspaceCollection.js';
 import { validatePlacedObjectLayers } from './placedObjectRendering.js';
+import { normalizeRobotTwinProfiles } from './robotTwinProfiles.js';
 
 export const PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-project';
 export const LINKED_PROJECT_ARCHIVE_FORMAT = 'atlas-route-studio-linked-project';
@@ -740,6 +741,7 @@ async function buildProjectEntries(payload, options = {}) {
   statistics.robotFileCount = Object.keys(entries).filter((path) => path.startsWith('robot/')).length;
   const project = {
     ...payload,
+    robotTwin: normalizeRobotTwinProfiles(payload.robotTwin) || undefined,
     schemaVersion: '1.3',
     archive: {
       format: PROJECT_ARCHIVE_FORMAT,
@@ -894,7 +896,8 @@ async function buildLinkedProjectEntries(payload, options) {
   for (const workspaceMode of LINKED_WORKSPACE_MODES) {
     const workspace = workspaces[workspaceMode];
     const prefix = `workspaces/${workspaceMode}/`;
-    const child = await buildProjectEntries(workspace.config.config.project, {
+    const child = await buildProjectEntries({ ...workspace.config.config.project,
+      ...(payload.robotTwin ? { robotTwin: payload.robotTwin } : {}) }, {
       mapResource: workspace.map,
       existingRobotPackage: workspace.map.portableRobotPackage,
       onProgress: (progress) => options.onProgress?.({ ...progress,
@@ -955,7 +958,8 @@ async function buildWorkspaceCollectionEntries(payload, options) {
     independentWorkspaceCount: collection.independentHistory.length + (collection.workspaces.independent ? 1 : 0) };
   const addWorkspace = async (snapshot, prefix, label) => {
     const project = snapshot.config.config.project;
-    const child = await buildProjectEntries(project, {
+    const child = await buildProjectEntries({ ...project,
+      ...(payload.robotTwin ? { robotTwin: payload.robotTwin } : {}) }, {
       mapResource: snapshot.map,
       existingRobotPackage: snapshot.map.portableRobotPackage?.relativePath === project.robot?.relativePath
         ? snapshot.map.portableRobotPackage : null,

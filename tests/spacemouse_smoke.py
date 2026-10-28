@@ -1050,11 +1050,10 @@ def run():
       panel.wait_for()
       assert "X 单轴通道已启用" in panel.inner_text()
       assert "仅该语义轴可输出" in panel.inner_text()
-      assert "左键循环 X / Y / Z" in panel.inner_text()
-      assert "右键循环 YAW / PITCH / ROLL" in panel.inner_text()
-      assert "双击同一实体键暂停" in panel.inner_text()
-      assert "只执行当前轴" in panel.inner_text()
-      assert "缩放始终由鼠标滚轮控制" in panel.inner_text()
+      # The compact controller shows these hints on the two mode buttons.
+      # Pause, axis isolation and wheel arbitration are exercised above.
+      assert "X → Y → Z 单轴循环" in panel.get_by_role("button", name="左键 · XYZ").inner_text()
+      assert "YAW → PITCH → ROLL 单轴循环" in panel.get_by_role("button", name="右键 · RPY").inner_text()
       page.wait_for_timeout(220)
       page.screenshot(path="/tmp/atlas-spacemouse-connected.png", full_page=True)
       page.get_by_role("button", name="重新标定").click()

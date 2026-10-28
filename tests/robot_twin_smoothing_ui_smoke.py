@@ -81,6 +81,9 @@ try:
             dialog.get_by_role('button', name='连接并同步', exact=True).click()
             expect(dialog).not_to_be_visible(timeout=10000)
             page.get_by_role('button', name='机器人后上方跟随视角', exact=True).click()
+            # Non-followed robots no longer carry an active presentation buffer.
+            # Let this newly enabled follower collect its first pair of samples.
+            page.wait_for_timeout(650)
             frames = page.evaluate('''() => new Promise(done => {
               const frames = [], start = performance.now();
               const read = () => {
@@ -93,13 +96,15 @@ try:
               }; requestAnimationFrame(read);
             })''')
             assert len(frames) > 50, len(frames)
+            (ARTIFACTS / 'motion.json').write_text(json.dumps({'frames': frames,
+                'readings': page.evaluate('window.twinReadings')}))
             moving = sum(b['x'] > a['x'] for a, b in zip(frames, frames[1:])) / (len(frames) - 1)
             assert moving > .95, moving
             offsets = [f['camera'] - f['x'] for f in frames]
             assert max(offsets) - min(offsets) < .001, 'camera and robot share the same presentation frame'
             assert all(abs(f['fleet'] - f['x']) < .00001 for f in frames)
             lag = [f['lag'] for f in frames if f['lag'] is not None]
-            assert 250 < statistics.median(lag) < 350, statistics.median(lag)
+            assert 550 < statistics.median(lag) < 630, statistics.median(lag)
             monitor = page.get_by_role('complementary', name='任务监控台', exact=True)
             camera = monitor.get_by_role('region', name='本体相机', exact=True)
             page.evaluate('window.delayTwinDecode=true')
