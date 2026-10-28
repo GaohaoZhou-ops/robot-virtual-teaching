@@ -177,6 +177,8 @@ try {
     'vision/AtlasVisionTeaching/VisionSurfaceRenderer.swift', 'vision/Tests/VisionSurfaceTests.swift',
     'vision/AtlasVisionTeaching/VisionSceneNavigation.swift', 'vision/AtlasVisionTeaching/VisionFloorPlacement.swift',
     'vision/AtlasVisionTeaching/VisionToolsPresentation.swift', 'vision/Tests/VisionToolsPresentationTests.swift',
+    'vision/AtlasVisionTeaching/VisionRecallControl.swift', 'vision/Tests/VisionRecallControlTests.swift',
+    'vision/AtlasVisionTeaching/VisionSceneMarkers.swift', 'vision/AtlasVisionTeaching/VisionParkingArrival.swift', 'vision/Tests/VisionParkingArrivalTests.swift',
     'vision/AtlasVisionTeaching/VisionObstacleProximity.swift', 'vision/Tests/VisionObstacleTests.swift',
     'vision/Tests/VisionFloorPlacementTests.swift', 'vision/Tests/VisionSceneTests.swift', '-o', binary]);
   await run(binary, [base, directory]);

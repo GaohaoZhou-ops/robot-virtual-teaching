@@ -260,7 +260,7 @@ struct VisionFloorSelection: Component { let id: UUID }
                 self.onPlacement?(self.placementTransform ?? transform)
                 self.scanning = false; self.surfacesRoot.isEnabled = false; self.onScanning?(false)
                 #if targetEnvironment(simulator)
-                self.message("模拟器地面对齐演练 · 地图原点位于脚下，比例 1:1")
+                self.message("")
                 #else
                 self.message("已对齐地面 · 地图原点位于脚下，比例 1:1")
                 #endif

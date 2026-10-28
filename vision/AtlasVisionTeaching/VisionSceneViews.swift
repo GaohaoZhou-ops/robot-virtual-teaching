@@ -21,12 +21,19 @@ struct VisionProjectImmersiveView: View {
                 #else
                 let wrist = AnchorEntity(.hand(.left, location: .wrist), trackingMode: .continuous)
                 button.position = SIMD3(0, 0.08, 0)
+                button.components.set(BillboardComponent())
                 #endif
                 button.scale = SIMD3(repeating: 0.7)
-                button.components.set(BillboardComponent())
+                // The simulator head anchor already faces the camera. Keep its
+                // hit plane stable instead of applying a second billboard turn.
+                VisionRecallControl.configure(button)
                 wrist.addChild(button); content.add(wrist)
             }
             await review.begin(in: content)
+        } update: { _, attachments in
+            if let button = attachments.entity(for: "recall-tools") {
+                VisionRecallControl.configure(button)
+            }
         } attachments: {
             Attachment(id: "recall-tools") {
                 VStack(spacing: 6) {
@@ -46,13 +53,18 @@ struct VisionProjectImmersiveView: View {
                 }.padding(8).glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 24))
             }
         }
-        .gesture(SpatialTapGesture().targetedToEntity(where: .has(VisionSceneSelection.self)).onEnded { value in
-            if let item = value.entity.components[VisionSceneSelection.self] {
+        // Use one nearest-hit gesture for spatial controls and map selection,
+        // while allowing the attachment's SwiftUI Button to handle its own tap.
+        .simultaneousGesture(SpatialTapGesture().targetedToEntity(where:
+            .has(VisionRecallTarget.self) || .has(VisionSceneSelection.self) || .has(VisionFloorSelection.self)
+        ).onEnded { value in
+            if value.entity.components.has(VisionRecallTarget.self) {
+                recallTools()
+            } else if let item = value.entity.components[VisionSceneSelection.self] {
                 review.select(item, point: value.convert(value.location3D, from: .local, to: review.content))
+            } else if let floor = value.entity.components[VisionFloorSelection.self] {
+                review.selectFloor(floor.id)
             }
-        })
-        .simultaneousGesture(SpatialTapGesture().targetedToEntity(where: .has(VisionFloorSelection.self)).onEnded { value in
-            if let floor = value.entity.components[VisionFloorSelection.self] { review.selectFloor(floor.id) }
         })
         .onChange(of: phase) { _, value in if value != .active && review.playing { review.togglePlayback() } }
         .task(id: workbench.toolsPresentation.pending?.replacement) {
@@ -186,7 +198,13 @@ struct VisionProjectToolsView: View {
                         .fixedSize().tint(.mint).accessibilityIdentifier("project-travel")
                 }.disabled(review.travelling)
             } else if review.travelling { ProgressView("正在前往…") }
-            else {
+            else if let marker = review.arrivedParkingPoint, !review.measuring {
+                Label("已到达停车点：\(marker.name)", systemImage: "checkmark.circle.fill")
+                    .font(.system(size: detailSize, weight: .semibold)).foregroundStyle(.green)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("project-parking-arrival")
+            }
+            else if review.measuring || !review.navigationMessage.isEmpty {
                 Text(review.measuring ? "点选两处几何，查看真实间距" : review.navigationMessage)
                     .font(.system(size: detailSize)).foregroundStyle(review.placingProject ? Color.green : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)

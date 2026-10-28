@@ -13,6 +13,8 @@ import simd
         navigation()
         VisionFloorPlacementTests.run()
         VisionToolsPresentationTests.run()
+        try await VisionRecallControlTests.run()
+        try await VisionParkingArrivalTests.run()
         VisionObstacleTests.run()
         let base = CommandLine.arguments[1], directory = URL(fileURLWithPath: CommandLine.arguments[2])
         let decoder = JSONDecoder(), data = try Data(contentsOf: directory.appendingPathComponent("scene.json"))

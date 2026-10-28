@@ -24,6 +24,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     @Published private(set) var travelling = false
     @Published var measuring = false
     @Published private(set) var navigationMessage = ""
+    @Published private(set) var arrivedParkingPoint: VisionSceneMarker?
     @Published private(set) var placingProject = false
     @Published private(set) var proximityPassthrough = true
     @Published private(set) var proximityMessage = ""
@@ -43,6 +44,10 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     private let landing = Entity(), environment = Entity(), lighting = Entity()
     private var floorGrid: Entity?
     private var parkingLabels: Entity?
+    private var parkingMarkers: [VisionSceneMarker] = []
+    private var parkingEntities: [String: ModelEntity] = [:]
+    private var parkingArrivalHalo: ModelEntity?
+    private var parkingArrivalPhase = 0.0
     private let mapGroup = CollisionGroup(rawValue: 1 << 4)
     private let robotGroup = CollisionGroup(rawValue: 1 << 5)
     private var travelTask: Task<Void, Never>?
@@ -81,6 +86,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
 
     init() {
         VisionSceneSelection.registerComponent()
+        VisionRecallTarget.registerComponent()
         root.addChild(stage); stage.addChild(axes); axes.addChild(content)
         axes.transform = Transform(matrix: TeachingCoordinates.zUpToAR)
         axes.addChild(lighting)
@@ -90,6 +96,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
             guard let self else { return }
             self.placingProject = scanning
             if scanning {
+                self.setParkingArrival(nil)
                 self.resetObstacleFade()
                 self.lifeSize = false
                 self.positioned = false; self.stage.isEnabled = false; self.environment.isEnabled = false
@@ -109,6 +116,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         self.immersiveProject = immersiveProject; lifeSize = false; measuring = false; entryPoint = nil
         placingProject = immersiveProject; stage.isEnabled = !immersiveProject; environment.isEnabled = !immersiveProject
         referenceFloorBounds = nil; floorGrid = nil; floorGridSpacing = 1; parkingLabels = nil
+        parkingMarkers = []; parkingEntities.removeAll(); parkingArrivalHalo = nil
         root.components.set(OpacityComponent(opacity: 1)); environment.children.forEach { $0.removeFromParent() }
         busy = true; error = ""; defer { busy = false }
         try scene.validate(); manifest = scene; clipIndex = nil; time = 0; progress = 0
@@ -136,17 +144,23 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
             let markerRadius = max(0.025, simd_length(extent) / 600)
             let markerMesh = MeshResource.generateSphere(radius: markerRadius)
             for marker in scene.markers {
-                let entity = ModelEntity(mesh: markerMesh, materials: [UnlitMaterial(color: marker.kind == "camera" ? .systemYellow : .systemMint)])
+                let entity = ModelEntity(mesh: markerMesh, materials: [VisionSceneMarkers.material(for: marker)])
                 entity.position = SIMD3(marker.position); entity.name = marker.name
                 entity.components.set(VisionSceneSelection(nodeID: marker.id, name: marker.name, taskID: marker.taskId, role: "marker"))
                 entity.generateCollisionShapes(recursive: false); entity.components.set(InputTargetComponent()); entity.components.set(HoverEffectComponent())
                 if #available(visionOS 26.0, *) { entity.components.set(ManipulationComponent.HitTarget(redirectedEntity: stage)) }
                 content.addChild(entity)
+                if marker.kind == "parking" { parkingMarkers.append(marker); parkingEntities[marker.id] = entity }
             }
             let labels = try await VisionParkingLabels.make(scene.markers, markerRadius: markerRadius)
             guard token == generation, !Task.isCancelled else { throw CancellationError() }
             parkingLabels = labels; labels.isEnabled = parkingLabelsVisible; content.addChild(labels)
             if immersiveProject {
+                if !parkingMarkers.isEmpty {
+                    let halo = try await VisionParkingArrival.makeIndicator(markerRadius: markerRadius)
+                    guard token == generation, !Task.isCancelled else { throw CancellationError() }
+                    parkingArrivalHalo = halo; content.addChild(halo)
+                }
                 addEnvironment(scene)
                 let ground = groundHeight(scene)
                 let grid = try await VisionFloorGrid.make(low: SIMD3(scene.bounds.min), high: SIMD3(scene.bounds.max), ground: ground)
@@ -223,6 +237,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         detailTask?.cancel(); detailTask = nil
         subscriptions.forEach { $0.cancel() }; subscriptions.removeAll()
         groundTracking.stop(); placingProject = false
+        setParkingArrival(nil)
         resetObstacleFade()
     }
     func immersionChanged(_ amount: Double?) { passthroughVisible = amount.map { $0 < 0.01 } ?? false }
@@ -257,6 +272,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     func overview() {
         guard let scene = manifest else { return }
+        setParkingArrival(nil)
         groundTracking.cancelPlacement(); stage.isEnabled = true
         travelTask?.cancel(); travelling = false; root.components.set(OpacityComponent(opacity: 1)); clearDestination()
         let low = SIMD3(scene.bounds.min), high = SIMD3(scene.bounds.max), size = high - low
@@ -386,6 +402,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         guard hasClearance(at: ground) else { clearDestination(); navigationMessage = "落点已被占据，请重新选择"; return }
         let oldLifeSize = lifeSize, token = generation
         travelling = true; playing = false
+        setParkingArrival(nil)
         travelTask = Task {
             do {
                 for step in 1...4 { root.components.set(OpacityComponent(opacity: 1-Float(step)/4)); try await Task.sleep(for: .milliseconds(20)) }
@@ -481,6 +498,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         guard immersed else { return }
         groundTracking.update(delta: delta)
         updateObstacleFade(delta: delta)
+        updateParkingArrival(delta: delta)
         if let head = device() {
             let direction = simd_normalize((head * SIMD4(VisionSurfaceRenderer.mapViewLight, 0)).xyz)
             if mapLightDirection.map({ simd_dot($0, direction) < 0.99999 }) ?? true {
@@ -498,6 +516,29 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         }
         if lifeSize, CACurrentMediaTime() - lastDetail > 1, let device = device() {
             lastDetail = CACurrentMediaTime(); refreshDetail(at: content.convert(position: device.translation, from: nil))
+        }
+    }
+    private func updateParkingArrival(delta: Double) {
+        let marker = VisionParkingArrival.nearest(in: parkingMarkers, head: device()?.translation,
+            worldFromProject: content.transformMatrix(relativeTo: nil),
+            enabled: immersiveProject && lifeSize && !placingProject && !travelling && !busy)
+        setParkingArrival(marker)
+        if marker != nil {
+            parkingArrivalPhase += min(max(delta, 0), 0.1)
+            let opacity = Float(0.8 + 0.2 * sin(parkingArrivalPhase * 2 * .pi / 1.4))
+            parkingArrivalHalo?.components.set(OpacityComponent(opacity: opacity))
+        }
+    }
+    private func setParkingArrival(_ marker: VisionSceneMarker?) {
+        guard arrivedParkingPoint?.id != marker?.id else { return }
+        if let previous = arrivedParkingPoint {
+            parkingEntities[previous.id]?.model?.materials = [VisionSceneMarkers.material(for: previous)]
+        }
+        arrivedParkingPoint = marker; parkingArrivalPhase = 0
+        parkingArrivalHalo?.isEnabled = marker != nil
+        if let marker {
+            parkingEntities[marker.id]?.model?.materials = [VisionSceneMarkers.material(for: marker, arrived: true)]
+            parkingArrivalHalo?.position = SIMD3(marker.position) + SIMD3(0, 0, 0.012)
         }
     }
     private func updateObstacleFade(delta: Double) {

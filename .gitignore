@@ -172,10 +172,11 @@ test-results/
 /tests/test-videos/
 /tests/test-traces/
 # Native simulator launchers write build.log and DerivedData under simulator-dev/.
-# Mixed-map, virtual Zivid camera, robot-surface and route/floor render checks
-# stay under vision/test-artifacts/{mixed-map,dual-cameras,robot-surface,route-review}/.
-# Point VISION_ROUTE_ARTIFACTS at this ignored root; keep the reusable Swift
-# render checks in vision/Tests/ and application renderers in AtlasVisionTeaching/.
+# Mixed-map, virtual Zivid camera, robot-surface, route/floor and parking-arrival
+# render checks stay under vision/test-artifacts/ in per-feature directories.
+# Point VISION_ROUTE_ARTIFACTS and VISION_PARKING_ARTIFACTS at this ignored root
+# or .atlas-cache/; keep reusable Swift checks in vision/Tests/ and application
+# renderers in AtlasVisionTeaching/.
 /ipad/test-artifacts/
 /iphone/test-artifacts/
 /vision/test-artifacts/
@@ -1313,6 +1314,9 @@ env/
 # vision-reset/ and vision-route-fix/ contain full simulator app/data backups,
 # imported project ZIPs and coordinate verification reports. vision-label-review/
 # contains temporary Swift runners, binaries, captures and installation reports.
+# vision-marker-color-review/, vision-recall-review/ and
+# vision-parking-arrival-review/ also hold render captures, compiled input probes,
+# copied scene manifests, and before/after installation reports.
 # All live under .atlas-cache/; none are maintained source or test fixtures.
 .atlas-cache/
 # Packed caches retain the same models, pairing state and simulator backups.
