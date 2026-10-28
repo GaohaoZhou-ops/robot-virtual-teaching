@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch Atlas in the shared visionOS simulator instance."""
+"""Control Atlas and its shared visionOS simulator instance."""
 
 from apple_simulator import VISION, main
 

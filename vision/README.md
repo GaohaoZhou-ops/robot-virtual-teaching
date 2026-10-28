@@ -27,9 +27,9 @@
 需要完整 Xcode、visionOS Simulator 运行时及 Python 3。从仓库根目录执行：
 
 ```bash
-./scripts/start_vision_simulator.command
+./scripts/run-vision-simulator.sh start
 # 修改代码后重新编译、安装并重启
-./scripts/start_vision_simulator.command --rebuild
+./scripts/run-vision-simulator.sh start --rebuild
 ```
 
 最低 visionOS 2.0；系统双手操控使用 visionOS 26。设备选择、模拟器演练和真机签名见 [开发文档](docs/development.md)。模拟器用于界面与流程验证，实际空间感知、手势和佩戴体验需在真机验证。

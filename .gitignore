@@ -916,17 +916,28 @@ playwright/.auth/
 /atlas-vision-??????/
 /vision/atlas-vision-??????/
 /tests/atlas-vision-??????/
-# Launcher regressions copy scripts and mock Apple tools into temporary projects.
+# Launcher/control regressions copy scripts and mock Apple tools into temporary
+# projects, alongside device/process state, command logs and concurrency gates.
 # Distinct prefixes keep similarly named source directories visible when TMPDIR
-# points to the repository root, tests/, ipad/ or vision/.
+# points to the repository root, tests/, iphone/, ipad/ or vision/.
+# iPhone launcher output at root, tests/ and iphone/ is covered above.
 /atlas-ipad-launcher-test-??????/
 /tests/atlas-ipad-launcher-test-??????/
+/iphone/atlas-ipad-launcher-test-??????/
 /ipad/atlas-ipad-launcher-test-??????/
 /vision/atlas-ipad-launcher-test-??????/
+/ipad/atlas-iphone-launcher-test-??????/
+/vision/atlas-iphone-launcher-test-??????/
 /atlas-vision-launcher-test-??????/
 /tests/atlas-vision-launcher-test-??????/
+/iphone/atlas-vision-launcher-test-??????/
 /ipad/atlas-vision-launcher-test-??????/
 /vision/atlas-vision-launcher-test-??????/
+/atlas-simulator-control-test-??????/
+/tests/atlas-simulator-control-test-??????/
+/iphone/atlas-simulator-control-test-??????/
+/ipad/atlas-simulator-control-test-??????/
+/vision/atlas-simulator-control-test-??????/
 
 # Project import/export and server-result smoke-test workspaces.
 /atlas-load-modes-*/

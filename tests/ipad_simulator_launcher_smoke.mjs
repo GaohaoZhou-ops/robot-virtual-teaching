@@ -14,7 +14,7 @@ const bin = path.join(temporary, 'bin');
 const calls = path.join(temporary, 'calls.jsonl');
 const devicesFile = path.join(temporary, 'devices.json');
 const source = fileURLToPath(new URL('../scripts/', import.meta.url));
-const entries = [`start_${family}_simulator.command`, `run-${family}-simulator.sh`];
+const entry = `run-${family}-simulator.sh`;
 const env = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
   ATLAS_IPAD_TEST_CALLS: calls, ATLAS_IPAD_TEST_DEVICES: devicesFile,
   IPAD_SIMULATOR_ID: 'UNRELATED-IPAD', IPHONE_SIMULATOR_ID: 'UNRELATED-PHONE',
@@ -37,7 +37,7 @@ const writeDevices = () => writeFile(devicesFile, JSON.stringify(inventory));
 const readCalls = async () => (await readFile(calls, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
 const resetCalls = () => writeFile(calls, '');
 const has = (records, command, action) => records.some(item => item.command === command && (!action || item.args.includes(action)));
-const invoke = (args = [], extra = {}, entry = entries[0]) => spawnSync('bash', [path.join(repo, 'scripts', entry), ...args],
+const invoke = (args = [], extra = {}) => spawnSync('bash', [path.join(repo, 'scripts', entry), ...args],
   { cwd: temporary, env: { ...env, ...extra }, encoding: 'utf8' });
 let concurrent;
 let firstExit;
@@ -45,7 +45,7 @@ try {
   await mkdir(bin, { recursive: true });
   // Do not inherit the repository's ESM setting when TMPDIR is inside it.
   await writeFile(path.join(bin, 'package.json'), '{"type":"commonjs"}\n');
-  for (const file of [...entries, `lib/${family}_simulator.py`, 'lib/apple_simulator.py']) {
+  for (const file of [entry, `lib/${family}_simulator.py`, 'lib/apple_simulator.py']) {
     const destination = path.join(repo, 'scripts', file);
     await mkdir(path.dirname(destination), { recursive: true });
     await copyFile(path.join(source, file), destination); await chmod(destination, 0o755);
@@ -75,11 +75,9 @@ if(command==='xcodebuild') {
     await writeFile(path.join(bin, tool), fakeTool); await chmod(path.join(bin, tool), 0o755);
   }
   await writeDevices(); await resetCalls();
-  for (const entry of entries) {
-    const help = invoke(['--help'], {}, entry);
-    assert.equal(help.status, 0, help.stderr); assert.ok(help.stdout.includes(deviceVariable));
-    assert.equal(invoke(['--unknown'], {}, entry).status, 2);
-  }
+  const help = invoke(['--help']);
+  assert.equal(help.status, 0, help.stderr); assert.ok(help.stdout.includes(deviceVariable));
+  assert.equal(invoke(['--unknown']).status, 2);
   assert.equal((await readCalls()).length, 0);
 
   let result = invoke(); assert.equal(result.status, 0, result.stderr);
@@ -98,8 +96,8 @@ if(command==='xcodebuild') {
   const installed = { ATLAS_IPAD_TEST_INSTALLED: '1' };
   // A running older Pro wins over a newer runtime, regardless of renamed devices.
   old.state = 'Booted'; await writeDevices();
-  for (const entry of entries) {
-    await resetCalls(); result = invoke([], installed, entry); assert.equal(result.status, 0, result.stderr);
+  for (const args of [[], ['start']]) {
+    await resetCalls(); result = invoke(args, installed); assert.equal(result.status, 0, result.stderr);
     records = await readCalls();
     assert.ok(!has(records, 'xcodebuild') && !has(records, 'xcrun', 'install') && !has(records, 'xcrun', 'bootstatus'));
     assert.ok(records.some(item => item.args.join(' ') === 'simctl launch OLD-PRO com.atlasroute.teaching'));
@@ -122,7 +120,7 @@ if(command==='xcodebuild') {
 
   await resetCalls();
   const gate = path.join(temporary, 'release-build');
-  concurrent = spawn('bash', [path.join(repo, 'scripts', entries[0]), '--rebuild'], {
+  concurrent = spawn('bash', [path.join(repo, 'scripts', entry), '--rebuild'], {
     cwd: temporary, env: { ...env, ...installed, ATLAS_IPAD_TEST_GATE: gate }, stdio: 'ignore',
   });
   firstExit = new Promise(resolve => concurrent.once('exit', resolve));
@@ -132,7 +130,7 @@ if(command==='xcodebuild') {
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   const countBefore = (await readCalls()).length;
-  result = invoke([], installed, entries[1]);
+  result = invoke([], installed);
   assert.equal(result.status, 0); assert.match(result.stdout, /不会重复启动/);
   assert.equal((await readCalls()).length, countBefore, 'concurrent launch must not call Apple tools');
   await writeFile(gate, 'release'); assert.equal(await firstExit, 0); concurrent = null;

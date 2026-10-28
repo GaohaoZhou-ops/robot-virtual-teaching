@@ -33,7 +33,7 @@ Vision Pro 启动后可 **选择设备同步** 电脑当前工程，也可 **载
 
 工程入口、能力边界、构建验证与真机联调见 [Vision Pro 开发文档](../vision/README.md)。历史单模型相机示教保留在首页的兼容入口。
 
-Mac 上可双击 [`scripts/start_vision_simulator.command`](../scripts/start_vision_simulator.command) 启动模拟器，修改后执行 `./scripts/start_vision_simulator.command --rebuild`。Xcode 构建时自动打包工作台页面和 Worker，需要先安装项目的 Node 依赖。
+Mac 上执行 `./scripts/run-vision-simulator.sh start` 启动模拟器，修改后执行 `./scripts/run-vision-simulator.sh start --rebuild`；用 `stop` 停止、`status` 查询状态。Xcode 构建时自动打包工作台页面和 Worker，需要先安装项目的 Node 依赖。
 
 ---
 

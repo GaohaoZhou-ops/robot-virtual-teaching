@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Launch Atlas in the shared iPad Pro simulator instance."""
+"""Control Atlas and its shared iPad Pro simulator instance."""
 
 from apple_simulator import IPAD, main
 

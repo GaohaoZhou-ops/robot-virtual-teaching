@@ -8,21 +8,30 @@
 
 ## 在 Mac 上用模拟器调试
 
-日常 UI 和功能迭代先在 Mac 的 visionOS 模拟器中完成，之后再集中进行真机验证。在 Finder 中双击 [`scripts/start_vision_simulator.command`](../../scripts/start_vision_simulator.command)，即可自动打开终端并启动模拟器与「Atlas 空间示教」。也可在仓库根目录执行：
+日常 UI 和功能迭代先在 Mac 的 visionOS 模拟器中完成，之后再集中进行真机验证。在仓库根目录执行以下命令，启动模拟器与「Atlas 空间示教」：
 
 ```bash
-./scripts/start_vision_simulator.command
+./scripts/run-vision-simulator.sh start
 ```
 
-脚本优先复用已启动的 visionOS 设备；没有运行中的设备时，选择已安装的最高版本。已安装应用时直接打开，正在运行的应用会保留进程和当前状态；首次未安装应用时才自动编译安装。同一 Mac 用户的两个启动入口及不同仓库副本共用进程锁，同时点击不会重复启动或编译，启动失败或退出后锁会自动释放。
+脚本优先复用已启动的 visionOS 设备；没有运行中的设备时，选择已安装的最高版本。已安装应用时直接打开，正在运行的应用会保留进程和当前状态；首次未安装应用时才自动编译安装。同一 Mac 用户在不同终端及仓库副本中运行脚本时共用进程锁，并发调用不会重复启动或编译，启动失败或退出后锁会自动释放。
 
 **修改代码后，使用 `--rebuild` 重新编译、安装并重启应用：**
 
 ```bash
-./scripts/start_vision_simulator.command --rebuild
+./scripts/run-vision-simulator.sh start --rebuild
 ```
 
-原来的 `./scripts/run-vision-simulator.sh` 使用相同的单例逻辑，也支持 `--rebuild`。两个入口均可从任意工作目录启动，支持 `VISION_SIMULATOR_ID=<UDID>` 指定设备、`VISION_ARTIFACTS=<目录>` 指定编译产物和日志位置（相对路径以仓库根目录为基准，默认 `vision/test-artifacts/simulator-dev/`）。切换设备前需先在 Simulator 中关闭当前 visionOS 设备；如果已经有多个 visionOS 设备运行，脚本会提示关闭多余设备后重试。需要安装完整 Xcode、visionOS Simulator 运行时及 Python 3。
+终端入口 `./scripts/run-vision-simulator.sh` 支持 `start`、`stop`、`status`，无参数默认为 `start`：
+
+```bash
+./scripts/run-vision-simulator.sh start          # 启动模拟器与应用
+./scripts/run-vision-simulator.sh status         # 查询设备与应用进程状态
+./scripts/run-vision-simulator.sh stop           # 关闭选中的模拟器及应用，保留数据
+./scripts/run-vision-simulator.sh start --rebuild # 更新代码后重新编译
+```
+
+脚本可从任意工作目录调用，支持 `VISION_SIMULATOR_ID=<UDID>` 指定设备、`VISION_ARTIFACTS=<目录>` 指定编译产物和日志位置（相对路径以仓库根目录为基准，默认 `vision/test-artifacts/simulator-dev/`）。切换设备前先停止当前 visionOS 设备；如果已有多个 visionOS 设备运行，`stop` / `status` 可用上述环境变量指定要操作的设备，`start` 仍要求先关闭多余设备。需要安装完整 Xcode、visionOS Simulator 运行时及 Python 3。状态返回码与并发规则见[模拟器控制说明](../../docs/development.md#模拟器启动停止与状态)。
 
 本机调试时，若电脑服务已启动但模拟器收不到 Node 的服务广播，可在 Mac 终端执行 `dns-sd -R "Atlas Simulator Discovery" _atlas-teach._tcp local. 21990`，通过系统 Bonjour 发布现有服务；端口需与电脑服务一致。保持该命令运行，结束调试后按 `Ctrl+C` 撤销广播。应用仍会验证实际 HTTP 服务，再自动填入解析到的 IPv4 和端口。
 

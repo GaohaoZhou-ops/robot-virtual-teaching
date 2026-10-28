@@ -12,8 +12,8 @@ const calls = path.join(temporary, 'calls.jsonl');
 const source = fileURLToPath(new URL('../scripts/', import.meta.url));
 const environment = { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`,
   ATLAS_VISION_TEST_CALLS: calls, VISION_SIMULATOR_ID: '', VISION_ARTIFACTS: 'artifacts with spaces', DEVELOPER_DIR: '' };
-const entries = ['start_vision_simulator.command', 'run-vision-simulator.sh'];
-function invoke(args = [], extra = {}, entry = entries[0]) {
+const entry = 'run-vision-simulator.sh';
+function invoke(args = [], extra = {}) {
   return spawnSync('bash', [path.join(repo, 'scripts', entry), ...args], {
     cwd: temporary, env: { ...environment, ...extra }, encoding: 'utf8',
   });
@@ -26,7 +26,7 @@ try {
   await mkdir(bin, { recursive: true });
   // Do not inherit the repository's ESM setting when TMPDIR is inside it.
   await writeFile(path.join(bin, 'package.json'), '{"type":"commonjs"}\n');
-  for (const file of [...entries, 'lib/vision_simulator.py', 'lib/apple_simulator.py']) {
+  for (const file of [entry, 'lib/vision_simulator.py', 'lib/apple_simulator.py']) {
     const destination = path.join(repo, 'scripts', file);
     await mkdir(path.dirname(destination), { recursive: true });
     await copyFile(path.join(source, file), destination);
@@ -70,10 +70,8 @@ if(command==='xcodebuild') {
     await writeFile(path.join(bin, tool), fakeTool); await chmod(path.join(bin, tool), 0o755);
   }
   await resetCalls();
-  for (const entry of entries) {
-    assert.equal(invoke(['--help'], {}, entry).status, 0);
-    assert.equal(invoke(['--unknown'], {}, entry).status, 2);
-  }
+  assert.equal(invoke(['--help']).status, 0);
+  assert.equal(invoke(['--unknown']).status, 2);
   assert.equal((await readCalls()).length, 0);
 
   let result = invoke(); assert.equal(result.status, 0, result.stderr);
@@ -87,9 +85,9 @@ if(command==='xcodebuild') {
   assert.ok(!records.find(item => item.command === 'open').args.includes('-n'));
 
   const running = { ATLAS_VISION_TEST_MODE: 'older', ATLAS_VISION_TEST_INSTALLED: '1' };
-  for (const entry of entries) {
+  for (const args of [[], ['start']]) {
     await resetCalls();
-    result = invoke([], running, entry); assert.equal(result.status, 0, result.stderr);
+    result = invoke(args, running); assert.equal(result.status, 0, result.stderr);
     records = await readCalls();
     assert.ok(!hasCommand(records, 'xcodebuild') && !hasCommand(records, 'xcrun', 'install'));
     assert.ok(!hasCommand(records, 'xcrun', 'bootstatus'));
@@ -104,7 +102,7 @@ if(command==='xcodebuild') {
     assert.equal((await readCalls()).length, 1, 'invalid selection must not boot, compile or open anything');
   }
 
-  await resetCalls(); result = invoke(['--rebuild'], running); assert.equal(result.status, 0, result.stderr);
+  await resetCalls(); result = invoke(['start', '--rebuild'], running); assert.equal(result.status, 0, result.stderr);
   records = await readCalls();
   assert.ok(hasCommand(records, 'xcodebuild') && hasCommand(records, 'xcrun', 'install'));
   assert.ok(records.find(item => item.command === 'xcrun' && item.args[1] === 'launch').args.includes('--terminate-running-process'));
@@ -119,7 +117,7 @@ if(command==='xcodebuild') {
 
   await resetCalls();
   const gate = path.join(temporary, 'release-build');
-  concurrent = spawn('bash', [path.join(repo, 'scripts', entries[0]), '--rebuild'], {
+  concurrent = spawn('bash', [path.join(repo, 'scripts', entry), '--rebuild'], {
     cwd: temporary, env: { ...environment, ATLAS_VISION_TEST_GATE: gate }, stdio: 'ignore',
   });
   const firstExit = new Promise(resolve => concurrent.once('exit', resolve));
@@ -129,7 +127,7 @@ if(command==='xcodebuild') {
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   const countBefore = (await readCalls()).length;
-  result = invoke([], {}, entries[1]);
+  result = invoke();
   assert.equal(result.status, 0); assert.match(result.stdout, /不会重复启动/);
   assert.equal((await readCalls()).length, countBefore, 'the competing launcher must not invoke Apple tools');
   await writeFile(gate, 'release');

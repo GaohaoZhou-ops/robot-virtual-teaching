@@ -63,6 +63,7 @@
 | 机器人任务与完整路网导出 | `npm run test:abx-bundle` |
 | 清理与数据保护 | `node tests/clean_build_smoke.mjs` |
 | 构建脚本参数与失败处理 | `node tests/build_scripts_smoke.mjs` |
+| iPhone / iPad / Vision Pro 模拟器 start、stop、status、设备隔离与并发控制（模拟 Apple 工具） | `node tests/apple_simulator_control_smoke.mjs` |
 | iPad 部署脚本的设备选择、签名校验与失败保护（模拟 Apple 工具，不安装真机） | `python3 tests/ipad_deploy_script_smoke.py` |
 
 <details>
