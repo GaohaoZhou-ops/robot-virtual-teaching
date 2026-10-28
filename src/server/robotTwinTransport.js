@@ -5,10 +5,10 @@ const quote = (value) => `"${String(value).replaceAll('\\', '\\\\').replaceAll('
 // Some macOS installations cannot open LAN sockets from the Homebrew Node
 // process (EHOSTUNREACH), while the system HTTP client can. Keep credentials on
 // stdin, never in shell text, process arguments, temporary files or logs.
-export function systemRobotFetch(url, { method, headers, body, signal }) {
+export function systemRobotFetch(url, { method, headers, body, signal, timeoutMs = 3000, maxBytes = 1024 * 1024 }) {
   return new Promise((resolve, reject) => {
     const config = ['silent', 'show-error', 'include', 'noproxy = "*"', 'proto = "=http,https"',
-      'connect-timeout = 2', 'max-time = 3', `url = ${quote(url)}`, `request = ${quote(method)}`,
+      'connect-timeout = 2', `max-time = ${timeoutMs / 1000}`, `url = ${quote(url)}`, `request = ${quote(method)}`,
       ...Object.entries(headers).map(([key, value]) => `header = ${quote(`${key}: ${value}`)}`),
       ...(body ? [`data = ${quote(String(body))}`] : [])].join('\n');
     const child = spawn('/usr/bin/curl', ['--disable', '--config', '-'], { stdio: ['pipe', 'pipe', 'pipe'], signal });
@@ -18,7 +18,7 @@ export function systemRobotFetch(url, { method, headers, body, signal }) {
     child.stderr.resume();
     child.stdout.on('data', (chunk) => {
       size += chunk.length;
-      if (size > 1024 * 1024 + 16384) { child.kill(); reject(new Error('robot response too large')); }
+      if (size > maxBytes + 16384) { child.kill(); reject(new Error('robot response too large')); }
       else chunks.push(chunk);
     });
     child.on('close', (code) => {

@@ -1,0 +1,5 @@
+.robot-twin-follow-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; border: 1px solid #3e6858; border-radius: 4px; background: #132c23; color: #b1dec9; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.robot-twin-follow-toggle:hover:not(:disabled) { border-color: #79d8b0; background: #1b3d2f; }
+.robot-twin-follow-toggle[aria-pressed=true] { border-color: #79d8b0; background: #23523d; color: #d8f5e5; }
+.robot-twin-follow-toggle:focus-visible { outline: 2px solid #79d8b0; outline-offset: 2px; }
+.robot-twin-follow-toggle:disabled { opacity: .4; cursor: default; }

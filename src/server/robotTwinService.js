@@ -2,10 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL, robotTwinSnapshot } from '../lib/robotTwin.js';
 import { robotFetch } from './robotTwinTransport.js';
-import { createRobotTaskMonitor, isRobotMonitorRead } from './robotTwinMonitor.js';
+import { createRobotCaptureHistory, createRobotTaskMonitor, isRobotMonitorRead } from './robotTwinMonitor.js';
 import { createRobotCamera } from './robotTwinCameraService.js';
+import { streamRobotCapture } from './robotTwinCaptureService.js';
 
-const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
+const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const reply = (res, status, data) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(data));
@@ -46,7 +47,7 @@ async function body(req) {
 // has a separate restricted preview/frame adapter, never a generic proxy or a
 // control-ownership, motion, enable, stop or task command.
 const allowedReads = new Set(['/api/v1/control-session', '/api/v1/model', '/api/v1/slam', '/api/v1/state']);
-async function readRobot(session, path, login) {
+async function readRobot(session, path, login, signal) {
   if (login ? path !== '/api/v1/access/login' : !allowedReads.has(path) && !isRobotMonitorRead(path)) fail(403, '真机孪生只允许读取状态');
   const headers = { Accept: 'application/json', 'X-ABX-Web-Client': 'robot-dashboard' };
   if (session.cookie) headers.Cookie = session.cookie;
@@ -56,20 +57,22 @@ async function readRobot(session, path, login) {
   try {
     response = await robotFetch(session, path, { method: login ? 'POST' : 'GET', headers,
       ...(login ? { body: new URLSearchParams({ role: 'admin', password: login.password }) } : {}),
-      redirect: 'error', signal: AbortSignal.any([session.controller.signal, AbortSignal.timeout(3000)]) });
+      redirect: 'error', signal: AbortSignal.any([session.controller.signal, AbortSignal.timeout(3000), ...(signal ? [signal] : [])]) });
     const chunks = []; let size = 0;
     for await (const chunk of response.body) {
       size += chunk.length;
       if (size > 1024 * 1024) fail(502, '机器人响应过大');
       chunks.push(chunk);
     }
+    // Authentication failures may have an HTML or empty response body.
+    if (response.status === 401 || response.status === 403) fail(401,
+      '机器人鉴权失败，请重新输入管理员密码', 'ROBOT_AUTH_FAILED');
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (!response.ok) fail(response.status === 401 || response.status === 403 ? 401 : 502,
-      response.status === 401 || response.status === 403 ? '机器人鉴权失败，请检查管理员密码并重新连接'
-        : `机器人状态接口返回 HTTP ${response.status}`);
+    if (!response.ok) fail(502, `机器人状态接口返回 HTTP ${response.status}`);
     if (login) session.cookie = response.headers.get('set-cookie')?.split(';')[0] || '';
     return payload;
   } catch (error) {
+    signal?.throwIfAborted();
     if (error.status) throw error;
     fail(502, error.name === 'TimeoutError' ? '机器人响应超时，正在等待恢复'
       : response ? '机器人返回了无效的状态数据' : '无法连接机器人，请检查地址、端口和局域网连接');
@@ -133,7 +136,7 @@ export function createRobotTwinService() {
           try { await readRobot(session, '/api/v1/slam'); }
           catch (error) {
             if (error.status !== 401) throw error;
-            if (typeof data.password !== 'string' || !data.password) fail(401, '请输入机器人管理员密码');
+            if (typeof data.password !== 'string' || !data.password) fail(401, '请输入机器人管理员密码', 'ROBOT_AUTH_REQUIRED');
             await readRobot(session, '/api/v1/access/login', { password: data.password });
             // This GET only returns the Web session credential; it does not
             // acquire control ownership. The credential stays on this server.
@@ -144,6 +147,7 @@ export function createRobotTwinService() {
           session.model = await readRobot(session, '/api/v1/model');
           const initial = await snapshot(session);
           session.monitor = createRobotTaskMonitor((path) => readRobot(session, path));
+          session.captureHistory = createRobotCaptureHistory((path, signal) => readRobot(session, path, undefined, signal));
           session.camera = createRobotCamera(session);
           const token = randomBytes(32).toString('hex');
           session.lastSeen = Date.now(); sessions.set(token, session);
@@ -151,7 +155,9 @@ export function createRobotTwinService() {
         } finally { pending -= 1; }
         return;
       }
-      if (!['/snapshot', '/monitor', '/session', '/cameras', '/camera', '/camera/frame'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
+      const capture = new RegExp(`^${ROBOT_TWIN_PREFIX}/captures/([a-f0-9]{32})/(left|right)/(png|xyzbin)$`).exec(pathname);
+      const history = new RegExp(`^${ROBOT_TWIN_PREFIX}/capture-history/([a-f0-9]{32})/([0-9]{1,8})$`).exec(pathname);
+      if (!capture && !history && !['/snapshot', '/monitor', '/session', '/cameras', '/camera', '/camera/frame'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
       const token = /^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
       const session = sessions.get(token);
       if (!session || Date.now() - session.lastSeen > 60_000) {
@@ -162,6 +168,19 @@ export function createRobotTwinService() {
         sessions.delete(token); await dispose(session); reply(res, 200, { ok: true }); return;
       }
       session.lastSeen = Date.now();
+      if (history) {
+        if (req.method !== 'GET') fail(405, '算法结果列表仅支持读取');
+        const controller = new AbortController();
+        const abort = () => { if (!res.writableEnded) controller.abort(); };
+        res.once('close', abort);
+        try { reply(res, 200, await session.captureHistory(history[1], Number(history[2]), AbortSignal.any([controller.signal, session.controller.signal]))); }
+        finally { res.off('close', abort); }
+        return;
+      }
+      if (capture) {
+        if (req.method !== 'GET') fail(405, '采集结果仅支持读取已保存文件');
+        await streamRobotCapture(session, res, { id: capture[1], side: capture[2], kind: capture[3] }); return;
+      }
       if (pathname === `${ROBOT_TWIN_PREFIX}/camera`) {
         if (req.method !== 'PUT') fail(405, '相机预览仅支持切换订阅');
         const data = await body(req);
@@ -193,7 +212,7 @@ export function createRobotTwinService() {
         throw error;
       }
     } catch (error) {
-      if (!res.headersSent) reply(res, error.status || 500, { error: error.message || '真机状态读取失败' });
+      if (!res.headersSent) reply(res, error.status || 500, { error: error.message || '真机状态读取失败', ...(error.code ? { code: error.code } : {}) });
     }
   };
   middleware.close = () => {

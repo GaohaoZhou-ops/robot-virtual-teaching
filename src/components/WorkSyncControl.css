@@ -5,6 +5,21 @@
 .work-sync__renew { padding: 5px 0; border: 0; background: none; color: #99c7bb; font-size: 11px; }
 .work-sync__status { position: absolute; top: calc(100% + 3px); right: 0; width: max-content; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9abeb1; font-size: 9px; line-height: 15px; }
 .work-sync__status.is-error { color: #f2b795; }
+.work-sync-progress { padding: 13px; margin: 0 0 16px; border: 1px solid #36564a; border-radius: 5px; background: #10241c; color: #b7d8c8; }
+.work-sync-progress__label { display: flex; align-items: center; gap: 10px; justify-content: space-between; font-size: 12px; line-height: 1.7; }
+.work-sync-progress__label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-sync-progress__label > strong { flex-shrink: 0; font-weight: 500; font-variant-numeric: tabular-nums; }
+.work-sync-progress progress { display: block; appearance: none; width: 100%; height: 5px; overflow: hidden; margin-top: 7px; border: 0; border-radius: 3px; background: #263e32; accent-color: #8bd7b8; }
+.work-sync-progress progress::-webkit-progress-bar { background: #263e32; }
+.work-sync-progress progress::-webkit-progress-value { background: #8bd7b8; border-radius: 3px; transition: width .2s ease; }
+.work-sync-progress progress::-moz-progress-bar { background: #8bd7b8; border-radius: 3px; }
+.work-sync-progress__detail { display: block; margin-top: 8px; color: #8fb5a4; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.work-sync-progress.is-complete { border-color: #5b9277; }
+.work-sync-progress.is-error { border-color: #8d6641; color: #f2b795; }
+.work-sync-progress.is-error .work-sync-progress__detail { color: #f2b795; }
+.work-sync > .work-sync-progress.is-compact { position: absolute; z-index: 2; right: 0; top: calc(100% + 3px); width: 190px; box-sizing: border-box; padding: 5px 8px; margin: 0; box-shadow: 0 5px 16px #0003; }
+.work-sync-progress.is-compact .work-sync-progress__label { font-size: 9px; }
+.work-sync-progress.is-compact progress { height: 3px; margin-top: 3px; }
 .work-sync-dialog { width: min(480px, calc(100vw - 32px)); box-sizing: border-box; padding: 26px; border: 1px solid #3d5b58; border-radius: 10px; background: #152124; color: #dbe9e6; box-shadow: 0 24px 90px #0008; }
 .work-sync-dialog::backdrop { background: #050c10a6; backdrop-filter: blur(3px); }
 .work-sync-dialog__heading { display: flex; gap: 10px; align-items: center; color: #8bd7b8; font-size: 12px; }
@@ -25,6 +40,7 @@
 .work-sync-mode-options { display: grid; gap: 12px; }
 .work-sync-mode-options > button { display: grid; grid-template-columns: 28px 1fr; gap: 8px 14px; padding: 20px; border: 1px solid #3d5b58; border-radius: 7px; background: #102024; color: #dbe9e6; text-align: left; cursor: pointer; font: inherit; }
 .work-sync-mode-options > button:hover { border-color: #8bd7b8; background: #1c3331; }
+.work-sync-mode-options > button:disabled { opacity: .5; cursor: wait; border-color: #3d5b58; background: #102024; }
 .work-sync-mode-options svg { grid-row: span 3; color: #8bd7b8; }
 .work-sync-mode-options strong { font-size: 16px; }
 .work-sync-mode-options span { font-size: 12px; line-height: 1.7; color: #b2c5c1; }
@@ -53,11 +69,10 @@
   .robot-twin-success__ring, .robot-twin-success__check { stroke-dashoffset: 0; }
 }
 .work-sync-mode-dialog.is-twin { width: min(620px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; }
-.robot-twin-robots { min-width: 0; padding: 0; margin: 22px 0 0; border: 0; }
-.robot-twin-robots legend { width: 100%; padding: 0 0 12px; color: #dbe9e6; font-size: 12px; }
-.robot-twin-robots legend > span { float: right; color: #809d94; font-size: 11px; }
+.robot-twin-robots { min-width: 0; padding: 0; margin: 16px 0 0; border: 0; }
 .robot-twin-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 320px; overflow: auto; padding: 3px; margin: -3px; scrollbar-width: thin; }
-.robot-twin-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border: 1px solid #334d48; border-radius: 7px; background: #101d20; color: #dbe9e6; cursor: pointer; font: inherit; text-align: left; transition: border-color .15s ease, background-color .15s ease; }
+.robot-twin-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 0; border: 1px solid #334d48; border-radius: 7px; background: #101d20; color: #dbe9e6; font: inherit; text-align: left; transition: border-color .15s ease, background-color .15s ease; }
+.robot-twin-card__select { display: flex; flex-direction: column; gap: 10px; padding: 16px 16px 0; cursor: pointer; }
 .robot-twin-card:hover { border-color: #6b9a88; background: #152a28; }
 .robot-twin-card.is-selected { border-color: #8bd7b8; background: linear-gradient(130deg, #1c3930, #142725); box-shadow: inset 3px 0 #8bd7b8; }
 .robot-twin-card:has(input:focus-visible) { outline: 2px solid #8bd7b8; outline-offset: 2px; }
@@ -67,31 +82,39 @@
 .robot-twin-card__top > small { font: 9px 'SFMono-Regular', Menlo, monospace; letter-spacing: .08em; }
 .robot-twin-card__check { margin-left: auto; display: grid; place-items: center; width: 17px; height: 17px; border: 1px solid #466053; border-radius: 50%; }
 .robot-twin-card.is-selected .robot-twin-card__check { color: #132c24; border-color: #a3ddbd; background: #a3ddbd; }
-.robot-twin-card > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
-.robot-twin-card > code { color: #91b5a6; font: 11px 'SFMono-Regular', Menlo, monospace; overflow-wrap: anywhere; }
-.robot-twin-card--add { justify-content: center; align-items: center; min-height: 119px; border-style: dashed; background: transparent; color: #91b5a6; }
+.robot-twin-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.robot-twin-card code { color: #91b5a6; font: 11px 'SFMono-Regular', Menlo, monospace; overflow-wrap: anywhere; }
+.robot-twin-card--add { justify-content: center; align-items: center; min-height: 119px; padding: 16px; border-style: dashed; background: transparent; color: #91b5a6; cursor: pointer; }
 .robot-twin-card--add > strong { font-size: 12px; }
 .robot-twin-card--add > span { font-size: 10px; color: #78958a; }
 .robot-twin-robots:disabled .robot-twin-card { cursor: default; opacity: .55; }
 .robot-twin-robots:disabled .robot-twin-card.is-selected { opacity: .85; }
-.robot-twin-robots__tools, .robot-twin-robots__undo { display: flex; align-items: center; gap: 12px; margin: 13px 0; font-size: 11px; color: #819e97; }
-.robot-twin-robots__tools { justify-content: flex-end; }
-.robot-twin-robots__tools > span, .robot-twin-robots__undo > span { flex: 1; overflow-wrap: anywhere; min-width: 0; }
-.robot-twin-robots__tools button, .robot-twin-robots__undo button { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 4px 0; background: none; color: #a3c6b7; cursor: pointer; font: inherit; white-space: nowrap; }
-.robot-twin-robots__tools button:hover, .robot-twin-robots__undo button:hover { color: #d1f2df; }
-.robot-twin-robots__tools button:disabled, .robot-twin-robots__undo button:disabled { opacity: .45; cursor: default; }
+.robot-twin-robots:disabled .robot-twin-card__select { cursor: default; }
+.robot-twin-card__actions, .robot-twin-robots__undo { display: flex; align-items: center; gap: 12px; font-size: 11px; color: #819e97; }
+.robot-twin-card__actions { justify-content: flex-end; padding: 0 16px 12px; }
+.robot-twin-card__actions > span { display: inline-flex; align-items: center; gap: 4px; margin-right: auto; color: #8fc9aa; font-size: 10px; }
+.robot-twin-robots__undo { margin: 13px 0; }
+.robot-twin-robots__undo > span { flex: 1; overflow-wrap: anywhere; min-width: 0; }
+.robot-twin-card__actions button, .robot-twin-robots__undo button { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 4px 0; background: none; color: #a3c6b7; cursor: pointer; font: inherit; white-space: nowrap; }
+.robot-twin-card__actions button:hover, .robot-twin-robots__undo button:hover { color: #d1f2df; }
+.robot-twin-card__actions .is-delete { color: #c49a92; }
+.robot-twin-card__actions .is-delete:hover { color: #ffb1a1; }
+.robot-twin-card__actions button:disabled, .robot-twin-robots__undo button:disabled { opacity: .45; cursor: default; }
 .robot-twin-robots__undo { padding: 9px 11px; border: 1px solid #334d48; border-radius: 4px; }
 .robot-twin-editor { margin-top: 20px; padding: 16px; border: 1px solid #3d5b58; border-radius: 6px; background: #101c1f; }
 .robot-twin-editor h3 { margin: 0 0 2px; font-size: 13px; font-weight: 500; color: #bcd6c8; }
 .robot-twin-editor__fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 12px; }
 .robot-twin-editor .robot-twin-field { min-width: 0; margin-bottom: 0; }
 .robot-twin-editor .work-sync-dialog__actions { margin-top: 18px; }
+.robot-twin-connect { margin-top: 20px; }
 @media (max-width: 520px) {
   .work-sync-mode-dialog.is-twin { padding: 20px; }
   .robot-twin-cards, .robot-twin-editor__fields { grid-template-columns: minmax(0, 1fr); }
   .robot-twin-cards { max-height: 280px; }
-  .robot-twin-card { padding: 13px 15px; gap: 8px; }
-  .robot-twin-card--add { min-height: 105px; }
+  .robot-twin-card { gap: 8px; }
+  .robot-twin-card__select { padding: 13px 15px 0; gap: 8px; }
+  .robot-twin-card__actions { padding: 0 15px 9px; }
+  .robot-twin-card--add { min-height: 105px; padding: 13px 15px; }
 }
 @media (max-width: 720px) {
   .start-page:has(.work-sync) { grid-template-rows: auto minmax(0, 1fr) 25px; }

@@ -20,5 +20,6 @@ export function useWorkSync(adapter, projectRevision) {
   }, []);
   useEffect(() => { client.current?.projectChanged(); }, [projectRevision]);
   return { ...state, request: () => client.current?.requestAuthorization(),
+    prepareTwin: () => client.current?.prepareTwin(),
     disconnect: (...args) => client.current?.disconnect(...args), decide: (id, allow) => client.current?.decide(id, allow) };
 }

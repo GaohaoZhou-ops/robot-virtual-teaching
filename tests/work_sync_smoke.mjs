@@ -8,6 +8,10 @@ import { applySyncOperations, diffSyncDocument, rebaseSyncDocument, syncDocument
   WORK_SYNC_INTERVAL, WORK_SYNC_LEASE } from '../src/lib/workSyncDocument.js';
 
 const copy = structuredClone;
+const waitFor = async (predicate) => {
+  const until = Date.now() + 5000;
+  while (!predicate()) { assert.ok(Date.now() < until, 'state transition timed out'); await new Promise((resolve) => setTimeout(resolve, 10)); }
+};
 const initial = syncDocument({ teachingTasks: [{ id: 'task', name: 'Task', parkingPoints: [
   { id: 'left', name: 'Left', poses: [] }, { id: 'right', name: 'Right', poses: [] },
 ] }] });
@@ -84,11 +88,24 @@ try {
   await server.api(`/links/${id}/bootstrap`, { token: stranger.token, method: 'GET', code: 403 });
   await server.api(`/links/${id}/bundle`, { token: peer.token, method: 'PUT', bytes: Buffer.from('PKtest'), code: 403 });
   await server.api(`/links/${id}/bundle`, { token: host.token, method: 'PUT', bytes: Buffer.from('PKtest') });
+  const uploaded = (await server.api('/status', { token: host.token, data: { project } })).link;
+  assert.equal(uploaded.transfer.complete, false, 'upload alone cannot finish initial synchronization');
+  assert.equal(uploaded.transfer.progress, 0.5);
+  await server.api(`/links/${id}/progress`, { token: host.token, data: { progress: 1, phase: 'done' }, code: 403 });
+  await server.api(`/links/${id}/progress`, { token: stranger.token, data: { progress: 1, phase: 'done' }, code: 403 });
+  await server.api(`/links/${id}/progress`, { token: peer.token, data: { progress: 1, phase: 'done' }, code: 409 });
+  await server.api(`/links/${id}/progress`, { token: peer.token, data: { progress: 0.85, phase: '恢复工程' } });
+  const lateProgress = await server.api(`/links/${id}/progress`, { token: peer.token, data: { progress: 0.6, phase: '接收工程' } });
+  assert.equal(lateProgress.link.transfer.progress, 0.85, 'late reports cannot move progress backward');
   assert.equal(Buffer.from(await server.api(`/links/${id}/bundle`, { token: peer.token, method: 'GET' })).toString(), 'PKtest');
   const exchange = (token, document, sequence = 1) => server.api(`/links/${id}/exchange`, { token,
     data: { since: 0, sequence, operations: diffSyncDocument(initial, document) } });
   await exchange(host.token, left);
   const merged = await exchange(peer.token, right);
+  const complete = await server.api(`/links/${id}/progress`, { token: peer.token, data: { progress: 1, phase: 'done' } });
+  assert.equal(complete.link.transfer.complete, true);
+  const lateCompletion = await server.api(`/links/${id}/progress`, { token: peer.token, data: { progress: 0.98, phase: '保存工程' } });
+  assert.equal(lateCompletion.link.transfer.progress, 1);
   assert.deepEqual(applySyncOperations(initial, merged.operations), combined);
   assert.equal((await exchange(peer.token, right)).revision, merged.revision, 'retry is idempotent');
   // Keep the authorizing browser online while advancing to the lease boundary.
@@ -123,8 +140,9 @@ const makeAdapter = (isHost) => {
 };
 const hostAdapter = makeAdapter(true), peerAdapter = makeAdapter(false);
 let intercept = null;
+const peerProgress = [];
 const hostClient = new WorkSyncClient({ adapter: hostAdapter, request: live.fetchAs(true) });
-const peerClient = new WorkSyncClient({ adapter: peerAdapter, request: async (...args) => {
+const peerClient = new WorkSyncClient({ adapter: peerAdapter, onChange: (state) => peerProgress.push(state.progress?.progress), request: async (...args) => {
   const response = await live.fetchAs(false)(...args);
   if (intercept && args[0].endsWith('/exchange')) { const handler = intercept; intercept = null; await handler(); }
   return response;
@@ -137,10 +155,24 @@ try {
     assert.equal(hostClient.state.requests.length, 1);
     await hostClient.decide(hostClient.state.requests[0].id, true);
     assert.equal(hostClient.state.error, '');
+    assert.equal(hostClient.state.link.transfer.complete, false);
+    await assert.rejects(hostClient.prepareTwin(), /工程仍在同步/);
     await peerClient.tick(); assert.equal(peerClient.state.error, '');
     assert.equal(peerClient.state.phase, 'connected');
   };
-  await connect();
+  const originalPersist = peerAdapter.persist;
+  let releaseSave, saving = false;
+  peerAdapter.persist = async () => { saving = true; await new Promise((resolve) => { releaseSave = resolve; }); await originalPersist(); };
+  const connecting = connect();
+  await waitFor(() => saving);
+  assert.notEqual(peerClient.state.phase, 'connected', 'receiving files is not equivalent to saving the restored project');
+  assert.notEqual(peerClient.state.progress.progress, 1);
+  await assert.rejects(peerClient.prepareTwin(), /工程仍在同步/);
+  releaseSave(); await connecting; peerAdapter.persist = originalPersist;
+  await hostClient.tick();
+  assert.equal(hostClient.state.link.transfer.complete, true);
+  assert.equal(peerClient.state.progress.progress, 1);
+  assert.ok(peerProgress.some((value) => value >= 0.5 && value < 0.98), 'byte transfer emits progress');
   assert.equal(peerAdapter.state.installs, 1);
   hostAdapter.state.document = edit(hostAdapter.state.document, 'left', 'host-pose');
   peerAdapter.state.document = edit(peerAdapter.state.document, 'right', 'peer-pose');
@@ -172,8 +204,24 @@ try {
   assert.deepEqual(hostAdapter.state.document, peerAdapter.state.document);
   assert.equal(peerAdapter.state.document.teachingTasks[0].parkingPoints[1].poses.length, 4);
   const retained = copy(peerAdapter.state.document);
-  await hostClient.disconnect(); await peerClient.tick();
+  intercept = () => { throw new Error('switch network failure'); };
+  await assert.rejects(peerClient.prepareTwin(), /switch network failure/);
+  assert.ok(peerClient.state.link, 'a failed final exchange retains the offline collaboration');
+  let releaseExchange, exchanging = false;
+  intercept = async () => { exchanging = true; await new Promise((resolve) => { releaseExchange = resolve; }); };
+  const inFlight = peerClient.tick();
+  await waitFor(() => exchanging);
+  const switching = peerClient.prepareTwin();
+  assert.equal(peerClient.state.switching, true);
+  assert.ok(peerClient.state.link, 'switch waits for the current exchange');
+  releaseExchange(); await inFlight; await switching; await hostClient.tick();
+  assert.equal(peerClient.state.switching, false);
+  assert.equal(hostClient.state.link, null);
   assert.equal(peerClient.state.link, null);
+  assert.deepEqual(peerAdapter.state.document, retained);
+  await connect(); await hostClient.tick();
+  await hostClient.prepareTwin(); await peerClient.tick();
+  assert.equal(hostClient.state.link, null, 'the host can also switch after peer completion');
   assert.deepEqual(peerAdapter.state.document, retained);
   assert.ok(hostAdapter.state.saves && peerAdapter.state.saves);
 } finally { hostClient.stop(); peerClient.stop(); await live.close(); }

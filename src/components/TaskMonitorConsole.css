@@ -1,6 +1,19 @@
 .task-monitor { --monitor-accent: #79d8b0; }
 .task-monitor::before { background: var(--monitor-accent); }
-.task-monitor .task-monitor__content { grid-template-rows: 67px auto minmax(0, 1fr); }
+.task-monitor .task-monitor__content { grid-template-rows: 67px auto auto minmax(0, 1fr); }
+.task-monitor.has-alarm::before { background: #ff6659; }
+.task-monitor.has-alarm .inspector-collapse-toggle { color: #ff9a8d; border-color: #9b4c43; }
+.task-monitor__alarm { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-bottom: 1px solid #b64f4770; background: #8e2b282e; color: #ff8e83; }
+.task-monitor__alarm > svg { flex-shrink: 0; }
+.task-monitor__alarm > div { flex: 1; min-width: 0; }
+.task-monitor__alarm strong { display: block; font-size: 13px; font-weight: 600; }
+.task-monitor__alarm span { display: block; margin-top: 4px; font-size: 10px; color: #d89790; }
+.task-monitor__alarm button { padding: 5px 8px; border: 1px solid #a4544b; border-radius: 3px; background: #8c362b30; color: #ffb1a4; font: inherit; font-size: 10px; cursor: pointer; }
+.task-monitor.has-alarm.is-suspected::before { background: #facc15; }
+.task-monitor.has-alarm.is-suspected .inspector-collapse-toggle { color: #facc15; border-color: #8c742f; }
+.task-monitor__alarm.is-suspected { color: #facc15; background: #80631724; border-bottom-color: #b2933d70; }
+.task-monitor__alarm.is-suspected span { color: #cdbd83; }
+.task-monitor__alarm.is-suspected button { border-color: #8c742f; color: #f4db83; background: #80631730; }
 .task-monitor .inspector-heading { padding-right: 68px; }
 .task-monitor .eyebrow { color: var(--monitor-accent); }
 .task-monitor__connection {
@@ -46,25 +59,48 @@
 .task-monitor__progress p { font-size: 10px; color: #789a97; margin: 0; }
 .task-monitor__metrics { display: flex; justify-content: space-between; gap: 6px; padding-top: 18px; color: #97b4b0; font: 10px 'SFMono-Regular', Menlo, monospace; }
 .task-monitor__queue { margin-top: 18px; }
-.task-monitor__queue summary, .task-monitor__output summary { color: #94b0ad; cursor: pointer; font-size: 10px; padding: 9px 0; }
-.task-monitor__queue ol, .task-monitor__detections { list-style: none; padding: 0; margin: 0; }
-.task-monitor__queue li, .task-monitor__detections li { display: flex; gap: 8px; font-size: 11px; line-height: 1.7; padding: 5px 0; color: #9fbab4; overflow-wrap: anywhere; }
-.task-monitor__queue li > span, .task-monitor__detections li > span { color: #52736e; font: 10px/1.7 'SFMono-Regular', Menlo, monospace; }
+.task-monitor__queue summary { color: #94b0ad; cursor: pointer; font-size: 10px; padding: 9px 0; }
+.task-monitor__queue ol { list-style: none; padding: 0; margin: 0; }
+.task-monitor__queue li { display: flex; gap: 8px; font-size: 11px; line-height: 1.7; padding: 5px 0; color: #9fbab4; overflow-wrap: anywhere; }
+.task-monitor__queue li > span { color: #52736e; font: 10px/1.7 'SFMono-Regular', Menlo, monospace; }
 .task-monitor__queue li[aria-current='step'] { color: var(--monitor-accent); }
-.task-monitor__result-count { margin: 0 0 12px; font-size: 10px; color: #75928e; }
-.task-monitor__result { background: rgba(121, 216, 176, .025); border: 1px solid rgba(122, 165, 150, .16); padding: 12px; margin-bottom: 10px; }
-.task-monitor__result header { display: flex; align-items: center; gap: 8px; }
-.task-monitor__sequence { color: #649587; font: 10px 'SFMono-Regular', Menlo, monospace; }
-.task-monitor__result header strong { color: #b9d0c6; font-size: 11px; font-weight: 500; }
-.task-monitor__context { color: #6e8f84; font-size: 10px; line-height: 1.7; margin: 8px 0; overflow-wrap: anywhere; }
-.task-monitor__result-state { margin: 10px 0 6px; font-size: 11px; }
+.task-monitor__result-count { margin: 0 0 9px; font-size: 10px; color: #75928e; }
+.task-monitor__results { max-height: min(360px, 44vh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 0; margin: 0; list-style: none; border: 1px solid #29443a; border-radius: 4px; background: #091a15; }
+.task-monitor__result { margin: 0; padding: 0; border: 0; border-left: 3px solid transparent; border-bottom: 1px solid #28423680; }
+.task-monitor__result:last-child { border-bottom: 0; }
+.task-monitor__result.is-selectable { transition: background .15s, border-left-color .15s; }
+.task-monitor__result.is-selectable:hover, .task-monitor__result.is-selected { background: #79d8b00e; }
+.task-monitor__result.is-selected { border-left-color: #79d8b0; }
+.task-monitor__result-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 13px; align-items: start; gap: 6px; box-sizing: border-box; width: 100%; padding: 9px 7px 9px 6px; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; }
+button.task-monitor__result-row { cursor: pointer; }
+.task-monitor__result-row:focus-visible { outline: 2px solid #b1edce; outline-offset: -2px; }
+.task-monitor__results:focus-visible { outline: 1px solid #79d8b0; outline-offset: 2px; }
+.task-monitor__result-body { display: grid; gap: 4px; min-width: 0; }
+.task-monitor__result-heading { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.task-monitor__result-heading strong { flex-shrink: 0; color: #b9d0c6; font-size: 11px; font-weight: 500; }
+.task-monitor__result-heading .task-monitor__badge { padding: 0 3px; font-size: 8px; flex-shrink: 0; }
+.task-monitor__selected { display: inline-flex; align-items: center; min-height: 16px; color: #a8e7c7; }
+.task-monitor__result.is-alarm { background: #9e322518; border-left-color: #f2695c; }
+.task-monitor__result.is-alarm:hover, .task-monitor__result.is-alarm.is-selected { border-left-color: #ff8e83; background: #9e32252b; }
+.task-monitor__result.is-alarm .task-monitor__selected { color: #ffb2aa; }
+.task-monitor__result.is-alarm .task-monitor__result-heading strong, .task-monitor__result.is-alarm .task-monitor__sequence,
+.task-monitor__result.is-alarm .task-monitor__detections { color: #ffaaa0; }
+.task-monitor__result-state.is-alarm { color: #ff8e83; }
+.task-monitor__result.is-alarm.is-suspected { background: #8c6a1118; border-left-color: #facc15; }
+.task-monitor__result.is-alarm.is-suspected:hover, .task-monitor__result.is-alarm.is-suspected.is-selected { background: #8c6a112b; }
+.task-monitor__result.is-alarm.is-suspected .task-monitor__result-heading strong, .task-monitor__result.is-alarm.is-suspected .task-monitor__sequence,
+.task-monitor__result.is-alarm.is-suspected .task-monitor__selected { color: #f4db83; }
+.task-monitor__result-state.is-suspected, .task-monitor__result .task-monitor__detections .is-suspected { color: #facc15; }
+.task-monitor__sequence { padding-top: 1px; color: #649587; font: 10px/16px 'SFMono-Regular', Menlo, monospace; }
+.task-monitor__context, .task-monitor__detections, .task-monitor__result-error { display: block; color: #7e9d90; font-size: 10px; line-height: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-monitor__detections { color: #9fbab4; }
+.task-monitor__result-error { color: #d8b07a; }
+.task-monitor__result-state { min-width: 0; gap: 4px; margin: 0 0 0 auto; font-size: 10px; line-height: 16px; }
+.task-monitor__result-state > svg { flex-shrink: 0; }
+.task-monitor__result-state > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-monitor__result-state.is-success { color: var(--monitor-accent); }
 .task-monitor__result-state.is-warning { color: #d8b07a; }
 .task-monitor__result-state.is-muted { color: #8da6a0; }
-.task-monitor__output { margin-top: 9px; border-top: 1px solid rgba(122, 165, 150, .12); }
-.task-monitor__output summary svg { vertical-align: middle; margin-right: 5px; }
-.task-monitor__output pre { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 9px; background: #06100e; color: #adc6bb; font: 10px/1.7 'SFMono-Regular', Menlo, monospace; }
-.task-monitor__output p { color: #9eac96; font-size: 10px; }
 .task-monitor__empty { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 25px 10px; gap: 13px; }
 .task-monitor__empty > svg { color: #416c60; stroke-width: 1; }
 .task-monitor__empty strong { color: #97b8aa; font-size: 12px; font-weight: 500; }

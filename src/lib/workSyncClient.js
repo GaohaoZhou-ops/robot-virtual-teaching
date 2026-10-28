@@ -16,7 +16,7 @@ export class WorkSyncClient {
     this.token = null; this.context = null; this.epoch = 0; this.running = false; this.timer = null;
     this.working = false; this.preparing = false; this.controllers = new Set();
     this.blockedLinks = new Set(); this.disconnecting = false; this.statusVersion = -1;
-    this.state = { role: 'peer', phase: 'starting', requests: [], pending: false, link: null, error: '', lastSync: null };
+    this.state = { role: 'peer', phase: 'starting', requests: [], pending: false, link: null, progress: null, error: '', lastSync: null };
   }
   emit(changes = {}) {
     this.state = { ...this.state, ...changes };
@@ -25,7 +25,7 @@ export class WorkSyncClient {
   start() {
     if (this.running) return;
     this.running = true;
-    this.emit({ phase: 'starting', link: null, pending: false, requests: [], deciding: false, error: '', reason: '', lastSync: null });
+    this.emit({ phase: 'starting', link: null, pending: false, requests: [], deciding: false, progress: null, error: '', reason: '', lastSync: null });
     const epoch = this.epoch;
     // Remote browsers only discover their role once. No registration, polling
     // or project reads occur until the user presses Synchronize.
@@ -52,7 +52,7 @@ export class WorkSyncClient {
     socket?.close();
   }
   updateActivity() {
-    const linked = this.running && (this.state.link?.expiresAt > Date.now() || (this.pollPending && this.state.pending));
+    const linked = this.running && !this.switching && (this.state.link?.expiresAt > Date.now() || (this.pollPending && this.state.pending));
     if (linked && !this.timer) this.timer = setInterval(() => this.tick(), WORK_SYNC_INTERVAL);
     if (!linked) { clearInterval(this.timer); this.timer = null; }
     const listening = this.running && (this.listenLocal || this.state.pending || linked);
@@ -96,7 +96,7 @@ export class WorkSyncClient {
       if (this.valid(epoch)) this.emit({ error: error.message });
     }
   }
-  async api(route, { method = 'POST', data = {}, binary, download = false } = {}) {
+  async api(route, { method = 'POST', data = {}, binary, download = false, onProgress } = {}) {
     const clientStartedAt = Date.now();
     const controller = new AbortController(); this.controllers.add(controller);
     const timer = setTimeout(() => controller.abort(), download || binary ? 240_000 : 30_000);
@@ -109,7 +109,20 @@ export class WorkSyncClient {
         const payload = await response.json().catch(() => ({}));
         throw Object.assign(new Error(payload.error || `同步请求失败（${response.status}）`), { status: response.status });
       }
-      return download ? new Uint8Array(await response.arrayBuffer()) : { ...await response.json(), clientStartedAt };
+      if (!download) return { ...await response.json(), clientStartedAt };
+      if (!response.body?.getReader) return new Uint8Array(await response.arrayBuffer());
+      const reader = response.body.getReader(), total = Number(response.headers.get('content-length')) || 0;
+      const chunks = []; let loaded = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value); loaded += value.byteLength; onProgress?.(loaded, total);
+        }
+      } finally { reader.releaseLock(); }
+      const bytes = new Uint8Array(loaded); let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return bytes;
     } finally { clearTimeout(timer); this.controllers.delete(controller); }
   }
   valid(epoch) { return this.running && this.epoch === epoch; }
@@ -127,7 +140,12 @@ export class WorkSyncClient {
       expiresAt: (clientStartedAt || Date.now()) + Math.max(0, status.link.expiresAt - status.serverTime) };
     if (this.context && status.link?.id !== this.context.id) this.context = null;
     clearTimeout(this.expiration);
-    this.emit({ ...status, phase: status.link ? (this.context ? 'connected' : 'preparing') : status.pending ? 'pending' : 'idle', error: '' });
+    const progress = status.link?.transfer;
+    const localProgress = status.link?.id === this.state.link?.id ? this.state.progress : null;
+    this.emit({ ...status, phase: status.link ? (this.context && progress?.complete ? 'connected'
+      : this.state.phase === 'receiving' ? 'receiving' : 'preparing') : status.pending ? 'pending' : 'idle',
+      progress: progress ? localProgress?.progress > progress.progress ? localProgress : progress : this.preparing ? this.state.progress : null,
+      error: '' });
     if (status.link) {
       const id = status.link.id;
       this.expiration = setTimeout(() => {
@@ -146,7 +164,7 @@ export class WorkSyncClient {
     this.epoch += 1; this.context = null; this.preparing = false;
     clearTimeout(this.expiration);
     for (const controller of this.controllers) controller.abort();
-    this.emit({ link: null, pending: false, phase: 'idle', reason: message, error: '', requests: [] });
+    this.emit({ link: null, pending: false, phase: 'idle', reason: message, error: '', requests: [], progress: null, deciding: false });
     this.updateActivity();
     await Promise.allSettled([this.adapter.persist?.(), link ? this.api(`/links/${link.id}/disconnect`) : undefined]);
     this.disconnecting = false;
@@ -171,7 +189,11 @@ export class WorkSyncClient {
         if (this.valid(epoch)) this.acceptStatus(result);
         return;
       }
-      const initial = await this.adapter.buildInitial((progress) => this.emit({ progress }));
+      this.emit({ progress: { phase: '准备工程资源', progress: 0 } });
+      const initial = await this.adapter.buildInitial((value) => {
+        if (this.valid(epoch)) this.emit({ progress: { ...value,
+          progress: Math.max(this.state.progress?.progress || 0, Math.min(1, Number(value.progress) || 0) * 0.25) } });
+      });
       if (!this.valid(epoch)) return;
       if (this.adapter.identity() !== initial.localIdentity) throw new Error('工程已变化，请重新申请同步');
       const result = await this.api('/decision', { data: { requestId, allow: true, document: initial.document } });
@@ -187,27 +209,50 @@ export class WorkSyncClient {
         this.emit({ error: error.message });
       }
     } finally {
-      this.preparing = false; this.emit({ deciding: false, progress: null });
+      this.preparing = false;
+      if (this.valid(epoch)) this.emit({ deciding: false, ...(!this.state.link ? { progress: null } : {}) });
     }
   }
+  async reportTransfer(link, epoch, progress, required = false) {
+    if (!this.valid(epoch) || this.state.link?.id !== link.id) return;
+    this.emit({ progress: progress.progress === 1 ? { phase: '确认工程同步完成', progress: 0.99 } : progress });
+    // Stream/decoder callbacks can be frequent. At most one metadata report is
+    // in flight, and completion waits for it so late progress cannot undo 100%.
+    if (!required && (this.progressRequest || Date.now() - (this.progressReportedAt || 0) < 250)) return;
+    if (required) await this.progressRequest?.catch(() => {});
+    if (!this.valid(epoch) || this.state.link?.id !== link.id) return;
+    this.progressReportedAt = Date.now();
+    const pending = this.api(`/links/${link.id}/progress`, { data: progress });
+    this.progressRequest = pending;
+    try {
+      const result = await pending;
+      if (this.valid(epoch)) this.acceptStatus(result);
+    } catch (error) { if (required) throw error; }
+    finally { if (this.progressRequest === pending) this.progressRequest = null; }
+  }
   async initialize(link, epoch) {
-    this.emit({ phase: 'receiving' });
+    this.emit({ phase: 'receiving', progress: { phase: '读取工程信息', progress: 0.5 } });
     const initial = await this.api(`/links/${link.id}/bootstrap`, { method: 'GET' });
     if (!this.valid(epoch)) return;
     const previous = await this.adapter.loadCheckpoint?.(link.project.key);
     if (!this.valid(epoch)) return;
     if (previous?.projectKey === link.project.key && previous.localIdentity === this.adapter.identity()) {
+      void this.reportTransfer(link, epoch, { phase: '合并本地工程与协作结果', progress: 0.9 });
       const merged = rebaseSyncDocument(initial.document, previous.document, this.adapter.readDocument());
       this.adapter.applyDocument(merged);
     } else {
-      const bytes = await this.api(`/links/${link.id}/bundle`, { method: 'GET', download: true });
+      const bytes = await this.api(`/links/${link.id}/bundle`, { method: 'GET', download: true,
+        onProgress: (loaded, total) => { void this.reportTransfer(link, epoch, { phase: '接收工程包',
+          progress: 0.5 + (total ? Math.min(1, loaded / total) : 0) * 0.25,
+          detail: `${(loaded / 1048576).toFixed(1)}${total ? ` / ${(total / 1048576).toFixed(1)}` : ''} MB` }); } });
       if (!this.valid(epoch) || link.expiresAt <= Date.now()) return;
-      await this.adapter.installInitial(bytes, link.project, () => this.valid(epoch) && link.expiresAt > Date.now());
+      await this.adapter.installInitial(bytes, link.project, () => this.valid(epoch) && link.expiresAt > Date.now(),
+        (value) => { void this.reportTransfer(link, epoch, { ...value, progress: 0.75 + Math.min(1, Number(value.progress) || 0) * 0.23 }); });
       if (!this.valid(epoch)) return;
     }
     this.context = { id: link.id, projectKey: link.project.key, localIdentity: this.adapter.identity(),
       base: initial.document, revision: 0, sequence: 0, flight: null };
-    this.emit({ phase: 'connected' });
+    void this.reportTransfer(link, epoch, { phase: '保存工程与首次同步结果', progress: 0.98 });
     await this.checkpoint(this.context);
   }
   async exchange(context, epoch) {
@@ -233,7 +278,11 @@ export class WorkSyncClient {
     if (changed) await this.checkpoint(context);
   }
   async tick() {
-    if (!this.running || this.working || this.disconnecting) return;
+    if (!this.running || this.working || this.disconnecting || this.switching) return;
+    const pending = this.performTick(); this.tickRequest = pending;
+    try { await pending; } finally { if (this.tickRequest === pending) this.tickRequest = null; }
+  }
+  async performTick() {
     this.working = true;
     const epoch = this.epoch;
     try {
@@ -258,7 +307,16 @@ export class WorkSyncClient {
       const link = this.state.link;
       if (!link) return;
       if (!this.context && this.state.role === 'peer' && link.ready && this.adapter.ready()) await this.initialize(link, epoch);
-      if (this.context && this.active(this.context, epoch)) await this.exchange(this.context, epoch);
+      if (this.context && this.active(this.context, epoch)) {
+        await this.exchange(this.context, epoch);
+        if (this.context && this.active(this.context, epoch) && this.state.role === 'peer'
+          && !this.state.link.transfer?.complete && this.adapter.ready()) {
+          await this.adapter.persist?.();
+          if (this.context && this.active(this.context, epoch)) {
+            await this.reportTransfer(this.state.link, epoch, { phase: '工程同步完成', progress: 1 }, true);
+          }
+        }
+      }
     } catch (error) {
       if (this.valid(epoch)) {
         if (error.status === 401) {
@@ -269,5 +327,18 @@ export class WorkSyncClient {
         this.emit({ error: error.name === 'AbortError' ? '通讯暂时中断，正在重试，本地结果已保留' : error.message });
       }
     } finally { this.working = false; }
+  }
+  async prepareTwin() {
+    if (this.switching || this.preparing || this.state.deciding || (this.state.link
+      ? !this.state.link.transfer?.complete : this.state.pending)) throw new Error('工程仍在同步，请等待进度完成后连接机器人');
+    this.switching = true; this.emit({ switching: true }); this.updateActivity();
+    try {
+      await this.tickRequest;
+      const epoch = this.epoch, context = this.context;
+      if (context && this.active(context, epoch)) await this.exchange(context, epoch);
+      await this.adapter.persist?.();
+      if (!this.valid(epoch)) throw new Error('工程状态已变化，请重试连接');
+      if (this.state.link) await this.disconnect('工程已保留，离线协作已结束');
+    } finally { this.switching = false; this.emit({ switching: false }); this.updateActivity(); }
   }
 }

@@ -1,6 +1,9 @@
 import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL } from './robotTwin.js';
 import { ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_MONITOR_MAX_AGE } from './robotTwinMonitor.js';
 import { RobotTwinCameraClient } from './robotTwinCameraClient.js';
+import { forgetRobotTwinCredential, rememberRobotTwinCredential } from './robotTwinCredentials.js';
+
+const isRobotAuthFailure = (error) => ['ROBOT_AUTH_FAILED', 'ROBOT_AUTH_REQUIRED'].includes(error.code);
 
 export class RobotTwinClient {
   constructor({ request = (...args) => globalThis.fetch(...args), onChange = () => {} } = {}) {
@@ -9,22 +12,27 @@ export class RobotTwinClient {
     this.controllers = new Set();
     this.cameraClient = new RobotTwinCameraClient({ request: (path, options) => this.api(path, options),
       onChange: (camera) => this.publish({ camera }) });
-    this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '',
+    this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '', authFailed: false, credentialError: '',
       monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state };
   }
 
   publish(update) { this.state = { ...this.state, ...update }; this.onChange(this.state); }
 
-  async api(path, { binary = false, ...options } = {}, token = this.token) {
+  async api(path, { binary = false, timeoutMs = 12_000, ...options } = {}, token = this.token) {
+    const generation = this.generation;
     const controller = new AbortController(); this.controllers.add(controller);
     try {
       const response = await this.request(ROBOT_TWIN_PREFIX + path, { ...options,
         cache: 'no-store', headers: { 'Content-Type': 'application/json', 'X-Atlas-Robot-Twin': '1',
           ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
-        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(12_000), ...(options.signal ? [options.signal] : [])]) });
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs), ...(options.signal ? [options.signal] : [])]) });
       if (!response.ok) {
         const payload = await response.json();
-        throw Object.assign(new Error(payload.error || '真机连接失败'), { status: response.status });
+        const error = Object.assign(new Error(payload.error || '真机连接失败'), { status: response.status, code: payload.code });
+        if (path !== '/sessions' && token && token === this.token && generation === this.generation && isRobotAuthFailure(error)) {
+          this.authenticationFailed(error);
+        }
+        throw error;
       }
       return binary ? { blob: await response.blob(), headers: response.headers } : await response.json();
     } finally { this.controllers.delete(controller); }
@@ -39,9 +47,17 @@ export class RobotTwinClient {
     this.cameraClient.reset();
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
-    this.release(this.token); this.token = null;
-    this.publish({ active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '',
+    this.release(this.token); this.token = null; this.profile = null;
+    this.publish({ active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, error: '', authFailed: false, credentialError: '', profileId: null,
       monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null });
+  }
+
+  authenticationFailed(error) {
+    const profile = this.profile;
+    const forgotten = !profile || forgetRobotTwinCredential(profile);
+    this.disconnect();
+    this.publish({ phase: 'error', error: error.message, authFailed: true, profileId: profile?.id,
+      credentialError: forgotten ? '' : '浏览器未能清除已失效的密码，请重新输入。' });
   }
 
   accept(snapshot, elapsed, generation) {
@@ -65,23 +81,28 @@ export class RobotTwinClient {
     }, Math.min(...durations));
   }
 
-  async connect(address, password) {
+  async connect(address, password, profileId) {
     this.disconnect();
     const generation = this.generation;
-    this.publish({ active: true, phase: 'connecting', address, error: '', monitorPhase: 'loading' });
+    this.profile = profileId ? { id: profileId, address } : null;
+    this.publish({ active: true, phase: 'connecting', address, profileId, error: '', monitorPhase: 'loading' });
     const started = performance.now();
     try {
       const result = await this.api('/sessions', { method: 'POST', body: JSON.stringify({ address, password }) });
       if (generation !== this.generation) { this.release(result.token); return false; }
       this.token = result.token;
-      this.publish({ address: result.address });
+      const remembered = !this.profile || rememberRobotTwinCredential(this.profile, password);
+      this.publish({ address: result.address, credentialError: remembered ? '' : '浏览器未能记住此密码，下次连接时需要重新输入。' });
       this.accept(result.snapshot, performance.now() - started, generation);
       this.timer = setTimeout(() => this.poll(generation), ROBOT_TWIN_INTERVAL);
       void this.pollMonitor(generation);
       void this.cameraClient.load();
       return true;
     } catch (error) {
-      if (generation === this.generation) this.publish({ active: false, phase: 'error', error: error.message });
+      if (generation === this.generation) {
+        if (isRobotAuthFailure(error)) this.authenticationFailed(error);
+        else this.publish({ active: false, phase: 'error', error: error.message });
+      }
       return false;
     }
   }

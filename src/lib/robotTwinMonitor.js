@@ -13,6 +13,8 @@ export const ALGORITHM_PHASES = { processing: '算法执行中', complete: '算�
 export const CAMERA_NAMES = { left: '左相机', right: '右相机', 'head-left': '头部左目', 'head-right': '头部右目',
   'chest-color': '胸前彩色', 'chest-depth': '胸前深度', 'wrist-left': '左手腕', 'wrist-right': '右手腕' };
 
+export const isRobotDetectionAlarm = (item) => item?.received === true && !item.demo && item.state === 'complete' && item.detectionCount > 0;
+
 // Only display fields cross into the browser. Storage paths, ownership tokens,
 // confirmation receipts and executable task plans never leave the local server.
 export function robotTwinTask(run) {

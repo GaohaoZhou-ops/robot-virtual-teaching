@@ -275,6 +275,27 @@ playwright/.auth/
 /tests/robot-twin-*.[hH][aA][rR]
 /robot-twin-*.json
 /tests/robot-twin-*.json
+
+# Simulator PID/locks/logs live in .atlas-cache/fake-robot/; twin, confidence,
+# history-list and offline-to-twin UI captures use test-artifacts/{robot-twin,
+# fake-robot,work-sync}/. Shared ignore rules already cover those output roots.
+# Also exclude standalone debug exports copied beside the project or tests.
+# Anchor these rules so scripts/fake_robot.mjs and nested fixtures stay visible.
+/fake-robot/
+/fake-robot-*/
+/tests/fake-robot/
+/tests/fake-robot-*/
+/fake-robot.[zZ][iI][pP]
+/fake-robot-*.[zZ][iI][pP]
+/tests/fake-robot.[zZ][iI][pP]
+/tests/fake-robot-*.[zZ][iI][pP]
+/fake-robot-*.json
+/tests/fake-robot-*.json
+# Saved Zivid point-cloud buffers can be large; keep deliberate fixture copies.
+/robot-twin-*.[xX][yY][zZ][bB][iI][nN]
+/tests/robot-twin-*.[xX][yY][zZ][bB][iI][nN]
+/zivid-*.[xX][yY][zZ][bB][iI][nN]
+/tests/zivid-*.[xX][yY][zZ][bB][iI][nN]
 # Task-monitor captures and result diagnostics copied out of the shared twin
 # artifact directory. Scope standalone reports to root/tests, preserving
 # TaskMonitorConsole sources, maintained runners and nested regression fixtures.

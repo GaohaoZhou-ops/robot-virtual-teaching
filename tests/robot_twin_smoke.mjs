@@ -4,9 +4,11 @@ import { Group } from 'three';
 import { createRobotTwinService, robotTwinAddress } from '../src/server/robotTwinService.js';
 import { ROBOT_TWIN_PREFIX, robotTwinSnapshot, robotTwinDisplayPose } from '../src/lib/robotTwin.js';
 import { RobotTwinClient } from '../src/lib/robotTwinClient.js';
+import { loadRobotTwinCredentials, rememberRobotTwinCredential } from '../src/lib/robotTwinCredentials.js';
+import { createRobotTwinFollowCamera } from '../src/lib/robotTwinFollowCamera.js';
 import { applyRobotJointValues } from '../src/lib/robotLoader.js';
 import { systemRobotFetch } from '../src/server/robotTwinTransport.js';
-import { createRobotTaskMonitor, isRobotMonitorRead } from '../src/server/robotTwinMonitor.js';
+import { createRobotCaptureHistory, createRobotTaskMonitor, isRobotMonitorRead } from '../src/server/robotTwinMonitor.js';
 import { robotTwinTask } from '../src/lib/robotTwinMonitor.js';
 import { BODY_CAMERAS } from '../src/lib/robotTwinCamera.js';
 
@@ -35,6 +37,31 @@ const partial = structuredClone(state); partial.robot.joint_samples.head[0].fres
 assert.equal(normalize({ state: partial }).jointCount, 19);
 assert.equal(normalize({ state: { robot: { ...state.robot, state_fresh: false } } }).jointCount, 0);
 const offline = { position: { x: 8, y: 7, z: .12 }, rpy: { roll: 3, pitch: 4, yaw: 5 } };
+for (const yaw of [-180, -90, 0, 90, 179]) {
+  const pose = { position: { x: 2, y: -3, z: .2 }, rpy: { roll: 0, pitch: 0, yaw } };
+  const original = structuredClone(pose), follow = createRobotTwinFollowCamera(pose, 1.8);
+  const heading = yaw * Math.PI / 180, dx = follow.position.x - 2, dy = follow.position.y + 3;
+  assert(dx * Math.cos(heading) + dy * Math.sin(heading) < -3, 'camera stays behind the chassis');
+  assert(Math.abs(dx * Math.sin(heading) - dy * Math.cos(heading)) < 1e-10);
+  assert(follow.position.z > pose.position.z + 1.8, 'view is higher than the robot');
+  assert((follow.target.x - 2) * Math.cos(heading) + (follow.target.y + 3) * Math.sin(heading) > .5);
+  const moved = { ...pose, position: { x: 4, y: -4, z: .2 } };
+  for (let i = 0; i < 120; ++i) follow.update(moved, 1 / 60);
+  assert(Math.abs(follow.position.x - 4 - dx) < 1e-5 && Math.abs(follow.position.y + 4 - dy) < 1e-5);
+  assert.deepEqual(pose, original, 'following never changes the robot pose');
+}
+const north = { position: { x: 0, y: 0, z: 0 }, rpy: { yaw: 179 } };
+const acrossWrap = { position: { x: 2, y: 3, z: 0 }, rpy: { yaw: -179 } };
+const at30Hz = createRobotTwinFollowCamera(north), at120Hz = createRobotTwinFollowCamera(north);
+for (let i = 0; i < 30; ++i) {
+  at30Hz.update(acrossWrap, 1 / 30);
+  assert(at30Hz.position.x > 3, 'heading crosses ±180° by the short arc');
+}
+for (let i = 0; i < 120; ++i) at120Hz.update(acrossWrap, 1 / 120);
+assert(at30Hz.position.distanceTo(at120Hz.position) < 1e-9, 'smoothing is independent of frame rate');
+const held = at30Hz.position.clone();
+at30Hz.update({ position: { x: NaN }, rpy: {} }, 1 / 60);
+assert(held.equals(at30Hz.position), 'invalid pose feedback cannot corrupt the camera');
 assert.deepEqual(robotTwinDisplayPose(offline, normalize().pose), { position: { x: 1.25, y: -2.5, z: .12 }, rpy: { roll: 0, pitch: 0, yaw: 90 } });
 assert.equal(offline.position.x, 8);
 const robot = new Group(), joint = new Group(); joint.name = 'left_J1';
@@ -49,7 +76,7 @@ for (const value of ['https://example.com', 'http://8.8.8.8', 'http://192.168.0.
 const traffic = [];
 const cameraTraffic = [], cameraLeases = new Map();
 let activeCamera = null, frameSequence = 0, freezeFrames = false, cameraDelay = 0;
-let unauthorized = false, stale = false, redirect = false, failures = false;
+let unauthorized = false, cameraUnauthorized = false, monitorUnauthorized = false, stale = false, redirect = false, failures = false;
 let taskFailures = false, resultFailures = false, algorithmProcessing = true;
 const run = { id: 'd'.repeat(32), phase: 'idle', task_name: '巡检任务', task_index: 0,
   parking_name: '一号停车点', point_name: '焊缝检测', stage: 'capture', message: '正在采集',
@@ -62,6 +89,55 @@ for (const path of ['/api/v1/execution/start', '/api/v1/execution/cancel', '/api
   `/api/v1/cameras/jobs/${capture.id}/wait-capture`, `/api/v1/execution/captures?run_id=${run.id}&offset=0&start=1`,
   '/api/v1/execution/captures?run_id=../../control&offset=0']) assert.equal(isRobotMonitorRead(path), false);
 const credential = 'a'.repeat(64), cookie = 'b'.repeat(64);
+
+// Complete history must include results older than the 24-record live window,
+// including a paired job split by a page boundary and late algorithms.
+{
+  const records = [{ id: 'f'.repeat(32), side: 'head-left', sequence: 1 }, ...Array.from({ length: 36 }, (_, index) => ({
+    id: (Math.floor(index / 2) + 100).toString(16).padStart(32, '0'), side: index % 2 ? 'right' : 'left', sequence: index + 2,
+  }))];
+  const calls = [], reads = new Map(); let running = 0, peak = 0, late = true;
+  const history = createRobotCaptureHistory(async (path, signal) => {
+    signal?.throwIfAborted(); calls.push(path); assert.ok(isRobotMonitorRead(path));
+    if (path.includes('/captures?')) {
+      const offset = Number(new URL(path, 'http://fixture').searchParams.get('offset'));
+      const page = records.slice(offset, offset + 11);
+      return { ok: true, run_id: run.id, captures: page, total: records.length, next_offset: offset + page.length };
+    }
+    running++; peak = Math.max(peak, running);
+    await new Promise((resolve) => setTimeout(resolve, 1)); running--;
+    reads.set(path, (reads.get(path) || 0) + 1);
+    const id = path.split('/').at(-1);
+    return { job: { state: 'complete', cameras: Object.fromEntries(['left', 'right'].map((side) => [side, {
+      files: [{ kind: 'png', url: `${path}/${side}/png` }],
+      inspection: { state: late && id === records[1].id ? 'processing' : 'complete', image_width: 480, image_height: 270, boxes: [] },
+    }])) } };
+  });
+  const all = [], details = new Map(); let offset = 0;
+  do {
+    const page = await history(run.id, offset);
+    if (!offset) assert.equal(page.pending, true);
+    all.push(...page.results); for (const item of page.captures) details.set(item.id, item);
+    offset = page.nextOffset;
+  } while (offset < records.length);
+  assert.equal(all.length, 36); assert.equal(new Set(all.map((item) => item.key)).size, 36);
+  assert.equal(details.size, 18); assert.equal(details.get(records[1].id).runId, run.id);
+  assert.ok([...details.values()].every((item) => item.sides.left.image && item.sides.right.image));
+  assert.equal(all.filter((item) => item.state === 'complete').length, 34);
+  assert.equal(peak, 2, 'history bounds concurrent metadata reads');
+  assert.ok(!calls.some((path) => /frame-captures|\/png|\/xyzbin/.test(path)), 'history reads only Zivid metadata');
+  const before = [...reads]; await history(run.id, 24);
+  assert.deepEqual([...reads], before, 'finished jobs are cached across page reads');
+  late = false;
+  assert.ok((await history(run.id, 0)).results.every((item) => item.state === 'complete'), 'old pending algorithms can finish');
+  const aborted = new AbortController(); aborted.abort();
+  const countBefore = calls.length;
+  await assert.rejects(history(run.id, 0, aborted.signal), { name: 'AbortError' });
+  assert.equal(calls.length, countBefore, 'cancelled history never contacts the robot');
+  await assert.rejects(createRobotCaptureHistory(async () => ({ ok: true, run_id: run.id, total: 2, next_offset: 0, captures: [] }))(run.id, 0), /索引格式/);
+  await assert.rejects(createRobotCaptureHistory(async () => { throw Object.assign(new Error('expired'), { code: 'ROBOT_AUTH_FAILED' }); })(run.id, 0),
+    { code: 'ROBOT_AUTH_FAILED' });
+}
 const send = (res, status, payload, headers = {}) => { res.writeHead(status, { 'Content-Type': 'application/json', ...headers }); res.end(JSON.stringify(payload)); };
 const upstream = createServer(async (req, res) => {
   traffic.push(`${req.method} ${req.url}`);
@@ -73,6 +149,8 @@ const upstream = createServer(async (req, res) => {
     return send(res, 200, { ok: true }, { 'Set-Cookie': `abx_access_9090=${cookie}; HttpOnly` });
   }
   if (unauthorized || req.headers.cookie !== `abx_access_9090=${cookie}`) return send(res, 401, { error: 'login required' });
+  if (cameraUnauthorized && req.url === '/api/v1/body-cameras') return send(res, 403, { error: 'camera auth required' });
+  if (monitorUnauthorized && req.url === '/api/v1/execution/activity') return send(res, 401, { error: 'task auth required' });
   if (req.url === '/api/v1/control-session' && req.method === 'GET') return send(res, 200, { token: credential });
   if (req.url === '/api/v1/body-cameras' && req.method === 'GET') return send(res, 200, { ok: true,
     cameras: [...Object.entries(BODY_CAMERAS).map(([id, label]) => ({ id, label, available: true })), { id: 'left', label: 'Zivid', available: true }] });
@@ -127,6 +205,13 @@ const listen = (server) => new Promise((resolve) => server.listen(0, '127.0.0.1'
 const upstreamUrl = await listen(upstream), appUrl = await listen(app);
 const request = (url, options) => fetch(appUrl + url, options);
 const client = new RobotTwinClient({ request });
+const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+const storage = new Map();
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+  getItem: (key) => storage.get(key) || null, setItem: (key, value) => storage.set(key, value),
+} });
+const profile = { id: 'robot-A', address: upstreamUrl };
+const otherProfile = { id: 'robot-B', address: 'http://127.0.0.1:9091' };
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const until = async (condition) => { const deadline = Date.now() + 7000; while (!condition()) { assert.ok(Date.now() < deadline, 'condition timed out'); await delay(25); } };
 try {
@@ -140,12 +225,25 @@ try {
     assert.equal(systemRedirect.status, 302, 'system transport must not follow redirects');
     redirect = false;
   }
-  assert.equal(await client.connect(upstreamUrl, 'wrong'), false);
+  rememberRobotTwinCredential(profile, 'old-password');
+  rememberRobotTwinCredential(otherProfile, 'another-password');
+  assert.equal(await client.connect(upstreamUrl, 'wrong', profile.id), false);
   assert.equal(client.state.active, false);
-  assert.equal(await client.connect(upstreamUrl, 'fixture-password'), true);
+  assert.equal(client.state.authFailed, true);
+  assert.deepEqual(loadRobotTwinCredentials().map((item) => item.id), [otherProfile.id], 'failed auth invalidates only that robot');
+  assert.equal(await client.connect(upstreamUrl, 'fixture-password', profile.id), true);
+  assert.equal(client.state.authFailed, false);
+  assert.equal(loadRobotTwinCredentials().find((item) => item.id === profile.id).password, 'fixture-password');
   await until(() => client.state.phase === 'live');
   assert.equal(client.state.pose.x, 1.25);
   assert.equal(client.state.joints.left_J7, 90);
+  await until(() => client.state.camera.catalogPhase === 'ready');
+  cameraUnauthorized = true;
+  await client.cameraClient.load();
+  assert.equal(client.state.authFailed, true, 'camera authentication failure invalidates the robot credential too');
+  assert.deepEqual(loadRobotTwinCredentials().map((item) => item.id), [otherProfile.id]);
+  cameraUnauthorized = false;
+  assert.equal(await client.connect(upstreamUrl, 'fixture-password', profile.id), true);
   await until(() => client.state.camera.catalogPhase === 'ready');
   assert.equal(client.state.camera.cameras.length, 6, 'Zivid is excluded from the preview catalog');
   assert.equal(cameraTraffic.length, 0, 'connecting the twin never opens a preview automatically');
@@ -183,7 +281,7 @@ try {
   await until(() => activeCamera === null);
   const releasedTraffic = traffic.length;
   await delay(600); assert.equal(traffic.length, releasedTraffic, 'disconnect releases the preview and stops all data reads');
-  assert.equal(await client.connect(upstreamUrl, 'fixture-password'), true);
+  assert.equal(await client.connect(upstreamUrl, 'fixture-password', profile.id), true);
   await until(() => client.state.phase === 'live');
   await until(() => client.state.monitorPhase === 'live');
   assert.equal(client.state.monitor.task, null);
@@ -194,7 +292,7 @@ try {
   algorithmProcessing = false;
   await until(() => client.state.monitor?.results[0]?.state === 'complete');
   assert.equal(client.state.monitor.results[0].labels[0], '表面裂纹');
-  assert.ok(client.state.monitor.results[0].output.includes('"x": 10'));
+  assert.ok(!Object.hasOwn(client.state.monitor.results[0], 'output'), 'raw algorithm output is not sent to the console');
   const jobReads = traffic.filter((entry) => entry.includes('/cameras/jobs/')).length;
   resultFailures = true;
   await until(() => Boolean(client.state.monitor?.resultsError));
@@ -233,12 +331,21 @@ try {
   await until(() => client.state.phase === 'live' && client.state.pose.x === 2.5);
   failures = true; await until(() => client.state.phase === 'stale');
   assert.equal(client.state.pose.x, 2.5);
+  assert.ok(loadRobotTwinCredentials().some((item) => item.id === profile.id), 'temporary failures preserve the password');
   failures = false; await until(() => client.state.phase === 'live');
   redirect = true; await until(() => client.state.phase === 'stale');
   assert.ok(!traffic.some((entry) => entry.includes('/control/enable')), 'never follow upstream redirects');
   redirect = false; await until(() => client.state.phase === 'live');
+  monitorUnauthorized = true;
+  await until(() => client.state.authFailed);
+  assert.deepEqual(loadRobotTwinCredentials().map((item) => item.id), [otherProfile.id], 'task authentication failure invalidates the robot credential');
+  monitorUnauthorized = false;
+  assert.equal(await client.connect(upstreamUrl, 'fixture-password', profile.id), true);
   unauthorized = true;
   await until(() => !client.token);
+  assert.equal(client.state.authFailed, true);
+  assert.equal(client.state.active, false, 'expired robot authentication exits the twin for password re-entry');
+  assert.deepEqual(loadRobotTwinCredentials().map((item) => item.id), [otherProfile.id]);
   const afterAuth = traffic.length;
   await delay(650); assert.equal(traffic.length, afterAuth, 'authentication expiry requires explicit reconnect');
   client.disconnect();
@@ -252,7 +359,14 @@ try {
 } finally {
   client.disconnect(); await service.close();
   await Promise.all([app, upstream].map((server) => new Promise((resolve) => server.close(resolve))));
+  if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage);
+  else delete globalThis.localStorage;
 }
+
+const expiredLocalSession = new RobotTwinClient({ request: async () => new Response(JSON.stringify({ error: 'local session expired' }), { status: 401 }) });
+assert.equal(await expiredLocalSession.connect('127.0.0.1:9090', 'fixture'), false);
+assert.equal(expiredLocalSession.state.authFailed, false, 'local session expiry is not a rejected robot password');
+expiredLocalSession.disconnect();
 
 // A late successful connection is discarded and its server session released.
 let finish, released = false;
@@ -280,6 +394,8 @@ const monitor = createRobotTaskMonitor(async (path) => {
 });
 const paired = await monitor();
 assert.equal(paired.results.length, 3); assert.equal(paired.results[0].camera, 'chest-color');
+assert.equal(paired.captures.length, 1, 'paired result rows share one selectable capture');
+assert.equal(paired.captures[0].id, capture.id);
 assert.ok(paired.results.every((item) => item.received && item.state === 'complete' && item.detectionCount === 0));
 assert.equal(monitorReads.filter((path) => path.includes('/cameras/jobs/')).length, 1);
 assert.equal(monitorReads.filter((path) => path.includes('/frame-captures/')).length, 1);
@@ -297,4 +413,5 @@ const demoMonitor = createRobotTaskMonitor(async (path) => {
 const demo = await demoMonitor();
 assert.equal(demo.results[0].demo, true); assert.equal(demo.results[0].labels[0], '演示缺陷');
 assert.equal(demo.resultLimit, 8); assert.equal(demoReads.length, 3);
+assert.deepEqual(demo.captures, [], 'demo annotations do not claim real capture files');
 console.log('Robot twin: SLAM, 20 joints, task monitoring, algorithm outputs, paired/body cameras, demo results, freshness, failure isolation, read-only allowlist and cancellation passed.');

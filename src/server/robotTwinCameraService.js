@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { robotFetch } from './robotTwinTransport.js';
 import { BODY_CAMERAS, isBodyCamera, ROBOT_CAMERA_INTERVAL } from '../lib/robotTwinCamera.js';
 
-const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
+const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Body-camera observation has its own exact API contract: catalog GET and
@@ -36,8 +36,9 @@ export function createRobotCamera(session) {
         let error;
         try { error = JSON.parse(bytes.toString('utf8')).error; } catch { /* HTTP status remains useful. */ }
         fail([401, 403, 409, 429, 503].includes(response.status) ? response.status : 502,
-          [401, 403].includes(response.status) ? '相机鉴权失败，请重新连接机器人'
-            : typeof error === 'string' ? error.slice(0, 500) : `本体相机接口返回 HTTP ${response.status}`);
+          [401, 403].includes(response.status) ? '相机鉴权失败，请重新输入管理员密码'
+            : typeof error === 'string' ? error.slice(0, 500) : `本体相机接口返回 HTTP ${response.status}`,
+          [401, 403].includes(response.status) ? 'ROBOT_AUTH_FAILED' : undefined);
       }
       if (kind !== 'frame') return JSON.parse(bytes.toString('utf8'));
       if (response.headers.get('content-type')?.split(';')[0] !== 'image/jpeg'

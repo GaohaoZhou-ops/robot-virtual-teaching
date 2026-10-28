@@ -6571,6 +6571,7 @@ export default function App() {
       view2d: view2dRef.current, view3d: view3dRef.current });
   };
   const robotTwin = useRobotTwin(JSON.stringify([appPage, teachingSpaceMode, mapData?.mapId, selectedRobot?.relativePath]));
+  const [twinTransitionError, setTwinTransitionError] = useState('');
   const displayedRobotPose = useMemo(() => robotTwin.active
     ? robotTwinDisplayPose(robotPose, robotTwin.pose) : robotPose, [robotTwin.active, robotTwin.pose, robotPose]);
   const displayedRobotJoints = useMemo(() => robotTwin.active
@@ -6633,12 +6634,14 @@ export default function App() {
       const archive = await buildProjectArchive(payload, { mapResource, existingRobotPackage, onProgress });
       return { bytes: archive.bytes, document, localIdentity };
     },
-    installInitial: async (bytes, project, isActive) => {
+    installInitial: async (bytes, project, isActive, onProgress) => {
       const { readProjectArchive } = await import('./lib/projectArchive.js');
-      const imported = await readProjectArchive(bytes);
+      const imported = await readProjectArchive(bytes, { onProgress: (value) => onProgress?.({ ...value, progress: (Number(value.progress) || 0) * 0.8 }) });
       if (!isActive()) return;
+      onProgress?.({ phase: '恢复地图、机器人与示教结果', progress: 0.85 });
       await applyImportedProject(async () => imported, `同步：${project.name}`, project.mode, { throwOnError: true, fromWorkSync: true });
       await waitForPaint();
+      onProgress?.({ phase: '保存恢复后的工程', progress: 1 });
     },
     persist: persistWorkspaceNow,
     loadCheckpoint: loadWorkSyncCheckpoint,
@@ -6647,18 +6650,25 @@ export default function App() {
     mapData?.sourceHash, mapData?.name, selectedRobot?.relativePath, independentTeachingName]));
 
   useEffect(() => { if (workSync.link) robotTwin.disconnect(); }, [workSync.link?.id]);
-  const twinDisabledReason = workSync.link || workSync.pending ? '请先结束离线协作或等待中的授权申请。'
+  const twinDisabledReason = workSync.deciding || (workSync.link && !workSync.link.transfer?.complete)
+    ? '离线工程正在同步，进度完成后即可连接机器人。'
+    : workSync.pending && !workSync.link ? '正在等待离线协作授权。'
+    : workSync.switching ? '正在保存工程并切换同步模式…'
     : appPage !== APP_PAGE_WORKBENCH || !mapData?.geometry || robotLoadState.status !== 'loaded'
       ? '请先进入工作台并加载场景和机器人模型。'
       : loadState.loading || sessionState.status !== 'ready' || teachingCaptureState.status === 'capturing'
         || polylineTeachingBusy || polylineTeachingOpen || robotSettingsModalOpen || robotParkingGhost?.editing
         ? '请先结束当前加载、采集或姿态编辑。' : '';
-  const twinControl = { ...robotTwin, disabledReason: twinDisabledReason,
-    connect: (address, password) => {
+  const twinControl = { ...robotTwin, error: twinTransitionError || robotTwin.error, disabledReason: twinDisabledReason,
+    connect: async (address, password, profileId) => {
       if (twinDisabledReason) return false;
-      stopTeachingTaskPlayback(false);
-      setRobotControlEnabled(false); setRobotParkingGhost(null); setShowRobotModel(true);
-      return robotTwin.connect(address, password);
+      setTwinTransitionError('');
+      try {
+        await workSync.prepareTwin();
+        stopTeachingTaskPlayback(false);
+        setRobotControlEnabled(false); setRobotParkingGhost(null); setShowRobotModel(true);
+        return await robotTwin.connect(address, password, profileId);
+      } catch (error) { setTwinTransitionError(error.message || '工程保存失败，请重试'); return false; }
     } };
 
   const openCacheAction = (kind, entry = null) => {

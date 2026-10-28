@@ -1,0 +1,96 @@
+.robot-twin-capture { margin: 0 0 20px; }
+.robot-twin-capture__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; color: #b9d0c6; font-size: 11px; }
+.robot-twin-capture__actions { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.robot-twin-capture__latest { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border: 1px solid #3b6653; border-radius: 3px; color: #a5d9bd; background: #142b21; font: inherit; font-size: 10px; cursor: pointer; }
+.robot-twin-capture__latest:hover { color: #d1efdf; background: #1e3c2d; }
+.robot-twin-capture__icon { display: inline-flex; align-items: center; justify-content: center; padding: 5px; color: #9dbfb1; background: transparent; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+.robot-twin-capture__icon:hover { background: #1e3830; color: #e1f3eb; }
+.robot-twin-capture__tabs { display: inline-flex; padding: 3px; gap: 3px; border: 1px solid #29453b; border-radius: 5px; background: #0a1915; }
+.robot-twin-capture__tabs button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border: 0; border-radius: 3px; background: transparent; color: #7e9b92; font: inherit; font-size: 11px; cursor: pointer; }
+.robot-twin-capture__tabs button[aria-pressed='true'] { background: #254c3e; color: #c0ebd5; }
+.robot-twin-capture__context { margin: 10px 0; color: #809c93; font-size: 10px; line-height: 1.7; overflow-wrap: anywhere; }
+.robot-twin-capture__pair { display: grid; gap: 12px; }
+.robot-twin-capture__side { margin: 0; min-width: 0; overflow: hidden; border: 1px solid #2b493d; border-radius: 5px; background: #081714; }
+.robot-twin-capture__side.is-selected:not(.is-alarm) { border-color: #79d8b099; }
+.robot-twin-capture__side.is-selected:not(.is-alarm) figcaption { background: #79d8b00c; color: #b5e4ce; }
+.robot-twin-capture__side figcaption { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-bottom: 1px solid #203a31; color: #93b8a6; font-size: 10px; }
+.robot-twin-capture__side figcaption strong { font-weight: 500; }
+.robot-twin-capture__side figcaption > span { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #ff9c96; font-size: 9px; }
+.robot-twin-capture__side.is-alarm { border-color: #bf504b; box-shadow: inset 0 0 0 1px #bf504b26; }
+.robot-twin-capture__side.is-alarm figcaption { background: #8c302525; border-bottom-color: #a14c4040; }
+.robot-twin-capture__side.is-alarm.is-suspected { border-color: #bca137; box-shadow: inset 0 0 0 1px #facc1526; }
+.robot-twin-capture__side.is-suspected figcaption { background: #80631725; border-bottom-color: #a18b4040; }
+.robot-twin-capture__side.is-suspected figcaption > span { color: #facc15; }
+.robot-twin-capture__image { position: relative; }
+.robot-twin-capture__image img { display: block; width: 100%; height: auto; }
+.robot-twin-capture__image svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.robot-twin-capture__image rect { fill: #ff44332e; stroke: #ff584b; stroke-width: 2; }
+.robot-twin-capture__image rect.is-suspected { fill: #facc1526; stroke: #facc15; }
+.robot-twin-capture__annotations { position: absolute; inset: 0; overflow: hidden; pointer-events: none; visibility: hidden; }
+.robot-twin-capture__detection-label { position: absolute; top: 0; left: 0; display: inline-flex; align-items: baseline; gap: 4px; box-sizing: border-box; max-width: 100%; padding: 3px 5px; border-radius: 2px; background: #b91c1cf2; color: #fff; font-family: inherit; font-size: 12px; line-height: 17px; font-weight: 600; white-space: nowrap; }
+.robot-twin-capture__detection-label.is-suspected { background: #facc15f2; color: #422006; }
+.robot-twin-capture__detection-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.robot-twin-capture__detection-number, .robot-twin-capture__detection-score { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.robot-twin-capture-dialog .robot-twin-capture__detection-label { font-size: 13px; line-height: 18px; }
+.robot-twin-capture__empty { display: flex; min-height: 150px; padding: 18px; box-sizing: border-box; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #77958c; text-align: center; font-size: 11px; line-height: 1.7; }
+.robot-twin-capture__empty button, .robot-twin-capture__in-dialog { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 12px; border: 1px solid #355b4d; border-radius: 4px; background: #162c24; color: #b2d5c4; font: inherit; font-size: 11px; cursor: pointer; }
+.robot-twin-capture__in-dialog { width: 100%; min-height: 88px; }
+.robot-twin-cloud { position: relative; height: 240px; }
+.robot-twin-cloud__canvas { position: absolute; inset: 0; touch-action: none; }
+.robot-twin-cloud__canvas canvas { display: block; width: 100%; height: 100%; }
+.robot-twin-cloud__reset { position: absolute; right: 6px; top: 6px; background: #0b1b17d9; }
+.robot-twin-cloud__annotation { position: absolute; top: 8px; left: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 5px 9px; max-width: calc(100% - 58px); padding: 5px 7px; color: #ffb0a7; background: #081714d9; border-radius: 3px; font-size: 10px; line-height: 1.5; pointer-events: none; }
+.robot-twin-cloud__annotation > span { display: inline-flex; align-items: center; gap: 5px; }
+.robot-twin-cloud__annotation i { width: 6px; height: 6px; border-radius: 50%; background: #ff2020; flex-shrink: 0; }
+.robot-twin-cloud__annotation .is-suspected { color: #facc15; }
+.robot-twin-cloud__annotation .is-suspected i { background: #facc15; }
+.robot-twin-cloud__annotation.is-warning { color: #d8b07a; }
+.robot-twin-cloud__hint, .robot-twin-cloud__count { position: absolute; bottom: 7px; pointer-events: none; color: #84aa9a; font-size: 9px; background: #081714b3; padding: 3px 5px; }
+.robot-twin-cloud__hint { left: 5px; }.robot-twin-cloud__count { right: 5px; font-variant-numeric: tabular-nums; }
+.robot-twin-cloud > .robot-twin-capture__empty { position: absolute; inset: 0; margin: 0; }
+.robot-twin-capture-dialog { box-sizing: border-box; width: min(1440px, calc(100vw - 36px)); height: min(800px, calc(100dvh - 36px)); max-height: calc(100dvh - 36px); padding: 0; overflow: hidden; background: #0b1b17; color: #d4e7dc; border: 1px solid #3e6855; border-radius: 6px; box-shadow: 0 30px 100px #0009; }
+.robot-twin-capture-dialog[open] { display: flex; flex-direction: column; }
+.robot-twin-capture-dialog::backdrop { background: #030b08d9; backdrop-filter: blur(4px); }
+.robot-twin-capture-dialog > header { display: flex; flex-shrink: 0; align-items: center; gap: 10px; padding: 16px; border-bottom: 1px solid #274437; }
+.robot-twin-capture-dialog h2 { margin: 0; font-size: 14px; font-weight: 500; }
+.robot-twin-capture-dialog > header button { margin-left: auto; }
+.robot-twin-capture-dialog__toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px 16px; }
+.robot-twin-capture-dialog__body { display: grid; grid-template-columns: 260px minmax(0, 1fr); flex: 1; min-height: 0; }
+.robot-twin-capture-dialog__viewer { min-width: 0; overflow: auto; overscroll-behavior: contain; }
+.robot-twin-capture-dialog__toolbar > span { flex-basis: 100%; color: #8da99d; font-size: 11px; overflow-wrap: anywhere; }
+.robot-twin-capture-dialog__toolbar .robot-twin-capture__latest { margin-left: auto; }
+.robot-twin-capture-history { display: flex; flex-direction: column; min-height: 0; min-width: 0; padding: 16px 12px 0; background: #091813; border-right: 1px solid #274437; }
+.robot-twin-capture-history__heading { display: flex; align-items: center; gap: 7px; color: #b5d5c6; }
+.robot-twin-capture-history__heading h3 { margin: 0; font-size: 12px; font-weight: 500; }
+.robot-twin-capture-history__heading > span { margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; color: #89b8a2; }
+.robot-twin-capture-history__hint { margin: 8px 0 12px; color: #76958a; font-size: 10px; }
+.robot-twin-capture-history__scroll { overflow: auto; overscroll-behavior: contain; min-height: 0; margin: 0 -6px; padding: 2px 6px 14px; scrollbar-width: thin; }
+.robot-twin-capture-history ul { display: grid; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.robot-twin-capture-history__item { display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; padding: 11px; border: 1px solid #29483a; border-radius: 4px; background: #10231b; color: #a4c7b5; text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.robot-twin-capture-history__item:hover { background: #193328; }
+.robot-twin-capture-history__item[data-severity='suspected'] { border-color: #806b2a; background: #302b142e; color: #facc15; }
+.robot-twin-capture-history__item[data-severity='defect'] { border-color: #873f37; background: #45211e45; color: #ff8e83; }
+.robot-twin-capture-history__item[aria-pressed='true'] { box-shadow: inset 3px 0 currentColor; border-color: currentColor; }
+.robot-twin-capture-history__title { display: flex; align-items: center; gap: 8px; }
+.robot-twin-capture-history__title > span { opacity: .7; font-size: 10px; font-variant-numeric: tabular-nums; }
+.robot-twin-capture-history__title strong { font-size: 11px; font-weight: 500; }
+.robot-twin-capture-history__title > svg { margin-left: auto; }
+.robot-twin-capture-history__context, .robot-twin-capture-history__labels { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.robot-twin-capture-history__context { color: #91a89b; }
+.robot-twin-capture-history__status { display: flex; align-items: center; gap: 5px; font-size: 10px; line-height: 1.6; }
+.robot-twin-capture-history__status > svg { flex-shrink: 0; }
+.robot-twin-capture-history__empty { padding: 18px 4px; color: #85a091; font-size: 11px; line-height: 1.8; }
+.robot-twin-capture-history__error { display: grid; gap: 8px; margin-top: 12px; font-size: 11px; line-height: 1.7; color: #e2b375; overflow-wrap: anywhere; }
+.robot-twin-capture-history__error button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 6px; background: #253326; border: 1px solid #5c6540; border-radius: 3px; color: inherit; font: inherit; cursor: pointer; }
+.robot-twin-capture-dialog .robot-twin-capture__pair { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 16px 16px; }
+.robot-twin-capture-dialog .robot-twin-cloud { height: min(52vh, 440px); min-height: 240px; }
+.robot-twin-capture button:focus-visible, .robot-twin-capture-dialog button:focus-visible { outline: 2px solid #9bdcbc; outline-offset: 2px; }
+@media (max-width: 1000px) {
+  .robot-twin-capture-dialog__body { grid-template-columns: 220px minmax(0, 1fr); }
+  .robot-twin-capture-dialog .robot-twin-capture__pair { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .robot-twin-capture-dialog__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(150px, 30%) minmax(0, 1fr); }
+  .robot-twin-capture-history { border-right: 0; border-bottom: 1px solid #274437; padding-top: 10px; }
+  .robot-twin-capture-history__hint { margin: 6px 0; }
+}
