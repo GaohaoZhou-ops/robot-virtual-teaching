@@ -3,15 +3,27 @@ import SceneKit
 
 private let accent = Color(red: 0.35, green: 0.86, blue: 0.91)
 
+private struct PhoneTeachingLayout: ViewModifier {
+    let landscape: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if TeachingDevice.isPhone {
+            content.ignoresSafeArea(.container, edges: landscape ? .all : [])
+                .statusBarHidden(landscape)
+        } else { content }
+    }
+}
+
 private struct PhoneCaptureButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
+    var width: CGFloat = 52
+    var height: CGFloat = 60
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .frame(width: 84, height: 84)
+            .frame(width: width, height: height)
             .foregroundStyle(enabled ? Color(red: 0.02, green: 0.12, blue: 0.14) : .white.opacity(0.45))
-            .background(enabled ? accent : .white.opacity(0.12), in: Circle())
-            .overlay(Circle().strokeBorder(enabled ? .white.opacity(0.4) : .white.opacity(0.16), lineWidth: 1))
-            .contentShape(Circle())
+            .background(enabled ? accent : .white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(enabled ? .white.opacity(0.4) : .white.opacity(0.16), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
@@ -67,7 +79,9 @@ struct ContentView: View {
         GeometryReader { viewport in
         Group {
             if TeachingSession.supportsLocalTeaching, let project = session.current, let geometry = session.geometry {
-                TeachingView(projectID: project.id, geometry: geometry, bottomSafeArea: viewport.safeAreaInsets.bottom)
+                TeachingView(projectID: project.id, geometry: geometry, bottomSafeArea: viewport.safeAreaInsets.bottom,
+                             phoneSafeArea: viewport.safeAreaInsets)
+                    .modifier(PhoneTeachingLayout(landscape: viewport.size.width > viewport.size.height))
             } else { library(bottomSafeArea: viewport.safeAreaInsets.bottom) }
         }.frame(width: viewport.size.width, height: viewport.size.height)
         }.tint(accent).task { await session.reload() }
@@ -379,7 +393,7 @@ struct ContentView: View {
                 Button("重试连接") { pairManually() }
                     .buttonStyle(.bordered).disabled(!canPairManually).accessibilityIdentifier("retry-pairing")
             }
-            Spacer(minLength: 4)
+            if !TeachingDevice.isPhone { Spacer(minLength: 4) }
             if !session.status.isEmpty && session.transferProgress == nil {
                 Text(session.status).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
@@ -1152,6 +1166,7 @@ struct TeachingView: View {
     @State private var zividFieldOfViewEnabled = true
     @State private var tiltControlsOpen = false
     @State private var sidebarCollapsed = TeachingDevice.isPhone
+    @State private var phoneNotchOnRight = true
     @State private var nearbyPoseConfirmation: NearbyPoseConfirmation?
     @State private var loadedProjectID: String?
     @State private var sidebarContentHeight: CGFloat = 0
@@ -1159,6 +1174,7 @@ struct TeachingView: View {
     let projectID: String
     let geometry: ModelGeometry
     let bottomSafeArea: CGFloat
+    var phoneSafeArea = EdgeInsets()
     private let sidebarPadding: CGFloat = 22
     private var completed: Bool { session.current?.result.completedAt != nil }
     private var count: Int { session.current?.result.samples.count ?? 0 }
@@ -1402,15 +1418,24 @@ struct TeachingView: View {
     }
     private func phoneWorkspace(size: CGSize) -> some View {
         let portrait = size.width < size.height
-        let panelWidth = portrait ? size.width : min(300, size.width * 0.42)
+        // The full side safe area protects the notch at mid-height. On the
+        // opposite edge, 24 pt is enough for the rounded screen corners.
+        let trailingInset = portrait ? 0 : max(24, phoneNotchOnRight ? phoneSafeArea.trailing : 0)
+        let leadingInset = portrait ? 0 : max(24, phoneSafeArea.leading - 12)
+        let railWidth = 58 + trailingInset
+        let panelWidth = portrait ? size.width : min(300, size.width * 0.36) + trailingInset
         let panelHeight = portrait ? min(540, size.height * 0.66) : size.height
-        let controlsWidth = !portrait && !sidebarCollapsed ? size.width - panelWidth : size.width
+        let controlsWidth = portrait ? size.width : size.width - (sidebarCollapsed ? railWidth : panelWidth)
+        // Keep the live camera's viewport stable when opening the inspector.
+        // The preview can use the remaining canvas without sitting behind it.
+        let renderSize = CGSize(width: portrait ? size.width : liveCamera ? size.width - railWidth : controlsWidth,
+                                height: size.height)
         return ZStack(alignment: .topLeading) {
             // This surface never moves between stacks when rotating or folding
             // the controls: AR tracking, calibration and raycasts stay alive.
             ZStack {
                 Color.black
-                modelViewport(in: size)
+                modelViewport(in: renderSize, defaultMagnification: completed && !portrait ? 3 : 1)
                 if liveCamera {
                     Image(systemName: ar.placed && !ar.repositioning ? "plus" : "viewfinder")
                         .font(.system(size: ar.placed && !ar.repositioning ? 24 : 44, weight: .ultraLight))
@@ -1418,11 +1443,11 @@ struct TeachingView: View {
                         .shadow(color: .black, radius: 2).allowsHitTesting(false)
                         .accessibilityLabel("模型放置准星").accessibilityIdentifier("teaching-placement-target")
                 }
-            }.frame(width: size.width, height: size.height).clipped()
+            }.frame(width: renderSize.width, height: renderSize.height).clipped()
                 .accessibilityElement(children: .contain).accessibilityIdentifier("teaching-viewport")
 
             VStack(spacing: 8) {
-                phoneToolbar
+                phoneToolbar(landscape: !portrait)
                 parkingReferenceLegend
                 if liveCamera && levelVisible && (sidebarCollapsed || !portrait) && (portrait || !ar.adjustingPlacement) {
                     HStack {
@@ -1433,41 +1458,35 @@ struct TeachingView: View {
                 }
                 Spacer(minLength: 0)
                 if sidebarCollapsed && portrait {
-                    VStack(spacing: 10) {
-                        Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading).lineLimit(3)
-                        HStack {
-                            Text("\(count) 个 Pose").accessibilityIdentifier("floating-pose-count")
-                            Spacer()
-                            Text("\(coverage.coverageTitle) \(coverage.coveragePercentage)")
-                                .foregroundStyle(accent).accessibilityIdentifier("floating-coverage-percentage")
-                        }.font(.caption.monospacedDigit())
-                        if ar.adjustingPlacement { placementAdjustmentControls }
-                        else { phoneActionBar }
-                    }.padding(12).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.12)))
-                        .padding(12)
-                        .accessibilityElement(children: .contain).accessibilityIdentifier("floating-pose-controls")
+                    phonePortraitControls
                 }
-            }.frame(width: controlsWidth, height: size.height)
+            }.padding(.leading, leadingInset)
+                .frame(width: controlsWidth, height: size.height)
 
             if sidebarCollapsed && !portrait {
                 phoneLandscapeControls
-                    .padding(.trailing, 12).padding(.top, 80).padding(.bottom, 12)
+                    .padding(.leading, 6).padding(.trailing, trailingInset)
+                    .padding(.top, max(12, phoneSafeArea.top)).padding(.bottom, max(12, phoneSafeArea.bottom))
+                    .frame(width: railWidth, height: size.height)
+                    .background(Color(red: 0.025, green: 0.05, blue: 0.065).opacity(0.96))
+                    .overlay(alignment: .leading) { Rectangle().fill(.white.opacity(0.12)).frame(width: 1) }
+                    .accessibilityElement(children: .contain).accessibilityIdentifier("phone-landscape-controls")
                     .frame(width: size.width, height: size.height, alignment: .trailing)
-                if !canRecordPose || !session.error.isEmpty {
+                if (!completed && !canRecordPose) || !session.error.isEmpty {
                     Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
                         .lineLimit(2).padding(.horizontal, 12).padding(.vertical, 8)
-                        .frame(maxWidth: min(320, size.width - 164), alignment: .leading)
+                        .frame(maxWidth: min(360, controlsWidth - leadingInset - 24), alignment: .leading)
                         .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
                         .allowsHitTesting(false).accessibilityIdentifier("phone-landscape-hint")
-                        .padding(12)
+                        .padding(.leading, leadingInset + 8).padding(.bottom, max(12, phoneSafeArea.bottom))
                         .frame(width: size.width, height: size.height, alignment: .bottomLeading)
                 }
             }
 
             if !sidebarCollapsed {
             phoneInspector
+                .padding(.trailing, portrait ? 0 : trailingInset)
+                .padding(.bottom, portrait ? 0 : max(12, phoneSafeArea.bottom))
                 .frame(width: panelWidth, height: panelHeight)
                 .background(Color(red: 0.025, green: 0.05, blue: 0.065))
                 .clipShape(RoundedRectangle(cornerRadius: portrait ? 18 : 0))
@@ -1476,54 +1495,123 @@ struct TeachingView: View {
             }
         }.frame(width: size.width, height: size.height)
             .background(Color(red: 0.025, green: 0.05, blue: 0.065).ignoresSafeArea())
+            .onAppear {
+                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+                updatePhoneLandscapeOrientation()
+            }
+            .onDisappear { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                updatePhoneLandscapeOrientation()
+            }
+    }
+
+    private func updatePhoneLandscapeOrientation() {
+        let orientation = UIDevice.current.orientation
+        // Preserve the last landscape side while the phone lies flat. Starting
+        // with the larger inset also protects devices whose orientation is unknown.
+        if orientation.isLandscape { phoneNotchOnRight = orientation == .landscapeRight }
+    }
+
+    private var phonePortraitControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !session.error.isEmpty || (!completed && liveCamera && !canRecordPose) {
+                Text(viewportMessage).font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(2).padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 12).allowsHitTesting(false)
+                    .accessibilityIdentifier("phone-portrait-hint")
+            }
+            HStack(spacing: 8) {
+                if ar.adjustingPlacement {
+                    phonePlacementAdjustmentButtons
+                } else {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("\(count) 个 Pose").font(.caption.weight(.medium).monospacedDigit())
+                            .accessibilityIdentifier("floating-pose-count")
+                        Text("覆盖 \(coverage.coveragePercentage)").font(.caption2.monospacedDigit())
+                            .foregroundStyle(accent)
+                            .accessibilityLabel("\(coverage.coverageTitle) \(coverage.coveragePercentage)")
+                            .accessibilityIdentifier("floating-coverage-percentage")
+                    }.lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    phoneCaptureButton(horizontal: true)
+                    HStack(spacing: 8) {
+                        reviewPosesButton(compact: true).frame(width: 48)
+                        if !completed { finishTeachingButton(compact: true).frame(width: 48) }
+                    }.frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }.padding(.horizontal, 12).padding(.vertical, 8)
+                // The system already reserves the home-indicator inset. Extend
+                // only the background into it instead of adding a second gap.
+                .background(Color(red: 0.025, green: 0.05, blue: 0.065).opacity(0.96)
+                    .ignoresSafeArea(.container, edges: .bottom))
+                .overlay(alignment: .top) { Rectangle().fill(.white.opacity(0.12)).frame(height: 1) }
+                .accessibilityElement(children: .contain).accessibilityIdentifier("floating-pose-controls")
+        }
     }
 
     private var phoneLandscapeControls: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 8) {
+            Button { setSidebarCollapsed(false) } label: {
+                Image(systemName: "sidebar.right").frame(width: 44, height: 44)
+            }.accessibilityLabel("展开面板").accessibilityIdentifier("expand-teaching-panel")
             VStack(spacing: 3) {
-                Text("\(count) 个 Pose").font(.subheadline.weight(.medium).monospacedDigit())
+                Text("\(count) Pose").font(.caption.weight(.medium).monospacedDigit())
+                    .accessibilityLabel("\(count) 个 Pose")
                     .accessibilityIdentifier("floating-pose-count")
-                Text("覆盖 \(coverage.coveragePercentage)").font(.caption.monospacedDigit()).foregroundStyle(accent)
+                Text(coverage.coveragePercentage).font(.caption2.monospacedDigit()).foregroundStyle(accent)
                     .accessibilityLabel("\(coverage.coverageTitle) \(coverage.coveragePercentage)")
                     .accessibilityIdentifier("floating-coverage-percentage")
             }.lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 8)
             if ar.adjustingPlacement {
                 placementAdjustmentControls
             } else {
-                Button {
-                    if completed {
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        resultSyncOpen = true
-                    } else { recordPose() }
-                } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: completed ? "arrow.triangle.2.circlepath" : "plus.viewfinder")
-                            .font(.system(size: 25, weight: .medium))
-                        Text(completed ? "同步数据" : "记录 Pose").font(.caption.weight(.semibold)).lineLimit(1)
-                    }
-                }.buttonStyle(PhoneCaptureButtonStyle())
-                    .disabled(completed ? session.busy : !canRecordPose || nearbyPoseConfirmation != nil)
-                    .accessibilityLabel(completed ? "同步数据" : "记录 Pose")
-                    .accessibilityIdentifier(completed ? "sync-teaching-result" : "capture-pose")
-                HStack(spacing: 8) {
-                    reviewPosesButton(compact: true).frame(width: 52)
-                    if !completed { finishTeachingButton(compact: true).frame(width: 52) }
-                }
+                phoneCaptureButton(horizontal: false)
             }
-        }.frame(width: 112).padding(8)
-            .background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.12)))
-            .accessibilityElement(children: .contain).accessibilityIdentifier("phone-landscape-controls")
+            Spacer(minLength: 8)
+            VStack(spacing: 4) {
+                reviewPosesButton(compact: true).frame(width: 52)
+                if !completed { finishTeachingButton(compact: true).frame(width: 52) }
+            }
+        }.frame(width: 52)
     }
 
-    private var phoneToolbar: some View {
+    private func phoneCaptureButton(horizontal: Bool) -> some View {
+        Button {
+            if completed {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                resultSyncOpen = true
+            } else { recordPose() }
+        } label: {
+            if horizontal {
+                Label(completed ? "同步数据" : "记录 Pose",
+                      systemImage: completed ? "arrow.triangle.2.circlepath" : "plus.viewfinder")
+                    .font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            } else {
+                VStack(spacing: 5) {
+                    Image(systemName: completed ? "arrow.triangle.2.circlepath" : "plus.viewfinder")
+                        .font(.system(size: 20, weight: .medium))
+                    Text(completed ? "同步" : "记录").font(.caption2.weight(.semibold)).lineLimit(1)
+                }
+            }
+        }.buttonStyle(PhoneCaptureButtonStyle(width: horizontal ? 120 : 52, height: horizontal ? 48 : 60))
+            .disabled(completed ? session.busy : !canRecordPose || nearbyPoseConfirmation != nil)
+            .accessibilityLabel(completed ? "同步数据" : "记录 Pose")
+            .accessibilityIdentifier(completed ? "sync-teaching-result" : "capture-pose")
+    }
+
+    private func phoneToolbar(landscape: Bool) -> some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 Button { ar.stop(); Task { await session.close() } } label: {
                     Image(systemName: "chevron.left").frame(width: 44, height: 44)
                 }.accessibilityLabel("本地项目").accessibilityIdentifier("back-to-library").disabled(session.busy)
-                Text(session.current?.session.manifest.name ?? "虚拟示教")
-                    .font(.subheadline.weight(.medium)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(session.current?.session.manifest.name ?? "虚拟示教")
+                        .font(.subheadline.weight(.medium)).lineLimit(1)
+                    if landscape { phoneTrackingStatus.font(.caption2) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
                 if liveCamera {
                     Button { levelVisible.toggle() } label: {
                         Image(systemName: "move.3d").frame(width: 44, height: 44)
@@ -1534,21 +1622,30 @@ struct TeachingView: View {
                 Button { displaySettingsOpen = true } label: {
                     Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44)
                 }.accessibilityLabel("显示设置").accessibilityIdentifier("display-settings")
-                Button { setSidebarCollapsed(!sidebarCollapsed) } label: {
-                    Image(systemName: "sidebar.right").frame(width: 44, height: 44)
-                }.accessibilityLabel(sidebarCollapsed ? "展开面板" : "收起面板")
-                    .accessibilityIdentifier(sidebarCollapsed ? "expand-teaching-panel" : "phone-toggle-panel")
+                if !landscape {
+                    Button { setSidebarCollapsed(!sidebarCollapsed) } label: {
+                        Image(systemName: "sidebar.right").frame(width: 44, height: 44)
+                    }.accessibilityLabel(sidebarCollapsed ? "展开面板" : "收起面板")
+                        .accessibilityIdentifier(sidebarCollapsed ? "expand-teaching-panel" : "phone-toggle-panel")
+                }
             }
-            HStack(spacing: 8) {
+            if !landscape { phoneTrackingStatus.font(.caption).padding(.horizontal, 12) }
+        }.padding(.horizontal, 4).padding(.bottom, landscape ? 0 : 10).background(.black.opacity(0.8))
+            .accessibilityElement(children: .contain).accessibilityIdentifier("phone-teaching-toolbar")
+    }
+
+    private var phoneTrackingStatus: some View {
+        HStack(spacing: 8) {
                 Label(completed ? "已完成 · 结果预览" : ar.tracking,
                       systemImage: completed ? "checkmark.circle" : ar.trackingNormal ? "location.fill" : "location.slash")
                     .foregroundStyle(completed || ar.trackingNormal ? accent : .orange)
                     .accessibilityIdentifier("teaching-tracking-status")
                 Spacer(minLength: 0)
-                Text(liveCamera ? (ar.depthAvailable ? "LiDAR 已就绪" : "等待 LiDAR") : "三维预览")
-                    .foregroundStyle(.secondary).accessibilityIdentifier("teaching-depth-status")
-            }.font(.caption).lineLimit(1).minimumScaleFactor(0.8).padding(.horizontal, 12)
-        }.padding(.horizontal, 4).padding(.bottom, 10).background(.black.opacity(0.8))
+                if liveCamera {
+                    Text(ar.depthAvailable ? "LiDAR 已就绪" : "等待 LiDAR")
+                        .foregroundStyle(.secondary).accessibilityIdentifier("teaching-depth-status")
+                }
+        }.lineLimit(1).minimumScaleFactor(0.8)
     }
 
     private var phoneInspector: some View {
@@ -1584,7 +1681,7 @@ struct TeachingView: View {
                         calibrationPanel
                         if liveCamera && (ar.calibrated || ar.adjustingPlacement) { placementAdjustmentControls }
                     }
-                    Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
+                    if !completed { Text(viewportMessage).font(.caption).foregroundStyle(.secondary) }
                     if session.busy { ProgressView() }
                     if !session.status.isEmpty { Text(session.status).font(.caption).foregroundStyle(.secondary) }
                     if !renderer.error.isEmpty { Text(renderer.error).font(.caption).foregroundStyle(.orange) }
@@ -1700,7 +1797,12 @@ struct TeachingView: View {
             .accessibilityIdentifier("capture-pose")
     }
     private var placementAdjustmentControls: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 8) { placementAdjustmentActions }.font(.subheadline)
+    }
+    private var phonePlacementAdjustmentButtons: some View {
+        HStack(spacing: 8) { placementAdjustmentActions }.font(.subheadline)
+    }
+    @ViewBuilder private var placementAdjustmentActions: some View {
             if ar.adjustingPlacement {
                 Button {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -1722,15 +1824,16 @@ struct TeachingView: View {
                 }.buttonStyle(.bordered).disabled(session.busy || renderer.geometry == nil)
                     .accessibilityIdentifier("adjust-model-placement")
             }
-        }.font(.subheadline)
     }
-    private func modelViewport(in available: CGSize) -> some View {
-        let size = zividFieldOfViewEnabled ? fieldOfView?.fittedSize(in: available) ?? available : available
+    private func modelViewport(in available: CGSize, defaultMagnification: CGFloat = 1) -> some View {
+        let fillsPhoneLandscape = TeachingDevice.isPhone && available.width > available.height
+        let size = zividFieldOfViewEnabled && !fillsPhoneLandscape ? fieldOfView?.fittedSize(in: available) ?? available : available
         return ZStack {
             if liveCamera { ARSceneView(controller: ar) }
             else {
                 ObjectPreviewView(geometry: geometry, rendered: renderer.geometry,
-                                  initialViewport: completed ? size : nil,
+                                  initialViewport: completed || TeachingDevice.isPhone ? size : nil,
+                                  defaultMagnification: defaultMagnification,
                                   navigationReference: session.current?.session.navigationReference)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("三维物体预览，拖动旋转，双指缩放和平移")
@@ -1969,7 +2072,21 @@ struct ObjectPreviewView: UIViewRepresentable {
     let geometry: ModelGeometry
     let rendered: SCNGeometry?
     var initialViewport: CGSize? = nil
+    var defaultMagnification: CGFloat = 1
     var navigationReference: NavigationReference? = nil
+    final class Coordinator {
+        private var magnification: CGFloat = 1
+        func updateMagnification(_ requested: CGFloat, in view: SCNView) {
+            let next = requested.isFinite && requested > 0 ? requested : 1
+            guard next != magnification, let lens = view.pointOfView?.camera else { return }
+            // Scale the projected model without moving the inspection camera.
+            // Apply only the ratio between defaults so refreshes cannot compound
+            // the zoom and rotation preserves any manual camera adjustments.
+            lens.fieldOfView = atan(tan(lens.fieldOfView * .pi / 360) * magnification / next) * 360 / .pi
+            magnification = next
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> SCNView {
         let view = SCNView(); view.scene = SCNScene(); view.backgroundColor = UIColor(red: 0.025, green: 0.05, blue: 0.065, alpha: 1)
         let object = SCNNode(geometry: rendered); object.name = "preview-object"; view.scene?.rootNode.addChildNode(object)
@@ -2008,9 +2125,11 @@ struct ObjectPreviewView: UIViewRepresentable {
         view.scene?.rootNode.addChildNode(camera); view.pointOfView = camera
         view.allowsCameraControl = true; view.defaultCameraController.worldUp = SCNVector3(0, 0, 1)
         view.defaultCameraController.target = center
+        context.coordinator.updateMagnification(defaultMagnification, in: view)
         return view
     }
     func updateUIView(_ view: SCNView, context: Context) {
+        context.coordinator.updateMagnification(defaultMagnification, in: view)
         let object = view.scene?.rootNode.childNode(withName: "preview-object", recursively: false)
         if object?.geometry !== rendered { object?.geometry = rendered }
     }
@@ -2046,7 +2165,7 @@ struct PoseReviewView: View {
                     let landscape = viewport.size.width > viewport.size.height
                     let layout = landscape ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
                     layout {
-                        posePreview
+                        posePreview(defaultMagnification: landscape ? 3 : 1, fillsInspectionViewport: !landscape)
                             .frame(height: landscape ? nil : max(180, viewport.size.height * 0.53))
                         VStack(spacing: 0) {
                             poseList()
@@ -2068,11 +2187,11 @@ struct PoseReviewView: View {
                             poseEditorPanel(maximumHeight: min(290, viewport.size.height * 0.45))
                         }.frame(width: 280)
                         Divider()
-                        posePreview
+                        posePreview()
                     }
                 } else {
                     VStack(spacing: 0) {
-                        posePreview.frame(height: max(180, viewport.size.height * 0.62))
+                        posePreview().frame(height: max(180, viewport.size.height * 0.62))
                         Divider()
                         if viewport.size.width >= 600 {
                             HStack(alignment: .top, spacing: 0) {
@@ -2213,29 +2332,27 @@ struct PoseReviewView: View {
     private var previewToolbar: some View {
         VStack(spacing: 0) {
             if TeachingDevice.isPhone {
-                VStack(spacing: 6) {
-                    HStack(spacing: 6) {
-                        previewModeButtons
-                        Spacer(minLength: 0)
-                        resetPreviewButton.labelStyle(.iconOnly)
-                        Button { poseNameFocused = false; dismiss() } label: {
-                            Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44)
-                        }.accessibilityLabel("返回示教").accessibilityIdentifier("close-pose-review")
-                    }
-                    previewQualityControl
+                HStack(spacing: 6) {
+                    Button { poseNameFocused = false; dismiss() } label: {
+                        Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44)
+                    }.accessibilityLabel("返回示教").accessibilityIdentifier("close-pose-review")
+                    previewQualityControl(compact: true).frame(maxWidth: .infinity)
+                    if previewMode == .image { resetPreviewButton.labelStyle(.iconOnly) }
+                    phonePreviewModeButton
                 }.padding(.horizontal, 10).padding(.vertical, 6)
+                    .accessibilityElement(children: .contain).accessibilityIdentifier("phone-pose-preview-toolbar")
             } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    previewModeButtons; Spacer(minLength: 0); previewQualityControl; previewActions
+                    previewModeButtons; Spacer(minLength: 0); previewQualityControl(); previewActions
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 12) { previewModeButtons; Spacer(minLength: 0); previewActions }
-                    previewQualityControl
+                    previewQualityControl()
                 }
                 VStack(alignment: .trailing, spacing: 8) {
                     HStack { previewModeButtons; Spacer(minLength: 0) }
-                    HStack { previewQualityControl; Spacer(minLength: 0) }
+                    HStack { previewQualityControl(); Spacer(minLength: 0) }
                     previewActions
                 }
             }.padding(12)
@@ -2249,7 +2366,7 @@ struct PoseReviewView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { previewToolbarHeight = $0 }
     }
 
-    private var posePreview: some View {
+    private func posePreview(defaultMagnification: Float = 1, fillsInspectionViewport: Bool = false) -> some View {
         VStack(spacing: 0) {
             previewToolbar
             Divider()
@@ -2267,6 +2384,9 @@ struct PoseReviewView: View {
                                     status: ready ? previewPreparation.status : "正在提取当前 Pose 点云…",
                                     sample: selected, mode: previewMode, resetRevision: previewReset,
                                     navigationReference: session.current?.session.navigationReference,
+                                    defaultMagnification: defaultMagnification,
+                                    fillsInspectionViewport: fillsInspectionViewport,
+                                    overviewControlsTopInset: TeachingDevice.isPhone ? 64 : 12,
                                     showsCameraPose: $showsPoseCamera, showsModelOrigin: $showsModelOrigin,
                                     overviewExpanded: $overviewExpanded)
                         .frame(width: width, height: height)
@@ -2275,12 +2395,34 @@ struct PoseReviewView: View {
                         .accessibilityValue(previewMode == .interactive ? "3D 交互视图" : "2D 记录视角图像")
                         .accessibilityIdentifier("pose-review-preview")
                         .frame(width: area.size.width, height: area.size.height)
+                        .overlay(alignment: .topTrailing) {
+                            if TeachingDevice.isPhone && interactive {
+                                phoneFloatingResetPreviewButton
+                                    .padding(.trailing, 12)
+                                    .padding(.top, 12)
+                            }
+                        }
                 }
                 .ignoresSafeArea(.container, edges: previewMode == .interactive ? .bottom : [])
             } else { ContentUnavailableView("还没有 Pose", systemImage: "viewfinder") }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black.opacity(0.25))
             .accessibilityElement(children: .contain).accessibilityIdentifier("pose-review-viewport")
+    }
+
+    private var phonePreviewModeButton: some View {
+        Button {
+            poseNameFocused = false
+            previewMode = previewMode == .interactive ? .image : .interactive
+        } label: {
+            Label(previewMode == .interactive ? "3D模型" : "2D图像", systemImage: "arrow.triangle.2.circlepath")
+                .font(.subheadline.weight(.medium)).padding(.vertical, 5)
+        }.buttonStyle(.bordered).tint(accent)
+            .fixedSize(horizontal: true, vertical: false).disabled(selected == nil)
+            .accessibilityLabel("切换 3D / 2D")
+            .accessibilityValue(previewMode == .interactive ? "3D模型" : "2D图像")
+            .accessibilityHint(previewMode == .interactive ? "显示 2D 记录图像" : "显示 3D 交互模型")
+            .accessibilityIdentifier("phone-pose-preview-mode")
     }
 
     private var previewModeButtons: some View {
@@ -2318,7 +2460,7 @@ struct PoseReviewView: View {
         return byCount.sorted { $0.key < $1.key }.map(\.value)
     }
 
-    private var previewQualityControl: some View {
+    private func previewQualityControl(compact: Bool = false) -> some View {
         let options = qualityOptions
         let count = geometry.renderedCount(session.displaySettings)
         let total = geometry.usesMesh(session.displaySettings) ? geometry.indices / 3 : geometry.vertices
@@ -2331,25 +2473,31 @@ struct PoseReviewView: View {
                 guard settings != session.displaySettings else { return }
                 session.setDisplaySettings(settings)
             })
-        return HStack(spacing: 6) {
+        return HStack(spacing: compact ? 4 : 6) {
             Text("质量").font(.caption).foregroundStyle(.secondary)
+                .opacity(compact && renderer.preparing ? 0 : 1)
+                .overlay { if compact { previewQualityProgress } }
             Slider(value: selection, in: 0...Double(max(options.count - 1, 1)), step: 1)
-                .frame(width: 100).tint(accent)
+                .frame(minWidth: compact ? 64 : 100, idealWidth: 100, maxWidth: compact ? 120 : 100).tint(accent)
                 .disabled(selected == nil || options.count < 2)
                 .accessibilityLabel("点云 / 模型显示质量")
                 .accessibilityValue(percentage)
                 .accessibilityHint("向右提高细节，向左提升流畅度")
                 .accessibilityIdentifier("pose-preview-quality")
             Text(percentage).font(.caption.monospacedDigit()).foregroundStyle(accent)
-                .frame(width: 46, alignment: .trailing)
-            ZStack {
-                if renderer.preparing {
-                    ProgressView().controlSize(.mini)
-                        .accessibilityLabel("正在更新显示质量")
-                        .accessibilityIdentifier("pose-preview-quality-progress")
-                }
-            }.frame(width: 14, height: 14)
-        }.fixedSize(horizontal: true, vertical: false)
+                .frame(width: compact ? 38 : 46, alignment: .trailing)
+            if !compact { previewQualityProgress }
+        }.fixedSize(horizontal: !compact, vertical: false)
+    }
+
+    private var previewQualityProgress: some View {
+        ZStack {
+            if renderer.preparing {
+                ProgressView().controlSize(.mini)
+                    .accessibilityLabel("正在更新显示质量")
+                    .accessibilityIdentifier("pose-preview-quality-progress")
+            }
+        }.frame(width: 14, height: 14)
     }
 
     private var previewActions: some View {
@@ -2368,6 +2516,20 @@ struct PoseReviewView: View {
             Label(previewMode == .image ? "恢复完整画幅" : "恢复记录视角", systemImage: "arrow.counterclockwise").font(.subheadline)
                 .padding(.vertical, 5)
         }.buttonStyle(.bordered).disabled(selected == nil)
+            .accessibilityIdentifier("reset-pose-preview")
+    }
+
+    private var phoneFloatingResetPreviewButton: some View {
+        Button { previewReset += 1 } label: {
+            Image(systemName: "arrow.counterclockwise")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.white.opacity(0.85))
+                .frame(width: 44, height: 44)
+                .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.18), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain)
+            .accessibilityLabel("恢复记录视角")
             .accessibilityIdentifier("reset-pose-preview")
     }
 

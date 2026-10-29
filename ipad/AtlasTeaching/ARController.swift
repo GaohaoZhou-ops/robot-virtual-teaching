@@ -492,9 +492,13 @@ final class ARController: NSObject, ObservableObject, @preconcurrency ARSessionD
             cameraFieldOfView = nil; return
         }
         let resolution = frame.camera.imageResolution
-        let displaySize = orientation.isPortrait ? CGSize(width: resolution.height, height: resolution.width) : resolution
+        let phoneLandscape = TeachingDevice.isPhone && orientation.isLandscape && view.bounds.width > 0 && view.bounds.height > 0
+        let displaySize = phoneLandscape ? view.bounds.size
+            : orientation.isPortrait ? CGSize(width: resolution.height, height: resolution.width) : resolution
         // The enabled viewfinder fits the full camera image to this aspect. This
         // avoids the sidebar/portrait crop cutting off M70's horizontal coverage.
+        // iPhone landscape fills the canvas; project through that exact crop so
+        // the M70 mask and partial-coverage warning still match the camera image.
         let fieldOfView = ZividFieldOfView.project(intrinsics: frame.camera.intrinsics, resolution: resolution,
             displayTransform: frame.displayTransform(for: orientation, viewportSize: displaySize), displaySize: displaySize)
         if cameraFieldOfView != fieldOfView { cameraFieldOfView = fieldOfView }

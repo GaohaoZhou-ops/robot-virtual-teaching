@@ -70,7 +70,9 @@ xcuserdata/
 *.app.[zZ][iI][pP]
 *.xctest/
 *.xctest.[zZ][iI][pP]
-*.ipa
+# Signed app exports and their compressed copies (including extension case variants).
+*.[iI][pP][aA]
+*.[iI][pP][aA].[zZ][iI][pP]
 *.dSYM/
 *.dSYM.[zZ][iI][pP]
 *.bcsymbolmap
@@ -202,6 +204,7 @@ playwright/.auth/
 *.xcresult/
 *.xcresult.[zZ][iI][pP]
 *.xctestrun
+*.xctestrun.[zZ][iI][pP]
 *.xctestproducts
 *.xctestproducts.[zZ][iI][pP]
 *.xccovreport
@@ -1428,8 +1431,9 @@ Desktop.ini
 !maps/xian_map.ply
 
 # Local iPhone / iPad / Vision Pro model-transfer payloads
-*.atls
-*.atls.zip
+# Match extension case variants without hiding deliberate fixture inputs below.
+*.[aA][tT][lL][sS]
+*.[aA][tT][lL][sS].[zZ][iI][pP]
 
 # Locally recovered/exported projects may contain hundreds of MB of map data
 # Scope the recovery workspace to the root, preserving nested fixture inputs.
@@ -1481,7 +1485,7 @@ parking-merge-*-result.json
 !tests/**/fixtures/**/parking-merge-server-*/
 !tests/**/fixtures/**/*.[pP][lL][yY]
 !tests/**/fixtures/**/*.[pP][lL][yY].[gG][zZ]
-!tests/**/fixtures/**/*.atls
+!tests/**/fixtures/**/*.[aA][tT][lL][sS]
 !tests/**/fixtures/**/*.abxteach.ndjson
 !tests/**/fixtures/**/*.json
 !tests/**/fixtures/**/*.[zZ][iI][pP]
@@ -1489,7 +1493,7 @@ parking-merge-*-result.json
 !ipad/Tests/Fixtures/**/parking-merge-server-*/
 !ipad/Tests/Fixtures/**/*.[pP][lL][yY]
 !ipad/Tests/Fixtures/**/*.[pP][lL][yY].[gG][zZ]
-!ipad/Tests/Fixtures/**/*.atls
+!ipad/Tests/Fixtures/**/*.[aA][tT][lL][sS]
 !ipad/Tests/Fixtures/**/*.abxteach.ndjson
 !ipad/Tests/Fixtures/**/*.json
 !ipad/Tests/Fixtures/**/*.[zZ][iI][pP]
@@ -1497,7 +1501,7 @@ parking-merge-*-result.json
 !vision/Tests/Fixtures/**/parking-merge-server-*/
 !vision/Tests/Fixtures/**/*.[pP][lL][yY]
 !vision/Tests/Fixtures/**/*.[pP][lL][yY].[gG][zZ]
-!vision/Tests/Fixtures/**/*.atls
+!vision/Tests/Fixtures/**/*.[aA][tT][lL][sS]
 !vision/Tests/Fixtures/**/*.abxteach.ndjson
 !vision/Tests/Fixtures/**/*.json
 !vision/Tests/Fixtures/**/*.[zZ][iI][pP]

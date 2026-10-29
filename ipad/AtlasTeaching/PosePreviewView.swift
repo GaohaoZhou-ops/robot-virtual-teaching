@@ -44,6 +44,9 @@ struct PosePreviewView: UIViewRepresentable {
     let mode: PosePreviewMode
     let resetRevision: Int
     var navigationReference: NavigationReference? = nil
+    var defaultMagnification: Float = 1
+    var fillsInspectionViewport = false
+    var overviewControlsTopInset: CGFloat = 12
     @Binding var showsCameraPose: Bool
     @Binding var showsModelOrigin: Bool
     @Binding var overviewExpanded: Bool
@@ -54,7 +57,9 @@ struct PosePreviewView: UIViewRepresentable {
         view.onModelOriginVisibilityChange = { showsModelOrigin = $0 }
         view.onOverviewExpansionChange = { overviewExpanded = $0 }
         view.update(rendered: rendered, overview: overview, footprint: footprint, status: status,
-                    sample: sample, mode: mode, resetRevision: resetRevision, navigationReference: navigationReference)
+                    sample: sample, mode: mode, resetRevision: resetRevision, navigationReference: navigationReference,
+                    defaultMagnification: defaultMagnification, fillsInspectionViewport: fillsInspectionViewport,
+                    overviewControlsTopInset: overviewControlsTopInset)
         view.setCameraPoseVisible(showsCameraPose)
         view.setModelOriginVisible(showsModelOrigin)
         view.setOverviewExpanded(overviewExpanded && mode == .interactive)
@@ -223,6 +228,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     private var imageViewportSize = CGSize.zero
     private var imageDetailScale: CGFloat = 1
     private var orbitRadius: Float = 1
+    private var inspectionMagnification: Float = 1
+    private var fillsInspectionViewport = false
+    private var overviewControlsTopInset: CGFloat = 12
 
     init() {
         super.init(frame: .zero)
@@ -354,7 +362,14 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     func update(rendered: SCNGeometry?, overview: SCNGeometry? = nil,
                 footprint: TeachingCoverageSnapshot? = nil, status: String = "",
                 sample: TeachingSample, mode: PosePreviewMode, resetRevision: Int,
-                navigationReference: NavigationReference? = nil) {
+                navigationReference: NavigationReference? = nil, defaultMagnification: Float = 1,
+                fillsInspectionViewport: Bool = false, overviewControlsTopInset: CGFloat = 12) {
+        let magnification = defaultMagnification.isFinite && defaultMagnification > 0 ? defaultMagnification : 1
+        let magnificationChanged = inspectionMagnification != magnification
+        inspectionMagnification = magnification
+        let viewportModeChanged = self.fillsInspectionViewport != fillsInspectionViewport
+        self.fillsInspectionViewport = fillsInspectionViewport
+        self.overviewControlsTopInset = overviewControlsTopInset
         if self.navigationReference != navigationReference {
             self.navigationReference = navigationReference
             let root = overviewView.scene?.rootNode
@@ -426,6 +441,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             else { restoreRecordedView() }
         }
         else if geometryChanged || footprintChanged { updateOrbitTarget() }
+        if magnificationChanged || viewportModeChanged { updateInspectionProjection() }
         self.resetRevision = resetRevision
         if self.mode != mode {
             imageScrollView.setContentOffset(imageScrollView.contentOffset, animated: false)
@@ -467,7 +483,10 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        sceneView.frame = ZividFieldOfView.fittedFrame(in: bounds.size)
+        let sceneFrame = fillsInspectionViewport ? bounds : ZividFieldOfView.fittedFrame(in: bounds.size)
+        let viewportResized = sceneView.bounds.size != sceneFrame.size
+        sceneView.frame = sceneFrame
+        if fillsInspectionViewport && viewportResized { updateInspectionProjection() }
         layoutImageViewport()
         let width = min(220, max(136, bounds.width * 0.28), max(0, bounds.width - 24))
         let height = min(width * 0.75, max(0, bounds.height * 0.42))
@@ -478,7 +497,9 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             let controls = [cameraPoseControl, modelOriginControl]
             let sizes = controls.map { $0.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize) }
             let controlWidth = min(sizes.map(\.width).max() ?? 0, max(0, bounds.width - 80))
-            var controlY: CGFloat = 12
+            // The phone reserves the top-right corner for its floating reset.
+            // iPad and standalone previews retain their original 12 pt inset.
+            var controlY = overviewControlsTopInset
             for (control, size) in zip(controls, sizes) {
                 control.frame = CGRect(x: bounds.width - controlWidth - 12, y: controlY,
                                        width: controlWidth, height: max(44, size.height))
@@ -549,14 +570,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         let near: Float = 0.001, far: Float = 1000
         lens.zNear = Double(near); lens.zFar = Double(far)
         camera.camera = lens
-        // SCNCamera.copy() drops a custom projection matrix. Preserve image
-        // framing while replacing only its depth planes for free inspection.
-        if let recordedProjection {
-            var projection = simd_float4x4(elements: recordedProjection)
-            projection[2].z = -(far + near) / (far - near)
-            projection[3].z = -2 * far * near / (far - near)
-            lens.projectionTransform = SCNMatrix4(projection)
-        }
+        updateInspectionProjection()
         controller = SCNCameraController()
         controller.pointOfView = camera
         controller.interactionMode = .orbitArcball
@@ -564,6 +578,27 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
         controller.automaticTarget = false; controller.inertiaEnabled = false
         updateOrbitTarget()
         if overviewExpanded { fitOverviewCamera() } else { syncOverviewCamera() }
+        sceneView.setNeedsDisplay()
+    }
+
+    private func updateInspectionProjection() {
+        guard let recordedProjection, let lens = camera.camera else { return }
+        // Magnify only the inspection lens. Screen rotation changes this base
+        // scale without discarding the user's orbit, pan or pinch position.
+        var projection = simd_float4x4(elements: recordedProjection)
+        projection[0].x *= inspectionMagnification
+        projection[1].y *= inspectionMagnification
+        if fillsInspectionViewport && bounds.width > 0 && bounds.height > 0 {
+            // Extend the interactive canvas into the former letterbox without
+            // stretching the model or changing the user's current zoom.
+            let fitted = ZividFieldOfView.fittedFrame(in: bounds.size)
+            projection[0].x *= Float(fitted.width / bounds.width)
+            projection[1].y *= Float(fitted.height / bounds.height)
+        }
+        let near = Float(lens.zNear), far = Float(lens.zFar)
+        projection[2].z = -(far + near) / (far - near)
+        projection[3].z = -2 * far * near / (far - near)
+        lens.projectionTransform = SCNMatrix4(projection)
         sceneView.setNeedsDisplay()
     }
 

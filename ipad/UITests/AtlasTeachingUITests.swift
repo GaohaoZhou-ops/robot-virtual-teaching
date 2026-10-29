@@ -446,12 +446,14 @@ final class AtlasTeachingUITests: XCTestCase {
 
     func testReadOnlyParkingReferences() throws {
         continueAfterFailure = false
+        let phone = UIDevice.current.userInterfaceIdiom == .phone
         guard let id = ProcessInfo.processInfo.environment["ATLAS_PARKING_REFERENCE_FIXTURE_ID"], UUID(uuidString: id) != nil else {
             throw XCTSkip("Provide a dedicated completed parking reference fixture")
         }
         let app = XCUIApplication(); app.launch()
         let project = app.buttons["local-project-\(id)"]
         XCTAssertTrue(project.waitForExistence(timeout: 20)); project.tap()
+        if phone { assertPhoneToolbarVisible(app) }
         let legend = app.staticTexts["parking-reference-legend"]
         XCTAssertTrue(legend.waitForExistence(timeout: 40))
         XCTAssertTrue(legend.label.contains("3 个 · 只读"))
@@ -459,11 +461,14 @@ final class AtlasTeachingUITests: XCTestCase {
             XCUIDevice.shared.orientation = orientation
             let preview = app.otherElements["teaching-model-preview"]
             XCTAssertTrue(preview.waitForExistence(timeout: 10))
+            if phone { assertPhoneToolbarVisible(app) }
             XCTAssertTrue(app.windows.firstMatch.frame.contains(legend.frame))
             XCTAssertFalse(legend.frame.intersects(app.buttons["review-poses"].frame), "reference legend stays clear of the phone action panel")
             XCTAssertGreaterThanOrEqual(legend.frame.minY, app.staticTexts["teaching-tracking-status"].frame.maxY,
                                         "reference legend is below the status toolbar")
-            preview.tap(); preview.swipeLeft()
+            preview.tap()
+            if phone { assertPhoneToolbarVisible(app) }
+            preview.swipeLeft()
             XCTAssertTrue(legend.exists)
             XCTAssertFalse(app.textFields["停车点名称"].exists)
             let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -506,6 +511,11 @@ final class AtlasTeachingUITests: XCTestCase {
         if alert.waitForExistence(timeout: 2) {
             _ = allowPhonePermission(alert)
         }
+    }
+
+    private func assertPhoneToolbarVisible(_ app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["back-to-library"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["back-to-library"].isHittable)
     }
 
     func testPhoneLibraryConnectionsAndRotation() throws {
@@ -565,6 +575,7 @@ final class AtlasTeachingUITests: XCTestCase {
         guard project.exists else { throw XCTSkip("Provide a dedicated UI-iPhone-LiveAR fixture") }
         for _ in 0..<8 where !project.isHittable { app.scrollViews["library-phone-scroll"].swipeUp() }
         project.tap(); allowPhoneCameraIfNeeded()
+        assertPhoneToolbarVisible(app)
         let depth = app.staticTexts["teaching-depth-status"]
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "label == 'LiDAR 已就绪'"), object: depth)], timeout: 30), .completed)
@@ -596,6 +607,7 @@ final class AtlasTeachingUITests: XCTestCase {
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             shot.name = "iPhone live LiDAR and recorded Pose \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
         }
+        assertPhoneToolbarVisible(app)
         app.buttons["back-to-library"].tap()
         #endif
     }
@@ -618,7 +630,8 @@ final class AtlasTeachingUITests: XCTestCase {
         for _ in 0..<6 where !project.isHittable { scroll.swipeUp() }
         project.tap()
         allowPhoneCameraIfNeeded()
-        XCTAssertTrue(app.buttons["expand-teaching-panel"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["capture-pose"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["back-to-library"].isHittable, "Phone teaching starts with persistent navigation")
         for orientation in [UIDeviceOrientation.portrait, .landscapeLeft, .landscapeRight, .portrait] {
             XCUIDevice.shared.orientation = orientation
             RunLoop.current.run(until: Date().addingTimeInterval(0.8))
@@ -631,10 +644,35 @@ final class AtlasTeachingUITests: XCTestCase {
                 let window = app.windows.firstMatch.frame
                 let controls = app.otherElements["phone-landscape-controls"]
                 XCTAssertTrue(controls.exists)
-                XCTAssertLessThan(controls.frame.width, window.width * 0.2, "Keep the central camera view unobstructed")
+                XCTAssertEqual(controls.frame.minY, window.minY, accuracy: 1)
+                XCTAssertEqual(controls.frame.maxY, window.maxY, accuracy: 1, "The capture rail spans the entire landscape height")
+                XCTAssertEqual(controls.frame.maxX, window.maxX, accuracy: 1)
+                let viewport = app.otherElements["teaching-viewport"]
+                let preview = app.otherElements["teaching-model-preview"]
+                let surface = preview.exists ? preview : app.otherElements["teaching-render-surface"]
+                XCTAssertEqual(viewport.frame.minX, window.minX, accuracy: 1)
+                XCTAssertEqual(viewport.frame.height, window.height, accuracy: 1)
+                XCTAssertEqual(viewport.frame.maxX, controls.frame.minX, accuracy: 1)
+                XCTAssertGreaterThan(viewport.frame.width, window.width * 0.75)
+                XCTAssertEqual(surface.frame.width, viewport.frame.width, accuracy: 1, "Camera and model previews use the full canvas width")
+                XCTAssertEqual(surface.frame.height, viewport.frame.height, accuracy: 1)
+                XCTAssertTrue(app.buttons["back-to-library"].isHittable, "Navigation stays visible after rotating to landscape")
+                XCTAssertLessThan(controls.frame.width, window.width * 0.14, "Use a narrow single-column capture rail")
+                let outerGap = window.maxX - capture.frame.maxX
+                XCTAssertGreaterThanOrEqual(outerGap, 24, "Keep controls clear of the rounded screen edge")
+                if orientation == .landscapeLeft {
+                    XCTAssertEqual(outerGap, 24, accuracy: 1, "The edge opposite the notch does not reserve a full notch-width strip")
+                    XCTAssertEqual(controls.frame.width, 82, accuracy: 1)
+                }
+                let backFrame = app.buttons["back-to-library"].frame
+                XCTAssertGreaterThanOrEqual(backFrame.minX - window.minX, 28)
+                XCTAssertLessThanOrEqual(backFrame.minX - window.minX, 56, "Bring back navigation slightly closer to the edge")
+                XCTAssertGreaterThanOrEqual(app.buttons["expand-teaching-panel"].frame.minY - window.minY, 12)
                 XCTAssertGreaterThan(capture.frame.midX, window.minX + window.width * 0.8)
-                XCTAssertGreaterThanOrEqual(capture.frame.width, 80, "Use a thumb-sized capture target")
-                XCTAssertGreaterThanOrEqual(capture.frame.height, 80)
+                XCTAssertGreaterThanOrEqual(capture.frame.width, 44, "Keep the compact capture target tappable")
+                XCTAssertGreaterThanOrEqual(capture.frame.height, 44)
+                XCTAssertLessThanOrEqual(capture.frame.width, 56)
+                XCTAssertLessThanOrEqual(capture.frame.height, 64)
                 XCTAssertLessThan(abs(capture.frame.midY - window.midY), window.height * 0.2)
                 XCTAssertFalse(app.otherElements["floating-pose-controls"].exists, "No full-width bottom recording bar in landscape")
                 for id in ["review-poses", "finish-teaching"] {
@@ -643,10 +681,59 @@ final class AtlasTeachingUITests: XCTestCase {
                     XCTAssertGreaterThanOrEqual(action.frame.height, 44)
                     XCTAssertFalse(action.frame.intersects(capture.frame))
                 }
+                XCTAssertEqual(app.buttons["review-poses"].frame.midX, app.buttons["finish-teaching"].frame.midX, accuracy: 1)
+                XCTAssertLessThan(app.buttons["review-poses"].frame.maxY, app.buttons["finish-teaching"].frame.minY)
                 let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
                 shot.name = "iPhone landscape capture controls \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+                let canvasTap = surface.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+                let originalFrame = viewport.frame
+                canvasTap.tap()
+                XCTAssertTrue(app.buttons["back-to-library"].isHittable, "Tapping the canvas keeps navigation visible")
+                XCTAssertLessThanOrEqual(app.otherElements["phone-teaching-toolbar"].frame.height, 56)
+                let toolbarShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                toolbarShot.name = "iPhone landscape toolbar \(orientation.rawValue)"; toolbarShot.lifetime = .keepAlways; add(toolbarShot)
+                canvasTap.tap()
+                XCTAssertTrue(app.buttons["back-to-library"].isHittable)
+                XCTAssertTrue(app.buttons["display-settings"].isHittable)
+                XCTAssertFalse(app.buttons["phone-toggle-toolbar"].exists)
+                XCTAssertEqual(viewport.frame, originalFrame, "Canvas taps do not resize the view")
             } else {
                 XCTAssertFalse(app.otherElements["phone-landscape-controls"].exists)
+                let controls = app.otherElements["floating-pose-controls"]
+                let window = app.windows.firstMatch.frame
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "iPhone portrait capture controls"; shot.lifetime = .keepAlways; add(shot)
+                XCTAssertTrue(controls.exists)
+                let contentBottom = app.otherElements["teaching-viewport"].frame.maxY
+                XCTAssertLessThanOrEqual(contentBottom - controls.frame.minY, 72, "Portrait uses a single compact action row above the home-indicator inset")
+                XCTAssertEqual(controls.frame.maxY, window.maxY, accuracy: 1, "Only the background extends to the screen edge")
+                XCTAssertEqual(controls.frame.width, window.width, accuracy: 1)
+                XCTAssertLessThanOrEqual(capture.frame.height, 52)
+                XCTAssertLessThanOrEqual(capture.frame.width, 124)
+                XCTAssertEqual(capture.frame.midX, window.midX, accuracy: 1, "Portrait capture stays centered on the screen")
+                XCTAssertLessThanOrEqual(app.staticTexts["floating-pose-count"].frame.maxX, capture.frame.minX)
+                for id in ["review-poses", "finish-teaching"] {
+                    let action = app.buttons[id]
+                    XCTAssertTrue(action.isHittable)
+                    XCTAssertGreaterThanOrEqual(action.frame.height, 44)
+                    XCTAssertEqual(action.frame.midY, capture.frame.midY, accuracy: 1)
+                    XCTAssertFalse(action.frame.intersects(capture.frame))
+                    XCTAssertTrue(controls.frame.contains(action.frame))
+                }
+                XCTAssertTrue(app.buttons["back-to-library"].isHittable, "Portrait navigation stays visible too")
+                let viewport = app.otherElements["teaching-viewport"]
+                let originalFrame = viewport.frame
+                let captureFrame = capture.frame
+                viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+                XCTAssertTrue(app.buttons["back-to-library"].isHittable)
+                XCTAssertTrue(app.buttons["display-settings"].isHittable)
+                XCTAssertEqual(viewport.frame, originalFrame, "Canvas taps must not resize the camera")
+                XCTAssertEqual(capture.frame, captureFrame, "Canvas taps keep the recording button fixed at the bottom")
+                XCTAssertTrue(app.buttons["review-poses"].isHittable, "The bottom actions stay available with navigation visible")
+                let toolbarShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                toolbarShot.name = "iPhone portrait persistent navigation"; toolbarShot.lifetime = .keepAlways; add(toolbarShot)
+                viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+                XCTAssertTrue(app.buttons["back-to-library"].isHittable)
             }
             app.buttons["expand-teaching-panel"].tap()
             XCTAssertTrue(app.buttons["collapse-teaching-panel"].waitForExistence(timeout: 5))
@@ -666,8 +753,68 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertTrue(app.buttons["close-pose-review"].isHittable)
             let list = app.collectionViews["pose-review-list"].exists ? app.collectionViews["pose-review-list"] : app.tables["pose-review-list"]
             XCTAssertGreaterThan(list.frame.height, 90)
-            app.buttons["pose-preview-mode-2d"].tap()
-            app.buttons["pose-preview-mode-3d"].tap()
+            let mode = app.buttons["phone-pose-preview-mode"]
+            let quality = app.sliders["pose-preview-quality"]
+            let toolbar = app.otherElements["phone-pose-preview-toolbar"]
+            let preview = app.otherElements["pose-review-preview"]
+            XCTAssertTrue(mode.isHittable)
+            XCTAssertFalse(app.buttons["pose-preview-mode-2d"].exists)
+            XCTAssertFalse(app.buttons["pose-preview-mode-3d"].exists)
+            XCTAssertLessThanOrEqual(toolbar.frame.height, 60, "Phone preview controls occupy one row")
+            XCTAssertEqual(mode.value as? String, "3D模型")
+            let initialQuality = quality.value as? String
+            for expectedMode in ["2D图像", "3D模型"] {
+                mode.tap()
+                XCTAssertEqual(mode.value as? String, expectedMode)
+                XCTAssertEqual(preview.value as? String, expectedMode == "3D模型" ? "3D 交互视图" : "2D 记录视角图像")
+                XCTAssertEqual(quality.value as? String, initialQuality)
+                for control in [quality, app.buttons["close-pose-review"]] {
+                    XCTAssertTrue(control.isHittable)
+                    XCTAssertEqual(control.frame.midY, mode.frame.midY, accuracy: 2, "Quality and actions share the mode button's row")
+                    XCTAssertTrue(toolbar.frame.contains(control.frame))
+                }
+                XCTAssertGreaterThanOrEqual(quality.frame.minX, app.buttons["close-pose-review"].frame.maxX)
+                XCTAssertLessThanOrEqual(quality.frame.maxX, mode.frame.minX)
+                let reset = app.buttons["reset-pose-preview"]
+                XCTAssertEqual(app.buttons.matching(identifier: "reset-pose-preview").count, 1)
+                XCTAssertTrue(reset.isHittable)
+                if expectedMode == "3D模型" {
+                    XCTAssertEqual(reset.frame.maxX, preview.frame.maxX - 12, accuracy: 1)
+                    XCTAssertEqual(reset.frame.minY, preview.frame.minY + 12, accuracy: 1)
+                    XCTAssertEqual(reset.frame.width, 44, accuracy: 1)
+                    XCTAssertEqual(reset.frame.height, 44, accuracy: 1)
+                    XCTAssertTrue(preview.frame.contains(reset.frame))
+                    XCTAssertFalse(toolbar.frame.intersects(reset.frame))
+                    reset.tap()
+                    XCTAssertEqual(mode.value as? String, "3D模型", "The floating control restores the view without leaving review")
+                    let thumbnail = app.descendants(matching: .any)["pose-global-thumbnail"].firstMatch
+                    XCTAssertTrue(thumbnail.waitForExistence(timeout: 10)); thumbnail.doubleTap()
+                    let collapse = app.buttons["collapse-pose-overview"]
+                    XCTAssertTrue(collapse.waitForExistence(timeout: 5))
+                    XCTAssertTrue(reset.isHittable); XCTAssertTrue(collapse.isHittable)
+                    XCTAssertFalse(reset.frame.intersects(collapse.frame), "The floating reset must leave the overview's collapse control accessible")
+                    XCTAssertEqual(reset.frame.maxX, preview.frame.maxX - 12, accuracy: 1)
+                    XCTAssertEqual(reset.frame.minY, preview.frame.minY + 12, accuracy: 1)
+                    for id in ["pose-camera-projection-toggle", "pose-model-origin-toggle"] {
+                        let toggle = app.switches[id]
+                        XCTAssertTrue(toggle.isHittable)
+                        XCTAssertGreaterThanOrEqual(toggle.frame.minY, reset.frame.maxY + 8)
+                        XCTAssertFalse(toggle.frame.intersects(reset.frame))
+                    }
+                    let expandedShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                    expandedShot.name = "iPhone expanded Pose controls \(orientation.rawValue)"
+                    expandedShot.lifetime = .keepAlways; add(expandedShot)
+                    reset.tap()
+                    XCTAssertTrue(collapse.isHittable)
+                    collapse.tap()
+                    XCTAssertEqual(reset.frame.minY, preview.frame.minY + 12, accuracy: 1)
+                } else {
+                    XCTAssertTrue(toolbar.frame.contains(reset.frame), "The 2D image retains its full-frame restore action")
+                    XCTAssertEqual(reset.frame.midY, mode.frame.midY, accuracy: 2)
+                    XCTAssertLessThanOrEqual(quality.frame.maxX, reset.frame.minX)
+                    XCTAssertLessThanOrEqual(reset.frame.maxX, mode.frame.minX)
+                }
+            }
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             shot.name = "iPhone Pose review \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
         }
@@ -693,6 +840,30 @@ final class AtlasTeachingUITests: XCTestCase {
         app.buttons["仅完成并保存在 iPhone"].tap()
         XCTAssertTrue(app.buttons["sync-teaching-result"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.otherElements["phone-landscape-controls"].frame.contains(app.buttons["sync-teaching-result"].frame))
+        XCTAssertTrue(app.buttons["back-to-library"].isHittable)
+        XCTAssertFalse(app.staticTexts["phone-landscape-hint"].exists, "Completed results have no completion hint overlay")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "示教已完成")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["三维预览"].exists)
+        XCTAssertFalse(app.staticTexts["teaching-depth-status"].exists)
+        let completedLandscapeShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        completedLandscapeShot.name = "iPhone landscape completed model preview"
+        completedLandscapeShot.lifetime = .keepAlways; add(completedLandscapeShot)
+        XCUIDevice.shared.orientation = .portrait
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+        XCTAssertLessThanOrEqual(app.otherElements["teaching-viewport"].frame.maxY
+            - app.otherElements["floating-pose-controls"].frame.minY, 72)
+        XCTAssertTrue(app.buttons["sync-teaching-result"].isHittable)
+        XCTAssertTrue(app.buttons["review-poses"].isHittable)
+        XCTAssertEqual(app.buttons["sync-teaching-result"].frame.midX, app.windows.firstMatch.frame.midX, accuracy: 1)
+        XCTAssertFalse(app.buttons["capture-pose"].exists)
+        XCTAssertFalse(app.staticTexts["phone-portrait-hint"].exists, "Completed previews keep the action row compact")
+        XCTAssertTrue(app.buttons["back-to-library"].isHittable)
+        XCTAssertTrue(app.buttons["display-settings"].isHittable)
+        XCTAssertFalse(app.staticTexts["三维预览"].exists)
+        let completedShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        completedShot.name = "iPhone portrait completed controls"; completedShot.lifetime = .keepAlways; add(completedShot)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        RunLoop.current.run(until: Date().addingTimeInterval(0.8))
         app.buttons["sync-teaching-result"].tap()
         XCTAssertTrue(app.segmentedControls["result-sync-method"].waitForExistence(timeout: 5))
         app.segmentedControls["result-sync-method"].buttons["Wi-Fi"].tap()
@@ -701,6 +872,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "iPhone result export"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["close-result-sync"].tap()
+        XCTAssertTrue(app.buttons["back-to-library"].isHittable)
         app.buttons["back-to-library"].tap()
         XCTAssertTrue(app.buttons[projectID].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons[projectID].label.contains("已完成"))
@@ -822,7 +994,8 @@ final class AtlasTeachingUITests: XCTestCase {
         shot.name = "USB connected and complete model ready to receive"; shot.lifetime = .keepAlways; add(shot)
         receive.tap()
         if phone { allowPhoneCameraIfNeeded() }
-        let back = app.buttons["back-to-library"]
+        if phone { assertPhoneToolbarVisible(app) }
+        let back = app.buttons[phone ? "back-to-library" : "本地项目"]
         XCTAssertTrue(back.waitForExistence(timeout: 20), "USB reception opens the existing teaching workflow")
         back.tap()
         let row = app.buttons["local-project-\(id)"]
@@ -831,7 +1004,9 @@ final class AtlasTeachingUITests: XCTestCase {
         app.terminate(); app.launch()
         XCTAssertTrue(row.waitForExistence(timeout: 15), "the USB model survives relaunch")
         reveal(row, scroll: app.scrollViews[phone ? "library-phone-scroll" : "library-projects-scroll"])
-        row.tap(); XCTAssertTrue(back.waitForExistence(timeout: 15)); back.tap()
+        row.tap()
+        if phone { assertPhoneToolbarVisible(app) }
+        XCTAssertTrue(back.waitForExistence(timeout: 15)); back.tap()
         reveal(row, scroll: app.scrollViews[phone ? "library-phone-scroll" : "library-projects-scroll"])
         XCTAssertTrue(row.label.contains("数据线接收验证（临时）"))
         row.swipeLeft()
@@ -1998,6 +2173,99 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(scroll.zoomScale, 1, accuracy: 0.001); XCTAssertEqual(scroll.contentOffset, .zero)
         XCTAssertNotNil(view.imageView.image, "a different Pose starts with its complete recorded frame")
         view.stop()
+    }
+
+    func testPosePreviewDefaultMagnificationPreservesInspectionAndImage() throws {
+        let geometry = SCNBox(width: 0.2, height: 0.15, length: 0.05, chamferRadius: 0)
+        var sample = TeachingSample(segmentId: "default-preview-scale", kind: "keyframe",
+            cameraPose: CameraPose(position: Point3(SIMD3(0, 0, 1)),
+                quaternion: Rotation4(simd_quatf(angle: .pi, axis: SIMD3(1, 0, 0)))))
+        let view = PosePreviewSurface(); view.frame = CGRect(x: 0, y: 0, width: 648, height: 400)
+        defer { view.stop() }
+        func update(_ scale: Float, mode: PosePreviewMode = .interactive, reset: Int = 0, fillsViewport: Bool = false) {
+            view.update(rendered: geometry, sample: sample, mode: mode, resetRevision: reset,
+                        defaultMagnification: scale, fillsInspectionViewport: fillsViewport)
+            view.layoutIfNeeded()
+        }
+        func projectedSize() -> SIMD2<Float> {
+            // SceneKit projects against the last rendered camera state.
+            SCNTransaction.flush()
+            _ = view.sceneView.snapshot()
+            let lower = view.sceneView.projectPoint(SCNVector3(-0.04, -0.03, 0))
+            let upper = view.sceneView.projectPoint(SCNVector3(0.04, 0.03, 0))
+            return SIMD2(abs(upper.x - lower.x), abs(upper.y - lower.y))
+        }
+        update(1, mode: .image)
+        let recordedImage = try XCTUnwrap(view.imageView.image?.pngData())
+        update(1)
+        let original = projectedSize(), recordedTransform = view.camera.simdTransform.elements
+        XCTAssertGreaterThan(original.x, 1)
+        update(3)
+        XCTAssertEqual(projectedSize().x, original.x * 3, accuracy: 0.05)
+        XCTAssertEqual(projectedSize().y, original.y * 3, accuracy: 0.05)
+        XCTAssertEqual(view.camera.simdTransform.elements, recordedTransform)
+        view.zoom(by: 1.4); view.translate(by: CGPoint(x: 10, y: 5))
+        let inspectedTransform = view.camera.simdTransform.elements
+        update(3); update(1); update(3)
+        XCTAssertEqual(view.camera.simdTransform.elements, inspectedTransform, "Orientation and refreshes preserve manual inspection")
+        update(3, reset: 1)
+        XCTAssertEqual(view.camera.simdTransform.elements, recordedTransform)
+        XCTAssertEqual(projectedSize().x, original.x * 3, accuracy: 0.05, "Reset uses the current orientation's default scale")
+        sample.id = UUID().uuidString
+        update(3, reset: 1)
+        XCTAssertEqual(projectedSize().x, original.x * 3, accuracy: 0.05, "Selecting a Pose does not accumulate magnification")
+        update(3, mode: .image, reset: 1)
+        XCTAssertEqual(view.imageView.image?.pngData(), recordedImage, "The recorded 2D image remains unchanged")
+
+        view.frame.size = CGSize(width: 400, height: 648)
+        update(1, mode: .image, reset: 1)
+        let portraitImage = try XCTUnwrap(view.imageView.image?.pngData())
+        update(1, reset: 1)
+        let fittedSize = projectedSize()
+        update(1, reset: 1, fillsViewport: true)
+        XCTAssertEqual(view.sceneView.frame, view.bounds, "Portrait 3D uses the entire region above the Pose list")
+        XCTAssertEqual(projectedSize().x, fittedSize.x, accuracy: 0.05)
+        XCTAssertEqual(projectedSize().y, fittedSize.y, accuracy: 0.05, "Filling the canvas preserves model proportions and zoom")
+
+        // Render a marker in the former bottom letterbox. This space must now
+        // display and interact with the 3D scene, rather than merely match its background.
+        let marker = SCNNode(geometry: SCNPlane(width: 0.08, height: 0.08))
+        let material = SCNMaterial(); material.lightingModel = .constant
+        material.diffuse.contents = UIColor.orange; material.isDoubleSided = true
+        marker.geometry?.materials = [material]
+        let depth = view.sceneView.projectPoint(SCNVector3Zero).z
+        marker.position = view.sceneView.unprojectPoint(SCNVector3(200, 608, depth))
+        view.sceneView.scene?.rootNode.addChildNode(marker)
+        SCNTransaction.flush()
+        let rendered = view.sceneView.snapshot()
+        let cg = try XCTUnwrap(rendered.cgImage)
+        let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height,
+            bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+        let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+        let edgePixels = (0..<(cg.width * cg.height)).filter { index in
+            let row = index / cg.width, offset = index * 4
+            return (row < cg.height / 4 || row >= cg.height * 3 / 4)
+                && pixels[offset] > 200 && pixels[offset + 1] > 70 && pixels[offset + 2] < 40
+        }.count
+        XCTAssertGreaterThan(edgePixels, 10, "The former letterbox can render model content")
+        let shot = XCTAttachment(image: rendered); shot.name = "Portrait 3D renders into the former black strip"
+        shot.lifetime = .keepAlways; add(shot)
+
+        view.zoom(by: 1.2); view.translate(by: CGPoint(x: 12, y: -8))
+        let portraitTransform = view.camera.simdTransform.elements
+        view.frame.size = CGSize(width: 420, height: 700)
+        update(1, reset: 1, fillsViewport: true)
+        XCTAssertEqual(view.sceneView.frame, view.bounds)
+        XCTAssertEqual(view.camera.simdTransform.elements, portraitTransform)
+        view.frame.size = CGSize(width: 400, height: 648)
+        update(1, mode: .image, reset: 1, fillsViewport: true)
+        XCTAssertEqual(view.imageView.image?.pngData(), portraitImage, "The expanded 3D canvas does not change the recorded 2D image")
+        update(1, reset: 1)
+        XCTAssertEqual(view.camera.simdTransform.elements, portraitTransform)
+        XCTAssertEqual(view.sceneView.frame.width / view.sceneView.frame.height, ZividFieldOfView.nativeAspect, accuracy: 0.0001,
+                       "The default layout used by iPad still fits the recorded aspect")
     }
 
     func testPosePreviewLocalGeometryAndSynchronizedOverview() throws {
@@ -3690,6 +3958,55 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertFalse(app.buttons["capture-pose"].exists)
     }
 
+    func testIPadKeepsTeachingAndReviewLayout() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPad layout isolation") }
+        guard let id = ProcessInfo.processInfo.environment["ATLAS_IPAD_LAYOUT_FIXTURE_ID"], UUID(uuidString: id) != nil else {
+            throw XCTSkip("Provide a disposable iPad layout fixture")
+        }
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        let project = app.buttons["local-project-\(id)"]
+        XCTAssertTrue(project.waitForExistence(timeout: 15)); project.tap()
+        XCTAssertTrue(app.buttons["collapse-teaching-panel"].waitForExistence(timeout: 15))
+        let back = app.buttons["本地项目"]
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            let viewport = app.otherElements["teaching-viewport"]
+            XCTAssertTrue(back.isHittable, "iPad keeps its navigation visible")
+            XCTAssertEqual(app.windows.firstMatch.frame.width - viewport.frame.width, 340, accuracy: 1)
+            XCTAssertGreaterThanOrEqual(app.buttons["capture-pose"].frame.width, 250)
+            XCTAssertFalse(app.otherElements["phone-teaching-toolbar"].exists)
+            XCTAssertFalse(app.otherElements["phone-landscape-controls"].exists)
+            viewport.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+            XCTAssertTrue(back.isHittable, "Canvas taps do not hide iPad navigation")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Unchanged iPad teaching \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        let review = app.buttons["review-poses"]
+        if !review.isHittable { app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(review.isHittable); review.tap()
+        XCTAssertTrue(app.buttons["close-pose-review"].waitForExistence(timeout: 8))
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            RunLoop.current.run(until: Date().addingTimeInterval(0.8))
+            XCTAssertTrue(app.buttons["close-pose-review"].isHittable)
+            XCTAssertFalse(app.buttons["phone-pose-details"].exists)
+            XCTAssertFalse(app.buttons["phone-pose-preview-mode"].exists)
+            XCTAssertTrue(app.buttons["pose-preview-mode-3d"].isHittable)
+            XCTAssertTrue(app.buttons["pose-preview-mode-2d"].isHittable)
+            XCTAssertEqual(app.buttons["reset-pose-preview"].frame.midY, app.buttons["close-pose-review"].frame.midY, accuracy: 2,
+                           "iPad keeps reset beside the toolbar's return action")
+            app.buttons["pose-preview-mode-2d"].tap()
+            XCTAssertEqual(app.otherElements["pose-review-preview"].value as? String, "2D 记录视角图像")
+            app.buttons["pose-preview-mode-3d"].tap()
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Unchanged iPad review \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        app.buttons["close-pose-review"].tap()
+        back.tap()
+    }
+
     func testLibraryFillsWindowAndAdaptsToRotation() {
         continueAfterFailure = false
         let app = XCUIApplication()
@@ -3738,7 +4055,7 @@ final class AtlasTeachingUITests: XCTestCase {
             purpose.buttons["画面协作"].tap()
             let waiting = app.staticTexts["screen-pairing-status"]
             XCTAssertTrue(waiting.waitForExistence(timeout: 5))
-            XCTAssertTrue(waiting.label.contains("等待电脑端发起协作"))
+            XCTAssertEqual(waiting.label, "连接电脑，开始协作")
             XCTAssertFalse(app.staticTexts["方式一"].exists)
             XCTAssertFalse(app.otherElements["usb-receiving-panel"].exists)
             XCTAssertFalse(app.otherElements["model-transfer-progress"].exists)
