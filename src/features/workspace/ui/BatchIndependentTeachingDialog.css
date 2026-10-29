@@ -1,0 +1,32 @@
+.batch-independent-dialog { width: min(1120px, calc(100vw - 28px)); }
+.batch-independent-dialog .new-independent-dialog__body { gap: 16px; }
+.batch-independent-target, .batch-independent-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.batch-independent-target { color: #b9c8d6; font-size: 12px; justify-content: space-between; }
+.batch-independent-tools > span { margin-left: auto; color: #92a2b5; font-size: 11px; }
+.batch-independent-dialog .batch-independent-options { margin-top: 0; gap: 8px; }
+.batch-independent-dialog .batch-independent-options button { padding: 9px 8px; font-size: 11px; }
+.batch-independent-table-wrap { overflow-x: auto; border: 1px solid #303546; }
+.batch-independent-table { border-collapse: collapse; width: 100%; min-width: 900px; table-layout: fixed; font-size: 12px; }
+.batch-independent-table th { padding: 12px; text-align: left; color: #9facbf; font-weight: 500; background: #101a24; }
+.batch-independent-table th:first-child { width: 45px; }
+.batch-independent-table th:nth-child(3) { width: 190px; }
+.batch-independent-table th:nth-child(4) { width: 290px; }
+.batch-independent-table th:last-child { width: 100px; }
+.batch-independent-table td { padding: 14px 12px; border-top: 1px solid #293441; vertical-align: top; }
+.batch-independent-table td:first-child { color: #a699c7; font-family: "SFMono-Regular", Menlo, monospace; }
+.batch-independent-table td > input, .batch-independent-table .batch-independent-matrix-button { box-sizing: border-box; width: 100%; min-width: 0; height: 38px; padding: 9px; background: #101a24; color: #e2e8f1; border: 1px solid #485466; font: inherit; }
+.batch-independent-table input:focus-visible { outline: 2px solid #b3a0ff; outline-offset: 2px; }
+.batch-independent-table .batch-independent-matrix-button { width: 160px; max-width: 100%; margin-right: 0; }
+.batch-independent-matrix-file { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: #9facbf; font-size: 11px; }
+.batch-independent-matrix-file > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-independent-matrix-file > button { padding: 2px; border-color: transparent; background: transparent; }
+.batch-independent-table td > small { display: block; margin-top: 8px; color: #8abcb4; line-height: 1.6; overflow-wrap: anywhere; }
+.batch-independent-table td > small.is-error { color: #ffaaa0; }
+.batch-independent-model { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 8px; color: #9facbf; font-size: 11px; }
+.batch-independent-table td > button { padding: 7px; margin-right: 5px; }
+.batch-independent-empty { margin: 0; padding: 42px 20px; color: #91a0b2; text-align: center; font-size: 13px; }
+.batch-independent-dialog footer { position: sticky; bottom: 0; background: #0a1219; }
+@media (max-width: 580px) {
+  .batch-independent-tools > span { width: 100%; margin-left: 0; }
+  .batch-independent-table-wrap { max-width: 100%; }
+}

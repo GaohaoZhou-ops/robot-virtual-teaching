@@ -26,6 +26,7 @@
     "test:project-collection": "node tests/project_collection_smoke.mjs",
     "test:project-storage": "node tests/project_resource_storage_smoke.mjs",
     "test:independent-alignment": "node tests/independent_teaching_alignment_smoke.mjs",
+    "test:independent-batch": "node tests/unit/independent_teaching_batch_smoke.mjs",
     "test:teaching-data": "node tests/teaching_data_export_smoke.mjs",
     "test:independent-export": "node tests/independent_teaching_export_smoke.mjs",
     "test:project-save": "node tests/project_save_smoke.mjs",

@@ -8,7 +8,7 @@ const suites = {
     'test:viewport-zoom', 'test:robot-display', 'test:collision-backends'],
   extended: ['test:model-composition', 'test:torso', 'test:robot-presets', 'test:robot-limits',
     'test:robot-coupling', 'test:interactive-ik', 'test:polyline', 'test:teaching-insert',
-    'test:linked-project', 'test:project-collection', 'test:independent-alignment', 'test:teaching-data',
+    'test:linked-project', 'test:project-collection', 'test:independent-alignment', 'test:independent-batch', 'test:teaching-data',
     'test:independent-export', 'test:directory', 'test:abx',
     'test:ipad', 'test:ipad:navigation', 'test:ipad:qr', 'test:ipad:file', 'test:ipad:discovery',
     'test:ipad:screen', 'test:mobile-solve', 'test:transfer', 'test:route-sync',

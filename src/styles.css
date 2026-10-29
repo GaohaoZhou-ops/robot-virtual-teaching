@@ -1932,9 +1932,16 @@ code {
   text-align: right;
 }
 
-.robot-position-readout > small {
+.robot-position-readout small {
   color: var(--muted-2);
   font-size: 8px;
+}
+
+.robot-position-readout .axis.yaw {
+  width: auto;
+  padding-inline: 4px;
+  border-radius: 8px;
+  background: #70b7e7;
 }
 
 /* Map manifest and current project configuration. */

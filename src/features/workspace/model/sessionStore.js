@@ -1,4 +1,4 @@
-import { validateWorkspaceCollection } from "./projectWorkspaceCollection.js";
+import { validateProjectWorkspace, validateWorkspaceCollection } from "./projectWorkspaceCollection.js";
 import { normalizeIndependentTeachingName, validateIndependentTeachingName } from "./independentTeachingName.js";
 import { matchesPlacedSource } from "../../viewport/model/placedObjectRendering.js";
 import { sharedRobotPresetEntries, withSharedRobotPresetConfig, mergeImportedRobotPresets, mergeLegacyJointConsolePresets } from "../../robot/model/sharedRobotPresets.js";
@@ -1297,6 +1297,104 @@ export async function switchIndependentWorkspace(sessionId, {
   await completion;
   clearWorkspaceViewState('independent');
   if (mapPlacement) clearWorkspaceViewState('map');
+}
+
+// Append a prepared batch without repeatedly activating/archiving workspaces.
+// The existing independent workspace stays active; when absent, the first row
+// fills its slot. All remaining groups and optional placements commit together.
+export async function commitIndependentTeachingBatch(sessionId, {
+  replacements, mapPlacement = null, activeMode, expectedConfig, expectedMapConfig = null,
+}) {
+  if (!replacements?.length) throw new Error('没有可创建的独立示教组');
+  const ids = new Set(), groupIds = new Set();
+  for (const replacement of replacements) {
+    validateProjectWorkspace({ mode: 'independent', map: replacement.map,
+      config: { mapId: replacement.map.mapId, config: replacement.config } });
+    validateIndependentTeachingName(replacement.config.project.workspace.independentTeachingName);
+    if (ids.has(replacement.map.mapId) || !replacement.map.teachingGroupId || groupIds.has(replacement.map.teachingGroupId)) {
+      throw new Error('批量导入包含重复的示教组身份');
+    }
+    ids.add(replacement.map.mapId);
+    groupIds.add(replacement.map.teachingGroupId);
+    const transfer = replacement.config.project.workspace.transfer;
+    if (transfer && (transfer.kind !== 'alignment' || !expectedMapConfig || transfer.sourceMap?.mapId !== expectedMapConfig.mapId)) {
+      throw new Error('转换矩阵缺少已加载的目标地图');
+    }
+  }
+  if (mapPlacement) {
+    validateProjectWorkspace({ mode: 'map', map: mapPlacement.map,
+      config: { mapId: mapPlacement.map.mapId, config: mapPlacement.config } });
+    if (!expectedMapConfig || mapPlacement.mode !== 'map' || mapPlacement.config.project.workspace.transfer?.kind !== 'placement'
+      || !ids.has(mapPlacement.config.project.workspace.transfer.sourceMap?.mapId)) throw new Error('批量放置结果无效');
+  }
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction);
+  const store = transaction.objectStore(STORE_NAME);
+  let modes;
+  try {
+    const [meta, index, history, activeConfig, localMap, localConfig, targetMap, targetConfig] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(INDEPENDENT_HISTORY_KEY)), requestResult(store.get(workspaceConfigKey(activeMode))),
+      requestResult(store.get(workspaceMapKey('independent'))), requestResult(store.get(workspaceConfigKey('independent'))),
+      expectedMapConfig ? requestResult(store.get(workspaceMapKey('map'))) : null,
+      expectedMapConfig ? requestResult(store.get(workspaceConfigKey('map'))) : null,
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId || index?.sessionId !== sessionId || index.activeMode !== activeMode) {
+      throw new Error('工作会话已变化，请重新打开批量导入窗口');
+    }
+    if (!expectedConfig || activeConfig?.sessionId !== sessionId || activeConfig.mapId !== expectedConfig.mapId
+      || activeConfig.savedAt !== expectedConfig.savedAt || index.modes?.[activeMode]?.mapId !== expectedConfig.mapId) {
+      throw new Error('当前工程在批量导入期间发生了修改，请重新打开窗口');
+    }
+    if ((localMap || localConfig || index.modes?.independent?.available)
+      && (!localMap || !localConfig?.config?.project || localMap.sessionId !== sessionId || localConfig.sessionId !== sessionId
+        || localMap.mapId !== localConfig.mapId || index.modes?.independent?.mapId !== localMap.mapId)) {
+      throw new Error('当前独立工程缓存不完整，无法批量导入');
+    }
+    if (expectedMapConfig && (!targetMap?.positionBuffer || targetMap.sessionId !== sessionId
+      || targetConfig?.sessionId !== sessionId || targetMap.mapId !== expectedMapConfig.mapId
+      || targetConfig.mapId !== expectedMapConfig.mapId || targetConfig.savedAt !== expectedMapConfig.savedAt
+      || index.modes?.map?.mapId !== expectedMapConfig.mapId)) {
+      throw new Error('目标地图已变化，请重新打开批量导入窗口');
+    }
+    const entries = [...(history?.entries || [])];
+    if ([...entries, localMap].filter(Boolean).some((entry) => ids.has(entry.mapId) || groupIds.has(entry.teachingGroupId))) {
+      throw new Error('这些示教组已经导入，请重新打开列表');
+    }
+    const savedAt = Date.now();
+    modes = { ...index.modes };
+    for (const [rowIndex, replacement] of replacements.entries()) {
+      const current = !localMap && rowIndex === 0;
+      const id = replacement.map.mapId;
+      const map = { ...replacement.map, key: current ? workspaceMapKey('independent') : historyMapKey(id),
+        sessionId, savedAt, teachingSpaceMode: 'independent' };
+      const config = { key: current ? workspaceConfigKey('independent') : historyConfigKey(id),
+        mapId: id, sessionId, savedAt, teachingSpaceMode: 'independent', config: replacement.config };
+      store.put(packMapRecord(map));
+      store.put(config);
+      if (current) modes.independent = summarizeWorkspace('independent', map, config);
+      else entries.push({ ...summarizeRecovery({ sourceSessionId: sessionId, archivedAt: savedAt }, map, config),
+        historyId: id, teachingGroupId: map.teachingGroupId });
+    }
+    if (mapPlacement) {
+      const map = { ...mapPlacement.map, key: workspaceMapKey('map'), sessionId, savedAt, teachingSpaceMode: 'map' };
+      const config = { key: workspaceConfigKey('map'), mapId: map.mapId, sessionId, savedAt,
+        teachingSpaceMode: 'map', config: mapPlacement.config };
+      store.put(packMapRecord(map));
+      store.put(config);
+      modes.map = summarizeWorkspace('map', map, config);
+    }
+    store.put({ key: INDEPENDENT_HISTORY_KEY, entries });
+    store.put({ ...index, modes, updatedAt: savedAt });
+  } catch (error) {
+    transaction.abort();
+    await completion.catch(() => undefined);
+    throw error;
+  }
+  await completion;
+  if (mapPlacement) clearWorkspaceViewState('map');
+  return modes;
 }
 
 // Geometry, configuration, the reverse link and the active mode commit together.

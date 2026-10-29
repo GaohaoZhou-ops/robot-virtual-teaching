@@ -39,6 +39,8 @@ import HeightRange from "../features/viewport/ui/HeightRange.jsx";
 import IndependentWorkspaceDialog from "../features/workspace/ui/IndependentWorkspaceDialog.jsx";
 import WorkspaceCacheDialog from "../features/workspace/ui/WorkspaceCacheDialog.jsx";
 import NewIndependentTeachingDialog from "../features/workspace/ui/NewIndependentTeachingDialog.jsx";
+import BatchIndependentTeachingDialog from "../features/workspace/ui/BatchIndependentTeachingDialog.jsx";
+import { prepareIndependentTeachingBatch } from "../features/workspace/model/independentTeachingBatch.js";
 import IndependentTeachingNameDialog from "../features/workspace/ui/IndependentTeachingNameDialog.jsx";
 import IndependentTeachingExportDialog from "../features/workspace/ui/IndependentTeachingExportDialog.jsx";
 import { buildIndependentMapTeachingExport } from "../features/workspace/model/independentTeachingExport.js";
@@ -157,6 +159,7 @@ import {
   activateWorkspaceRecovery,
   commitWorkspaceTransfer,
   commitMapWorkspaceConfig,
+  commitIndependentTeachingBatch,
   fetchServiceSession,
   finalizeWorkspaceRecovery,
   loadWorkspaceViews,
@@ -2106,14 +2109,14 @@ export default function App() {
     return { expectedConfig: snapshot.config, currentRobotPackage };
   };
 
-  const openNewIndependentDialog = async ({ fromPicker = false } = {}) => {
+  const openNewIndependentDialog = async ({ fromPicker = false, batch = false } = {}) => {
     if (independentSwitchBlocked || independentSwitchBusyRef.current || workspaceSwitchingRef.current
       || newIndependentDialog || !mapData?.geometry
       || (fromPicker && (!independentWorkspaceDialog || independentWorkspaceDialog.busy))) return;
     const revision = ++newIndependentDialogRevisionRef.current;
     setRobotControlEnabled(false);
     if (fromPicker) setIndependentWorkspaceDialog(null);
-    setNewIndependentDialog({ sourceMode: teachingSpaceMode, mapLoading: true, mapSnapshot: null,
+    setNewIndependentDialog({ sourceMode: teachingSpaceMode, batch, mapLoading: true, mapSnapshot: null,
       returnToPicker: fromPicker ? independentWorkspaceDialog : null, busy: false, error: '' });
     try {
       if (teachingSpaceMode === 'map') {
@@ -2312,6 +2315,56 @@ export default function App() {
         error: error?.message || '新增独立示教失败，当前工程已保留' } : null);
     } finally {
       geometry?.dispose();
+    }
+  };
+
+  const createIndependentTeachingBatch = async (entries) => {
+    if (!entries.length || independentSwitchBusyRef.current || workspaceSwitchingRef.current || independentSwitchBlocked
+      || !newIndependentDialog?.batch || newIndependentDialog.sourceMode !== teachingSpaceMode) return;
+    independentSwitchBusyRef.current = true;
+    setNewIndependentDialog((current) => ({ ...current, busy: true, error: '' }));
+    const onProgress = (value) => setLoadState({ loading: true, ...value });
+    onProgress({ progress: 0, phase: '批量导入独立示教', detail: '保存当前工作现场' });
+    try {
+      if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+      const saved = persistWorkspaceNow();
+      workspaceSwitchingRef.current = true;
+      await saved;
+      if (!sessionReadyRef.current) throw new Error('当前工作现场尚未保存成功，请重试');
+      const current = latestWorkspaceRef.current;
+      const expectedConfig = await loadWorkspaceConfig(sessionIdRef.current, current.teachingSpaceMode);
+      const usesMap = entries.some((entry) => entry.matrix);
+      let targetMap = newIndependentDialog.mapSnapshot;
+      if (usesMap && current.teachingSpaceMode === 'map') {
+        targetMap = await loadWorkspaceSnapshot(sessionIdRef.current, 'map');
+        if (!hasLoadedMapWorkspace(targetMap) || targetMap.map.mapId !== newIndependentDialog.mapSnapshot?.map?.mapId) {
+          throw new Error('目标地图已变化，请重新打开批量导入窗口');
+        }
+      }
+      const { collectProjectRobotResources } = await import('../features/workspace/model/projectArchive.js');
+      const robotPackage = await collectProjectRobotResources(current.selectedRobot,
+        ({ phase, detail }) => onProgress({ progress: 0, phase, detail }), portableRobotPackageRef.current);
+      const result = await prepareIndependentTeachingBatch(entries, { targetMap, settings: current, robotPackage, onProgress });
+      onProgress({ progress: 0.95, phase: '保存全部示教组', detail: `共 ${entries.length} 组` });
+      const modes = await commitIndependentTeachingBatch(sessionIdRef.current, { ...result,
+        activeMode: current.teachingSpaceMode, expectedConfig, expectedMapConfig: usesMap ? targetMap?.config : null });
+      if (result.mapPlacement) {
+        // Restore changed geometry once after the entire batch, keeping the same mode.
+        window.location.assign('/workbench');
+      } else {
+        setCachedWorkspaces(modes);
+        setNewIndependentDialog(null);
+        workspaceSwitchingRef.current = false;
+        independentSwitchBusyRef.current = false;
+        setLoadState({ loading: false, progress: 0, phase: '' });
+        notify(`已创建 ${entries.length} 组独立示教，可从独立示教列表进入`, 'success');
+      }
+    } catch (error) {
+      workspaceSwitchingRef.current = false;
+      independentSwitchBusyRef.current = false;
+      setLoadState({ loading: false, progress: 0, phase: '' });
+      setNewIndependentDialog((current) => current ? { ...current, busy: false,
+        error: error.message || '批量导入失败，本批次未保存，请重试' } : null);
     }
   };
 
@@ -6596,6 +6649,11 @@ export default function App() {
                     {isIndependentTeachingSpace ? <MapIcon size={15} /> : <ScanLine size={15} />}
                     <span>{teachingModeLabel(alternateTeachingMode)}</span>
                   </button>
+                  <button type="button" className="action-button independent-teaching-action"
+                    onClick={() => openNewIndependentDialog({ batch: true })}
+                    disabled={independentSwitchBlocked || !mapData?.geometry}>
+                    <Layers2 size={15} /><span>批量导入独立示教</span>
+                  </button>
                   {isIndependentTeachingSpace && <>
                     <button
                       type="button"
@@ -6755,11 +6813,11 @@ export default function App() {
                 role="group"
                 aria-label="机器人实时坐标"
                 title={selectedRobot && robotLoadState.status === 'loaded'
-                  ? `机器人在 ${coordinateFrame.toUpperCase()} 坐标系中的实时位置，单位：米`
-                  : '加载机器人后显示实时 XYZ 坐标'}
+                  ? `机器人在 ${coordinateFrame.toUpperCase()} 坐标系中的实时 X/Y 位置（米）与 Yaw 朝向（度）`
+                  : '加载机器人后显示实时 X/Y 位置（米）与 Yaw 朝向（度）'}
               >
                 <span className="robot-position-readout__label"><Bot size={12} /> 机器人定位</span>
-                {['x', 'y', 'z'].map((axis) => (
+                {['x', 'y'].map((axis) => (
                   <span key={axis} data-axis={axis}>
                     <i className={`axis ${axis}`}>{axis.toUpperCase()}</i>
                     <b>{selectedRobot && robotLoadState.status === 'loaded'
@@ -6768,6 +6826,13 @@ export default function App() {
                   </span>
                 ))}
                 <small>m</small>
+                <span data-axis="yaw">
+                  <i className="axis yaw">Yaw</i>
+                  <b>{selectedRobot && robotLoadState.status === 'loaded'
+                    ? (Math.round(displayedRobotPose.rpy.yaw * 10) / 10).toFixed(1)
+                    : '—'}</b>
+                  <small>°</small>
+                </span>
               </div>
               <div
                 className="panel-heading__display-settings"
@@ -7379,7 +7444,14 @@ export default function App() {
         navigateAppPage(APP_PAGE_HOME, { teachingSpaceMode: 'map' });
       }}
     />}
-    {newIndependentDialog && <NewIndependentTeachingDialog
+    {newIndependentDialog?.batch && <BatchIndependentTeachingDialog
+      state={newIndependentDialog}
+      progress={loadState}
+      onLoadRoute={loadNewIndependentRoute}
+      onCreate={createIndependentTeachingBatch}
+      onClose={closeNewIndependentDialog}
+    />}
+    {newIndependentDialog && !newIndependentDialog.batch && <NewIndependentTeachingDialog
       state={newIndependentDialog}
       progress={loadState}
       onLoadRoute={loadNewIndependentRoute}
