@@ -23,7 +23,7 @@ def seed(page, modes, active, bind_directories=False, fixture_name="teachingTran
     page.evaluate("""async ({ modes, active, bindDirectories, fixtureName }) => {
       const fixtures = await import('/tests/teaching_transfer_helpers.mjs');
       const { transferFixtureFiles } = fixtures;
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       for (const mode of modes) {
         const fixture = fixtures[fixtureName](mode);
@@ -40,7 +40,7 @@ def seed(page, modes, active, bind_directories=False, fixture_name="teachingTran
             const writer = await handle.createWritable();
             await writer.write(bytes); await writer.close();
           }
-          const { saveProjectDirectoryBinding } = await import('/src/lib/projectDirectoryStore.js');
+          const { saveProjectDirectoryBinding } = await import('/src/features/workspace/model/projectDirectoryStore.js');
           await saveProjectDirectoryBinding({handle: directory, teachingSpaceMode: mode, sessionId});
         }
       }
@@ -52,7 +52,7 @@ def seed(page, modes, active, bind_directories=False, fixture_name="teachingTran
 
 def snapshot(page, mode):
     return page.evaluate("""async mode => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const data = await store.loadWorkspaceSnapshot((await store.fetchServiceSession()).sessionId, mode);
       return { project: data.config?.config.project, pointCount: data.map?.pointCount,
         mapId: data.map?.mapId, sourceHash: data.map?.sourceHash,
@@ -199,7 +199,7 @@ def run():
             ready(page, "independent")
             dialog = open_transfer(page)
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const target = await store.loadWorkspaceSnapshot(sessionId, 'map');
               target.config.config.project.virtualTeaching.tasks[0].parkingPoints[0].name = 'Concurrent edit';

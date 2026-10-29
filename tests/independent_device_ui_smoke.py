@@ -46,7 +46,7 @@ def run():
         subprocess.run(['node', '--input-type=module', '-e', """
           import { writeFile } from 'node:fs/promises';
           import { teachingTransferFixture } from './tests/teaching_transfer_helpers.mjs';
-          import { buildProjectArchive } from './src/lib/projectArchive.js';
+          import { buildProjectArchive } from './src/features/workspace/model/projectArchive.js';
           const fixture = teachingTransferFixture('independent');
           fixture.map.portableRobotPackage.files[0].bytes = new TextEncoder().encode(
             '<robot name="test"><link name="base_link"><visual><geometry><box size="0.5 0.3 0.3"/></geometry></visual></link>' +
@@ -96,7 +96,7 @@ def run():
                 assert port and port != 21990, 'Use an isolated service for restart testing'
                 assert not [url for url in traffic if '/@vite/' in url]
                 assert not sockets, sockets
-                app = Path('src/App.jsx'); original = app.read_bytes()
+                app = Path('src/app/App.jsx'); original = app.read_bytes()
                 try:
                     app.write_bytes(original + b'\n// isolated service update probe\n')
                     probe = Path('build/service/assets/previous-version-probe.txt')

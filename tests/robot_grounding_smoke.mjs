@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { ROBOT_GROUND_CLEARANCE, robotGroundLift } from '../src/lib/robotLoader.js';
+import { ROBOT_GROUND_CLEARANCE, robotGroundLift } from "../src/features/robot/model/robotLoader.js";
 
 const layer = new THREE.Group();
 const robot = new THREE.Group();

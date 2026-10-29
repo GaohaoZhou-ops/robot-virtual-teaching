@@ -7,11 +7,11 @@ import { readFileSync, existsSync } from 'node:fs';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import { createFakeRobotServer } from '../scripts/lib/fake_robot_server.mjs';
-import { createRobotTwinService } from '../src/server/robotTwinService.js';
-import { RobotTwinClient } from '../src/lib/robotTwinClient.js';
-import { colorRobotTwinPointCloud, parseRobotTwinPointCloud } from '../src/lib/robotTwinPointCloud.js';
-import { isRobotDetectionAlarm } from '../src/lib/robotTwinMonitor.js';
-import { formatRobotDetectionConfidence, isSuspectedRobotDetection, summarizeRobotDetections } from '../src/lib/robotTwinInspection.js';
+import { createRobotTwinService } from "../src/server/robots/robotTwinService.js";
+import { RobotTwinClient } from "../src/features/robot-twin/client/robotTwinClient.js";
+import { colorRobotTwinPointCloud, parseRobotTwinPointCloud } from "../src/features/robot-twin/model/robotTwinPointCloud.js";
+import { isRobotDetectionAlarm } from "../src/shared/protocols/robotTwinMonitor.js";
+import { formatRobotDetectionConfidence, isSuspectedRobotDetection, summarizeRobotDetections } from "../src/shared/protocols/robotTwinInspection.js";
 
 for (const [box, suspected] of [
   [{ confidence: 0 }, true], [{ confidence: 0.6999999999999 }, true], [{ confidence: 0.70 }, false],

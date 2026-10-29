@@ -16,7 +16,7 @@ def seed(page, variant='linked'):
     fixture = page.evaluate("""async variant => {
       const { independentTeachingExportFixture } = await import('/tests/independent_teaching_export_helpers.mjs');
       const { abxTeachingPresetFixture } = await import('/tests/abx_teaching_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = independentTeachingExportFixture();
       fixture.local.config.config.project.virtualTeaching.jointPoses = abxTeachingPresetFixture().payload.virtualTeaching.jointPoses;
@@ -144,7 +144,7 @@ def run():
                         # A replaced map while the choice is open cannot use the old binding.
                         export.click()
                         page.evaluate("""async () => {
-                          const store = await import('/src/lib/sessionStore.js');
+                          const store = await import('/src/features/workspace/model/sessionStore.js');
                           const { sessionId } = await store.fetchServiceSession();
                           const config = await store.loadWorkspaceConfig(sessionId, 'map');
                           config.config.project.map.sourceHash = 'replacement-map';

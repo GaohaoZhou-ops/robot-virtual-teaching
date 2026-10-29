@@ -29,7 +29,7 @@ def run():
     changed = json.loads(subprocess.check_output(['node', '--input-type=module', '-e', '''
         import { readFileSync } from 'node:fs';
         import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
-        import { packIPadModel } from './src/lib/ipadTeaching.js';
+        import { packIPadModel } from './src/features/devices/model/ipadTeaching.js';
         const source = readFileSync(0);
         const geometry = new PLYLoader().parse(source.buffer.slice(source.byteOffset, source.byteOffset + source.byteLength));
         geometry.computeBoundingBox();
@@ -43,7 +43,7 @@ def run():
     with tempfile.TemporaryDirectory(prefix='atlas-model-consistency-') as directory:
         server = subprocess.Popen(['node', '--input-type=module', '-e', '''
             import { createServer } from 'node:http';
-            import { createIPadTeachingService } from './src/server/ipadTeachingService.js';
+            import { createIPadTeachingService } from './src/server/devices/ipadTeachingService.js';
             const middleware = createIPadTeachingService({directory: process.env.ATLAS_TEST_STORE});
             const server = createServer((req, res) => middleware(req, res, () => {res.writeHead(404); res.end();}));
             server.listen(0, '127.0.0.1', () => console.log(`http://127.0.0.1:${server.address().port}`));

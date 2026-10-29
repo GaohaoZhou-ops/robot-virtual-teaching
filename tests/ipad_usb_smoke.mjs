@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { BufferGeometry, Float32BufferAttribute } from 'three';
-import { createIPadUSBBridge, wiredIPads } from '../src/server/ipadUSB.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { packIPadModel } from '../src/lib/ipadTeaching.js';
+import { createIPadUSBBridge, wiredIPads } from "../src/server/devices/ipadUSB.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { packIPadModel } from "../src/features/devices/model/ipadTeaching.js";
 
 const temporary = await mkdtemp(path.join(tmpdir(), 'atlas-ipad-usb-'));
 const container = path.join(temporary, 'device-container');

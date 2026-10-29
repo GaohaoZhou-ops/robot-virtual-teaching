@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createViewportNavigation, VIEWPORT_FOV } from '../src/lib/viewportNavigation.js';
+import { createViewportNavigation, VIEWPORT_FOV } from "../src/features/viewport/model/viewportNavigation.js";
 
 const camera = new THREE.PerspectiveCamera(VIEWPORT_FOV, 1, 0.01, 100);
 camera.position.set(0, -6, 8);

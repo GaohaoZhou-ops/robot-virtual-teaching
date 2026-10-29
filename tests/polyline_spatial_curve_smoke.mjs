@@ -2,16 +2,16 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { BoxGeometry, CatmullRomCurve3, Group, Object3D, Vector3, Matrix4, Quaternion } from 'three';
 import { normalizePolyline, polylineDrawingProgress, polylineSegmentStartPoses, samplePolylinePlan,
-  readPolylineTcp, repeatPolylinePlan, transformPolyline, polylineBoundsPoints } from '../src/lib/polylineTeaching.js';
-import { spatialCurveGeometry, spatialPartPoint, sampleSpatialCurve, spatialCurveDrawingEdges } from '../src/lib/polylineTeachingSpatialCurve.js';
-import { polylinePreviewParts, polylinePreviewCapacity, POLYLINE_EXECUTED_COLOR } from '../src/lib/polylineTeachingPreview.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { setRobotJointValue, applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { buildTeachingDataExport } from '../src/lib/teachingData.js';
-import { loadPolylinePreferences, savePolylinePreferences } from '../src/lib/polylineTeachingPreferences.js';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
+  readPolylineTcp, repeatPolylinePlan, transformPolyline, polylineBoundsPoints } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { spatialCurveGeometry, spatialPartPoint, sampleSpatialCurve, spatialCurveDrawingEdges } from "../src/features/teaching/polyline/model/polylineTeachingSpatialCurve.js";
+import { polylinePreviewParts, polylinePreviewCapacity, POLYLINE_EXECUTED_COLOR } from "../src/features/teaching/polyline/model/polylineTeachingPreview.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { setRobotJointValue, applyRobotJointValues, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildTeachingDataExport } from "../src/features/teaching/model/teachingData.js";
+import { loadPolylinePreferences, savePolylinePreferences } from "../src/features/teaching/polyline/model/polylineTeachingPreferences.js";
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
 
 const path = (points, extra = {}) => normalizePolyline({ pathType: 'spline', points: points.map(position => ({ position })), ...extra });
 const points = [[.4, .3, .7], [.435, .3, .72], [.49, .36, .68], [.505, .31, .71]];

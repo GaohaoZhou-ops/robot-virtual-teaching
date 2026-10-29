@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { buildWaypointLabels } from '../src/lib/waypointLabels.js';
-import { TEACHING_WAYPOINT_SOURCE, TEMPORARY_MAP_ROUTE_SOURCE, waypointRobotPose } from '../src/lib/teachingNavigation.js';
+import { buildWaypointLabels } from "../src/features/viewport/model/waypointLabels.js";
+import { TEACHING_WAYPOINT_SOURCE, TEMPORARY_MAP_ROUTE_SOURCE, waypointRobotPose } from "../src/features/teaching/model/teachingNavigation.js";
 
 const route = (id, node, x, name = `N${node} · 停车点1`) => ({ id, name, source: 'abx-route',
   abx: { routeId: 'route', nodeId: node }, pose: { x, y: 2, z: 0, roll: 0, pitch: 0, yaw: 0 } });

@@ -5,10 +5,10 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { BufferGeometry, Float32BufferAttribute } from 'three';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { prepareIPadTransfer } from '../src/lib/ipadTransferPreparation.js';
-import { buildIPadPoseSeed } from '../src/lib/ipadPoseSeed.js';
-import { ipadPoseSeedHash } from '../src/lib/ipadTransferSnapshot.js';
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { prepareIPadTransfer } from "../src/features/devices/model/ipadTransferPreparation.js";
+import { buildIPadPoseSeed } from "../src/features/devices/model/ipadPoseSeed.js";
+import { ipadPoseSeedHash } from "../src/shared/protocols/ipadTransferSnapshot.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-ipad-snapshot-'));
 let middleware = createIPadTeachingService({ directory });

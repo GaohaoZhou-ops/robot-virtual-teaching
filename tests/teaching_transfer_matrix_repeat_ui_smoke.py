@@ -168,8 +168,8 @@ def run():
             page.on("pageerror", lambda error: errors.append(str(error)))
             seed(page, ["map", "independent"], "independent")
             page.evaluate("""async text => {
-              const store = await import('/src/lib/sessionStore.js');
-              const transfer = await import('/src/lib/teachingTransfer.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
+              const transfer = await import('/src/features/teaching/model/teachingTransfer.js');
               const { sessionId } = await store.fetchServiceSession();
               const source = await store.loadWorkspaceSnapshot(sessionId, 'independent');
               const target = await store.loadWorkspaceSnapshot(sessionId, 'map');

@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { BoxGeometry } from 'three';
-import { packIPadModel } from '../src/lib/ipadTeaching.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { modelThumbnail } from '../src/server/modelThumbnail.js';
+import { packIPadModel } from "../src/features/devices/model/ipadTeaching.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { modelThumbnail } from "../src/server/devices/modelThumbnail.js";
 
 const simulator = process.env.VISION_SIMULATOR_ID || Object.values(JSON.parse(execFileSync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'])).devices)
   .flat().find(device => device.name.includes('Vision Pro'))?.udid;

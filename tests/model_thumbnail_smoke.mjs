@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { BoxGeometry, BufferGeometry, Float32BufferAttribute } from 'three';
 import { PNG } from 'pngjs';
-import { packIPadModel } from '../src/lib/ipadTeaching.js';
-import { modelThumbnail } from '../src/server/modelThumbnail.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
+import { packIPadModel } from "../src/features/devices/model/ipadTeaching.js";
+import { modelThumbnail } from "../src/server/devices/modelThumbnail.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-model-preview-'));
 const middleware = createIPadTeachingService({ directory });

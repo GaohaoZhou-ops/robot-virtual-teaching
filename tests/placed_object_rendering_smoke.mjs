@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { placedObjectLayers, placedObjectMask, recoverPlacedObjectLayers } from '../src/lib/placedObjectRendering.js';
-import { identityTransferPose, placeTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { normalizeProject } from '../src/lib/io.js';
+import { placedObjectLayers, placedObjectMask, recoverPlacedObjectLayers } from "../src/features/viewport/model/placedObjectRendering.js";
+import { identityTransferPose, placeTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
 import { teachingTransferFixture, transferSnapshot, transferFixtureFiles } from './teaching_transfer_helpers.mjs';
 
 const background = teachingTransferFixture('map');

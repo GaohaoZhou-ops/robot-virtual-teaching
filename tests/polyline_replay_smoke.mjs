@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { setRobotJointValue } from '../src/lib/robotLoader.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { normalizePolyline, repeatPolylinePlan, samplePolylinePlan, polylineSegmentStartPoses, polylineVertices } from '../src/lib/polylineTeaching.js';
-import { polylinePreviewParts, POLYLINE_EXECUTED_COLOR } from '../src/lib/polylineTeachingPreview.js';
+import { setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { normalizePolyline, repeatPolylinePlan, samplePolylinePlan, polylineSegmentStartPoses, polylineVertices } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { polylinePreviewParts, POLYLINE_EXECUTED_COLOR } from "../src/features/teaching/polyline/model/polylineTeachingPreview.js";
 
 const far = { kind: 'mesh', positions: new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]), indices: new Uint32Array([0, 1, 2]) };
 function fixture() {

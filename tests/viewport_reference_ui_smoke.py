@@ -107,7 +107,7 @@ def check_legend_toggle(page, mode):
     page.keyboard.press('Escape')
     page.screenshot(path=f'/tmp/atlas-height-legend-hidden-{mode}.png', full_page=True)
     page.wait_for_function("""async mode => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const record = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, mode);
       return record?.config.ui.showHeightLegend3D === false
         && record?.config.project.workspace.showHeightLegend3D === false;

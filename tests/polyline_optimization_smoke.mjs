@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import * as THREE from 'three';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { createMobileCollisionChecker, prepareMobileCollisionEnvironment } from '../src/lib/mobileTeachingCollision.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { planPolylineWithApproach } from '../src/lib/polylineTeachingApproach.js';
-import { serializeMobileTeachingRobot, restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable } from '../src/lib/polylineTeaching.js';
-import { createPolylineSuccessMemory, polylineMemoryContext } from '../src/lib/polylineTeachingMemory.js';
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { createMobileCollisionChecker, prepareMobileCollisionEnvironment } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { planPolylineWithApproach } from "../src/features/teaching/polyline/model/polylineTeachingApproach.js";
+import { serializeMobileTeachingRobot, restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { createPolylineSuccessMemory, polylineMemoryContext } from "../src/features/teaching/polyline/model/polylineTeachingMemory.js";
 
 const box = (size, center, divisions = 1) => {
   const geometry = new THREE.BoxGeometry(...size, divisions, divisions, divisions).translate(...center);

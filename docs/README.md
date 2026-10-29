@@ -39,6 +39,7 @@
 | [工程保存与交换](projects.md) | 自动保存、恢复、JSON / ZIP、完整工程目录 |
 | [机器人示教数据导出](robot-export.md) | 导出前检查、机器人文件交换和数据格式 |
 | [本地构建与设备部署](development.md) | Web / 原生构建、iPad / iPhone 签名、模拟器与安装 |
+| [代码结构与模块边界](architecture.md) | 功能归属、依赖规则、服务装配与新增代码约定 |
 | [集群计算与物理后端](compute-backends.md) | 停车点集群计算、Isaac Sim / PhysX |
 | [缓存清理与兼容性](maintenance.md) | 清理范围、数据保护和历史名称 |
 | [测试与回归](testing.md) | 各功能测试入口、平台依赖及专用用例 |

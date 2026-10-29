@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { Quaternion, Vector3 } from 'three';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
-import { normalizeProject } from '../src/lib/io.js';
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
 import { cropTeachingGeometry, extractTeachingWorkspace, identityTransferPose, placeTeachingWorkspace,
-  placementTransform, transferMatrix, transformTeachingPose, writeBackTeachingWorkspace } from '../src/lib/teachingTransfer.js';
+  placementTransform, transferMatrix, transformTeachingPose, writeBackTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
 
 const close = (a, b, epsilon = 1e-5) => assert.ok(Math.abs(a - b) < epsilon, `${a} ≠ ${b}`);

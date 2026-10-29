@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { applyRobotModelOpacity } from '../src/lib/robotDisplay.js';
-import { applyRobotCollisionHighlights, collectRobotCollisionProxies, disposeRobotCollisionProxies } from '../src/lib/robotCollision.js';
-import { serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { applyRobotModelOpacity } from "../src/features/robot/model/robotDisplay.js";
+import { applyRobotCollisionHighlights, collectRobotCollisionProxies, disposeRobotCollisionProxies } from "../src/features/robot/model/robotCollision.js";
+import { serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
 
 const robot = new THREE.Group();
 const link = new THREE.Group(); link.name = 'left_L3'; link.userData.urdfType = 'link'; robot.add(link);

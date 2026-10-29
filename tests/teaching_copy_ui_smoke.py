@@ -94,8 +94,8 @@ def run():
                 expect_preset(copied_json(page))
                 # Verify the actual clipboard can pass back through the existing preset importer.
                 restored = page.evaluate("""async () => {
-                  const { readRobotPresetFile } = await import('/src/lib/robotJointPresets.js');
-                  const { ABX_JOINT_NAMES } = await import('/src/lib/abxFormat.js');
+                  const { readRobotPresetFile } = await import('/src/features/robot/model/robotJointPresets.js');
+                  const { ABX_JOINT_NAMES } = await import('/src/features/teaching/model/abxFormat.js');
                   const definitions = Object.values(ABX_JOINT_NAMES).flat().reverse()
                     .map(name => ({ name, type: 'revolute', lower: -180, upper: 180 }));
                   return readRobotPresetFile(await navigator.clipboard.readText(), definitions, 'copied.json');
@@ -152,7 +152,7 @@ def run():
             expect(page.get_by_role('status').filter(has_text='复制姿态失败')).to_contain_text('head_yaw_J')
             assert page.evaluate('navigator.clipboard.readText()') == 'preserve existing clipboard'
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const saved = await store.loadWorkspaceConfig(sessionId, 'map');
               saved.config.project.virtualTeaching.tasks = [];

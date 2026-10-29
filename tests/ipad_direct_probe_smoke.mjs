@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { advertiseIPadService } from '../src/server/ipadDiscovery.js';
+import { advertiseIPadService } from "../src/server/devices/ipadDiscovery.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-directed-probe-'));
 const id = randomUUID(), otherID = randomUUID();

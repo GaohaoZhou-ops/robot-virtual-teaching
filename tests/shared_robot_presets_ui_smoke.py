@@ -51,7 +51,7 @@ def run():
             seed(page, 'map')
             page.wait_for_timeout(300)  # Drain fixture hydration's debounced autosave.
             page.evaluate('''async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
               const { sessionId } = await store.fetchServiceSession();
               const original = await store.loadWorkspaceSnapshot(sessionId, 'map');
@@ -112,8 +112,8 @@ def run():
             assert_shared(page, [])
             # A stale legacy autosave cannot repopulate the authoritative empty list.
             page.evaluate('''async () => {
-              const store = await import('/src/lib/sessionStore.js');
-              const { createRobotJointPreset } = await import('/src/lib/robotJointPresets.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
+              const { createRobotJointPreset } = await import('/src/features/robot/model/robotJointPresets.js');
               const { sessionId } = await store.fetchServiceSession();
               const snapshot = await store.loadWorkspaceSnapshot(sessionId, 'independent');
               snapshot.config.config.project.virtualTeaching.jointPoses.push(createRobotJointPreset({id: 'stale', name: '旧副本',

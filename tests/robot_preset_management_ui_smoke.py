@@ -19,8 +19,8 @@ def seed(page, mode):
     wait_for_home(page)
     page.evaluate('''async mode => {
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const { createRobotJointPreset } = await import('/src/lib/robotJointPresets.js');
-      const store = await import('/src/lib/sessionStore.js');
+      const { createRobotJointPreset } = await import('/src/features/robot/model/robotJointPresets.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransferFixture(mode), project = fixture.config.config.project;
       const joints = ['left_J1', 'right_J1', 'head_pitch_J'].map(name => ({name, type: 'revolute', lower: -180, upper: 180}));

@@ -26,7 +26,7 @@ def submit(page, dialog, mode="independent"):
 
 def route_enabled(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       return (await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId,
         'independent')).config.ui.mapRouteSyncEnabled === true;
     }""")
@@ -153,7 +153,7 @@ def run():
             context, page = new_page(browser, errors)
             seed(page, ['map', 'independent'], 'independent')
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const config = await store.loadWorkspaceConfig(sessionId, 'map');
               config.config.project.waypoints = []; config.config.project.paths = [];

@@ -84,7 +84,7 @@ def seed_host(page):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate("""async mode => {
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransferFixture(mode);
       fixture.config.config.project.virtualTeaching.jointPoses[0].joints.source = 'robot-preset';

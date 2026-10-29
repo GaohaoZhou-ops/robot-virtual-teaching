@@ -10,7 +10,7 @@ def seed(page, case, mode):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate("""async ({ caseName, mode }) => {
       const { teachingTransfer3DFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransfer3DFixture(mode), project = fixture.config.config.project;
       const task = project.virtualTeaching.tasks[0];
@@ -112,7 +112,7 @@ def run():
                 # The diagnostic is preserved after an actual browser reload.
                 for _ in range(100):
                     if page.evaluate("""async mode => {
-                      const store = await import('/src/lib/sessionStore.js');
+                      const store = await import('/src/features/workspace/model/sessionStore.js');
                       const saved = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, mode);
                       return saved.config.ui.validation?.status === 'partial' && saved.config.ui.validation.checkedAt;
                     }""", mode):

@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { strFromU8, unzipSync } from 'fflate';
-import { abxTeachingNeedsRobot, buildAbxTeachingArchive, buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
-import { parseAbxTeachingTask, readAbxTeachingFile } from '../src/lib/abxTeachingImport.js';
-import { buildIndependentMapTeachingExport } from '../src/lib/independentTeachingExport.js';
+import { abxTeachingNeedsRobot, buildAbxTeachingArchive, buildAbxTeachingExport } from "../src/features/teaching/model/abxTeachingExport.js";
+import { parseAbxTeachingTask, readAbxTeachingFile } from "../src/features/teaching/model/abxTeachingImport.js";
+import { buildIndependentMapTeachingExport } from "../src/features/workspace/model/independentTeachingExport.js";
 import { abxTeachingPresetFixture } from './abx_teaching_helpers.mjs';
 import { independentTeachingExportFixture } from './independent_teaching_export_helpers.mjs';
 

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { mobileUpperBodyJoints, mobileReferenceMetrics } from '../src/lib/mobileTeachingReference.js';
+import { applyRobotJointValues, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { mobileUpperBodyJoints, mobileReferenceMetrics } from "../src/features/teaching/mobile/model/mobileTeachingReference.js";
 import { solveMobileTeaching, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport, mobileReportSolveOptions,
-  validateMobileSolveOptions, buildMobileSolvedTask } from '../src/lib/mobileTeachingSolver.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
+  validateMobileSolveOptions, buildMobileSolvedTask } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
 
 // Two Cartesian wrists give an independently known answer: every target below
 // is exactly the same reference posture, translated/turned by its chassis.

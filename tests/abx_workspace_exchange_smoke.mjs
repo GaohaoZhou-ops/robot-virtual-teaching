@@ -6,11 +6,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { unzipSync, zipSync } from 'fflate';
-import { abxRouteToProject, buildAbxRouteDocuments, readAbxRoute, validateAbxRoute } from '../src/lib/abxRoute.js';
-import { readAbxTeachingFile, parseAbxTeachingTask, mergeAbxImport } from '../src/lib/abxTeachingImport.js';
-import { buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
-import { buildTeachingWaypoints } from '../src/lib/teachingNavigation.js';
+import { abxRouteToProject, buildAbxRouteDocuments, readAbxRoute, validateAbxRoute } from "../src/features/navigation/model/abxRoute.js";
+import { readAbxTeachingFile, parseAbxTeachingTask, mergeAbxImport } from "../src/features/teaching/model/abxTeachingImport.js";
+import { buildAbxTeachingExport } from "../src/features/teaching/model/abxTeachingExport.js";
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildTeachingWaypoints } from "../src/features/teaching/model/teachingNavigation.js";
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
 const workspace = path.resolve(process.env.ABX_WORKSPACE_ZIP || 'workspace.zip');

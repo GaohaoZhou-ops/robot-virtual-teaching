@@ -30,6 +30,8 @@
 
 `.gitignore` 按依赖缓存、构建产物、本地运行状态、测试产物及工程导出分类。浏览器截图、录像和追踪包按测试输出目录，或根目录与 `tests/` 下的 `atlas-` / `transfer-` 文件名限定范围，测试报告、截图和下载目录的 ZIP 打包文件也按明确路径忽略。
 
+新增检查的日志、报告和临时运行器统一放在 `build/<任务>/`，截图与下载放在 `test-artifacts/<测试>/`。忽略规则也覆盖 `tests/unit/`、`tests/integration/` 等测试目录下的标准产物目录与打包副本；`tests/fixtures/` 和各测试套件内的 `fixtures/` 保留工程格式输入。历史输出名称继续兼容，不再为每次验证追加专用规则。
+
 Vision Pro 空间相机调试产物保存在 `vision/build/spatial-editor/` 与 `vision/test-artifacts/`；单独复制到根目录、`tests/` 或 `vision/` 的 `atlas-spatial-*-attachments` 附件目录、编号重试副本及 ZIP 也会忽略。`vision/` 下的 `atlas-spatial-*` PNG、MP4、WebM 截图录像保留在本机，同名嵌套测试样例和设计素材仍可跟踪。
 
 沉浸式工程的构建与验证输出使用 `vision/build/workbench*` 和 `vision/test-artifacts/workbench/`。Xcode 生成的 `vision/AtlasVisionTeaching/WebWorkbench/` 及其 ZIP 副本不提交；根目录、`tests/` 或 `vision/` 下的 `atlas-vision-scene-*`、`atlas-vision-workbench-*` 临时目录与 ZIP，以及 `VisionWorkbenchImports/` 工程导入缓存也保留在本机，嵌套测试夹具仍可跟踪。

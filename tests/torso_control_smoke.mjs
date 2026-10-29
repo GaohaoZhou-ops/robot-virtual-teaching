@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { configureRobotArmSoftLimits, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
-import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from '../src/lib/robotTorsoControl.js';
+import { configureRobotArmSoftLimits, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { getRobotJointLimits } from "../src/features/robot/model/robotJointLimits.js";
+import { createRobotTorsoController, readRobotTorsoPose, solveRobotTorsoPose } from "../src/features/robot/model/robotTorsoControl.js";
 
 // A URDF-shaped four-joint chain with the robot's real link lengths and limits.
 const robot = new THREE.Group();

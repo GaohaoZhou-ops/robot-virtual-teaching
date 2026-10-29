@@ -37,7 +37,7 @@ with sync_playwright() as p:
         host.keyboard.press('Escape')
         expect(control(host)).to_have_attribute('data-sync-role', 'host', timeout=70000)
         project_key = host.evaluate('''async () => {
-          const store = await import('/src/lib/sessionStore.js');
+          const store = await import('/src/features/workspace/model/sessionStore.js');
           const {sessionId} = await store.fetchServiceSession();
           const {map, config} = await store.loadWorkspaceSnapshot(sessionId, 'map');
           return JSON.stringify(['map', map.mapId, map.sourceHash, config.config.project.robot.relativePath]);
@@ -104,7 +104,7 @@ with sync_playwright() as p:
         peer.goto(BASE_URL, wait_until='networkidle')
         peer.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
         peer.evaluate('''async key => {
-          const store = await import('/src/lib/sessionStore.js');
+          const store = await import('/src/features/workspace/model/sessionStore.js');
           const {sessionId} = await store.fetchServiceSession();
           const {map, config} = await store.loadWorkspaceSnapshot(sessionId, 'map');
           delete map.geometryLayers;

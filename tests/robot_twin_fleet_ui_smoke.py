@@ -246,7 +246,7 @@ try:
             command({'motion': True})
             page.wait_for_timeout(1100)
             performance = page.evaluate('''async () => {
-              const {RobotTwinScene} = await import('/src/lib/robotTwinScene.js');
+              const {RobotTwinScene} = await import('/src/features/robot-twin/model/robotTwinScene.js');
               const update=RobotTwinScene.prototype.update, costs=[], frames=[];
               RobotTwinScene.prototype.update=function(...args) {
                 const start=performance.now(), result=update.apply(this,args);

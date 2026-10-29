@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { buildVisionScenePackage } from '../src/lib/visionScenePackage.js';
-import { heightPalette } from '../src/lib/heightPalette.js';
+import { buildVisionScenePackage } from "../src/features/devices/model/visionScenePackage.js";
+import { heightPalette } from "../src/features/viewport/model/heightPalette.js";
 import { visionSceneFixture } from './vision_scene_fixture.mjs';
 
 const bytes = rgb => rgb.map(value => Math.round(value * 255));

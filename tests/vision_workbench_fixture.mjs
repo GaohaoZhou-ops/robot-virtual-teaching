@@ -1,5 +1,5 @@
 import { writeFile } from 'node:fs/promises';
-import { buildProjectArchive } from '../src/lib/projectArchive.js';
+import { buildProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 import { visionSceneFixture } from './vision_scene_fixture.mjs';
 import { pathToFileURL } from 'node:url';
 

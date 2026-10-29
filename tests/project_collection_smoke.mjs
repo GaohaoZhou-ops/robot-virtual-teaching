@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { strToU8, unzipSync, zipSync } from 'fflate';
-import { buildProjectArchive, readProjectArchive, readProjectDirectoryFiles, saveProjectArchive } from '../src/lib/projectArchive.js';
-import { prepareWorkspaceCollectionImport } from '../src/lib/projectWorkspaceCollection.js';
-import { linkedWorkspaceRelation } from '../src/lib/linkedProject.js';
-import { normalizeProject } from '../src/lib/io.js';
+import { buildProjectArchive, readProjectArchive, readProjectDirectoryFiles, saveProjectArchive } from "../src/features/workspace/model/projectArchive.js";
+import { prepareWorkspaceCollectionImport } from "../src/features/workspace/model/projectWorkspaceCollection.js";
+import { linkedWorkspaceRelation } from "../src/features/workspace/model/linkedProject.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
 import { projectCollectionFixture, projectCollectionOptions } from './project_collection_helpers.mjs';
 import { linkedProjectFixture } from './linked_project_helpers.mjs';
-import { writeBackTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { expandProjectResources } from '../src/lib/projectResourceStorage.js';
+import { writeBackTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { expandProjectResources } from "../src/features/workspace/model/projectResourceStorage.js";
 
 const collection = await projectCollectionFixture();
 const original = structuredClone(collection);

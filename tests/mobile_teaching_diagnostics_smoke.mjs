@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { DEFAULT_MOBILE_SOLVE_OPTIONS, measureMobileTarget, mobileReportSolveOptions } from '../src/lib/mobileTeachingSolver.js';
+import { DEFAULT_MOBILE_SOLVE_OPTIONS, measureMobileTarget, mobileReportSolveOptions } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
 import { formatMobileConstraintValue, mobileAxisWithinTolerance, mobileRowFailureReason,
-  mobileSolutionFailureReasons, mobileTargetWithinTolerance } from '../src/lib/mobileTeachingDiagnostics.js';
+  mobileSolutionFailureReasons, mobileTargetWithinTolerance } from "../src/features/teaching/mobile/model/mobileTeachingDiagnostics.js";
 
 const options = structuredClone(DEFAULT_MOBILE_SOLVE_OPTIONS);
 const solution = {

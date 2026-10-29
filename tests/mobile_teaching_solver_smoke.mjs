@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { DEFAULT_MOBILE_SOLVE_OPTIONS, buildMobileSolvedTask, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport, solveMobileTeaching, validateMobileSolveOptions } from '../src/lib/mobileTeachingSolver.js';
-import { mobileSolutionMapPose } from '../src/lib/mobileTeachingParking.js';
-import { readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
-import { transformTeachingTasks } from '../src/lib/teachingTransfer.js';
-import { createMobileTeachingPauseGate, restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { mobileRobotPoseLinks, mobileSampleStatus } from '../src/lib/mobileTeachingReview.js';
-import { createMobilePosePreview, disposeIPadCaptureLayer } from '../src/lib/ipadCaptureDisplay.js';
+import { DEFAULT_MOBILE_SOLVE_OPTIONS, buildMobileSolvedTask, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport, solveMobileTeaching, validateMobileSolveOptions } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { mobileSolutionMapPose } from "../src/features/teaching/mobile/model/mobileTeachingParking.js";
+import { readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
+import { transformTeachingTasks } from "../src/features/teaching/model/teachingTransfer.js";
+import { createMobileTeachingPauseGate, restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { mobileRobotPoseLinks, mobileSampleStatus } from "../src/features/teaching/mobile/model/mobileTeachingReview.js";
+import { createMobilePosePreview, disposeIPadCaptureLayer } from "../src/features/devices/model/ipadCaptureDisplay.js";
 
 // A limited six-axis Cartesian arm makes feasibility and impossible targets
 // independently known, while still exercising the same URDF joint update code.
@@ -186,7 +186,7 @@ for (const row of multi.rows) {
   const fkRobot = model(), fkLayer = new THREE.Group(); fkLayer.add(fkRobot);
   fkLayer.position.set(...['x', 'y', 'z'].map((axis) => mapPose.position[axis]));
   fkLayer.rotation.set(...['roll', 'pitch', 'yaw'].map((axis) => THREE.MathUtils.degToRad(mapPose.rpy[axis])), 'XYZ');
-  const { applyRobotJointValues } = await import('../src/lib/robotLoader.js');
+  const { applyRobotJointValues } = await import("../src/features/robot/model/robotLoader.js");
   applyRobotJointValues(fkRobot, row.solutions.left.jointValues); fkLayer.updateMatrixWorld(true);
   assert.ok(measureMobileTarget(fkRobot.getObjectByName('tool_left'), mobileSampleTarget(distributed.mobileCapture.samples.find((s) => s.id === row.sampleId), distributed), multi.options).withinTolerance);
 }

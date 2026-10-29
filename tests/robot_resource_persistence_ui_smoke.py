@@ -12,7 +12,7 @@ CHROME = os.environ.get('PLAYWRIGHT_CHROMIUM_EXECUTABLE', '/Applications/Google 
 
 def records(page):
     return page.evaluate('''async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const {sessionId} = await store.fetchServiceSession();
       const active = await store.loadWorkspaceSnapshot(sessionId, 'map');
       const companion = await store.loadWorkspaceSnapshot(sessionId, 'independent');
@@ -47,7 +47,7 @@ def run():
             page.locator('[data-session-state="ready"]:visible').wait_for()
             page.evaluate('''async () => {
               const {teachingTransferFixture} = await import('/tests/teaching_transfer_helpers.mjs');
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const {sessionId} = await store.fetchServiceSession();
               const {robots} = await (await fetch('/__atlas/robots')).json();
               const robot = robots.find(robot => robot.name === 'botx_abx_zivid_m70');
@@ -87,7 +87,7 @@ def run():
             page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70').click()
             loaded(page)
             page.wait_for_function('''async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const data = await store.loadWorkspaceSnapshot((await store.fetchServiceSession()).sessionId, 'map');
               return data.config.config.ui.selectedRobot?.portableResourceId === null;
             }''')
@@ -127,7 +127,7 @@ def run():
 
             # Failed map-cache writes must also roll back the robot selection.
             result = page.evaluate('''async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const {sessionId}=await store.fetchServiceSession();
               const before=await store.loadWorkspaceSnapshot(sessionId,'independent');
               const config=structuredClone(before.config.config);

@@ -7,9 +7,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { strFromU8, unzipSync } from 'fflate';
-import { abxRouteToProject, readAbxRoute } from '../src/lib/abxRoute.js';
-import { buildAbxTeachingArchive } from '../src/lib/abxTeachingExport.js';
-import { parseAbxTeachingTask, readAbxTeachingFile } from '../src/lib/abxTeachingImport.js';
+import { abxRouteToProject, readAbxRoute } from "../src/features/navigation/model/abxRoute.js";
+import { buildAbxTeachingArchive } from "../src/features/teaching/model/abxTeachingExport.js";
+import { parseAbxTeachingTask, readAbxTeachingFile } from "../src/features/teaching/model/abxTeachingImport.js";
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');

@@ -2,17 +2,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { normalizePolyline, readPolylineTcp, samplePolylinePlan, transformPolyline } from '../src/lib/polylineTeaching.js';
-import { normalizeTeachingTasks, normalizeProject } from '../src/lib/io.js';
-import { buildTeachingDataExport } from '../src/lib/teachingData.js';
-import { transformTeachingTasks, extractTeachingWorkspace, writeBackTeachingWorkspace, placeTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { normalizePolyline, readPolylineTcp, samplePolylinePlan, transformPolyline } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { normalizeTeachingTasks, normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildTeachingDataExport } from "../src/features/teaching/model/teachingData.js";
+import { transformTeachingTasks, extractTeachingWorkspace, writeBackTeachingWorkspace, placeTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { buildAbxTeachingExport } from "../src/features/teaching/model/abxTeachingExport.js";
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
 function setup(side = 'left', offset = [0, 0, 0]) {

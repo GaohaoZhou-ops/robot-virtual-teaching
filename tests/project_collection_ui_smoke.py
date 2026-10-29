@@ -14,9 +14,9 @@ from topbar_tools_helpers import topbar_action
 
 def state(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
-      const { normalizeProject } = await import('/src/lib/io.js');
-      const { linkedWorkspaceRelation } = await import('/src/lib/linkedProject.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
+      const { normalizeProject } = await import('/src/features/workspace/model/io.js');
+      const { linkedWorkspaceRelation } = await import('/src/features/workspace/model/linkedProject.js');
       const { sessionId } = await store.fetchServiceSession();
       const map = await store.loadWorkspaceSnapshot(sessionId, 'map');
       const { companionWorkspace, independentHistory } = await store.loadProjectCompanions(sessionId, 'map');
@@ -81,7 +81,7 @@ def run():
             source.goto(BASE_URL, wait_until="networkidle")
             source.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
             source.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { projectCollectionFixture } = await import('/tests/project_collection_helpers.mjs');
               const { sessionId } = await store.fetchServiceSession();
               await store.restoreWorkspaceCollection(sessionId, await projectCollectionFixture());
@@ -153,9 +153,9 @@ def run():
             # Storage failure after writes were queued must roll back both the
             # active slots and the full history list, without losing local data.
             assert page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { projectCollectionFixture } = await import('/tests/project_collection_helpers.mjs');
-              const { prepareWorkspaceCollectionImport } = await import('/src/lib/projectWorkspaceCollection.js');
+              const { prepareWorkspaceCollectionImport } = await import('/src/features/workspace/model/projectWorkspaceCollection.js');
               const { sessionId } = await store.fetchServiceSession();
               const collection = prepareWorkspaceCollectionImport(await projectCollectionFixture());
               const put = IDBObjectStore.prototype.put;

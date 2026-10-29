@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { workbenchFixture } from './vision_workbench_fixture.mjs';
 import { createServer } from 'node:http';
-import { createWorkSyncService } from '../src/server/workSyncService.js';
+import { createWorkSyncService } from "../src/server/collaboration/workSyncService.js";
 
 const run = (cmd, args, options = {}) => new Promise((resolve, reject) => {
   const child = spawn(cmd, args, { stdio: 'inherit', ...options });

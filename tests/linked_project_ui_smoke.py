@@ -23,7 +23,7 @@ def seed_linked(page, active):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate("""async active => {
       const { linkedProjectFixture } = await import('/tests/linked_project_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const pair = await linkedProjectFixture();
       await store.restoreLinkedWorkspaces(sessionId, pair, active);
@@ -37,9 +37,9 @@ def seed_linked(page, active):
 
 def state(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
-      const { linkedWorkspaceRelation } = await import('/src/lib/linkedProject.js');
-      const { normalizeProject } = await import('/src/lib/io.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
+      const { linkedWorkspaceRelation } = await import('/src/features/workspace/model/linkedProject.js');
+      const { normalizeProject } = await import('/src/features/workspace/model/io.js');
       const { sessionId } = await store.fetchServiceSession();
       const pair = Object.fromEntries(await Promise.all(['map', 'independent'].map(async mode =>
         [mode, await store.loadWorkspaceSnapshot(sessionId, mode)])));
@@ -118,7 +118,7 @@ def check_shared_save_target(browser, errors):
     assert assert_pair(saved_bytes(page, "linked.zip"))["independent"]["workspace"]["pointColorMode"] == "white"
     committed = saved_bytes(page, "linked.zip")
     page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       // Replace just the other side with an unrelated model.
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
@@ -191,7 +191,7 @@ def run():
                 # Force a serialization failure after the first workspace has
                 # been written in the transaction, and verify complete rollback.
                 assert page.evaluate("""async () => {
-                  const store = await import('/src/lib/sessionStore.js');
+                  const store = await import('/src/features/workspace/model/sessionStore.js');
                   const { linkedProjectFixture } = await import('/tests/linked_project_helpers.mjs');
                   const { sessionId } = await store.fetchServiceSession();
                   const pair = await linkedProjectFixture();

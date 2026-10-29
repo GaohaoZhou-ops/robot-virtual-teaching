@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
-import { createIPadScreenService, SCREEN_PROTOCOL } from '../src/server/ipadScreenService.js';
-import { randomPairingCode } from '../src/server/ipadPairing.js';
-import { screenJointState } from '../src/lib/ipadScreenControl.js';
+import { createIPadScreenService, SCREEN_PROTOCOL } from "../src/server/devices/ipadScreenService.js";
+import { randomPairingCode } from "../src/server/devices/ipadPairing.js";
+import { screenJointState } from "../src/shared/protocols/ipadScreenControl.js";
 
 let now = Date.now(), usbCalls = 0;
 const plannedCodes = ['AAAA', 'AAAA', 'BBBB'];

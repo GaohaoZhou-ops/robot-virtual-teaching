@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
-import { composeModels, inverseModelPose, joinEditableModels } from '../src/lib/modelComposition.js';
-import { encodeModelPly, modelBounds, parseEditablePly } from '../src/lib/modelEditing.js';
-import { modelMatrixFromOrigin, ZERO_MODEL_ORIGIN } from '../src/lib/modelOriginTransform.js';
+import { composeModels, inverseModelPose, joinEditableModels } from "../src/features/model-editor/model/modelComposition.js";
+import { encodeModelPly, modelBounds, parseEditablePly } from "../src/features/model-editor/model/modelEditing.js";
+import { modelMatrixFromOrigin, ZERO_MODEL_ORIGIN } from "../src/features/model-editor/model/modelOriginTransform.js";
 
 const model = (positions, indices = [], colors = null, normals = null) => ({ positions: new Float32Array(positions), indices: new Uint32Array(indices),
   colors: colors && new Float32Array(colors), normals: normals && new Float32Array(normals) });

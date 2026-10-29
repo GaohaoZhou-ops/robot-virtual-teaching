@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { readRobotJointValues, applyRobotJointValues } from '../src/lib/robotLoader.js';
-import { mobileChestTiltLowerBound } from '../src/lib/mobileTeachingChest.js';
-import { mobileChestWithinTolerance, mobileSolutionFailureReasons } from '../src/lib/mobileTeachingDiagnostics.js';
-import { mobileParkingCandidates } from '../src/lib/mobileTeachingParking.js';
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { readRobotJointValues, applyRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { mobileChestTiltLowerBound } from "../src/features/teaching/mobile/model/mobileTeachingChest.js";
+import { mobileChestWithinTolerance, mobileSolutionFailureReasons } from "../src/features/teaching/mobile/model/mobileTeachingDiagnostics.js";
+import { mobileParkingCandidates } from "../src/features/teaching/mobile/model/mobileTeachingParking.js";
 import { solveMobileTeaching, validateMobileSolveOptions, normalizeMobileSolveReport, mobileReportSolveOptions,
-  measureMobileTarget, mobileSampleTarget } from '../src/lib/mobileTeachingSolver.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
+  measureMobileTarget, mobileSampleTarget } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
 const robot = restoreMobileTeachingRobot(fixture.robot), original = readRobotJointValues(robot);

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
 import {
   buildTeachingWaypoints,
   navigationEdgesForWaypoints,
   removeTeachingWaypoints,
   TEACHING_WAYPOINT_SOURCE,
   updateTeachingWaypoint,
-} from '../src/lib/teachingNavigation.js';
+} from "../src/features/teaching/model/teachingNavigation.js";
 
 const mapData = { name: 'site.ply', sourceHash: 'site-hash' };
 const pose = (x) => ({

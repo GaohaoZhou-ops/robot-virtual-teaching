@@ -65,6 +65,7 @@ npm install
 | 同步设备或使用空间示教 | [设备协作](docs/collaboration.md) · [iPad / iPhone](docs/mobile-teaching.md) · [Vision Pro](vision/README.md) |
 | 保存、恢复和对接机器人 | [工程管理](docs/projects.md) · [机器人导出](docs/robot-export.md) |
 | 编译、部署、测试与清理 | [构建与部署](docs/development.md) · [测试](docs/testing.md) · [维护](docs/maintenance.md) |
+| 扩展功能、调整目录与检查依赖 | [代码结构与模块边界](docs/architecture.md) |
 
 更多主题见 [完整文档目录](docs/README.md)。设备采集结果与机器人执行数据的区别见 [能力边界](docs/overview.md) 和 [导出检查](docs/robot-export.md#导出前检查)。
 

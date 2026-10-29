@@ -58,9 +58,9 @@ def run():
             route = page.evaluate("""async () => {
               const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
               const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
-              const { abxRouteToProject } = await import('/src/lib/abxRoute.js');
-              const { buildExport } = await import('/src/lib/io.js');
-              const store = await import('/src/lib/sessionStore.js');
+              const { abxRouteToProject } = await import('/src/features/navigation/model/abxRoute.js');
+              const { buildExport } = await import('/src/features/workspace/model/io.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const { payload, robotPackage, values } = abxTeachingFixture();
               const joints = Object.keys(values).map(name => `<link name="${name}_link"/>
@@ -151,8 +151,8 @@ def run():
             # Only this isolated browser's IndexedDB is changed.
             page.goto(BASE_URL, wait_until='networkidle')
             legacy = page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
-              const { transferMatrix, transformTeachingPose } = await import('/src/lib/teachingTransfer.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
+              const { transferMatrix, transformTeachingPose } = await import('/src/features/teaching/model/teachingTransfer.js');
               const { sessionId } = await store.fetchServiceSession();
               const saved = await store.loadWorkspaceConfig(sessionId, 'map');
               const project = saved.config.project, matrix = transferMatrix(project.workspace.transfer.localToMap);

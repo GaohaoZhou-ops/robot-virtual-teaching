@@ -1,7 +1,7 @@
-import { buildExport } from '../src/lib/io.js';
-import { buildProjectArchive } from '../src/lib/projectArchive.js';
+import { buildExport } from "../src/features/workspace/model/io.js";
+import { buildProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 import { unzipSync } from 'fflate';
-import { expandProjectResources } from '../src/lib/projectResourceStorage.js';
+import { expandProjectResources } from "../src/features/workspace/model/projectResourceStorage.js";
 import { Box3, BoxGeometry, Float32BufferAttribute, PlaneGeometry } from 'three';
 
 export function teachingTransferFixture(mode = 'map') {

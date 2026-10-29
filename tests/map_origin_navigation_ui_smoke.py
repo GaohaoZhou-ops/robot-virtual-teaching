@@ -95,8 +95,8 @@ def run():
             # Independent mode navigates the transformed MAP origin, including
             # a tilted map vertical, while keeping the calibrated local height.
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
-              const { createTeachingAlignment } = await import('/src/lib/teachingTransfer.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
+              const { createTeachingAlignment } = await import('/src/features/teaching/model/teachingTransfer.js');
               const { sessionId } = await store.fetchServiceSession();
               const target = await store.loadWorkspaceSnapshot(sessionId, 'map');
               const local = await store.loadWorkspaceConfig(sessionId, 'independent');
@@ -122,7 +122,7 @@ def run():
             assert math.isclose(actual['z'], local_height, abs_tol=1e-6)
             assert json.loads(canvas.get_attribute('data-robot-joint-values')) == local_joints
             result = page.evaluate("""async pose => {
-              const { transferMatrix, transformTeachingPose } = await import('/src/lib/teachingTransfer.js');
+              const { transferMatrix, transformTeachingPose } = await import('/src/features/teaching/model/teachingTransfer.js');
               return transformTeachingPose({position: pose, rpy: pose}, transferMatrix({
                 position: {x: 5, y: -3, z: 1}, rpy: {roll: 12, pitch: -8, yaw: 90} }));
             }""", actual)

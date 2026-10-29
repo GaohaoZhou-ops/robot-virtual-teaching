@@ -9,7 +9,7 @@ with sync_playwright() as p:
     page.route('**/__encoder_test', lambda route: route.fulfill(content_type='text/html', body='<!doctype html><title>JPEG test</title>'))
     page.goto(os.environ.get('BASE_URL', 'http://127.0.0.1:21992') + '/__encoder_test')
     result = page.evaluate('''async () => {
-      const {createScreenJPEGEncoder} = await import('/src/lib/ipadScreenEncoder.js');
+      const {createScreenJPEGEncoder} = await import('/src/features/collaboration/workers/ipadScreenEncoder.js');
       const check = (value, message) => { if (!value) throw new Error(message); };
       const canvas = color => {
         const result = document.createElement('canvas'); result.width = 960; result.height = 600;

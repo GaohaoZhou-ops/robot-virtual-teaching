@@ -38,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='atlas-abx-exchange-ui-') as folder, syn
         toolbar.screenshot(path='/tmp/atlas-task-import-toolbar.png')
         fixture = page.evaluate("""async () => {
           const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
-          const { buildAbxTeachingExport } = await import('/src/lib/abxTeachingExport.js');
+          const { buildAbxTeachingExport } = await import('/src/features/teaching/model/abxTeachingExport.js');
           const { payload, robotPackage } = abxTeachingFixture();
           const bundle = await buildAbxTeachingExport(payload, { robotPackage });
           return Object.entries(bundle.files).map(([name, bytes]) => ({ name: name.slice(4), bytes: Array.from(bytes) }));

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { WebSocket } from 'ws';
-import { createIPadScreenService, SCREEN_PROTOCOL, validateScreenFrame, validateScreenWorkspace } from '../src/server/ipadScreenService.js';
-import { screenJointState, screenJointCommand, screenPoseCaptureState, screenPoseCaptureCommand } from '../src/lib/ipadScreenControl.js';
+import { createIPadScreenService, SCREEN_PROTOCOL, validateScreenFrame, validateScreenWorkspace } from "../src/server/devices/ipadScreenService.js";
+import { screenJointState, screenJointCommand, screenPoseCaptureState, screenPoseCaptureCommand } from "../src/shared/protocols/ipadScreenControl.js";
 
 const jpeg = Buffer.from([255, 216, 255, 217]);
 const pair = Buffer.alloc(16); pair.writeUInt32BE(4, 0); pair.writeUInt32BE(4, 4); jpeg.copy(pair, 8); jpeg.copy(pair, 12);

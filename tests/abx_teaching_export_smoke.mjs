@@ -6,10 +6,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
-import { buildAbxTeachingArchive, buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
+import { buildAbxTeachingArchive, buildAbxTeachingExport } from "../src/features/teaching/model/abxTeachingExport.js";
 import vm from 'node:vm';
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { payload, robotPackage, model, stamp, b } = abxTeachingFixture();

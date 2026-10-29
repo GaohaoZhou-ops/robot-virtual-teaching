@@ -5,7 +5,7 @@ import {
   normalizeProject,
   normalizeTeachingSpaceMode,
   teachingCoordinateFrame,
-} from '../src/lib/io.js';
+} from "../src/features/workspace/model/io.js";
 
 const mapData = {
   name: 'local-scan.ply',

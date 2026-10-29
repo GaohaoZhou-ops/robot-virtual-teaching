@@ -19,7 +19,7 @@ def seed(page):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate('''async () => {
       const {teachingTransferFixture} = await import('/tests/teaching_transfer_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const {sessionId} = await store.fetchServiceSession();
       for (const mode of ['map', 'independent']) {
         const f = teachingTransferFixture(mode), project = f.config.config.project;
@@ -115,7 +115,7 @@ def wait_saved(page, value):
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if page.evaluate('''async value => {
-          const store=await import('/src/lib/sessionStore.js');
+          const store=await import('/src/features/workspace/model/sessionStore.js');
           const s=await store.loadWorkspaceSnapshot((await store.fetchServiceSession()).sessionId,'map');
           return s.config?.config.ui.annotationsOnTop3D===value
             && s.config.config.project.workspace.annotationsOnTop3D===value;

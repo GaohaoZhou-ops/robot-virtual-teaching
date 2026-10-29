@@ -1,5 +1,5 @@
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
-import { extractTeachingWorkspace, placeTeachingWorkspace } from '../src/lib/teachingTransfer.js';
+import { extractTeachingWorkspace, placeTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
 
 export async function linkedProjectFixture(kind = 'placement') {
   const map = teachingTransferFixture('map');

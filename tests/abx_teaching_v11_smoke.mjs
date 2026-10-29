@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { strFromU8, unzipSync } from 'fflate';
-import { buildAbxTeachingArchive as buildArchive, buildAbxTeachingExport } from '../src/lib/abxTeachingExport.js';
-import { parseAbxTeachingTask, readAbxTeachingFile } from '../src/lib/abxTeachingImport.js';
-import { abxRouteToProject } from '../src/lib/abxRoute.js';
+import { buildAbxTeachingArchive as buildArchive, buildAbxTeachingExport } from "../src/features/teaching/model/abxTeachingExport.js";
+import { parseAbxTeachingTask, readAbxTeachingFile } from "../src/features/teaching/model/abxTeachingImport.js";
+import { abxRouteToProject } from "../src/features/navigation/model/abxRoute.js";
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
 // Exact field sets observed in 380B平地巡检.zip; independent of the serializer.

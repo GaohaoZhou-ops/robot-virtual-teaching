@@ -1,7 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import TaskMonitorConsole from '../../src/components/TaskMonitorConsole.jsx';
-import { RobotTwinCaptureCache } from '../../src/lib/robotTwinCaptureCache.js';
+import TaskMonitorConsole from "../../src/features/robot-twin/ui/TaskMonitorConsole.jsx";
+import { RobotTwinCaptureCache } from "../../src/features/robot-twin/model/robotTwinCaptureCache.js";
 
 const root = createRoot(document.getElementById('root'));
 const captures = [], results = [], transfers = new Map();

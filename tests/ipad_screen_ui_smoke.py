@@ -14,7 +14,7 @@ BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:21992')
 
 def native_status(device_id):
     command = {'action': 'request', 'deviceId': device_id, 'method': 'GET', 'path': '/status'}
-    result = subprocess.run([sys.executable, str(ROOT / 'src/server/ipadScreenUSB.py')],
+    result = subprocess.run([sys.executable, str(ROOT / 'src/server/devices/ipadScreenUSB.py')],
                             input=json.dumps(command) + '\n', text=True, capture_output=True, timeout=8, check=True)
     reply = json.loads(result.stdout)
     assert reply.get('value', {}).get('status') == 200, reply

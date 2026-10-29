@@ -4,6 +4,7 @@ from topbar_tools_helpers import topbar_action
 import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from playwright.sync_api import sync_playwright
 
 from viewer_tools_helpers import open_viewer_tools, viewer_tool
@@ -12,6 +13,7 @@ from archive_helpers import start_project_download, read_exported_project
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
+CHROME = Path(os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
 
 
 def click_path_midpoint(page, path):
@@ -30,7 +32,7 @@ def click_path_midpoint(page, path):
 def run():
     messages = []
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True)
+        browser = playwright.chromium.launch(headless=True, executable_path=str(CHROME) if CHROME.is_file() else None)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.set_default_timeout(30_000)
         page.on("console", lambda msg: messages.append(f"console:{msg.type}:{msg.text}"))
@@ -253,16 +255,19 @@ def run():
         assert page.get_by_role("button", name="倒车", exact=True).get_attribute("aria-pressed") == "false"
         assert page.get_by_role("switch", name="3D感知避障").get_attribute("aria-checked") == "true"
 
-        page.get_by_role("button", name="检测", exact=True).click()
+        path_test = page.get_by_role("button", name="路径测试", exact=True)
+        path_test.click()
         assert page.locator(".route-edge.unreachable").count() == 1
-        assert page.get_by_text("1 条路径尚未形成回路", exact=True).is_visible()
+        results = page.get_by_role("dialog", name="路径检测结果", exact=True)
+        assert results.get_by_text("1 条路径无法往返（黄色）", exact=True).is_visible()
+        results.get_by_role("button", name="关闭路径检测结果", exact=True).click()
 
         page.locator(".waypoint-marker").nth(1).click()
         page.locator(".waypoint-marker").nth(0).click()
         assert page.locator(".route-edge").count() == 2
-        page.get_by_role("button", name="检测", exact=True).click()
+        path_test.click()
         assert page.locator(".route-edge.connected").count() == 2
-        assert page.get_by_text("全图强连通", exact=True).is_visible()
+        assert "全图强连通" in path_test.get_attribute("title")
         page.screenshot(path="/tmp/atlas-connected.png", full_page=True)
 
         page.get_by_role("button", name="选择 / 漫游").click()
@@ -313,8 +318,13 @@ def run():
         page.get_by_role("button", name="返回主工作台继续示教").click()
         page.locator('[data-app-page="teaching-data"]').wait_for(state="detached")
 
-        page.locator('input[type="file"][accept*=".zip"]').set_input_files(str(download_path))
-        page.get_by_text("ZIP 工程包已加载", exact=False).wait_for()
+        with TemporaryDirectory(prefix="atlas-browser-") as download_directory:
+            archive_path = Path(download_directory) / download.suggested_filename
+            download.save_as(str(archive_path))
+            page.locator('input[data-project-guide-input="true"]').set_input_files(str(archive_path))
+            page.get_by_text("ZIP 工程包已加载", exact=False).wait_for(timeout=120_000)
+        page.locator(".loading-curtain").wait_for(state="hidden", timeout=120_000)
+        page.locator(".projection-status").wait_for(state="hidden", timeout=120_000)
         assert page.locator(".waypoint-marker").count() == 2
         assert page.locator(".route-edge").count() == 2
         imported_route_button = page.get_by_role("button", name="配置路径 P01 到 P02")

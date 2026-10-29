@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
 import { ARM_JOINT_COUPLING_LIMIT, configureRobotJointCoupling, getRobotJointCouplingPairs,
-  normalizeArmJointCouplingEnabled, projectRobotJointCoupling, robotJointCouplingViolations } from '../src/lib/robotJointCoupling.js';
-import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
-import { solveEndEffectorIk } from '../src/lib/robotEndEffectorIk.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { buildMobileSolvedTask, normalizeMobileSolveReport, solveMobileTeaching } from '../src/lib/mobileTeachingSolver.js';
-import { buildTeachingTaskTrajectory, sampleTeachingTrajectorySegment } from '../src/lib/teachingPlayback.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
+  normalizeArmJointCouplingEnabled, projectRobotJointCoupling, robotJointCouplingViolations } from "../src/features/robot/model/robotJointCoupling.js";
+import { getRobotJointLimits } from "../src/features/robot/model/robotJointLimits.js";
+import { solveEndEffectorIk } from "../src/features/robot/model/robotEndEffectorIk.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { buildMobileSolvedTask, normalizeMobileSolveReport, solveMobileTeaching } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { buildTeachingTaskTrajectory, sampleTeachingTrajectorySegment } from "../src/features/teaching/model/teachingPlayback.js";
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
 const rad = THREE.MathUtils.degToRad;

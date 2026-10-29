@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { planPolylineWithSuggestion } from '../src/lib/polylineTeachingSuggestion.js';
-import { serializeMobileTeachingRobot, restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable } from '../src/lib/polylineTeaching.js';
-import { polylineApproachGuides } from '../src/lib/polylineTeachingGuides.js';
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { planPolylineWithSuggestion } from "../src/features/teaching/polyline/model/polylineTeachingSuggestion.js";
+import { serializeMobileTeachingRobot, restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { polylineApproachGuides } from "../src/features/teaching/polyline/model/polylineTeachingGuides.js";
 
 function fixture() {
   const robot = new THREE.Group(), layer = new THREE.Group(); layer.add(robot);

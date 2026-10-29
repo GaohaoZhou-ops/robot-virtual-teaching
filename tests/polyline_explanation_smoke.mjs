@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { explainPolylineSearch } from '../src/lib/polylineTeachingExplanation.js';
+import { explainPolylineSearch } from "../src/features/teaching/polyline/model/polylineTeachingExplanation.js";
 
 const path = { side: 'right', tcpOffset: [.01, 0, -.2], base: { allowPartial: true },
   points: [{ position: [.9, 0, .7] }, { position: [1, 0, .7] }] };

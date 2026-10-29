@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { abxNodeName, abxRouteToProject, buildAbxRouteDocuments } from '../src/lib/abxRoute.js';
-import { buildAbxTeachingArchive } from '../src/lib/abxTeachingExport.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
-import { teachingParkingName, waypointRobotPose } from '../src/lib/teachingNavigation.js';
-import { transferMatrix, transformTeachingPose } from '../src/lib/teachingTransfer.js';
+import { abxNodeName, abxRouteToProject, buildAbxRouteDocuments } from "../src/features/navigation/model/abxRoute.js";
+import { buildAbxTeachingArchive } from "../src/features/teaching/model/abxTeachingExport.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { syncMapRouteToIndependent } from "../src/features/navigation/model/mapRouteSync.js";
+import { teachingParkingName, waypointRobotPose } from "../src/features/teaching/model/teachingNavigation.js";
+import { transferMatrix, transformTeachingPose } from "../src/features/teaching/model/teachingTransfer.js";
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
 const decoder = new TextDecoder();

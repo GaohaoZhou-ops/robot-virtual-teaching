@@ -1,0 +1,1034 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { getRobotJointLimits, normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from "./robotJointLimits.js";
+
+const ROBOT_FILE_PREFIX = '/__atlas/robot-files/';
+const SUPPORTED_FORMATS = new Set(['urdf', 'glb', 'gltf', 'stl']);
+const portableRobotPackages = new Map();
+// The bundled BOTX package documents this GLB as the browser equivalent of the
+// 99 MB official STL. Its geometry is already expressed in metres and centred
+// on XY, so only the URDF's -90 degree yaw remains necessary.
+const BUILTIN_MESH_OVERRIDES = {
+  'package://botx_abx_zivid_m70/meshes/ZividTwo.stl': {
+    file: 'meshes/zivid_2_m70_official.glb',
+    applyUrdfScale: false,
+    origin: { xyz: [0, 0, 0], rpy: [0, 0, -1.5707963268] },
+  },
+};
+
+const encodePath = (value) =>
+  value
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join('/');
+
+const sanitizeRelativePath = (value) => {
+  if (typeof value !== 'string') return null;
+  const normalized = value.replaceAll('\\', '/').replace(/^\/+/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  if (!parts.length || parts.some((part) => part === '.' || part === '..' || part.includes('\0'))) {
+    return null;
+  }
+  return parts.join('/');
+};
+
+const extensionForPath = (value) => {
+  const pathname = String(value || '').split(/[?#]/)[0];
+  const dot = pathname.lastIndexOf('.');
+  return dot >= 0 ? pathname.slice(dot + 1).toLowerCase() : '';
+};
+
+const portableMimeType = (path) => ({
+  glb: 'model/gltf-binary',
+  gltf: 'model/gltf+json',
+  jpeg: 'image/jpeg',
+  jpg: 'image/jpeg',
+  json: 'application/json',
+  png: 'image/png',
+  stl: 'model/stl',
+  urdf: 'application/xml',
+  xml: 'application/xml',
+}[extensionForPath(path)] || 'application/octet-stream');
+
+const resolvePortablePath = (basePath, reference) => {
+  const source = String(reference || '').trim().replaceAll('\\', '/');
+  const packageMatch = /^package:\/\/([^/]+)\/(.+)$/i.exec(source);
+  const parts = packageMatch
+    ? [packageMatch[1], ...packageMatch[2].split('/')]
+    : [...String(basePath || '').split('/').filter(Boolean), ...source.split('/')];
+  const normalized = [];
+  let escapedRoot = false;
+  parts.forEach((part) => {
+    if (!part || part === '.') return;
+    if (part === '..') {
+      if (!normalized.length) escapedRoot = true;
+      else normalized.pop();
+    }
+    else normalized.push(part);
+  });
+  return escapedRoot ? null : sanitizeRelativePath(normalized.join('/'));
+};
+
+export function registerPortableRobotPackage(robotPackage) {
+  if (!robotPackage || !Array.isArray(robotPackage.files)) {
+    throw new Error('便携机器人资源包无效');
+  }
+  const relativePath = sanitizeRelativePath(robotPackage.relativePath);
+  if (!relativePath) throw new Error('便携机器人资源包缺少主文件路径');
+  const resourceId = String(
+    robotPackage.resourceDigest
+    || `portable-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  );
+  if (!portableRobotPackages.has(resourceId)) {
+    const urls = new Map();
+    const files = new Map();
+    robotPackage.files.forEach((file) => {
+      const path = sanitizeRelativePath(file.path);
+      if (!path || files.has(path)) throw new Error(`便携机器人资源路径无效或重复：${file.path}`);
+      const bytes = file.bytes instanceof ArrayBuffer
+        ? file.bytes
+        : ArrayBuffer.isView(file.bytes)
+          ? file.bytes.buffer.slice(file.bytes.byteOffset, file.bytes.byteOffset + file.bytes.byteLength)
+          : null;
+      if (!bytes) throw new Error(`便携机器人资源数据无效：${path}`);
+      const mimeType = String(file.mimeType || portableMimeType(path));
+      files.set(path, { path, mimeType, bytes });
+      urls.set(path, URL.createObjectURL(new Blob([bytes], { type: mimeType })));
+    });
+    if (!files.has(relativePath)) throw new Error(`便携机器人资源缺少主文件：${relativePath}`);
+    portableRobotPackages.set(resourceId, {
+      resourceId,
+      relativePath,
+      packageName: String(robotPackage.packageName || ''),
+      packagePath: sanitizeRelativePath(robotPackage.packagePath) || '',
+      files,
+      urls,
+    });
+  }
+  return resourceId;
+}
+
+export function releasePortableRobotPackage(resourceId) {
+  const entry = portableRobotPackages.get(String(resourceId || ''));
+  if (!entry) return false;
+  entry.urls.forEach((url) => URL.revokeObjectURL(url));
+  portableRobotPackages.delete(entry.resourceId);
+  return true;
+}
+
+const portablePackageFor = (descriptor) => (
+  portableRobotPackages.get(String(descriptor?.portableResourceId || '')) || null
+);
+
+const portableUrlFor = (descriptor, path) => {
+  const normalized = sanitizeRelativePath(path);
+  return normalized ? portablePackageFor(descriptor)?.urls.get(normalized) || null : null;
+};
+
+const finitePoseValue = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+export function normalizeRobotPose(value) {
+  const pose = value && typeof value === 'object' ? value : {};
+  const position = pose.position && typeof pose.position === 'object'
+    ? pose.position
+    : pose;
+  const rpy = pose.rpy && typeof pose.rpy === 'object' ? pose.rpy : pose;
+  return {
+    position: {
+      x: finitePoseValue(position.x),
+      y: finitePoseValue(position.y),
+      z: finitePoseValue(position.z),
+    },
+    rpy: {
+      roll: finitePoseValue(rpy.roll),
+      pitch: finitePoseValue(rpy.pitch),
+      yaw: finitePoseValue(rpy.yaw),
+    },
+  };
+}
+
+export function normalizeRobotJointValues(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([name, rawValue]) => {
+      const parsed = Number(
+        rawValue && typeof rawValue === 'object' ? rawValue.value : rawValue,
+      );
+      return name && Number.isFinite(parsed) ? [[String(name), parsed]] : [];
+    }),
+  );
+}
+
+export function normalizeRobotDescriptor(value) {
+  if (!value || typeof value !== 'object') return null;
+  const relativePath = sanitizeRelativePath(
+    value.relativePath || value.path || value.id || value.fileName,
+  );
+  if (!relativePath) return null;
+  const format = String(value.format || extensionForPath(relativePath)).toLowerCase();
+  if (!SUPPORTED_FORMATS.has(format)) return null;
+  const packagePath = sanitizeRelativePath(value.packagePath)
+    || (relativePath.includes('/') ? relativePath.split('/')[0] : null);
+  const packageBaseUrl = packagePath
+    ? `${ROBOT_FILE_PREFIX}${encodePath(packagePath)}/`
+    : ROBOT_FILE_PREFIX;
+  const fileName = relativePath.split('/').at(-1);
+  const fallbackName = fileName.replace(/\.[^.]+$/, '');
+  const portableResourceId = value.portableResourceId
+    ? String(value.portableResourceId)
+    : null;
+  const portablePackage = portableResourceId
+    ? portableRobotPackages.get(portableResourceId) || null
+    : null;
+  const portableUrl = portablePackage?.urls.get(relativePath) || null;
+  const portableManifestPath = packagePath ? `${packagePath}/web-model.json` : 'web-model.json';
+  return {
+    id: relativePath,
+    name: String(value.name || fallbackName),
+    fileName,
+    relativePath,
+    format,
+    url: portableUrl || `${ROBOT_FILE_PREFIX}${encodePath(relativePath)}`,
+    packageName: value.packageName ? String(value.packageName) : packagePath,
+    packagePath,
+    packageBaseUrl,
+    manifestUrl: portablePackage?.urls.get(portableManifestPath)
+      || (value.manifestUrl && packagePath ? `${packageBaseUrl}web-model.json` : null),
+    portableResourceId,
+    origin: normalizeRobotPose(value.origin),
+    joints: normalizeRobotJointValues(value.joints),
+  };
+}
+
+export async function fetchRobotCatalog(signal) {
+  const response = await fetch('/__atlas/robots', { signal, cache: 'no-store' });
+  if (!response.ok) throw new Error(`机器人目录请求失败（${response.status}）`);
+  const payload = await response.json();
+  if (!Array.isArray(payload?.robots)) throw new Error('机器人目录响应格式无效');
+  return payload.robots.map(normalizeRobotDescriptor).filter(Boolean);
+}
+
+const childElements = (node, tagName) =>
+  Array.from(node?.children || []).filter(
+    (child) => child.tagName?.toLowerCase() === tagName.toLowerCase(),
+  );
+
+const childElement = (node, tagName) => childElements(node, tagName)[0] || null;
+
+const parseNumbers = (value, count, fallback) => {
+  const source = Array.isArray(value) ? value : String(value || '').trim().split(/\s+/);
+  const parsed = Array.from({ length: count }, (_, index) => Number(source[index]));
+  return parsed.every(Number.isFinite) ? parsed : [...fallback];
+};
+
+const readOrigin = (originElement) => ({
+  xyz: parseNumbers(originElement?.getAttribute('xyz'), 3, [0, 0, 0]),
+  rpy: parseNumbers(originElement?.getAttribute('rpy'), 3, [0, 0, 0]),
+});
+
+const applyOrigin = (object, origin) => {
+  object.position.fromArray(origin.xyz);
+  // URDF defines fixed-axis roll/pitch/yaw as Rz(yaw) · Ry(pitch) · Rx(roll).
+  // Three.js' ZYX Euler order produces that matrix for the stored x/y/z angles;
+  // using XYZ here makes multi-axis arm joints drift apart down the hierarchy.
+  object.rotation.set(origin.rpy[0], origin.rpy[1], origin.rpy[2], 'ZYX');
+};
+
+const fetchText = async (url, signal, label) => {
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`${label}请求失败（${response.status}）`);
+  return response.text();
+};
+
+const fetchBuffer = async (url, signal, label) => {
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`${label}请求失败（${response.status}）`);
+  return response.arrayBuffer();
+};
+
+const materialFromRgba = (rgba = [0.68, 0.76, 0.77, 1]) => {
+  const color = new THREE.Color(
+    THREE.MathUtils.clamp(rgba[0], 0, 1),
+    THREE.MathUtils.clamp(rgba[1], 0, 1),
+    THREE.MathUtils.clamp(rgba[2], 0, 1),
+  );
+  const opacity = THREE.MathUtils.clamp(rgba[3], 0, 1);
+  return new THREE.MeshStandardMaterial({
+    color,
+    opacity,
+    transparent: opacity < 0.999,
+    roughness: 0.58,
+    metalness: 0.16,
+    fog: false,
+  });
+};
+
+const parseMaterialColor = (materialElement, namedMaterials) => {
+  if (!materialElement) return [0.68, 0.76, 0.77, 1];
+  const color = childElement(materialElement, 'color');
+  if (color) return parseNumbers(color.getAttribute('rgba'), 4, [0.68, 0.76, 0.77, 1]);
+  const materialName = materialElement.getAttribute('name');
+  return namedMaterials.get(materialName) || [0.68, 0.76, 0.77, 1];
+};
+
+const resolvePackageUrl = (filename) => {
+  const match = /^package:\/\/([^/]+)\/(.+)$/i.exec(filename);
+  if (!match) return null;
+  return `${ROBOT_FILE_PREFIX}${encodePath(`${match[1]}/${match[2]}`)}`;
+};
+
+const resolveAssetReference = (filename, descriptor, override = false) => {
+  const portablePackage = portablePackageFor(descriptor);
+  if (portablePackage) {
+    const descriptorDirectory = descriptor.relativePath.split('/').slice(0, -1).join('/');
+    const path = override
+      ? resolvePortablePath(descriptor.packagePath || '', filename)
+      : resolvePortablePath(descriptorDirectory, filename);
+    const url = portableUrlFor(descriptor, path);
+    if (!url) throw new Error(`便携机器人包缺少资源：${path || filename}`);
+    return { url, path };
+  }
+  if (override) {
+    return {
+      url: new URL(filename, new URL(descriptor.packageBaseUrl, window.location.href)).href,
+      path: resolvePortablePath(descriptor.packagePath || '', filename),
+    };
+  }
+  const packageUrl = resolvePackageUrl(filename);
+  if (packageUrl) {
+    return {
+      url: new URL(packageUrl, window.location.href).href,
+      path: resolvePortablePath('', filename),
+    };
+  }
+  return {
+    url: new URL(filename, new URL(descriptor.url, window.location.href)).href,
+    path: resolvePortablePath(descriptor.relativePath.split('/').slice(0, -1).join('/'), filename),
+  };
+};
+
+export function resolveRobotResourceUrl(value, filename, options = {}) {
+  const descriptor = normalizeRobotDescriptor(value);
+  if (!descriptor) throw new Error('机器人模型描述无效');
+  try {
+    return resolveAssetReference(filename, descriptor, options.packageRelative === true).url;
+  } catch (error) {
+    if (options.optional === true && portablePackageFor(descriptor)) return null;
+    throw error;
+  }
+}
+
+const portableGltfBaseUrl = (resourceId, path) => {
+  const directory = String(path || '').split('/').slice(0, -1);
+  return `https://atlas-portable.invalid/${encodeURIComponent(resourceId)}/${directory
+    .map((part) => encodeURIComponent(part)).join('/')}${directory.length ? '/' : ''}`;
+};
+
+const portableUrlFromGltfRequest = (descriptor, requestedUrl) => {
+  const portablePackage = portablePackageFor(descriptor);
+  if (!portablePackage) return null;
+  try {
+    const url = new URL(requestedUrl);
+    if (url.hostname !== 'atlas-portable.invalid') return null;
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    if (decodeURIComponent(pathParts.shift() || '') !== portablePackage.resourceId) return null;
+    const path = sanitizeRelativePath(pathParts.map((part) => decodeURIComponent(part)).join('/'));
+    return path ? portablePackage.urls.get(path) || null : null;
+  } catch {
+    return null;
+  }
+};
+
+const loadAsset = async (url, signal, formatHint = '', portableContext = null) => {
+  const format = String(formatHint || extensionForPath(url)).toLowerCase();
+  const buffer = await fetchBuffer(url, signal, `网格 ${decodeURIComponent(url.split('/').at(-1))}`);
+  if (format === 'stl') {
+    const geometry = new STLLoader().parse(buffer);
+    if (!geometry.getAttribute('normal')) geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    geometry.computeBoundingSphere();
+    return { type: 'geometry', geometry };
+  }
+  if (format === 'glb' || format === 'gltf') {
+    const manager = new THREE.LoadingManager();
+    if (portableContext?.descriptor?.portableResourceId) {
+      manager.setURLModifier((requestedUrl) => (
+        portableUrlFromGltfRequest(portableContext.descriptor, requestedUrl) || requestedUrl
+      ));
+    }
+    const loader = new GLTFLoader(manager);
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    const resourceBaseUrl = portableContext?.descriptor?.portableResourceId
+      ? portableGltfBaseUrl(portableContext.descriptor.portableResourceId, portableContext.path)
+      : new URL('./', url).href;
+    const gltf = await loader.parseAsync(buffer, resourceBaseUrl);
+    return { type: 'scene', scene: gltf.scene };
+  }
+  throw new Error(`暂不支持网格格式 .${format || 'unknown'}`);
+};
+
+const instantiateAsset = (asset, material = null) => {
+  if (asset.type === 'geometry') {
+    const mesh = new THREE.Mesh(asset.geometry, material || materialFromRgba());
+    mesh.renderOrder = 3;
+    return mesh;
+  }
+  const clone = asset.scene.clone(true);
+  clone.traverse((object) => {
+    if (!object.isMesh) return;
+    if (material) object.material = material;
+    object.renderOrder = 3;
+  });
+  return clone;
+};
+
+const createPrimitive = (geometryElement, material) => {
+  const box = childElement(geometryElement, 'box');
+  if (box) {
+    const size = parseNumbers(box.getAttribute('size'), 3, [1, 1, 1]);
+    return new THREE.Mesh(new THREE.BoxGeometry(...size), material);
+  }
+  const cylinder = childElement(geometryElement, 'cylinder');
+  if (cylinder) {
+    const radius = Number(cylinder.getAttribute('radius')) || 0.5;
+    const length = Number(cylinder.getAttribute('length')) || 1;
+    const geometry = new THREE.CylinderGeometry(radius, radius, length, 24);
+    geometry.rotateX(Math.PI / 2);
+    return new THREE.Mesh(geometry, material);
+  }
+  const sphere = childElement(geometryElement, 'sphere');
+  if (sphere) {
+    const radius = Number(sphere.getAttribute('radius')) || 0.5;
+    return new THREE.Mesh(new THREE.SphereGeometry(radius, 24, 16), material);
+  }
+  return null;
+};
+
+async function loadManifest(descriptor, signal) {
+  if (!descriptor.manifestUrl) return null;
+  const response = await fetch(descriptor.manifestUrl, { signal, cache: 'no-cache' });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Web 模型清单请求失败（${response.status}）`);
+  const manifest = await response.json();
+  return manifest && (
+    typeof manifest.meshOverrides === 'object'
+    || typeof manifest.collisionMeshOverrides === 'object'
+  ) ? manifest : null;
+}
+
+const belongsToRobotCollisionModel = (object, root) => {
+  let current = object;
+  while (current && current !== root) {
+    if (
+      current.userData?.robotCollisionGeometry
+      || current.userData?.urdfType === 'collision'
+    ) return true;
+    current = current.parent;
+  }
+  return false;
+};
+
+export function setRobotVisualBounds(target, robot) {
+  const bounds = target || new THREE.Box3();
+  bounds.makeEmpty();
+  if (!robot) return bounds;
+  robot.updateWorldMatrix(true, true);
+  const objectBounds = new THREE.Box3();
+  robot.traverse((object) => {
+    if (
+      !object.geometry
+      || (!object.isMesh && !object.isLine && !object.isLineSegments && !object.isPoints)
+      || belongsToRobotCollisionModel(object, robot)
+    ) return;
+    let sourceBounds;
+    if (object.boundingBox !== undefined) {
+      if (object.boundingBox === null) object.computeBoundingBox();
+      sourceBounds = object.boundingBox;
+    } else {
+      if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
+      sourceBounds = object.geometry.boundingBox;
+    }
+    if (sourceBounds && !sourceBounds.isEmpty()) {
+      objectBounds.copy(sourceBounds).applyMatrix4(object.matrixWorld);
+      bounds.union(objectBounds);
+    }
+  });
+  return bounds;
+}
+
+export const ROBOT_GROUND_CLEARANCE = 0.001;
+
+// Call after applying the base pose and restored joint values, before attaching
+// interaction helpers. Keep the robot's local frames and geometry untouched.
+export function robotGroundLift(robot) {
+  const bounds = setRobotVisualBounds(new THREE.Box3(), robot);
+  if (bounds.isEmpty() || !Number.isFinite(bounds.min.z)) return 0;
+  const lift = ROBOT_GROUND_CLEARANCE - bounds.min.z;
+  return lift > 1e-9 ? lift : 0;
+}
+
+async function loadUrdfRobot(descriptor, signal, onProgress) {
+  const [source, manifest] = await Promise.all([
+    fetchText(descriptor.url, signal, 'URDF'),
+    loadManifest(descriptor, signal),
+  ]);
+  const documentNode = new DOMParser().parseFromString(source, 'application/xml');
+  const parserError = documentNode.querySelector('parsererror');
+  if (parserError) throw new Error(`URDF 解析失败：${parserError.textContent.trim()}`);
+  const robotElement = documentNode.documentElement;
+  if (robotElement.tagName?.toLowerCase() !== 'robot') throw new Error('URDF 缺少 robot 根节点');
+
+  const robot = new THREE.Group();
+  robot.name = robotElement.getAttribute('name') || descriptor.name;
+  const namedMaterials = new Map();
+  childElements(robotElement, 'material').forEach((material) => {
+    const name = material.getAttribute('name');
+    const color = childElement(material, 'color');
+    if (name && color) {
+      namedMaterials.set(name, parseNumbers(color.getAttribute('rgba'), 4, [0.68, 0.76, 0.77, 1]));
+    }
+  });
+
+  const linkElements = childElements(robotElement, 'link');
+  const jointElements = childElements(robotElement, 'joint');
+  const linkGroups = new Map();
+  linkElements.forEach((linkElement) => {
+    const name = linkElement.getAttribute('name');
+    if (!name) return;
+    const link = new THREE.Group();
+    link.name = name;
+    link.userData.urdfType = 'link';
+    linkGroups.set(name, link);
+  });
+
+  const visualEntries = linkElements.flatMap((linkElement) =>
+    childElements(linkElement, 'visual').map((visualElement, index) => ({
+      linkElement,
+      visualElement,
+      index,
+    })),
+  );
+  const collisionEntries = linkElements.flatMap((linkElement) =>
+    childElements(linkElement, 'collision').map((collisionElement, index) => ({
+      linkElement,
+      collisionElement,
+      index,
+    })),
+  );
+  const geometryEntryCount = visualEntries.length + collisionEntries.length;
+  onProgress?.({ loaded: 0, total: geometryEntryCount, phase: '解析 URDF 关节树与碰撞模型' });
+  const assetCache = new Map();
+  const meshOverrides = {
+    ...BUILTIN_MESH_OVERRIDES,
+    ...(manifest?.meshOverrides || {}),
+  };
+  const collisionMeshOverrides = manifest?.collisionMeshOverrides || {};
+  let loadedVisuals = 0;
+  let loadedCollisions = 0;
+  let processedGeometries = 0;
+
+  const visualTasks = visualEntries.map(async ({ linkElement, visualElement, index }) => {
+    const linkName = linkElement.getAttribute('name');
+    const link = linkGroups.get(linkName);
+    const geometryElement = childElement(visualElement, 'geometry');
+    if (!link || !geometryElement) return;
+    const visual = new THREE.Group();
+    visual.name = `${linkName}:visual:${index}`;
+    visual.userData.urdfType = 'visual';
+    const material = materialFromRgba(
+      parseMaterialColor(childElement(visualElement, 'material'), namedMaterials),
+    );
+    const meshElement = childElement(geometryElement, 'mesh');
+    let object;
+    let origin = readOrigin(childElement(visualElement, 'origin'));
+
+    if (meshElement) {
+      const filename = meshElement.getAttribute('filename');
+      if (!filename) throw new Error(`${linkName} 的 visual 缺少 mesh filename`);
+      const override = meshOverrides[filename] || null;
+      const selectedFile = override?.file || filename;
+      const assetReference = resolveAssetReference(
+        selectedFile,
+        descriptor,
+        Boolean(override?.file),
+      );
+      if (!assetCache.has(assetReference.url)) {
+        assetCache.set(
+          assetReference.url,
+          loadAsset(
+            assetReference.url,
+            signal,
+            extensionForPath(selectedFile),
+            { descriptor, path: assetReference.path },
+          ),
+        );
+      }
+      const asset = await assetCache.get(assetReference.url);
+      object = instantiateAsset(asset, material);
+      const urdfScale = parseNumbers(meshElement.getAttribute('scale'), 3, [1, 1, 1]);
+      const appliedScale = override?.applyUrdfScale === false
+        ? parseNumbers(override.scale, 3, [1, 1, 1])
+        : urdfScale;
+      object.scale.fromArray(appliedScale);
+      if (override?.origin) {
+        origin = {
+          xyz: parseNumbers(override.origin.xyz, 3, origin.xyz),
+          rpy: parseNumbers(override.origin.rpy, 3, origin.rpy),
+        };
+      }
+      visual.userData.sourceFile = filename;
+      visual.userData.loadedFile = selectedFile;
+      visual.userData.webOptimized = Boolean(override);
+    } else {
+      object = createPrimitive(geometryElement, material);
+      if (!object) {
+        material.dispose();
+        throw new Error(`${linkName} 包含不支持的 URDF 几何类型`);
+      }
+    }
+
+    applyOrigin(visual, origin);
+    visual.add(object);
+    link.add(visual);
+    loadedVisuals += 1;
+    processedGeometries += 1;
+    onProgress?.({
+      loaded: processedGeometries,
+      total: geometryEntryCount,
+      phase: `装配机器人模型 ${processedGeometries}/${geometryEntryCount}`,
+    });
+  });
+
+  const collisionTasks = collisionEntries.map(async ({
+    linkElement,
+    collisionElement,
+    index,
+  }) => {
+    const linkName = linkElement.getAttribute('name');
+    const link = linkGroups.get(linkName);
+    const geometryElement = childElement(collisionElement, 'geometry');
+    if (!link || !geometryElement) return;
+    const collision = new THREE.Group();
+    collision.name = `${linkName}:collision:${index}`;
+    collision.userData.urdfType = 'collision';
+    collision.userData.collisionIndex = index;
+    const material = new THREE.MeshBasicMaterial({
+      visible: false,
+      colorWrite: false,
+      depthWrite: false,
+    });
+    const meshElement = childElement(geometryElement, 'mesh');
+    let object;
+    let origin = readOrigin(childElement(collisionElement, 'origin'));
+    try {
+      if (meshElement) {
+        const filename = meshElement.getAttribute('filename');
+        if (!filename) throw new Error(`${linkName} 的 collision 缺少 mesh filename`);
+        const override = collisionMeshOverrides[filename] || null;
+        const selectedFile = override?.file || filename;
+        const assetReference = resolveAssetReference(
+          selectedFile,
+          descriptor,
+          Boolean(override?.file),
+        );
+        if (!assetCache.has(assetReference.url)) {
+          assetCache.set(
+            assetReference.url,
+            loadAsset(
+              assetReference.url,
+              signal,
+              extensionForPath(selectedFile),
+              { descriptor, path: assetReference.path },
+            ),
+          );
+        }
+        const asset = await assetCache.get(assetReference.url);
+        object = instantiateAsset(asset, material);
+        object.scale.fromArray(
+          override?.applyUrdfScale === false
+            ? parseNumbers(override.scale, 3, [1, 1, 1])
+            : parseNumbers(meshElement.getAttribute('scale'), 3, [1, 1, 1]),
+        );
+        if (override?.origin) {
+          origin = {
+            xyz: parseNumbers(override.origin.xyz, 3, origin.xyz),
+            rpy: parseNumbers(override.origin.rpy, 3, origin.rpy),
+          };
+        }
+        collision.userData.sourceFile = filename;
+        collision.userData.loadedFile = selectedFile;
+      } else {
+        object = createPrimitive(geometryElement, material);
+        if (!object) throw new Error(`${linkName} 包含不支持的 URDF collision 几何类型`);
+      }
+      object.traverse((child) => {
+        if (child.isMesh) child.userData.robotCollisionGeometry = true;
+      });
+      applyOrigin(collision, origin);
+      collision.add(object);
+      // Collision geometry participates in transforms and queries but is never rendered.
+      collision.visible = false;
+      link.add(collision);
+      loadedCollisions += 1;
+      processedGeometries += 1;
+      onProgress?.({
+        loaded: processedGeometries,
+        total: geometryEntryCount,
+        phase: `装配碰撞模型 ${processedGeometries}/${geometryEntryCount}`,
+      });
+    } catch (error) {
+      material.dispose();
+      throw error;
+    }
+  });
+
+  const childLinkNames = new Set();
+  jointElements.forEach((jointElement) => {
+    const parentName = childElement(jointElement, 'parent')?.getAttribute('link');
+    const childName = childElement(jointElement, 'child')?.getAttribute('link');
+    const parentLink = linkGroups.get(parentName);
+    const childLink = linkGroups.get(childName);
+    if (!parentLink || !childLink) return;
+    const joint = new THREE.Group();
+    joint.name = jointElement.getAttribute('name') || `${parentName}->${childName}`;
+    joint.userData.urdfType = 'joint';
+    joint.userData.jointType = jointElement.getAttribute('type') || 'fixed';
+    applyOrigin(joint, readOrigin(childElement(jointElement, 'origin')));
+    const axis = parseNumbers(
+      childElement(jointElement, 'axis')?.getAttribute('xyz'),
+      3,
+      [0, 0, 1],
+    );
+    const axisLength = Math.hypot(...axis);
+    const limitElement = childElement(jointElement, 'limit');
+    const parseLimit = (name) => {
+      const value = limitElement?.getAttribute(name);
+      return value == null || value.trim() === '' ? NaN : Number(value);
+    };
+    const lower = parseLimit('lower');
+    const upper = parseLimit('upper');
+    joint.userData.jointAxis = axisLength > 1e-12
+      ? axis.map((value) => value / axisLength)
+      : [0, 0, 1];
+    joint.userData.jointLimit = {
+      lower: Number.isFinite(lower) ? lower : Number.NEGATIVE_INFINITY,
+      upper: Number.isFinite(upper) ? upper : Number.POSITIVE_INFINITY,
+      ...(Number.isFinite(parseLimit('velocity')) && parseLimit('velocity') > 0 ? { velocity: parseLimit('velocity') } : {}),
+    };
+    joint.userData.restPosition = joint.position.toArray();
+    joint.userData.restQuaternion = joint.quaternion.toArray();
+    joint.userData.jointValue = 0;
+    setRobotJointValue(joint, 0);
+    joint.add(childLink);
+    parentLink.add(joint);
+    childLinkNames.add(childName);
+  });
+  linkGroups.forEach((link, name) => {
+    if (!childLinkNames.has(name)) robot.add(link);
+  });
+
+  const [visualResults, collisionResults] = await Promise.all([
+    Promise.allSettled(visualTasks),
+    Promise.allSettled(collisionTasks),
+  ]);
+  const failure = visualResults.find((result) => result.status === 'rejected');
+  if (failure) {
+    disposeRobotModel(robot);
+    throw failure.reason;
+  }
+  if (!robot.children.length) throw new Error('URDF 中没有可装配的根链接');
+
+  const movableJoints = jointElements.flatMap((jointElement) => {
+    const name = jointElement.getAttribute('name') || '';
+    const joint = name ? robot.getObjectByName(name) : null;
+    const type = joint?.userData?.jointType;
+    if (!joint || !['revolute', 'continuous', 'prismatic'].includes(type)) return [];
+    return [robotJointDefinition(joint)];
+  });
+
+  robot.userData.robot = {
+    format: 'urdf',
+    linkCount: linkGroups.size,
+    jointCount: jointElements.length,
+    visualCount: loadedVisuals,
+    collisionCount: loadedCollisions,
+    collisionLoadErrorCount: collisionResults.filter(
+      (result) => result.status === 'rejected',
+    ).length,
+    zividCount: visualEntries.reduce((count, { visualElement }) => {
+      const filename = childElement(childElement(visualElement, 'geometry'), 'mesh')
+        ?.getAttribute('filename');
+      const meshFileName = filename?.split('/').at(-1) || '';
+      return count + Number(/zivid/i.test(meshFileName));
+    }, 0),
+    opticalFrameCount: [...linkGroups.keys()].filter((name) => /optical_frame$/i.test(name)).length,
+    webOverrideCount: visualEntries.reduce((count, { visualElement }) => {
+      const filename = childElement(childElement(visualElement, 'geometry'), 'mesh')
+        ?.getAttribute('filename');
+      return count + Number(Boolean(filename && meshOverrides[filename]));
+    }, 0),
+    movableJoints,
+  };
+  return robot;
+}
+
+async function loadDirectRobot(descriptor, signal, onProgress) {
+  onProgress?.({ loaded: 0, total: 1, phase: `读取 ${descriptor.fileName}` });
+  const url = new URL(descriptor.url, window.location.href).href;
+  const asset = await loadAsset(
+    url,
+    signal,
+    descriptor.format,
+    { descriptor, path: descriptor.relativePath },
+  );
+  const robot = new THREE.Group();
+  robot.name = descriptor.name;
+  robot.add(instantiateAsset(asset));
+  robot.userData.robot = {
+    format: descriptor.format,
+    linkCount: 1,
+    jointCount: 0,
+    visualCount: 1,
+    collisionCount: 0,
+    collisionLoadErrorCount: 0,
+    zividCount: 0,
+    opticalFrameCount: 0,
+    webOverrideCount: 0,
+    movableJoints: [],
+  };
+  onProgress?.({ loaded: 1, total: 1, phase: '机器人模型已装配' });
+  return robot;
+}
+
+export async function loadRobotModel(value, options = {}) {
+  const descriptor = normalizeRobotDescriptor(value);
+  if (!descriptor) throw new Error('机器人模型描述无效或格式不受支持');
+  const { signal, onProgress } = options;
+  const robot = descriptor.format === 'urdf'
+    ? await loadUrdfRobot(descriptor, signal, onProgress)
+    : await loadDirectRobot(descriptor, signal, onProgress);
+  robot.position.set(0, 0, 0);
+  robot.rotation.set(0, 0, 0);
+  robot.name = `robot:${descriptor.name}`;
+  robot.userData.descriptor = descriptor;
+  robot.userData.mapOrigin = [0, 0, 0];
+  robot.updateMatrixWorld(true);
+  const bounds = setRobotVisualBounds(new THREE.Box3(), robot);
+  const size = bounds.getSize(new THREE.Vector3());
+  const frameNames = [
+    'base_link',
+    'ankle_pitch_L',
+    'waist_yaw_L',
+    'tool_left',
+    'tool_right',
+    'zivid_left_link',
+    'zivid_right_link',
+  ];
+  const framePositions = Object.fromEntries(
+    frameNames.flatMap((name) => {
+      const frame = robot.getObjectByName(name);
+      if (!frame) return [];
+      return [[name, frame.getWorldPosition(new THREE.Vector3()).toArray()]];
+    }),
+  );
+  robot.userData.robot.bounds = {
+    min: bounds.min.toArray(),
+    max: bounds.max.toArray(),
+    size: size.toArray(),
+  };
+  robot.userData.robot.framePositions = framePositions;
+  const endEffectorDefinitions = {
+    left: ['tool_left', 'left_L7', 'zivid_left_link'],
+    right: ['tool_right', 'right_L7', 'zivid_right_link'],
+  };
+  const availableEndEffectors = [];
+  Object.entries(endEffectorDefinitions).forEach(([side, names]) => {
+    const availableFrames = names
+      .map((name) => robot.getObjectByName(name))
+      .filter(Boolean);
+    if (!availableFrames.length) return;
+    availableEndEffectors.push(side);
+    availableFrames.forEach((frame) => {
+      frame.userData.endEffectorSide = side;
+    });
+  });
+  robot.userData.robot.endEffectorCount = availableEndEffectors.length;
+  robot.userData.robot.endEffectorSides = availableEndEffectors;
+  return robot;
+}
+
+const movableJointTypes = new Set(['revolute', 'continuous', 'prismatic']);
+
+const robotJointDefinition = (joint) => {
+  const type = joint.userData.jointType;
+  const limit = getRobotJointLimits(joint);
+  const convert = (value) => Number.isFinite(value)
+    ? (type === 'prismatic' ? value : THREE.MathUtils.radToDeg(value)) : null;
+  return {
+    name: joint.name, type, unit: type === 'prismatic' ? 'meter' : 'degree',
+    lower: convert(limit.lower), upper: convert(limit.upper),
+    hardLower: convert(limit.hardLower), hardUpper: convert(limit.hardUpper),
+    softLimitRatio: limit.softLimitRatio,
+    softLimitRange: limit.softLimitRange, softLimitCustom: limit.softLimitCustom,
+    axis: [...(joint.userData.jointAxis || [0, 0, 1])],
+  };
+};
+
+// Update the live model without reloading meshes or modifying URDF hard limits.
+// Store settings on each supported joint so clones and worker snapshots are independent.
+export function configureRobotArmSoftLimits(robot, ratio, overrides = {}) {
+  const normalized = normalizeArmSoftLimitRatio(ratio);
+  const ranges = normalizeArmSoftLimitOverrides(overrides);
+  const definitions = new Map();
+  robot.traverse((joint) => {
+    if (!movableJointTypes.has(joint.userData?.jointType)) return;
+    if (getRobotJointLimits(joint).softLimited) {
+      joint.userData.armSoftLimitRatio = normalized;
+      if (ranges[joint.name]) joint.userData.armSoftLimitRange = { ...ranges[joint.name] };
+      else delete joint.userData.armSoftLimitRange;
+      setRobotJointValue(joint, joint.userData.jointValue);
+    }
+    definitions.set(joint.name, robotJointDefinition(joint));
+  });
+  const metadata = robot.userData.robot;
+  // Preserve the joint order used by existing panels and shared device controls.
+  const movableJoints = metadata?.movableJoints
+    ? metadata.movableJoints.map((joint) => definitions.get(joint.name) || joint)
+    : [...definitions.values()];
+  if (metadata) metadata.movableJoints = movableJoints;
+  robot.updateMatrixWorld(true);
+  return movableJoints;
+}
+
+const applyJointTransform = (joint, value) => {
+  const axis = new THREE.Vector3(...(joint.userData.jointAxis || [0, 0, 1])).normalize();
+  const restPosition = joint.userData.restPosition || [0, 0, 0];
+  const restQuaternion = joint.userData.restQuaternion || [0, 0, 0, 1];
+  joint.position.fromArray(restPosition);
+  joint.quaternion.fromArray(restQuaternion);
+  if (joint.userData.jointType === 'prismatic') {
+    joint.position.addScaledVector(axis, value);
+  } else {
+    joint.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(axis, value));
+  }
+  joint.userData.jointValue = value;
+  return value;
+};
+
+export const setRobotJointValue = (joint, rawValue) => {
+  if (!joint || !movableJointTypes.has(joint.userData?.jointType)) return 0;
+  const limit = getRobotJointLimits(joint);
+  return applyJointTransform(joint, THREE.MathUtils.clamp(
+    Number(rawValue) || 0,
+    Number.isFinite(limit.lower) ? limit.lower : Number.NEGATIVE_INFINITY,
+    Number.isFinite(limit.upper) ? limit.upper : Number.POSITIVE_INFINITY,
+  ));
+};
+
+export function applyRobotJointValues(robot, values, { measured = false } = {}) {
+  const normalized = normalizeRobotJointValues(values);
+  if (!robot) return normalized;
+  robot.traverse((object) => {
+    if (!movableJointTypes.has(object.userData?.jointType)) return;
+    if (!(object.name in normalized)) return;
+    const serializedValue = normalized[object.name];
+    const internalValue = object.userData.jointType === 'prismatic'
+      ? serializedValue
+      : THREE.MathUtils.degToRad(serializedValue);
+    // Telemetry is a measured pose, not a proposed offline motion target.
+    // Its display must not be altered by teaching soft/coupled joint limits.
+    if (measured) applyJointTransform(object, internalValue);
+    else setRobotJointValue(object, internalValue);
+  });
+  robot.updateMatrixWorld(true);
+  return readRobotJointValues(robot);
+}
+
+// Telemetry animation keeps a small joint index instead of traversing every
+// visual/collision mesh on each frame. It writes measured transforms only;
+// offline edits continue to use the normal limit/coupling-aware functions.
+export function createRobotMeasuredJointUpdater(robot) {
+  const entries = [], values = {}, rotation = new THREE.Quaternion();
+  robot.traverse((joint) => {
+    if (!movableJointTypes.has(joint.userData?.jointType)) return;
+    const prismatic = joint.userData.jointType === 'prismatic';
+    const value = Number(joint.userData.jointValue) || 0;
+    values[joint.name] = prismatic ? value : THREE.MathUtils.radToDeg(value);
+    entries.push({ joint, prismatic,
+      axis: new THREE.Vector3(...(joint.userData.jointAxis || [0, 0, 1])).normalize(),
+      position: new THREE.Vector3().fromArray(joint.userData.restPosition || [0, 0, 0]),
+      quaternion: new THREE.Quaternion().fromArray(joint.userData.restQuaternion || [0, 0, 0, 1]) });
+  });
+  return { joints: entries.map(({ joint }) => joint), values, revision: 0,
+    apply(measured) {
+      let changed = false;
+      for (const { joint, prismatic, axis, position, quaternion } of entries) {
+        const value = measured[joint.name];
+        if (!Number.isFinite(value) || Math.abs(value - values[joint.name]) < 1e-9) continue;
+        const internal = prismatic ? value : THREE.MathUtils.degToRad(value);
+        joint.position.copy(position); joint.quaternion.copy(quaternion);
+        if (prismatic) joint.position.addScaledVector(axis, internal);
+        else joint.quaternion.multiply(rotation.setFromAxisAngle(axis, internal));
+        joint.userData.jointValue = internal;
+        values[joint.name] = value; changed = true;
+      }
+      if (changed) this.revision++;
+      // The renderer updates world matrices once for the complete scene.
+      return changed;
+    },
+  };
+}
+
+export function readRobotJointValues(robot) {
+  const values = {};
+  robot?.traverse((object) => {
+    if (!movableJointTypes.has(object.userData?.jointType)) return;
+    const internalValue = Number(object.userData.jointValue) || 0;
+    values[object.name] = object.userData.jointType === 'prismatic'
+      ? internalValue
+      : THREE.MathUtils.radToDeg(internalValue);
+  });
+  return values;
+}
+
+export function getRobotEndEffector(robot, side) {
+  if (!robot || !['left', 'right'].includes(side)) return null;
+  const frame = robot.getObjectByName(`tool_${side}`);
+  if (!frame) return null;
+  const joints = [];
+  let current = frame.parent;
+  while (current && current !== robot) {
+    if (movableJointTypes.has(current.userData?.jointType)) joints.push(current);
+    current = current.parent;
+  }
+  return joints.length ? { side, robot, frame, joints } : null;
+}
+
+export function disposeRobotModel(robot) {
+  if (!robot || robot.userData?.atlasDisposed) return;
+  robot.userData.atlasDisposed = true;
+  const geometries = new Set();
+  const materials = new Set();
+  const textures = new Set();
+  robot.traverse((object) => {
+    if (object.geometry) geometries.add(object.geometry);
+    const objectMaterials = Array.isArray(object.material) ? object.material : [object.material];
+    objectMaterials.filter(Boolean).forEach((material) => {
+      materials.add(material);
+      Object.values(material).forEach((value) => {
+        if (value?.isTexture) textures.add(value);
+      });
+    });
+  });
+  textures.forEach((texture) => texture.dispose());
+  materials.forEach((material) => material.dispose());
+  geometries.forEach((geometry) => geometry.dispose());
+  robot.removeFromParent();
+  robot.clear();
+}

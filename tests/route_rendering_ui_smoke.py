@@ -13,7 +13,7 @@ def seed_routes(page):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate("""async () => {
       const { teachingTransfer3DFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransfer3DFixture('map');
       const project = fixture.config.config.project;
@@ -119,7 +119,7 @@ def run():
             assert geometry(route(page, "B", "A"))["length"] > reverse["length"] * 1.5
             expect(canvas).to_have_attribute("data-route-edge-count", "2")
             read_saved_paths = """async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const saved = await store.loadWorkspaceSnapshot((await store.fetchServiceSession()).sessionId, 'map');
               return saved.config.config.project.paths.map(path => path.id);
             }"""

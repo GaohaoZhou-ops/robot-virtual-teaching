@@ -6,9 +6,9 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { WebSocket } from 'ws';
-import { createIPadScreenService, SCREEN_PROTOCOL } from '../src/server/ipadScreenService.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { screenJointState } from '../src/lib/ipadScreenControl.js';
+import { createIPadScreenService, SCREEN_PROTOCOL } from "../src/server/devices/ipadScreenService.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { screenJointState } from "../src/shared/protocols/ipadScreenControl.js";
 
 let now = Date.now(), usbCalls = 0;
 const serverId = randomUUID();

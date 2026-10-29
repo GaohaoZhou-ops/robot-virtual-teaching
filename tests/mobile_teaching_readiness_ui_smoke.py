@@ -24,7 +24,7 @@ def isolated_service():
     with tempfile.TemporaryDirectory(prefix='atlas-solve-readiness-') as directory:
         process = subprocess.Popen(['node', '--input-type=module', '-e', '''
             import { createServer } from 'node:http';
-            import { createIPadTeachingService } from './src/server/ipadTeachingService.js';
+            import { createIPadTeachingService } from './src/server/devices/ipadTeachingService.js';
             const middleware = createIPadTeachingService({ directory: process.argv[1],
                 getAddresses: port => [`http://127.0.0.1:${port}`] });
             const server = createServer((req, res) => middleware(req, res, () => {

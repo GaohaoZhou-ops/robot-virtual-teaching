@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { buildMobileSolvedTask, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport, solveMobileTeaching } from '../src/lib/mobileTeachingSolver.js';
-import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { buildMobileSolvedTask, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport, solveMobileTeaching } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { applyRobotJointValues, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
 
 // Disjoint left/right workspaces: neither arm can photograph the opposite
 // side at the origin, but together they can cover the entire station.

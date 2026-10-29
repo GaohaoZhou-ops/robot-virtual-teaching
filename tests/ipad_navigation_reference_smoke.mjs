@@ -6,12 +6,12 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { BoxGeometry, Matrix4, Quaternion, Vector3 } from 'three';
-import { buildIPadNavigationReference, validateIPadNavigationReference } from '../src/lib/ipadNavigationReference.js';
-import { prepareIPadTransfer } from '../src/lib/ipadTransferPreparation.js';
-import { buildTeachingWaypoints } from '../src/lib/teachingNavigation.js';
-import { syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
-import { transferMatrix } from '../src/lib/teachingTransfer.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
+import { buildIPadNavigationReference, validateIPadNavigationReference } from "../src/shared/protocols/ipadNavigationReference.js";
+import { prepareIPadTransfer } from "../src/features/devices/model/ipadTransferPreparation.js";
+import { buildTeachingWaypoints } from "../src/features/teaching/model/teachingNavigation.js";
+import { syncMapRouteToIndependent } from "../src/features/navigation/model/mapRouteSync.js";
+import { transferMatrix } from "../src/features/teaching/model/teachingTransfer.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-navigation-reference-'));
 const sessionDirectory = path.join(directory, 'sessions');

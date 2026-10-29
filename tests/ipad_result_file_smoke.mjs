@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { BufferGeometry, Float32BufferAttribute } from 'three';
-import { packIPadModel, ipadResultTask } from '../src/lib/ipadTeaching.js';
-import { MAX_RESULT_FILE_BYTES, readIPadResultFile } from '../src/lib/ipadResultFile.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
+import { packIPadModel, ipadResultTask } from "../src/features/devices/model/ipadTeaching.js";
+import { MAX_RESULT_FILE_BYTES, readIPadResultFile } from "../src/features/devices/model/ipadResultFile.js";
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 
 const run = (command, args) => new Promise((resolve, reject) => {
   const child = spawn(command, args, { stdio: 'inherit' });

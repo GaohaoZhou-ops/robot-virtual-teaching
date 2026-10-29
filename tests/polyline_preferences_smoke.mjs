@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_MAX_SPEED } from '../src/lib/polylineTeaching.js';
-import { loadPolylinePreferences, savePolylinePreferences, POLYLINE_PREFERENCES_KEY } from '../src/lib/polylineTeachingPreferences.js';
-import { POLYLINE_ALGORITHM_FIELDS } from '../src/lib/polylineTeachingParameters.js';
+import { normalizePolyline, POLYLINE_DEFAULTS, POLYLINE_MAX_SPEED } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { loadPolylinePreferences, savePolylinePreferences, POLYLINE_PREFERENCES_KEY } from "../src/features/teaching/polyline/model/polylineTeachingPreferences.js";
+import { POLYLINE_ALGORITHM_FIELDS } from "../src/features/teaching/polyline/model/polylineTeachingParameters.js";
 
 const entries = new Map([['unrelated', 'preserve']]);
 const storage = { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) };

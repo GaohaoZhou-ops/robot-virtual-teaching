@@ -62,7 +62,7 @@ def fixture_data():
         import { readFileSync } from 'node:fs';
         import { createHash } from 'node:crypto';
         import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
-        import { packIPadModel } from './src/lib/ipadTeaching.js';
+        import { packIPadModel } from './src/features/devices/model/ipadTeaching.js';
         const bytes = readFileSync('tests/fixtures/rotation-map.ply');
         const geometry = new PLYLoader().parse(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
         geometry.computeBoundingBox();

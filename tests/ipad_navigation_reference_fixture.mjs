@@ -2,7 +2,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { buildIPadNavigationReference } from '../src/lib/ipadNavigationReference.js';
+import { buildIPadNavigationReference } from "../src/shared/protocols/ipadNavigationReference.js";
 
 const output = process.argv[2];
 if (!output) throw new Error('Usage: node tests/ipad_navigation_reference_fixture.mjs <output-directory>');

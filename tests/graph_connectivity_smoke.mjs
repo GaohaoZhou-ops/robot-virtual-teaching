@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { connectivityCopy, inspectConnectivity } from '../src/lib/graph.js';
+import { connectivityCopy, inspectConnectivity } from "../src/features/navigation/model/graph.js";
 
 const points = (...ids) => ids.map((id) => ({ id }));
 const path = (from, to, directed = true) => ({ id: `${from}-${to}`, from, to, directed });

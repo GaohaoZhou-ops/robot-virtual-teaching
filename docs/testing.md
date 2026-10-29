@@ -4,6 +4,12 @@
 
 文中的命令均从仓库根目录执行。
 
+日常提交运行 `npm run check`，依次完成架构边界检查、核心协议／算法回归和生产构建。较完整的算法、工程交换与设备协议回归使用 `npm run test:extended`；清单见 `scripts/run_checks.mjs`。CI 在 Node 22、24 下运行核心检查。浏览器、原生构建与真机测试仍按下表选择，不包含在核心检查中。
+
+孪生和工作协作的无浏览器测试已迁到 `tests/unit/`、`tests/integration/`，原有 npm 测试命令继续可用。新增代码和测试的归属见 [代码结构与模块边界](architecture.md)。
+
+`test:extended` 中的二维码、发现和 Vision 场景检查需要 macOS / Xcode。外部机器人参考包契约单独运行 `ABX_WORKSPACE_ZIP=/path/to/workspace.zip npm run test:external`；缺失参考包时会明确失败，不会计为已验证。
+
 [iPad 画面协作回归](#ipad-画面协作回归) · [表面折线示教回归](#表面折线示教回归)
 
 <a id="验证与回归"></a>
@@ -12,6 +18,7 @@
 
 | 范围 | 入口 |
 | --- | --- |
+| 工作台点云加载、路径编辑、工程 ZIP 往返和三维缩放 | `BASE_URL=http://127.0.0.1:22170 uv run --with playwright python tests/browser_smoke.py`（先启动独立 Vite；可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定浏览器） |
 | 孪生协议、慢响应时效、跟随对象独立插值、变速转向平滑、晚到数据恢复、模型更新开销与相机换帧生命周期 | `npm run test:robot-twin` |
 | 机器人卡片的工程归档、工作区集合、地址合并及密码隔离 | `npm run test:robot-twin-project` |
 | 另存为 / 导出后在新浏览器恢复机器人卡片、端口及勾选状态 | `BASE_URL=http://127.0.0.1:22070 uv run --with playwright python tests/robot_twin_project_ui_smoke.py`（先启动独立 Vite 开发服务；测试不会连接机器人） |
@@ -119,7 +126,7 @@ BASE_URL=http://127.0.0.1:22001 python tests/ipad_teaching_ui_smoke.py
 
 Windows 助手浏览器回归：用局域网 `BASE_URL` 运行 `tests/ipad_usb_bridge_ui_smoke.py`，验证下载包、独立浏览器工程、双臂与 3D 帧、关节、视角、Pose、后台保活、重连和工程导出，断言画面不请求服务器、工程未上传。测试使用 Windows usbmux TCP 协议设备替身；Windows 的 Apple 驱动与实际线缆仍需在目标 Windows 电脑验证。
 
-助手的 iPad 真机记录回归：运行 `python3 src/server/ipadUSBBridge.py`，在原有 `tests/ipad_screen_capture_ui_smoke.py` 真机环境变量上增加 `ATLAS_SCREEN_BRIDGE=1` 并使用局域网 `BASE_URL`，搭配原生 `testLiveScreenPoseCapture` 验证缺少任务/停车点提示和双页记录 Pose。
+助手的 iPad 真机记录回归：运行 `python3 src/server/devices/ipadUSBBridge.py`，在原有 `tests/ipad_screen_capture_ui_smoke.py` 真机环境变量上增加 `ATLAS_SCREEN_BRIDGE=1` 并使用局域网 `BASE_URL`，搭配原生 `testLiveScreenPoseCapture` 验证缺少任务/停车点提示和双页记录 Pose。
 
 真机界面回归使用 `tests/ipad_screen_ui_smoke.py`，需 `ATLAS_SCREEN_LIVE=1` 与 `BASE_URL`。有线模式自动连接；无线模式额外设置 `ATLAS_SCREEN_WIFI=1 ATLAS_SCREEN_DEVICE_ID=<iPad UDID>`，模拟 Windows 连接选项并输出 `build/ipad-screen-test/pairing.json`。将其中的地址与配对码传给 `xcodebuild test` 的 `TEST_RUNNER_ATLAS_SCREEN_LAN_ADDRESS`、`TEST_RUNNER_ATLAS_SCREEN_LAN_CODE`，运行原生 `testLiveScreenWiFiCollaboration` 验证相机与后台恢复。USB 只用于真机调试和读取诊断状态，协作帧通过 Wi-Fi 发送。
 

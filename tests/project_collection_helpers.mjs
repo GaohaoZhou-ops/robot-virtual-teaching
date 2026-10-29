@@ -1,6 +1,6 @@
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
-import { placeTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { createRobotJointPreset } from '../src/lib/robotJointPresets.js';
+import { placeTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { createRobotJointPreset } from "../src/features/robot/model/robotJointPresets.js";
 
 export async function projectCollectionFixture() {
   const fixture = (mode, group) => {

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { collectRobotCollisionProxies } from '../src/lib/robotCollision.js';
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { collectRobotCollisionProxies } from "../src/features/robot/model/robotCollision.js";
 
 const robot = new THREE.Group(), layer = new THREE.Group(); layer.add(robot);
 function box(name, position, chain, halfSize = [0.1, 0.1, 0.1]) {

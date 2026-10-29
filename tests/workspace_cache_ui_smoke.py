@@ -15,7 +15,7 @@ def cache(page, count):
 
 def stored(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       return await store.listIndependentWorkspaces((await store.fetchServiceSession()).sessionId);
     }""")
 
@@ -31,7 +31,7 @@ def run():
             seed(page, ['map', 'independent'], 'independent')
             map_before = snapshot(page, 'map')
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
               const { sessionId } = await store.fetchServiceSession();
               for (const id of ['cache-b', 'cache-c']) {
@@ -100,9 +100,9 @@ def run():
               const root = await navigator.storage.getDirectory();
               const handle = await root.getFileHandle('retained-export.zip', {create: true});
               const writer = await handle.createWritable(); await writer.write('export must survive'); await writer.close();
-              const { rememberProjectSaveTarget } = await import('/src/lib/projectSaveTarget.js');
+              const { rememberProjectSaveTarget } = await import('/src/features/workspace/model/projectSaveTarget.js');
               await rememberProjectSaveTarget({teachingSpaceMode: 'map', mapId: 'saved', handle});
-              const { saveProjectDirectoryBinding } = await import('/src/lib/projectDirectoryStore.js');
+              const { saveProjectDirectoryBinding } = await import('/src/features/workspace/model/projectDirectoryStore.js');
               await saveProjectDirectoryBinding({handle: root, teachingSpaceMode: 'map'});
               const db = await new Promise((resolve) => { const r=indexedDB.open('atlas-route-studio'); r.onsuccess=()=>resolve(r.result); });
               await new Promise((resolve, reject) => {

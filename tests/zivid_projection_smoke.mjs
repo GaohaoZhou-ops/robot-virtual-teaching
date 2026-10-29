@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
-import { ZividM70Camera, ZIVID_M70_PROFILE as profile } from '../src/lib/zividCamera.js';
+import { ZividM70Camera, ZIVID_M70_PROFILE as profile } from "../src/features/cameras/model/zividCamera.js";
 
 const camera = new ZividM70Camera();
 const near = (actual, expected, tolerance = 1e-10) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} != ${expected}`);

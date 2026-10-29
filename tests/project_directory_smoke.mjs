@@ -9,7 +9,7 @@ import {
   buildProjectArchive,
   readProjectDirectoryHandle,
   updateProjectDirectory,
-} from '../src/lib/projectArchive.js';
+} from "../src/features/workspace/model/projectArchive.js";
 
 class MemoryFileHandle {
   kind = 'file';

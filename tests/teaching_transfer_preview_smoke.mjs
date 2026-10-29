@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createTransferPreviewLayer, disposeTransferPreview } from '../src/lib/teachingTransferPreview.js';
+import { createTransferPreviewLayer, disposeTransferPreview } from "../src/features/teaching/model/teachingTransferPreview.js";
 import { teachingTransferFixture } from './teaching_transfer_helpers.mjs';
 
 // RGB must follow exactly the same sampled vertices as positions, both for

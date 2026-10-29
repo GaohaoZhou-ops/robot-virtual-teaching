@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { getRobotJointLimits, getArmSoftLimitRange, getRobotSoftLimitRange, normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from '../src/lib/robotJointLimits.js';
-import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { solveEndEffectorIk } from '../src/lib/robotEndEffectorIk.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
-import { jointPresetErrors } from '../src/lib/robotJointPresets.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { applyMobileReferencePose } from '../src/lib/mobileTeachingReference.js';
+import { getRobotJointLimits, getArmSoftLimitRange, getRobotSoftLimitRange, normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from "../src/features/robot/model/robotJointLimits.js";
+import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { solveEndEffectorIk } from "../src/features/robot/model/robotEndEffectorIk.js";
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
+import { jointPresetErrors } from "../src/features/robot/model/robotJointPresets.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { applyMobileReferencePose } from "../src/features/teaching/mobile/model/mobileTeachingReference.js";
 
 const close = (actual, expected, tolerance = 1e-9) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} != ${expected}`);
 const makeJoint = (name, lower, upper, jointType = 'revolute') => {

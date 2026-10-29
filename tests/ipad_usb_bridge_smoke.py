@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src/server'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src/server/devices'))
 import ipadScreenUSB as usb
 from ipadUSBBridge import BridgeServer, BridgeState, PROTOCOL
 

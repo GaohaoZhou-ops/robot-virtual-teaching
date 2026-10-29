@@ -12,11 +12,11 @@ def seed(page):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate("""async () => {
       const { teachingTransfer3DFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const { abxRouteToProject } = await import('/src/lib/abxRoute.js');
-      const { buildExport, normalizeTeachingTasks } = await import('/src/lib/io.js');
-      const { buildTeachingWaypoints } = await import('/src/lib/teachingNavigation.js');
-      const { transferMatrix, transformTeachingTasks } = await import('/src/lib/teachingTransfer.js');
-      const store = await import('/src/lib/sessionStore.js');
+      const { abxRouteToProject } = await import('/src/features/navigation/model/abxRoute.js');
+      const { buildExport, normalizeTeachingTasks } = await import('/src/features/workspace/model/io.js');
+      const { buildTeachingWaypoints } = await import('/src/features/teaching/model/teachingNavigation.js');
+      const { transferMatrix, transformTeachingTasks } = await import('/src/features/teaching/model/teachingTransfer.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const map = teachingTransfer3DFixture('map'), local = teachingTransfer3DFixture('independent');
       const route = {schema_version: 1, id: 'label-route', name: '重复标签测试', scene_name: 'map',

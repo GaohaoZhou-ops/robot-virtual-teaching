@@ -4,8 +4,8 @@ import {
   buildRobotPresetFile, createRobotJointPreset, groupPresetJoints, jointPresetErrors,
   jointValueFromInput, jointValueToInput, presetJointDefinitions, presetMatchesRobot, readRobotPresetFile,
   robotPresetValuesForEditing, validateRobotPresetName,
-} from '../src/lib/robotJointPresets.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
+} from "../src/features/robot/model/robotJointPresets.js";
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
 
 const revolute = (name, lower = -180, upper = 180) => ({ name, type: 'revolute', lower, upper });
 const definitions = [

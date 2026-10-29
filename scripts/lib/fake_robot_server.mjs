@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { createHash, randomBytes } from 'node:crypto';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
-import { BODY_CAMERAS } from '../../src/lib/robotTwinCamera.js';
+import { BODY_CAMERAS } from "../../src/shared/protocols/robotTwinCamera.js";
 
 export const FAKE_ROBOT_SERVICE = 'atlas-fake-robot';
 const JOINT_NAMES = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J', 'waist_yaw_J', 'head_yaw_J', 'head_pitch_J',

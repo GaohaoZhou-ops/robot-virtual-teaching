@@ -22,7 +22,7 @@ def open_from_map(page):
 
 def independent_entries(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       return store.listIndependentWorkspaces((await store.fetchServiceSession()).sessionId);
     }""")
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
-import { mapRouteSyncStatus, syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
-import { TEMPORARY_MAP_ROUTE_SOURCE, withoutTemporaryMapNavigation } from '../src/lib/teachingNavigation.js';
-import { extractTeachingWorkspace, identityTransferPose, placeTeachingWorkspace, transferMatrix } from '../src/lib/teachingTransfer.js';
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
+import { mapRouteSyncStatus, syncMapRouteToIndependent } from "../src/features/navigation/model/mapRouteSync.js";
+import { TEMPORARY_MAP_ROUTE_SOURCE, withoutTemporaryMapNavigation } from "../src/features/teaching/model/teachingNavigation.js";
+import { extractTeachingWorkspace, identityTransferPose, placeTeachingWorkspace, transferMatrix } from "../src/features/teaching/model/teachingTransfer.js";
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
 
 const local = teachingTransferFixture('independent');

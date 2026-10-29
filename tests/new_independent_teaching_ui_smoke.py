@@ -72,7 +72,7 @@ def run():
 
             # Merely having a map config, without its geometry, cannot enable a matrix.
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
               const { sessionId } = await store.fetchServiceSession();
               const map = teachingTransferFixture('map');

@@ -26,7 +26,7 @@ def route_file():
 def seed_without_route(page, mode):
     seed(page, ['map'] if mode == 'map' else ['map', 'independent'], mode)
     page.evaluate("""async activeMode => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const record = await store.loadWorkspaceConfig(sessionId, 'map');
       record.config.project.waypoints = []; record.config.project.paths = []; record.config.project.abxRoutes = [];

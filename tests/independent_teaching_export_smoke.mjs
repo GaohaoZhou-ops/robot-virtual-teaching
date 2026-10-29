@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { buildIndependentMapTeachingExport } from '../src/lib/independentTeachingExport.js';
-import { buildAbxTeachingArchive } from '../src/lib/abxTeachingExport.js';
-import { buildTeachingDataExport } from '../src/lib/teachingData.js';
-import { syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
+import { buildIndependentMapTeachingExport } from "../src/features/workspace/model/independentTeachingExport.js";
+import { buildAbxTeachingArchive } from "../src/features/teaching/model/abxTeachingExport.js";
+import { buildTeachingDataExport } from "../src/features/teaching/model/teachingData.js";
+import { syncMapRouteToIndependent } from "../src/features/navigation/model/mapRouteSync.js";
 import { independentTeachingExportFixture } from './independent_teaching_export_helpers.mjs';
 
 const { map, local, route, robotPackage, task, localToMap } = independentTeachingExportFixture();

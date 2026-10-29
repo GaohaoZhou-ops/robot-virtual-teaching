@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
 import { boundTeachingRelation, createTeachingAlignment, hasLoadedMapWorkspace, identityTransferPose,
-  parseTransferMatrixFile, placeTeachingWorkspace, transformTeachingPose, writeBackTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { mapRouteSyncStatus } from '../src/lib/mapRouteSync.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
-import { prepareLinkedProjectImport } from '../src/lib/linkedProject.js';
-import { prepareWorkspaceCollectionImport } from '../src/lib/projectWorkspaceCollection.js';
+  parseTransferMatrixFile, placeTeachingWorkspace, transformTeachingPose, writeBackTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { mapRouteSyncStatus } from "../src/features/navigation/model/mapRouteSync.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
+import { prepareLinkedProjectImport } from "../src/features/workspace/model/linkedProject.js";
+import { prepareWorkspaceCollectionImport } from "../src/features/workspace/model/projectWorkspaceCollection.js";
 
 const independent = teachingTransferFixture('independent');
 const map = teachingTransferFixture('map');

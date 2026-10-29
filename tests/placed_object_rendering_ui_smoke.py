@@ -14,8 +14,8 @@ from waypoint_names_ui_smoke import display_settings
 
 SEED = '''async ({points, legacy}) => {
   const {teachingTransferFixture} = await import('/tests/teaching_transfer_helpers.mjs');
-  const {placeTeachingWorkspace, identityTransferPose} = await import('/src/lib/teachingTransfer.js');
-  const store = await import('/src/lib/sessionStore.js');
+  const {placeTeachingWorkspace, identityTransferPose} = await import('/src/features/teaching/model/teachingTransfer.js');
+  const store = await import('/src/features/workspace/model/sessionStore.js');
   const {sessionId} = await store.fetchServiceSession();
   const make = mode => {
     const f = teachingTransferFixture(mode), x = mode === 'map' ? -3 : 0;
@@ -126,7 +126,7 @@ def run():
                 select_color(page, '独立对象', 'source')
                 for _ in range(50):
                     saved = page.evaluate("""async changedAt => {
-                  const store = await import('/src/lib/sessionStore.js');
+                  const store = await import('/src/features/workspace/model/sessionStore.js');
                   const {sessionId} = await store.fetchServiceSession();
                   const {config, savedAt} = await store.loadWorkspaceConfig(sessionId, 'map');
                   return savedAt >= changedAt && config.ui.pointColorMode === 'white'

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { solveMobileTeaching, buildMobileSolvedTask, mobileMotionGroups, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport } from '../src/lib/mobileTeachingSolver.js';
-import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
-import { mobileRobotPoseLinks } from '../src/lib/mobileTeachingReview.js';
-import { transformTeachingTasks } from '../src/lib/teachingTransfer.js';
-import { buildTeachingDataExport } from '../src/lib/teachingData.js';
-import { buildTeachingTaskTrajectory, sampleTeachingTrajectorySegment } from '../src/lib/teachingPlayback.js';
+import { solveMobileTeaching, buildMobileSolvedTask, mobileMotionGroups, measureMobileTarget, mobileSampleTarget, normalizeMobileSolveReport } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { applyRobotJointValues, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
+import { mobileRobotPoseLinks } from "../src/features/teaching/mobile/model/mobileTeachingReview.js";
+import { transformTeachingTasks } from "../src/features/teaching/model/teachingTransfer.js";
+import { buildTeachingDataExport } from "../src/features/teaching/model/teachingData.js";
+import { buildTeachingTaskTrajectory, sampleTeachingTrajectorySegment } from "../src/features/teaching/model/teachingPlayback.js";
 
 // Two disjoint lateral workspaces share one vertical torso actuator. Each arm
 // can compensate by only ±20 cm, making simultaneous reachability analytical.

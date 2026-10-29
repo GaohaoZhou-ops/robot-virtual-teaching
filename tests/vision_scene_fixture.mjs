@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { applyRobotJointValues } from '../src/lib/robotLoader.js';
+import { applyRobotJointValues } from "../src/features/robot/model/robotLoader.js";
 
 export function visionSceneFixture() {
   const box = (size, position, color) => {

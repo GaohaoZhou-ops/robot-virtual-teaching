@@ -122,7 +122,7 @@ def run():
             dialog = open_picker(page)
             replacement_id = second_id + "-replacement"
             page.evaluate("""async mapId => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const current = await store.loadWorkspaceSnapshot(sessionId, 'independent');
               await store.saveWorkspaceMap(sessionId, mapId, current.map.name, { ...current.map, mapId }, 'independent');

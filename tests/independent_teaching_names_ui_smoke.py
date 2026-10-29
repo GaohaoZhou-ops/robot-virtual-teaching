@@ -40,7 +40,7 @@ def save_name(dialog, name):
 
 def cache_state(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const { companionWorkspace, independentHistory } = await store.loadProjectCompanions(sessionId, 'map');
       return [companionWorkspace, ...independentHistory].map(item => ({
@@ -145,7 +145,7 @@ def run():
             # An intervening rename cannot silently be overwritten by a stale dialog.
             dialog = rename_dialog(page, cache, "产线 1 · 左侧阀门")
             page.evaluate("""async id => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const entry = (await store.listIndependentWorkspaces(sessionId)).find(item => item.mapId === id);
               await store.renameIndependentWorkspace(sessionId, { ...entry, expectedName: entry.teachingName, name: '产线 2 · 左侧阀门' });

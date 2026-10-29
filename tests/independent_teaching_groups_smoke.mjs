@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
-import { boundTeachingRelation, placeTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
-import { linkedWorkspaceRelation, prepareLinkedProjectImport } from '../src/lib/linkedProject.js';
-import { mapRouteSyncStatus, syncMapRouteToIndependent } from '../src/lib/mapRouteSync.js';
+import { boundTeachingRelation, placeTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
+import { linkedWorkspaceRelation, prepareLinkedProjectImport } from "../src/features/workspace/model/linkedProject.js";
+import { mapRouteSyncStatus, syncMapRouteToIndependent } from "../src/features/navigation/model/mapRouteSync.js";
 
 const original = teachingTransferFixture('map');
 const first = teachingTransferFixture('independent'); // Legacy group without an explicit group ID.

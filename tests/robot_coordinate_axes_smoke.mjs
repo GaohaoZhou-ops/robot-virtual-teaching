@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createRobotCoordinateAxes, getRobotCoordinateFrames, updateRobotCoordinateAxes, clearRobotCoordinateAxes } from '../src/lib/robotCoordinateAxes.js';
-import { serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { createRobotCoordinateAxes, getRobotCoordinateFrames, updateRobotCoordinateAxes, clearRobotCoordinateAxes } from "../src/features/robot/model/robotCoordinateAxes.js";
+import { serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
 
 const layer = new THREE.Group(), robot = new THREE.Group(); layer.add(robot);
 layer.position.set(1, -2, .3); layer.rotation.z = .6;

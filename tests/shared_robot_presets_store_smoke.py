@@ -13,9 +13,9 @@ def run():
             page.route('**/__preset-store-harness', lambda route: route.fulfill(content_type='text/html', body='<title>Preset storage fixture</title>'))
             page.goto(BASE + '/__preset-store-harness')
             result = page.evaluate('''async () => {
-              const s = await import('/src/lib/sessionStore.js');
+              const s = await import('/src/features/workspace/model/sessionStore.js');
               const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-              const { createRobotJointPreset } = await import('/src/lib/robotJointPresets.js');
+              const { createRobotJointPreset } = await import('/src/features/robot/model/robotJointPresets.js');
               const check = (condition, text) => { if (!condition) throw new Error(text); };
               const equal = (a,b) => JSON.stringify(a) === JSON.stringify(b);
               const session = 'preset-store-fixture';

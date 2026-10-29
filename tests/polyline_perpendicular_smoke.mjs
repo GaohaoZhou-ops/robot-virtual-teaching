@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { BoxGeometry, Group, Object3D, Quaternion, Vector3, Matrix4 } from 'three';
 import { normalizePolyline, samplePolylinePlan, readPolylineTcp, repeatPolylinePlan, polylineDrawingProgress,
-  polylineSegmentStartPoses, polylinePlanFromSearchPosition, transformPolyline } from '../src/lib/polylineTeaching.js';
-import { polylineDrawingEdges, polylineEdgeTarget, samplePolylineOrientation } from '../src/lib/polylineTeachingOrientation.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { checkPolylineStartTool } from '../src/lib/polylineTeachingToolCheck.js';
-import { applyRobotJointValues, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { savePolylinePreferences, loadPolylinePreferences } from '../src/lib/polylineTeachingPreferences.js';
+  polylineSegmentStartPoses, polylinePlanFromSearchPosition, transformPolyline } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { polylineDrawingEdges, polylineEdgeTarget, samplePolylineOrientation } from "../src/features/teaching/polyline/model/polylineTeachingOrientation.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { checkPolylineStartTool } from "../src/features/teaching/polyline/model/polylineTeachingToolCheck.js";
+import { applyRobotJointValues, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { savePolylinePreferences, loadPolylinePreferences } from "../src/features/teaching/polyline/model/polylineTeachingPreferences.js";
 
 const environment = { kind: 'mesh', positions: new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]), indices: new Uint32Array([0, 1, 2]) };
 const fixture = () => {

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createViewportNavigation, VIEWPORT_FOV } from '../src/lib/viewportNavigation.js';
-import { applyScreenViewportGesture } from '../src/lib/ipadScreenViewport.js';
-import { screenJointState, screenViewportCommand, validScreenJointState } from '../src/lib/ipadScreenControl.js';
+import { createViewportNavigation, VIEWPORT_FOV } from "../src/features/viewport/model/viewportNavigation.js";
+import { applyScreenViewportGesture } from "../src/features/collaboration/model/ipadScreenViewport.js";
+import { screenJointState, screenViewportCommand, validScreenJointState } from "../src/shared/protocols/ipadScreenControl.js";
 
 const rig = (height = 900) => {
   const camera = new THREE.PerspectiveCamera(VIEWPORT_FOV, 1.6, 0.01, 100);

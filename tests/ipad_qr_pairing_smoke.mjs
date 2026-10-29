@@ -5,8 +5,8 @@ import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { IPAD_PROTOCOL, validateIPadResult } from '../src/lib/ipadProtocol.js';
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { IPAD_PROTOCOL, validateIPadResult } from "../src/shared/protocols/ipadProtocol.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-pairing-qr-'));
 const serverId = randomUUID();

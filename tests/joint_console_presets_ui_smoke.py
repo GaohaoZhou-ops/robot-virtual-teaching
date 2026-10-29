@@ -25,7 +25,7 @@ def seed(page):
     page.evaluate('''async () => {
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
       const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const { payload, robotPackage, values, model, stamp } = abxTeachingFixture();
       const urdf = `<robot name="${model}"><link name="base_link"/>` + Object.keys(values).map((name, i) => `

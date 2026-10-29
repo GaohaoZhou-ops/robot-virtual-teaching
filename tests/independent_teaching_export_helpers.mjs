@@ -1,6 +1,6 @@
-import { buildExport, normalizeTeachingTasks } from '../src/lib/io.js';
-import { abxRouteToProject } from '../src/lib/abxRoute.js';
-import { transferMatrix, transformTeachingPose, transformTeachingTasks } from '../src/lib/teachingTransfer.js';
+import { buildExport, normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
+import { abxRouteToProject } from "../src/features/navigation/model/abxRoute.js";
+import { transferMatrix, transformTeachingPose, transformTeachingTasks } from "../src/features/teaching/model/teachingTransfer.js";
 import { teachingTransferFixture } from './teaching_transfer_helpers.mjs';
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 import { Matrix4 } from 'three';

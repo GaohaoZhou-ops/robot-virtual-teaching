@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { BufferGeometry, Float32BufferAttribute, Matrix4 } from 'three';
-import { buildIPadPoseSeed } from '../src/lib/ipadPoseSeed.js';
-import { packIPadModel } from '../src/lib/ipadTeaching.js';
-import { validateIPadPoseSeed, ipadPoseArm } from '../src/lib/ipadProtocol.js';
+import { buildIPadPoseSeed } from "../src/features/devices/model/ipadPoseSeed.js";
+import { packIPadModel } from "../src/features/devices/model/ipadTeaching.js";
+import { validateIPadPoseSeed, ipadPoseArm } from "../src/shared/protocols/ipadProtocol.js";
 
 const geometry = new BufferGeometry();
 geometry.setAttribute('position', new Float32BufferAttribute([0, 0, 1, 1, 0, 1, 0, 1, 1], 3));

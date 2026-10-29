@@ -6,9 +6,9 @@ import { createWriteStream } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { IPAD_PROTOCOL } from '../src/lib/ipadProtocol.js';
-import { publishVisionPairingOffer } from '../src/lib/visionPairingOffer.js';
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { IPAD_PROTOCOL } from "../src/shared/protocols/ipadProtocol.js";
+import { publishVisionPairingOffer } from "../src/features/devices/model/visionPairingOffer.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-vision-pairing-autofill-'));
 const identity = { serverId: randomUUID(), serverName: 'Atlas Automatic Pairing Test' };

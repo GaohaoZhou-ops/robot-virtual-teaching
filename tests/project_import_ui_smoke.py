@@ -73,7 +73,7 @@ def compressed_members():
 
 def collection_summary(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const current = await store.loadWorkspaceSnapshot(sessionId, 'independent');
       const { companionWorkspace, independentHistory } = await store.loadProjectCompanions(sessionId, 'independent');
@@ -126,7 +126,7 @@ def run():
             page.goto(BASE_URL, wait_until="networkidle")
             wait_ready(page)
             result = page.evaluate("""async () => {
-              const { readProjectArchive, readProjectFile } = await import('/src/lib/projectArchive.js');
+              const { readProjectArchive, readProjectFile } = await import('/src/features/workspace/model/projectArchive.js');
               const bytes = new Uint8Array(await (await fetch('/__test__/members.zip')).arrayBuffer());
               const length = bytes.length;
               window.__zipWorkers = [];

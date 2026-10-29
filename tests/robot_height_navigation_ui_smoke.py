@@ -14,8 +14,8 @@ def seed_height_workspaces(page):
     page.locator('[data-app-page="home"][data-session-state="ready"]').wait_for()
     page.evaluate("""async () => {
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
-      const { buildExport } = await import('/src/lib/io.js');
-      const store = await import('/src/lib/sessionStore.js');
+      const { buildExport } = await import('/src/features/workspace/model/io.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       for (const mode of ['map', 'independent']) {
         const fixture = teachingTransferFixture(mode), project = fixture.config.config.project;

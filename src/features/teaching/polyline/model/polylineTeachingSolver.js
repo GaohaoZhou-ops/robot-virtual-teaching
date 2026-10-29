@@ -1,0 +1,485 @@
+import * as THREE from 'three';
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from "../../../robot/model/robotLoader.js";
+import { getRobotJointLimits } from "../../../robot/model/robotJointLimits.js";
+import { getRobotJointCouplingPairs, robotJointCouplingViolations } from "../../../robot/model/robotJointCoupling.js";
+import { polylineJointExclusions } from "./polylineTeachingJoints.js";
+import { solveEndEffectorIk } from "../../../robot/model/robotEndEffectorIk.js";
+import { createMobileCollisionChecker } from "../../mobile/model/mobileTeachingCollision.js";
+import { normalizePolyline, polylineVertices, polylineGeometryVertices, polylineDrawingProgress, preparePolylineInterpolation, samplePolylineState } from "./polylineTeaching.js";
+import { preparePolylineTiming } from "./polylineTeachingTiming.js";
+import { samplePolylineCurve } from "./polylineTeachingCurve.js";
+import { polylineDrawingEdges, polylineEdgeTarget, samplePolylineOrientation } from "./polylineTeachingOrientation.js";
+import { preparePolylineArcMapping } from "./polylineTeachingSpeed.js";
+import { createPolylineBase, polylineBaseCandidates, polylinePostureCost } from "./polylineTeachingBase.js";
+import { canRecoverPolylinePosture, nearestPolylineReference, polylineRecoveryPolicies } from "./polylineTeachingRecovery.js";
+
+export async function planPolyline({ robot, parentMatrix, path, environment, lockedJointNames = [],
+  approachWaypoints = [], approachLockedJointNames = [], preparedEnvironment = null,
+  recoverLocal = false, referenceSamples = [], preferReference = false,
+  checkpoint = async () => {}, onProgress = () => {} }) {
+  const action = normalizePolyline(path);
+  if (!action || action.points.length < 2) throw new Error('请至少选择两个有效的表面点');
+  if (approachWaypoints.length && (action.base.sync || action.base.search)) throw new Error('接近绕行仅支持底盘静止');
+  if (approachWaypoints.some((point) => point.length !== 3 || !point.every(Number.isFinite))) throw new Error('接近路线包含无效坐标');
+  const layer = new THREE.Group();
+  new THREE.Matrix4().fromArray(parentMatrix).decompose(layer.position, layer.quaternion, layer.scale);
+  layer.add(robot); layer.updateMatrixWorld(true);
+  const controller = getRobotEndEffector(robot, action.side);
+  if (!controller) throw new Error('当前机器人缺少所选侧的 tool 工具坐标系');
+  const toolFrame = controller.frame;
+  const tcpFrame = new THREE.Object3D(); tcpFrame.position.fromArray(action.tcpOffset);
+  toolFrame.add(tcpFrame); controller.frame = tcpFrame; layer.updateMatrixWorld(true);
+  const excluded = polylineJointExclusions(controller, action, lockedJointNames);
+  const movable = controller.joints.filter((joint) => !excluded.has(joint));
+  if (!movable.length && !action.base.sync) throw new Error('所选机械臂的关节均被锁定');
+  const initialJoints = readRobotJointValues(robot);
+  const base = action.base.sync || action.base.search ? createPolylineBase(layer, action.base) : null;
+  if (base) controller.joints.push(...base.joints);
+  const zeroBase = { x: 0, y: 0, yaw: 0 };
+  const root = base?.root || layer;
+  const readState = () => ({ joints: readRobotJointValues(robot), ...(base ? { base: base.read() } : {}) });
+  const initialState = readState();
+  const applyState = (state) => {
+    if (base) base.apply(state.base);
+    applyRobotJointValues(robot, state.joints); root.updateMatrixWorld(true);
+  };
+  const fixedBaseExcluded = new Set([...excluded, ...(base?.joints || [])]);
+  const solvingExcluded = action.base.sync ? excluded : fixedBaseExcluded;
+  // Recovery trials can temporarily hold redundant joints on the way to P0.
+  // Release these additional restrictions for drawing; user locks still apply.
+  const approachLocks = new Set(approachLockedJointNames);
+  const approachExcluded = new Set([...solvingExcluded, ...controller.joints.filter((joint) => approachLocks.has(joint.name))]);
+  const targetQuaternion = action.quaternion ? new THREE.Quaternion().fromArray(action.quaternion)
+    : controller.frame.getWorldQuaternion(new THREE.Quaternion());
+  const settings = action.settings, coupling = getRobotJointCouplingPairs(robot);
+  const definitions = Object.fromEntries(movable.map((joint) => [joint.name, {
+    type: joint.userData.jointType,
+    velocity: (joint.userData.jointLimit?.velocity || 0) * (joint.userData.jointType === 'prismatic' ? 1 : 180 / Math.PI),
+  }]));
+  const checker = await createMobileCollisionChecker(robot, environment, checkpoint, { preparedEnvironment });
+  const vertices = polylineVertices(action);
+  const allowPartial = action.base.allowPartial && !action.base.sync && !action.base.search;
+  const requestedDistance = polylineDrawingProgress(action).total;
+  if (requestedDistance < 1e-9) throw new Error('路线点重合，请增加有长度的线段');
+  const drawingEdges = polylineDrawingEdges(action, targetQuaternion);
+  if (!drawingEdges.length) throw new Error('路线点重合，请增加有长度的线段');
+  const drawingStartQuaternion = samplePolylineOrientation(drawingEdges[0], 0, targetQuaternion);
+  let activeOrientation = () => targetQuaternion;
+  const start = controller.frame.getWorldPosition(new THREE.Vector3());
+  let approachOffset = 0, approachLength = start.distanceTo(vertices[0]), activeCurve = null;
+  const issue = (message, index, u, details = {}) => {
+    const point = index >= 0 && activeCurve ? samplePolylineCurve(activeCurve, u) : null;
+    return { message, segmentIndex: point?.segmentIndex ?? index, progress: point?.segmentProgress ?? u,
+      phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing',
+      ...(point ? { curveProgress: u } : {}),
+      ...(index < 0 ? { distanceFromStart: approachOffset + approachLength * u } : {}), ...details };
+  };
+  const collisionIssue = (index, u) => {
+    const collision = checker.check({ detailedEnvironment: true });
+    if (collision.clear) return null;
+    const reasons = [];
+    if (collision.selfPairs.length) reasons.push(`机器人自身碰撞：${collision.selfPairs.map((pair) => pair.join(' ↔ ')).join('；')}`);
+    if (collision.environmentIntersectingLinks.length) reasons.push(`机器人与模型碰撞：${collision.environmentIntersectingLinks.join('、')}（碰撞体重叠）`);
+    if (collision.environmentClearanceLinks.length) reasons.push(`机器人碰撞体的 ${(collision.environmentMargin * 1000).toFixed(0)} mm 预留区与模型相交：${collision.environmentClearanceLinks.join('、')}`);
+    if (collision.groundLinks.length) reasons.push(`部件低于支撑平面：${collision.groundLinks.join('、')}`);
+    return issue(reasons.join('；') || '碰撞检查未通过', index, u, { collision });
+  };
+  const referenceValues = (state) => ({ ...initialJoints, ...state.joints, ...(base ? Object.fromEntries(base.joints.map((joint, i) =>
+    [joint.name, state.base[['x', 'y', 'yaw'][i]]])) : {}) });
+  const solveTarget = (target, exclusions, reference, repeats = 1, precise = false, orientation = targetQuaternion) => {
+    const positionTolerance = precise ? 2e-7 : undefined;
+    for (let i = 0; i < repeats; i += 1) {
+      const result = solveEndEffectorIk(controller, target, orientation, exclusions, {
+        referenceJointValues: reference, positionTolerance, refineOnly: precise,
+      });
+      if (result.positionError <= (positionTolerance ?? settings.tolerance) && result.rotationError <= settings.rotationTolerance) break;
+    }
+    root.updateMatrixWorld(true);
+  };
+  if (THREE.MathUtils.radToDeg(controller.frame.getWorldQuaternion(new THREE.Quaternion()).angleTo(targetQuaternion)) > settings.rotationTolerance) {
+    return { complete: false, warnings: [], issue: issue('工具朝向已变化，请重新检查路径以采用当前朝向', -1, 0) };
+  }
+
+  const buildPlan = async (candidate = zeroBase, reportProgress = onProgress) => {
+    applyState(initialState);
+    activeCurve = null;
+    activeOrientation = () => targetQuaternion;
+    approachOffset = 0; approachLength = start.distanceTo(vertices[0]);
+    const segments = [];
+    const position = new THREE.Vector3(), quaternion = new THREE.Quaternion();
+    let maximumError = 0, checks = 0, durationMs = 0;
+    const localRecovery = { attempts: 0, successes: 0, checks: 0, backtrackedSamples: 0, referenceUses: 0 };
+    const warnings = [], warningKeys = new Set();
+    const warn = (code, message, index, u, phase = index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing') => {
+      // Sampling and interpolation may hit the same surface many times. Keep
+      // one visible warning per kind and segment, with its first location.
+      const warning = issue(message, index, u, { code, phase });
+      const key = `${phase}:${warning.segmentIndex}:${code}`;
+      if (warningKeys.has(key)) return;
+      warningKeys.add(key); warnings.push(warning);
+    };
+    const validState = (target, index, u, phase) => {
+      root.updateMatrixWorld(true);
+      if (base && Math.hypot(base.read().x, base.read().y) > action.base.range + 1e-7) return issue('底盘超出允许的水平移动范围，请增大范围后重新检查', index, u);
+      for (const joint of controller.joints) {
+        const { lower, upper } = getRobotJointLimits(joint), value = joint.userData.jointValue || 0;
+        if (value < lower - 1e-8 || value > upper + 1e-8) return issue(`关节 ${joint.name} 超出当前限位`, index, u);
+      }
+      if (robotJointCouplingViolations(coupling).length) return issue('关节耦合约束不满足', index, u);
+      const joints = readRobotJointValues(robot);
+      if (Object.keys(joints).some((name) => (!movable.some((joint) => joint.name === name) || (index < 0 && approachLocks.has(name)))
+        && Math.abs(joints[name] - initialJoints[name]) > 1e-7)) return issue('求解改变了不允许参与规划的关节', index, u);
+      controller.frame.getWorldPosition(position); controller.frame.getWorldQuaternion(quaternion);
+      const error = position.distanceTo(target);
+      const sourcePosition = index >= 0 && activeCurve ? samplePolylineCurve(activeCurve, u).sourcePosition : target;
+      const sourceError = position.distanceTo(sourcePosition);
+      const angular = THREE.MathUtils.radToDeg(quaternion.angleTo(activeOrientation(u)));
+      const trackingTolerance = settings.tolerance - target.distanceTo(sourcePosition);
+      if (error > trackingTolerance || sourceError > settings.tolerance || angular > settings.rotationTolerance) return issue(settings.perpendicularTool
+        ? '未找到满足沿线精度和垂直朝向的连续逆解' : '未找到满足沿线精度和固定朝向的连续逆解', index, u,
+        { code: 'continuous-ik', positionError: error, sourceError, rotationError: angular });
+      maximumError = Math.max(maximumError, sourceError);
+      // Surface imperfections and intended tip contact are advisory in virtual
+      // drawing. Continue checking IK, joints and physical robot collisions.
+      // Require a neighbourhood inside the mesh to avoid noisy face parity.
+      if (checker.containsPoint(position) && [0, 1, 2].every((axis) => [-1, 1].every((sign) => {
+        const probe = position.clone(); probe.setComponent(axis, probe.getComponent(axis) + sign * 0.0002);
+        return checker.containsPoint(probe);
+      }))) warn('tip-inside-surface', '笔尖路径进入模型内部', index, u, phase);
+      const toolOrigin = toolFrame.getWorldPosition(new THREE.Vector3());
+      if (checker.intersectsSegment(toolOrigin, position)) warn('pen-crosses-surface', '虚拟笔杆穿过模型表面', index, u, phase);
+      checks += 1;
+      return collisionIssue(index, u);
+    };
+    const recoveryReport = () => localRecovery.attempts ? { localRecovery: { ...localRecovery } } : {};
+    const fail = (problem) => ({ complete: false, executable: false, partial: false,
+      issue: problem, warnings, segments, checks, maximumError, ...recoveryReport() });
+    const initialIssue = validState(start, -1, 0, 'initial');
+    if (initialIssue) return fail({ ...initialIssue, phase: 'initial',
+      message: `${initialIssue.message}。请先调整机器人姿态或位置，再重新检查。` });
+    const addSegment = async (edge, samples, distance, endFraction = 1) => {
+      const arcMapping = edge.curve ? await preparePolylineArcMapping(samples, applyState, controller.frame, checkpoint) : null;
+      const { durationMs: segmentDuration, ...timed } = preparePolylineTiming(samples, arcMapping?.length ?? distance,
+        { ...settings, uniformSpeed: settings.uniformSpeed && Boolean(edge.curve) }, definitions,
+        { curvature: Math.max(edge.curve?.curvature || 0, arcMapping?.curvature || 0), arcMapping });
+      segments.push({ index: edge.index, phase: edge.index === -2 ? 'positioning' : edge.index < 0 ? 'approach' : 'drawing',
+        from: edge.from.toArray(), to: edge.to.toArray(), samples, ...timed, endFraction,
+        ...(edge.orientation ? { orientation: edge.orientation } : {}), ...(edge.rotationOnly ? { rotationOnly: true } : {}),
+        ...(edge.curve ? { curve: edge.curve, arcMapping } : {}),
+        durationMs: segmentDuration, startMs: durationMs, endMs: durationMs + segmentDuration });
+      durationMs += segmentDuration;
+    };
+    const finish = (problem = null) => {
+      const drawing = segments.filter((segment) => segment.index >= 0 && !segment.rotationOnly);
+      if (problem && (!allowPartial || problem.phase !== 'drawing' || !drawing.length)) return fail(problem);
+      if (!drawing.length) throw new Error('折线点重合，请增加有长度的线段');
+      if (settings.uniformSpeed && drawing.length > 1) {
+        // Reversals require stops, but their continuous blocks still share the
+        // same attainable cruise speed throughout this drawing operation.
+        const speed = Math.min(...drawing.map((segment) => segment.cruiseSpeed));
+        durationMs = 0;
+        for (const segment of segments) {
+          if (segment.uniformSpeed) Object.assign(segment, preparePolylineTiming(segment.samples, segment.arcMapping.length,
+            { ...settings, speed }, definitions, { curvature: Math.max(segment.curve.curvature, segment.arcMapping.curvature), arcMapping: segment.arcMapping }));
+          segment.startMs = durationMs; durationMs += segment.durationMs; segment.endMs = durationMs;
+        }
+      }
+      const last = drawing.at(-1);
+      const distance = drawing.reduce((sum, segment) => sum + (segment.curve
+        ? samplePolylineCurve(segment.curve, segment.endFraction).sourceDistance - samplePolylineCurve(segment.curve, 0).sourceDistance
+        : new THREE.Vector3().fromArray(segment.from).distanceTo(new THREE.Vector3().fromArray(segment.to))), 0);
+      const lastPoint = last.curve ? samplePolylineCurve(last.curve, last.endFraction) : null;
+      return { complete: !problem, executable: true, partial: Boolean(problem), ...(problem ? { issue: problem } : {}),
+        ...recoveryReport(),
+        warnings, segments, durationMs, initialJoints, quaternion: targetQuaternion.toArray(),
+        ...(base ? { baseReference: base.reference, selectedBase: drawing[0].samples[0].base } : {}),
+        maximumError, checks, distance, requestedDistance, coverage: Math.min(1, distance / requestedDistance),
+        ...(settings.uniformSpeed ? { speedProfile: { mode: 'uniform', cruiseSpeed: Math.min(...drawing.map((segment) => segment.cruiseSpeed)),
+          requestedSpeed: settings.speed, blendTolerance: action.pathType === 'spline' ? 0 : settings.tolerance * .5, cornerStops: drawing.length - 1 } } : {}),
+        stoppedAt: { segmentIndex: lastPoint?.segmentIndex ?? last.index, progress: lastPoint?.segmentProgress ?? last.endFraction, position: [...last.to] } };
+    };
+    const reposition = base && (Math.hypot(candidate.x, candidate.y) > 1e-8 || Math.abs(candidate.yaw) > 1e-8);
+    let reference = referenceValues({ base: candidate });
+    // Prescribe a continuous base transit and solve the arm along the matching
+    // TCP line to P0. Optional perpendicular tracking reaches its first
+    // orientation gradually during approach, including an in-place P0 turn.
+    // Its interpolation receives the same refinement/collision checks as drawing.
+    const approach = [start, ...approachWaypoints.map((point) => new THREE.Vector3().fromArray(point)), vertices[0]];
+    const totalApproach = approach.slice(1).reduce((sum, to, i) => sum + approach[i].distanceTo(to), 0);
+    let approachDistance = 0;
+    const edges = approach.slice(1).map((to, i) => {
+      const from = approach[i], length = from.distanceTo(to), before = approachDistance;
+      approachDistance += length;
+      const orientation = settings.perpendicularTool ? {
+        from: targetQuaternion.clone().slerp(drawingStartQuaternion, totalApproach > 1e-9 ? before / totalApproach : 0).toArray(),
+        to: targetQuaternion.clone().slerp(drawingStartQuaternion, totalApproach > 1e-9 ? approachDistance / totalApproach : 1).toArray(),
+      } : null;
+      return { from, to, index: reposition ? -2 : -1, ...(orientation ? { orientation } : {}),
+        ...(reposition ? { baseTarget: candidate } : {}) };
+    });
+    let previousOrientation = drawingStartQuaternion;
+    for (const edge of drawingEdges) {
+      const first = samplePolylineOrientation(edge, 0, targetQuaternion);
+      if (settings.perpendicularTool && first.angleTo(previousOrientation) > 1e-7) {
+        // Strict corners have two distinct tangents. Keep the TCP at the
+        // vertex and turn after stopping; never jump to the next tool pose.
+        edges.push({ from: edge.from, to: edge.from, index: edge.index, rotationOnly: true,
+          orientation: { from: previousOrientation.toArray(), to: first.toArray() } });
+      }
+      edges.push(edge); previousOrientation = samplePolylineOrientation(edge, 1, targetQuaternion);
+    }
+    let approachTravel = 0;
+    for (const edge of edges) {
+      const { from, to, index } = edge, distance = edge.distance ?? from.distanceTo(to);
+      activeCurve = edge.curve || null;
+      activeOrientation = (u) => samplePolylineOrientation(edge, u, targetQuaternion);
+      const targetAt = (u) => polylineEdgeTarget(edge, u);
+      // Once recovery reaches P0, keep its achieved posture as the drawing
+      // reference. Releasing held joints must not pull them abruptly back
+      // toward the pre-approach configuration via IK regularization.
+      if (index >= 0 && !segments.some((segment) => segment.index >= 0) && (approachLocks.size || approachWaypoints.length)) reference = referenceValues(readState());
+      const orientationAngle = settings.perpendicularTool ? activeOrientation(0).angleTo(activeOrientation(1)) : 0;
+      const orientationSteps = orientationAngle > 1e-7 ? Math.ceil(orientationAngle / (Math.PI / 90)) : 0;
+      if (distance < 0.00001 && !edge.baseTarget && !orientationSteps) continue;
+      if (index < 0) { approachOffset = approachTravel; approachLength = distance; approachTravel += distance; }
+      if (!edge.curve && checker.intersectsSegment(from, to)) warn('path-crosses-surface', '直线穿过物体表面', index, 0.5);
+      const count = edge.sampleCount ?? Math.max(1, orientationSteps, Math.ceil(Math.max(distance / settings.step, edge.baseTarget
+        ? Math.max(Math.hypot(candidate.x, candidate.y) / 0.002, Math.abs(candidate.yaw) / 0.5) : 0)));
+      const sampleLimit = Math.min(count, edge.curve ? 30000 : 10000, 30000 - segments.reduce((sum, item) => sum + item.samples.length, 0));
+      if (count > sampleLimit && (!allowPartial || index < 0 || !Number.isFinite(count) || sampleLimit < 1)) {
+        return finish(issue('路线过长，请拆成多条折线后分别检查', index, 0));
+      }
+      let samples = [{ u: 0, ...readState() }];
+      let activePolicy = null, recovering = false;
+      const jumpIssue = (state, seed, u) => movable.some((joint) => Math.abs(state.joints[joint.name] - seed.joints[joint.name])
+        > (joint.userData.jointType === 'prismatic' ? 0.01 : 8))
+        ? issue('相邻采样点的关节变化过大，请调整起始姿态或补点', index, u, { code: 'joint-jump' })
+        : base && (Math.hypot(state.base.x - seed.base.x, state.base.y - seed.base.y) > 0.01 || Math.abs(state.base.yaw - seed.base.yaw) > 3)
+          ? issue('底盘相邻采样变化过大，请缩短采样间距或调整起始位置', index, u) : null;
+      const solve = (u, seed, policy = activePolicy) => {
+        if (recovering) {
+          if (localRecovery.checks >= settings.postureSamples) return { problem: issue('局部姿态重试达到预算', index, u, { code: 'recovery-budget' }) };
+          localRecovery.checks += 1;
+        }
+        const target = targetAt(u), orientation = activeOrientation(u), precise = settings.uniformSpeed && (index >= 0 || u === 1);
+        const normalExclusions = edge.baseTarget ? fixedBaseExcluded : index < 0 ? approachExcluded : solvingExcluded;
+        const exclusions = policy?.heldJoints?.length
+          ? new Set([...normalExclusions, ...controller.joints.filter((joint) => policy.heldJoints.includes(joint.name))]) : normalExclusions;
+        const remembered = preferReference ? nearestPolylineReference(referenceSamples, target) : null;
+        const postureReference = policy?.reference || remembered?.joints || reference;
+        const resetSeed = () => {
+          applyState(seed);
+          if (edge.baseTarget) base.apply(Object.fromEntries(Object.entries(edge.baseTarget).map(([axis, value]) => [axis, value * u])));
+          if (policy?.seedReference) {
+            const next = { ...seed.joints };
+            for (const joint of movable) {
+              if (exclusions.has(joint) || !Number.isFinite(policy.seedReference[joint.name])) continue;
+              let delta = policy.seedReference[joint.name] - seed.joints[joint.name];
+              if (joint.userData.jointType === 'continuous') delta = THREE.MathUtils.euclideanModulo(delta + 180, 360) - 180;
+              const maximum = joint.userData.jointType === 'prismatic' ? .006 : 6;
+              next[joint.name] += THREE.MathUtils.clamp(delta, -maximum, maximum);
+            }
+            applyRobotJointValues(robot, next); root.updateMatrixWorld(true);
+          }
+        };
+        resetSeed();
+        // Select the alternative posture first, then refine its TCP residual.
+        // Every alternative starts from a checked sample, never a cached jump.
+        if (policy) solveTarget(target, exclusions, postureReference, 1, false, orientation);
+        if (precise || !policy) solveTarget(target, exclusions, postureReference, precise ? 3 : 1, precise, orientation);
+        // Extra numerical precision is a preference, never a reason to reject
+        // an otherwise valid posture within the user's geometric tolerance.
+        // A residual correction near a singularity may choose a colliding pose;
+        // retry the regularized seed and subject it to all the same checks.
+        if (precise && (jumpIssue(readState(), seed, u) || collisionIssue(index, u))) {
+          resetSeed(); solveTarget(target, exclusions, postureReference, 1, false, orientation);
+        }
+        const problem = validState(target, index, u);
+        if (problem) return { problem };
+        return { sample: { u, ...readState() } };
+      };
+      const recover = async (u, problem) => {
+        if (!recoverLocal || base || localRecovery.attempts >= settings.postureRetries || localRecovery.checks >= settings.postureSamples
+          || !canRecoverPolylinePosture(controller, problem)) return null;
+        const policies = polylineRecoveryPolicies(controller, movable.filter((joint) => !(index < 0 && approachLocks.has(joint.name))),
+          problem, samples.at(-1).joints, targetAt(u), referenceSamples);
+        const anchors = new Set();
+        recovering = true;
+        try {
+          for (const span of [6, 18, 36]) {
+            const anchor = Math.max(0, samples.length - 1 - span);
+            if (anchors.has(anchor)) continue;
+            anchors.add(anchor);
+            for (const policy of policies) {
+              if (localRecovery.attempts >= settings.postureRetries || localRecovery.checks >= settings.postureSamples) return null;
+              await checkpoint(); localRecovery.attempts += 1;
+              const warningCount = warnings.length, oldKeys = new Set(warningKeys);
+              const prefix = samples.slice(0, anchor + 1), tail = [];
+              let failed = false;
+              for (const nextU of [...samples.slice(anchor + 1).map((sample) => sample.u), u]) {
+                await checkpoint();
+                const seed = tail.at(-1) || prefix.at(-1), result = solve(nextU, seed, policy);
+                if (result.problem || jumpIssue(result.sample, seed, nextU)) { failed = true; break; }
+                tail.push(result.sample);
+              }
+              if (!failed) {
+                // Changing the anchor tangent also affects its preceding
+                // interval. Check that interval and the replacement tail now;
+                // the entire final edge is checked again below before use.
+                const head = prefix.slice(0, -2), checked = await validateInterpolation([...prefix.slice(-2), ...tail].map((sample) => ({ ...sample })), policy);
+                if (!checked.problem) {
+                  localRecovery.successes += 1;
+                  localRecovery.backtrackedSamples += samples.length - 1 - anchor;
+                  if (policy.source === 'successful-plan') localRecovery.referenceUses += 1;
+                  return { samples: [...head, ...checked.samples], policy };
+                }
+              }
+              warnings.length = warningCount; warningKeys.clear(); oldKeys.forEach((key) => warningKeys.add(key));
+            }
+          }
+          return null;
+        } finally { recovering = false; applyState(samples.at(-1)); }
+      };
+      let stopIssue = null;
+      for (let i = 1; i <= sampleLimit; i += 1) {
+        await checkpoint();
+        const u = edge.knots ? edge.knots[i] : i / count;
+        if (edge.curve && checker.intersectsSegment(targetAt(samples.at(-1).u), targetAt(u))) {
+          warn('path-crosses-surface', '笔尖路线穿过物体表面', index, u);
+        }
+        const result = solve(u, samples.at(-1));
+        const problem = result.problem || jumpIssue(result.sample, samples.at(-1), u);
+        if (problem) {
+          const recovered = await recover(u, problem);
+          if (recovered) {
+            samples = recovered.samples; activePolicy = recovered.policy;
+            applyState(samples.at(-1)); continue;
+          }
+          if (!allowPartial || index < 0) return fail(problem);
+          stopIssue = problem; break;
+        }
+        samples.push(result.sample);
+        if (i % 20 === 0 || i === sampleLimit) {
+          const point = edge.curve ? samplePolylineCurve(edge.curve, u) : null;
+          reportProgress({ phase: index === -2 ? 'positioning' : index < 0 ? 'approach' : 'drawing',
+            segmentIndex: point?.segmentIndex ?? index, fraction: point?.segmentProgress ?? u, total: vertices.length - 1 });
+        }
+      }
+      if (!stopIssue && sampleLimit < count) stopIssue = issue('路线过长，请拆成多条折线后分别检查', index, samples.at(-1).u);
+      // A successful IK endpoint alone is insufficient: check the same Hermite
+      // interpolation used by playback. A shortened tail changes its tangents,
+      // so EVERY retained interval is checked again after trimming.
+      async function validateInterpolation(input, policy = activePolicy) {
+        let checked = input;
+        for (let pass = 0; pass < 7; pass += 1) {
+          preparePolylineInterpolation(checked);
+          const additions = [];
+          let firstRefinement = null;
+          for (let i = 0; i < checked.length - 1; i += 1) {
+            await checkpoint();
+            for (const fraction of [0.25, 0.5, 0.75]) {
+              const u = checked[i].u + (checked[i + 1].u - checked[i].u) * fraction;
+              applyState(samplePolylineState(checked, u));
+              const problem = validState(targetAt(u), index, u);
+              if (!problem) continue;
+              if (problem.collision || problem.code !== 'continuous-ik' || pass === 6) {
+                return { samples: checked, problem, beforeU: checked[i].u };
+              }
+              const result = solve(u, checked[i], policy);
+              if (result.problem) return { samples: checked, problem: result.problem, beforeU: checked[i].u };
+              firstRefinement ??= checked[i].u;
+              additions.push(result.sample);
+            }
+          }
+          if (!additions.length) return { samples: checked };
+          if (checked.length + additions.length > (edge.curve ? 30000 : 15000)) return { samples: checked, beforeU: firstRefinement,
+            problem: issue('当前路线无法在计算预算内满足精度，请拆分或调整', index, firstRefinement) };
+          checked = [...checked, ...additions].sort((a, b) => a.u - b.u);
+        }
+      }
+      while (samples.length > 1) {
+        const checked = await validateInterpolation(samples);
+        samples = checked.samples;
+        if (!checked.problem) break;
+        if (!allowPartial || index < 0) return fail(checked.problem);
+        if (!stopIssue || (checked.problem.curveProgress ?? checked.problem.progress) < (stopIssue.curveProgress ?? stopIssue.progress)) stopIssue = checked.problem;
+        samples = samples.filter((sample) => sample.u <= checked.beforeU);
+      }
+      if (samples.length < 2) return finish(stopIssue);
+      const endFraction = samples.at(-1).u;
+      const endpoint = targetAt(endFraction);
+      // Reparameterization preserves the checked curve; retiming then brings
+      // the robot smoothly to rest at the end of the executable prefix.
+      samples = samples.map((sample) => ({ ...sample, u: sample.u / endFraction }));
+      preparePolylineInterpolation(samples);
+      applyState(samples.at(-1));
+      await addSegment({ ...edge, to: endpoint }, samples, distance * endFraction, endFraction);
+      if (stopIssue) return finish(stopIssue);
+    }
+    return finish();
+  };
+
+  if (!action.base.search) return buildPlan();
+  // A search cannot repair an invalid current pose by teleporting out of it.
+  const initialCollision = collisionIssue(-1, 0);
+  if (initialCollision) return { complete: false, warnings: [], issue: { ...initialCollision, phase: 'initial',
+    message: `${initialCollision.message}。请先调整机器人姿态或位置，再重新检查。` } };
+  const searchVertices = polylineGeometryVertices(action);
+  const candidates = polylineBaseCandidates(searchVertices, start, base.reference, action.base);
+  const ranked = [];
+  const probes = settings.perpendicularTool ? drawingEdges.flatMap((edge) => [0, .25, .5, .75, 1].map((u) => ({
+    position: polylineEdgeTarget(edge, u), orientation: samplePolylineOrientation(edge, u, targetQuaternion),
+  }))) : searchVertices.map((position) => ({ position, orientation: targetQuaternion }));
+  const probePoints = probes.filter((_, i) => i === 0 || i === probes.length - 1 || i % Math.max(1, Math.ceil(probes.length / 16)) === 0);
+  for (let i = 0; i < candidates.length; i += 1) {
+    await checkpoint(); applyState(initialState); base.apply(candidates[i]);
+    const reference = referenceValues({ base: candidates[i] });
+    let cost = 0, valid = true;
+    for (let j = 0; j < probePoints.length; j += 1) {
+      await checkpoint();
+      // Even in combined mode P0 must be reachable at the selected parking
+      // pose. After that, synchronized probes may use all three base axes.
+      const { position: target, orientation } = probePoints[j];
+      solveTarget(target, j === 0 ? fixedBaseExcluded : solvingExcluded, reference, 6, false, orientation);
+      const positionError = controller.frame.getWorldPosition(new THREE.Vector3()).distanceTo(target);
+      const rotationError = THREE.MathUtils.radToDeg(controller.frame.getWorldQuaternion(new THREE.Quaternion()).angleTo(orientation));
+      if (positionError > settings.tolerance || rotationError > settings.rotationTolerance
+        || Math.hypot(base.read().x, base.read().y) > action.base.range + 1e-7 || collisionIssue(-2, 1)) { valid = false; break; }
+      cost += polylinePostureCost(movable) / probePoints.length;
+    }
+    if (valid) ranked.push({ candidate: candidates[i], score: cost + 0.35 * Math.hypot(candidates[i].x, candidates[i].y) / action.base.range
+      + 0.15 * Math.abs(candidates[i].yaw) / 180 });
+    onProgress({ phase: 'search', stage: '筛选位置', candidate: i + 1, candidates: candidates.length, fraction: (i + 1) / candidates.length });
+  }
+  ranked.sort((a, b) => a.score - b.score);
+  let best = null, failure = null, tried = 0, feasible = 0;
+  // Full interpolation/transit verification is expensive on large maps. Rank
+  // the seeds, then compare up to three valid plans among eight finalists.
+  const finalists = ranked.slice(0, 8);
+  // Keep the current placement as a fallback: failed parking transits must
+  // not discard a route that already works from the user's present pose.
+  if (!finalists.some(({ candidate }) => candidate.x === 0 && candidate.y === 0 && candidate.yaw === 0)) {
+    finalists.splice(7, 1, { candidate: zeroBase, score: Infinity });
+  }
+  for (const entry of finalists) {
+    tried += 1;
+    const result = await buildPlan(entry.candidate, (progress) => onProgress({ ...progress, phase: 'search',
+      stage: '检查完整路线', candidate: tried, candidates: finalists.length }));
+    if (!result.complete) { failure ||= result; continue; }
+    feasible += 1;
+    let postureCost = 0, samples = 0, baseDistance = 0, previous = zeroBase;
+    for (const segment of result.segments) for (const sample of segment.samples) {
+      baseDistance += Math.hypot(sample.base.x - previous.x, sample.base.y - previous.y); previous = sample.base;
+      if (segment.index < 0) continue;
+      applyState(sample); postureCost += polylinePostureCost(movable); samples += 1;
+    }
+    const score = postureCost / Math.max(1, samples) + 0.35 * baseDistance / action.base.range
+      + 0.15 * Math.abs(result.selectedBase.yaw) / 180;
+    if (!best || score < best.score) best = { result, score };
+    if (feasible >= 3) break;
+  }
+  if (best) return { ...best.result, baseSearch: { candidates: candidates.length, checked: tried, feasible, score: best.score } };
+  if (failure) return { ...failure, issue: { ...failure.issue,
+    message: `本次底盘候选位置未通过完整路线检查：${failure.issue.message}` } };
+  return { complete: false, warnings: [], issue: issue('在当前范围内未找到可用底盘位置，请增大搜索范围、调整工具朝向或折线位置', -2, 0) };
+}

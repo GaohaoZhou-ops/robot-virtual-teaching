@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { sharedRobotPresetEntries, withSharedRobotPresets, withSharedRobotPresetConfig, mergeImportedRobotPresets, mergeLegacyJointConsolePresets } from '../src/lib/sharedRobotPresets.js';
-import { createRobotJointPreset } from '../src/lib/robotJointPresets.js';
+import { sharedRobotPresetEntries, withSharedRobotPresets, withSharedRobotPresetConfig, mergeImportedRobotPresets, mergeLegacyJointConsolePresets } from "../src/features/robot/model/sharedRobotPresets.js";
+import { createRobotJointPreset } from "../src/features/robot/model/robotJointPresets.js";
 
 const preset = createRobotJointPreset({ id: 'map-preset', name: '准备', robot: { id: 'robot-a' },
   joints: [{ name: 'left_J1', type: 'revolute', lower: -180, upper: 180 }], values: { left_J1: 30 } });

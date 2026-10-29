@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { BufferGeometry, Float32BufferAttribute } from 'three';
-import { packIPadModel } from '../src/lib/ipadTeaching.js';
-import { validateIPadResult } from '../src/lib/ipadProtocol.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
+import { packIPadModel } from "../src/features/devices/model/ipadTeaching.js";
+import { validateIPadResult } from "../src/shared/protocols/ipadProtocol.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-native-ipad-'));
 const serverDirectory = path.join(directory, 'server');

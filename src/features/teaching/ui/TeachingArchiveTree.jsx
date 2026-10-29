@@ -1,0 +1,1202 @@
+import { mobileDeviceLabel } from "../../../shared/protocols/ipadProtocol.js";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  ArrowDown,
+  ArrowUp,
+  Bot,
+  Camera,
+  ChevronDown,
+  ChevronRight,
+  Cloud,
+  Copy,
+  Download,
+  FileText,
+  Folder,
+  FolderOpen,
+  GitMerge,
+  ListPlus,
+  ListTree,
+  MapPin,
+  Maximize2,
+  Play,
+  Route,
+  Server,
+  Trash2,
+  X,
+} from 'lucide-react';
+import {
+  DEFAULT_PARKING_CLUSTER_DISTANCE,
+  DEFAULT_PARKING_MERGE_RPY_TOLERANCE,
+  DEFAULT_PARKING_MERGE_XYZ_TOLERANCE,
+} from "../model/parkingPointMerge.js";
+import ParkingPointMergeDialog from "./ParkingPointMergeDialog.jsx";
+import ParkingPointServerDialog from "./ParkingPointServerDialog.jsx";
+import TeachingParkingMap from "./TeachingParkingMap.jsx";
+import TeachingInsertActionDialog from "./TeachingInsertActionDialog.jsx";
+import { teachingActionPresets } from "../model/teachingPresetInsertion.js";
+import { teachingPoseMoveReason } from "../model/teachingPoseOrder.js";
+
+const formatCapturedAt = (value) => {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return '当前会话';
+  return new Intl.DateTimeFormat('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date);
+};
+
+const formatValue = (value, digits = 3) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed.toFixed(digits) : '--';
+};
+
+const formatBytes = (value) => {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${Math.round(bytes)} B`;
+};
+
+const poseCountForTask = (task) => (task?.parkingPoints || []).reduce(
+  (total, parkingPoint) => total + (parkingPoint.poses?.length || 0),
+  0,
+);
+
+const taskContextMatches = (task, mapData, robot) => {
+  const taskRobotKey = task?.robot?.id || task?.robot?.relativePath;
+  const currentRobotKey = robot?.id || robot?.relativePath;
+  const sameRobot = Boolean(taskRobotKey && currentRobotKey && taskRobotKey === currentRobotKey);
+  const sameMap = task?.map?.sourceHash && mapData?.sourceHash
+    ? task.map.sourceHash === mapData.sourceHash
+    : Boolean(task?.map?.fileName && task.map.fileName === mapData?.name);
+  const sameFrame = !mapData?.coordinateFrame || !task?.coordinateFrame
+    || task.coordinateFrame === mapData.coordinateFrame;
+  return sameRobot && sameMap && sameFrame;
+};
+
+const getDefaultSelection = (tasks, activeTaskId, activeParkingPointId) => {
+  const task = tasks.find((item) => item.id === activeTaskId) || tasks[0] || null;
+  if (!task) return null;
+  const parkingPoint = (task.parkingPoints || []).find(
+    (item) => item.id === activeParkingPointId,
+  ) || task.parkingPoints?.[0] || null;
+  if (!parkingPoint) return { type: 'task', taskId: task.id };
+  const pose = parkingPoint.poses?.at(-1) || null;
+  return pose
+    ? {
+        type: 'pose',
+        taskId: task.id,
+        parkingPointId: parkingPoint.id,
+        poseId: pose.id,
+      }
+    : { type: 'parking', taskId: task.id, parkingPointId: parkingPoint.id };
+};
+
+const selectionExists = (tasks, selection) => {
+  if (!selection) return false;
+  const task = tasks.find((item) => item.id === selection.taskId);
+  if (!task) return false;
+  if (selection.type === 'task') return true;
+  const parkingPoint = task.parkingPoints?.find(
+    (item) => item.id === selection.parkingPointId,
+  );
+  if (!parkingPoint) return false;
+  if (selection.type === 'parking') return true;
+  return parkingPoint.poses?.some((pose) => pose.id === selection.poseId) || false;
+};
+
+export default function TeachingArchiveTree({
+  tasks = [],
+  jointPoses = [],
+  teachingSpaceMode = 'map',
+  activeTaskId,
+  activeParkingPointId,
+  mapData,
+  heightRange,
+  colorMode,
+  robot,
+  robotLoadState,
+  parkingMergePlannerReady = false,
+  projectExportState = { status: 'idle' },
+  onSelectTask,
+  onRenameTask,
+  onDeleteTask,
+  onSelectParkingPoint,
+  onViewParkingPoint,
+  onRenameParkingPoint,
+  onDeleteParkingPoint,
+  onApplyParkingPoint,
+  onRenamePoint,
+  onDeletePoint,
+  onApplyPoint,
+  onViewPose,
+  onInsertPreset,
+  onMovePoint,
+  onPlayTask,
+  onOpenPolyline,
+  playbackDisabled = false,
+  onAnalyzeParkingPointMerge,
+  onMergeParkingPoints,
+  onExportTeachingData,
+  onCopyTeachingNode,
+  onImportTeachingData,
+  teachingImportDisabled = false,
+  canExportTeachingData = false,
+  onSelectionChange,
+}) {
+  const initialTask = tasks.find((task) => task.id === activeTaskId) || tasks[0] || null;
+  const initialParkingPoint = initialTask?.parkingPoints?.find(
+    (parkingPoint) => parkingPoint.id === activeParkingPointId,
+  ) || initialTask?.parkingPoints?.[0] || null;
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState(() => new Set(
+    tasks.filter((task) => task.id !== initialTask?.id).map((task) => task.id),
+  ));
+  const [collapsedParkingPointIds, setCollapsedParkingPointIds] = useState(() => new Set(
+    tasks.flatMap((task) => (task.parkingPoints || [])
+      .filter((parkingPoint) => parkingPoint.id !== initialParkingPoint?.id)
+      .map((parkingPoint) => parkingPoint.id)),
+  ));
+  const knownTaskIdsRef = useRef(new Set(tasks.map((task) => task.id)));
+  const knownParkingPointIdsRef = useRef(new Set(
+    tasks.flatMap((task) => (task.parkingPoints || []).map((parkingPoint) => parkingPoint.id)),
+  ));
+  const [selection, setSelection] = useState(() => getDefaultSelection(
+    tasks,
+    activeTaskId,
+    activeParkingPointId,
+  ));
+  const [nameDraft, setNameDraft] = useState('');
+  const [playbackSelection, setPlaybackSelection] = useState(null);
+  const [visionPreview, setVisionPreview] = useState(null);
+  const [insertActionTarget, setInsertActionTarget] = useState(null);
+  const [copying, setCopying] = useState(false);
+  const [mergeDialog, setMergeDialog] = useState(null);
+  const [serverMergeTaskId, setServerMergeTaskId] = useState(null);
+  const mergeAnalysisRevisionRef = useRef(0);
+
+  const selectedTask = tasks.find((task) => task.id === selection?.taskId)
+    || tasks.find((task) => task.id === activeTaskId)
+    || tasks[0]
+    || null;
+  const selectedParkingPoint = selectedTask?.parkingPoints?.find(
+    (parkingPoint) => parkingPoint.id === selection?.parkingPointId,
+  ) || null;
+  const selectedPoint = selectedParkingPoint?.poses?.find(
+    (pose) => pose.id === selection?.poseId,
+  ) || null;
+  const selectedEntity = selectedPoint || selectedParkingPoint || selectedTask;
+  const moveReasons = useMemo(() => Object.fromEntries(['up', 'down'].map((direction) => [
+    direction, teachingPoseMoveReason(selectedTask, selectedParkingPoint?.id, selectedPoint?.id, direction),
+  ])), [selectedTask, selectedParkingPoint?.id, selectedPoint?.id]);
+  const selectedCoordinateFrame = selectedTask?.coordinateFrame
+    || mapData?.coordinateFrame
+    || 'map';
+  const isIndependentTeachingSpace = selectedCoordinateFrame === 'virtual_origin';
+  const coordinateFrameLabel = isIndependentTeachingSpace ? 'VIRTUAL_ORIGIN' : 'MAP';
+  const totalParkingPoints = tasks.reduce(
+    (total, task) => total + (task.parkingPoints?.length || 0),
+    0,
+  );
+  const totalPoses = tasks.reduce((total, task) => total + poseCountForTask(task), 0);
+  const totalPolylines = tasks.reduce((total, task) => total + (task.polylines?.length || 0), 0);
+  const contextMatches = taskContextMatches(selectedTask, mapData, robot);
+  const robotReady = robotLoadState?.status === 'loaded' && Boolean(robot);
+  const polylineDisabledReason = (task, path) => {
+    if (!robotReady) return '机器人模型尚未装配完成';
+    if (!taskContextMatches(task, mapData, robot)) return '当前地图或机器人与任务不匹配';
+    if (playbackDisabled) return '请先结束当前检查、播放或编辑，并等待工程就绪';
+    if (!mapData?.faceCount) return '折线查看和回放需要带三角面的模型';
+    if (!onOpenPolyline) return '折线回放暂不可用';
+    if (path.points?.length < 2 || !path.points) return '折线至少需要两个点';
+    return '';
+  };
+  const playbackOptions = [
+    ...(poseCountForTask(selectedTask) ? [{ value: 'poses', label: '停车点与机械臂姿态' }] : []),
+    ...(selectedTask?.polylines || []).map((path) => ({ value: `polyline:${path.id}`, label: `${path.pathType === 'spline' ? '空间曲线' : '独立折线'} · ${path.name}`, path })),
+  ];
+  const playbackOption = playbackOptions.find((option) => playbackSelection?.taskId === selectedTask?.id
+    && option.value === playbackSelection.value) || playbackOptions[0];
+  const playbackPath = playbackOption?.path;
+  const playbackDisabledReason = playbackPath ? polylineDisabledReason(selectedTask, playbackPath)
+    : !poseCountForTask(selectedTask) ? '请先保存折线或记录机械臂姿态'
+      : !contextMatches ? '当前地图或机器人与任务不匹配'
+        : !robotReady ? '机器人模型尚未装配完成' : '';
+  const mergePlannerAvailable = Boolean(
+    parkingMergePlannerReady
+    && robotReady
+    && Number(robotLoadState?.zividCount) > 0,
+  );
+  const serverMergeAvailable = Boolean(
+    robotReady
+    && Number(robotLoadState?.zividCount) > 0
+    && robot?.format === 'urdf'
+    && mapData?.geometry
+    && mapData?.sourceHash
+  );
+  const exportPacking = projectExportState?.status === 'packing';
+  const insertTask = tasks.find((task) => task.id === insertActionTarget?.taskId);
+  const insertParking = insertTask?.parkingPoints.find((point) => point.id === insertActionTarget?.parkingPointId);
+  const insertPose = insertParking?.poses.find((pose) => pose.id === insertActionTarget?.poseId);
+
+  const jointEntries = useMemo(
+    () => Object.entries(selectedPoint?.fullBodyJoints?.values || {})
+      .sort(([left], [right]) => left.localeCompare(right)),
+    [selectedPoint],
+  );
+  const selectedCameraFrames = ['left', 'right'].flatMap((side) => {
+    const frame = selectedPoint?.cameraCapture?.frames?.[side];
+    return frame ? [{ side, frame }] : [];
+  });
+
+  useEffect(() => {
+    const imported = tasks.find((task) => task.id === activeTaskId && task.abx && !knownTaskIdsRef.current.has(task.id));
+    if (imported) {
+      setSelection({ type: 'task', taskId: imported.id });
+      onSelectionChange?.({ type: 'task', task: imported, parkingPoint: null, pose: null });
+      return;
+    }
+    setSelection((current) => (
+      selectionExists(tasks, current)
+        ? current
+        : getDefaultSelection(tasks, activeTaskId, activeParkingPointId)
+    ));
+  }, [activeParkingPointId, activeTaskId, tasks, onSelectionChange]);
+
+  useEffect(() => {
+    const nextTaskIds = new Set(tasks.map((task) => task.id));
+    const nextParkingPointIds = new Set(
+      tasks.flatMap((task) => (task.parkingPoints || []).map((parkingPoint) => parkingPoint.id)),
+    );
+    setCollapsedTaskIds((current) => {
+      const next = new Set([...current].filter((id) => nextTaskIds.has(id)));
+      tasks.forEach((task) => {
+        if (!knownTaskIdsRef.current.has(task.id) && task.id !== activeTaskId) next.add(task.id);
+      });
+      return next;
+    });
+    setCollapsedParkingPointIds((current) => {
+      const next = new Set([...current].filter((id) => nextParkingPointIds.has(id)));
+      tasks.forEach((task) => (task.parkingPoints || []).forEach((parkingPoint) => {
+        if (
+          !knownParkingPointIdsRef.current.has(parkingPoint.id)
+          && parkingPoint.id !== activeParkingPointId
+        ) next.add(parkingPoint.id);
+      }));
+      return next;
+    });
+    knownTaskIdsRef.current = nextTaskIds;
+    knownParkingPointIdsRef.current = nextParkingPointIds;
+  }, [activeParkingPointId, activeTaskId, tasks]);
+
+  useEffect(() => {
+    if (activeTaskId) {
+      setCollapsedTaskIds((current) => {
+        if (!current.has(activeTaskId)) return current;
+        const next = new Set(current);
+        next.delete(activeTaskId);
+        return next;
+      });
+    }
+    if (activeParkingPointId) {
+      setCollapsedParkingPointIds((current) => {
+        if (!current.has(activeParkingPointId)) return current;
+        const next = new Set(current);
+        next.delete(activeParkingPointId);
+        return next;
+      });
+    }
+  }, [activeParkingPointId, activeTaskId]);
+
+  useEffect(() => {
+    setNameDraft(selectedEntity?.name || '');
+  }, [selectedEntity?.id, selectedEntity?.name]);
+
+  useEffect(() => {
+    setVisionPreview(null);
+  }, [selectedPoint?.id]);
+
+  useEffect(() => {
+    if (!visionPreview) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setVisionPreview(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [visionPreview]);
+
+  useEffect(() => {
+    if (!mergeDialog) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key !== 'Escape' || mergeDialog.status === 'analyzing') return;
+      mergeAnalysisRevisionRef.current += 1;
+      setMergeDialog(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mergeDialog]);
+
+  const toggleCollapsed = (setter, id) => {
+    setter((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectTask = (task) => {
+    onSelectTask(task.id);
+    setNameDraft(task.name);
+    setSelection({ type: 'task', taskId: task.id });
+    onSelectionChange?.({ type: 'task', task, parkingPoint: null, pose: null });
+    setCollapsedTaskIds((current) => {
+      const next = new Set(current);
+      next.delete(task.id);
+      return next;
+    });
+  };
+
+  const selectParkingPoint = (task, parkingPoint) => {
+    if (task.id !== activeTaskId) onSelectTask(task.id);
+    onSelectParkingPoint(parkingPoint.id);
+    setNameDraft(parkingPoint.name);
+    setSelection({
+      type: 'parking',
+      taskId: task.id,
+      parkingPointId: parkingPoint.id,
+    });
+    onSelectionChange?.({ type: 'parking', task, parkingPoint, pose: null });
+    setCollapsedTaskIds((current) => {
+      const next = new Set(current);
+      next.delete(task.id);
+      return next;
+    });
+    setCollapsedParkingPointIds((current) => {
+      const next = new Set(current);
+      next.delete(parkingPoint.id);
+      return next;
+    });
+  };
+
+  const selectPose = (task, parkingPoint, pose) => {
+    if (task.id !== activeTaskId) onSelectTask(task.id);
+    if (parkingPoint.id !== activeParkingPointId) onSelectParkingPoint(parkingPoint.id);
+    setNameDraft(pose.name);
+    setSelection({
+      type: 'pose',
+      taskId: task.id,
+      parkingPointId: parkingPoint.id,
+      poseId: pose.id,
+    });
+    onSelectionChange?.({ type: 'pose', task, parkingPoint, pose });
+  };
+
+  const copySelectedNode = async () => {
+    if (copying || !selectedParkingPoint || !onCopyTeachingNode) return;
+    setCopying(true);
+    try {
+      await onCopyTeachingNode(selectedTask.id, selectedParkingPoint.id,
+        selection?.type === 'pose' ? selectedPoint?.id : undefined);
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const commitName = () => {
+    const nextName = nameDraft.trim();
+    if (!selection || !selectedEntity || !nextName) {
+      setNameDraft(selectedEntity?.name || '');
+      return;
+    }
+    if (nextName === selectedEntity.name) return;
+    if (selection.type === 'task') onRenameTask(selectedTask.id, nextName);
+    if (selection.type === 'parking') {
+      onRenameParkingPoint(selectedTask.id, selectedParkingPoint.id, nextName);
+    }
+    if (selection.type === 'pose') {
+      onRenamePoint(selectedTask.id, selectedParkingPoint.id, selectedPoint.id, nextName);
+    }
+  };
+
+  const normalizeMergeParameters = (value = {}) => {
+    const clamp = (rawValue, minimum, maximum, fallback) => {
+      const parsed = Number(rawValue);
+      return Math.max(minimum, Math.min(maximum, Number.isFinite(parsed) ? parsed : fallback));
+    };
+    return {
+      distanceThreshold: clamp(
+        value.distanceThreshold,
+        0.02,
+        5,
+        DEFAULT_PARKING_CLUSTER_DISTANCE,
+      ),
+      positionToleranceCm: clamp(
+        value.positionToleranceCm,
+        0.1,
+        50,
+        DEFAULT_PARKING_MERGE_XYZ_TOLERANCE * 100,
+      ),
+      rotationTolerance: clamp(
+        value.rotationTolerance,
+        0.1,
+        45,
+        DEFAULT_PARKING_MERGE_RPY_TOLERANCE,
+      ),
+    };
+  };
+
+  const runParkingMergeAnalysis = (task, requestedParameters) => {
+    if (!task || typeof onAnalyzeParkingPointMerge !== 'function') return;
+    const parameters = normalizeMergeParameters(requestedParameters);
+    const revision = ++mergeAnalysisRevisionRef.current;
+    setMergeDialog((current) => ({
+      ...(current || {}),
+      taskId: task.id,
+      source: 'local',
+      status: 'analyzing',
+      parameters,
+      result: current?.taskId === task.id ? current.result : null,
+      analyzedParameters: current?.taskId === task.id ? current.analyzedParameters : null,
+      selectedClusterIds: new Set(),
+      error: '',
+    }));
+    window.requestAnimationFrame(async () => {
+      try {
+        const result = await onAnalyzeParkingPointMerge(task.id, {
+          distanceThreshold: parameters.distanceThreshold,
+          positionTolerance: parameters.positionToleranceCm / 100,
+          rotationTolerance: parameters.rotationTolerance,
+        });
+        if (revision !== mergeAnalysisRevisionRef.current) return;
+        setMergeDialog((current) => (
+          current?.taskId === task.id
+            ? {
+                ...current,
+                status: 'ready',
+                result,
+                analyzedParameters: parameters,
+                selectedClusterIds: new Set(
+                  (result?.clusters || []).filter((cluster) => cluster.feasible)
+                    .map((cluster) => cluster.id),
+                ),
+                error: '',
+              }
+            : current
+        ));
+      } catch (error) {
+        if (revision !== mergeAnalysisRevisionRef.current) return;
+        setMergeDialog((current) => (
+          current?.taskId === task.id
+            ? {
+                ...current,
+                status: 'error',
+                result: null,
+                analyzedParameters: null,
+                selectedClusterIds: new Set(),
+                error: error?.message || '停车点合并分析失败',
+              }
+            : current
+        ));
+      }
+    });
+  };
+
+  const openParkingMergeDialog = () => {
+    if (!selectedTask || selectedTask.parkingPoints?.length < 2) return;
+    runParkingMergeAnalysis(selectedTask, {
+      distanceThreshold: DEFAULT_PARKING_CLUSTER_DISTANCE,
+      positionToleranceCm: DEFAULT_PARKING_MERGE_XYZ_TOLERANCE * 100,
+      rotationTolerance: DEFAULT_PARKING_MERGE_RPY_TOLERANCE,
+    });
+  };
+
+  const closeParkingMergeDialog = () => {
+    if (mergeDialog?.status === 'analyzing') return;
+    mergeAnalysisRevisionRef.current += 1;
+    setMergeDialog(null);
+  };
+
+  const acceptServerMergeResult = ({ analysis, manifest }) => {
+    const task = tasks.find((item) => item.id === serverMergeTaskId);
+    if (!task || !analysis) return;
+    const importedParameters = {
+      distanceThreshold: Number(analysis.distanceThreshold)
+        || DEFAULT_PARKING_CLUSTER_DISTANCE,
+      positionToleranceCm: (Number(analysis.positionTolerance)
+        || DEFAULT_PARKING_MERGE_XYZ_TOLERANCE) * 100,
+      rotationTolerance: Number(analysis.rotationTolerance)
+        || DEFAULT_PARKING_MERGE_RPY_TOLERANCE,
+    };
+    mergeAnalysisRevisionRef.current += 1;
+    setMergeDialog({
+      taskId: task.id,
+      source: 'server',
+      serverManifest: manifest,
+      status: 'ready',
+      parameters: importedParameters,
+      analyzedParameters: importedParameters,
+      result: analysis,
+      selectedClusterIds: new Set(
+        (analysis.clusters || []).filter((cluster) => cluster.feasible)
+          .map((cluster) => cluster.id),
+      ),
+      error: '',
+    });
+    setServerMergeTaskId(null);
+  };
+
+  const updateParkingMergeParameter = (name, value) => {
+    setMergeDialog((current) => current
+      ? { ...current, parameters: { ...current.parameters, [name]: value } }
+      : current);
+  };
+
+  const toggleParkingMergeCluster = (clusterId) => {
+    setMergeDialog((current) => {
+      if (!current) return current;
+      const selectedClusterIds = new Set(current.selectedClusterIds || []);
+      if (selectedClusterIds.has(clusterId)) selectedClusterIds.delete(clusterId);
+      else selectedClusterIds.add(clusterId);
+      return { ...current, selectedClusterIds };
+    });
+  };
+
+  const confirmParkingPointMerge = (clusters) => {
+    const task = tasks.find((item) => item.id === mergeDialog?.taskId);
+    if (!task || typeof onMergeParkingPoints !== 'function') return;
+    const outcome = onMergeParkingPoints(task.id, clusters, mergeDialog.result);
+    if (!outcome?.success) return;
+    mergeAnalysisRevisionRef.current += 1;
+    setSelection({ type: 'task', taskId: task.id });
+    setMergeDialog(null);
+  };
+
+  const renderTree = () => tasks.map((task) => {
+    const taskCollapsed = collapsedTaskIds.has(task.id);
+    const taskSelected = selection?.type === 'task' && selection.taskId === task.id;
+    return (
+      <div className="teaching-tree-branch teaching-tree-branch--task" key={task.id} role="treeitem" aria-expanded={!taskCollapsed}>
+        <div className={`teaching-tree-node teaching-tree-node--task ${taskSelected ? 'is-selected' : ''}`}>
+          <button
+            type="button"
+            className="teaching-tree-expander"
+            aria-label={`${taskCollapsed ? '展开' : '折叠'}任务 ${task.name}`}
+            onClick={() => toggleCollapsed(setCollapsedTaskIds, task.id)}
+          >
+            {taskCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          </button>
+          <button
+            type="button"
+            className="teaching-tree-label"
+            aria-label={`选择示教任务 ${task.name}`}
+            onClick={() => selectTask(task)}
+          >
+            {taskCollapsed ? <Folder size={13} /> : <FolderOpen size={13} />}
+            <span>{task.name}</span>
+            <small>{task.mobileCapture ? `${task.mobileCapture.samples.length} ${mobileDeviceLabel(task.mobileCapture)} Pose` : `${task.parkingPoints?.length || 0} / ${poseCountForTask(task)}${task.polylines?.length ? ` · ${task.polylines.length} 折线` : ''}`}</small>
+          </button>
+        </div>
+
+        {!taskCollapsed && (
+          <div className="teaching-tree-group teaching-tree-group--parking" role="group">
+            {(task.polylines || []).map((path) => {
+              const disabledReason = polylineDisabledReason(task, path);
+              return (
+                <div className="teaching-tree-node teaching-tree-node--polyline" key={path.id}
+                  role="treeitem" aria-label={`独立折线 ${path.name}`} data-polyline-id={path.id}>
+                  <span className="teaching-tree-leaf-line" />
+                  <button type="button" className="teaching-tree-label" aria-label={`查看折线 ${path.name}`}
+                    disabled={Boolean(disabledReason)} title={disabledReason || '在 3D 工作台查看独立折线'}
+                    onClick={() => onOpenPolyline?.(task.id, path.id, 'preview')}>
+                    <Route size={12} /><span>{path.name}</span><small>{path.pathType === 'spline' ? '曲线 · ' : ''}{path.points?.length || 0} 点</small>
+                  </button>
+                  <button type="button" className="teaching-tree-polyline-play" aria-label={`回放折线 ${path.name}`}
+                    disabled={Boolean(disabledReason)} title={disabledReason || '返回 3D 工作台，检查通过后回放折线'}
+                    onClick={() => onOpenPolyline?.(task.id, path.id, 'play')}>
+                    <Play size={12} fill="currentColor" />
+                  </button>
+                </div>
+              );
+            })}
+            {(task.parkingPoints || []).map((parkingPoint) => {
+              const parkingCollapsed = collapsedParkingPointIds.has(parkingPoint.id);
+              const parkingSelected = selection?.type === 'parking'
+                && selection.parkingPointId === parkingPoint.id;
+              return (
+                <div className="teaching-tree-branch teaching-tree-branch--parking" key={parkingPoint.id} role="treeitem" aria-expanded={!parkingCollapsed}>
+                  <div className={`teaching-tree-node teaching-tree-node--parking ${parkingSelected ? 'is-selected' : ''}`}>
+                    <button
+                      type="button"
+                      className="teaching-tree-expander"
+                      aria-label={`${parkingCollapsed ? '展开' : '折叠'}停车点 ${parkingPoint.name}`}
+                      onClick={() => toggleCollapsed(
+                        setCollapsedParkingPointIds,
+                        parkingPoint.id,
+                      )}
+                    >
+                      {parkingCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    <button
+                      type="button"
+                      className="teaching-tree-label"
+                      aria-label={`选择停车点 ${parkingPoint.name}`}
+                      onClick={() => selectParkingPoint(task, parkingPoint)}
+                    >
+                      <MapPin size={12} />
+                      <span>{parkingPoint.name}</span>
+                      <small>{parkingPoint.poses?.length || 0}</small>
+                    </button>
+                  </div>
+
+                  {!parkingCollapsed && (
+                    <div className="teaching-tree-group teaching-tree-group--poses" role="group">
+                      {(parkingPoint.poses || []).map((pose) => {
+                        const poseSelected = selection?.type === 'pose'
+                          && selection.poseId === pose.id;
+                        return (
+                          <div
+                            className={`teaching-tree-node teaching-tree-node--pose teaching-point-row ${poseSelected ? 'is-selected' : ''}`}
+                            key={pose.id}
+                            role="treeitem"
+                            data-teaching-point-id={pose.id}
+                            data-joint-count={pose.fullBodyJoints?.count || 0}
+                            data-camera-frame-count={Object.keys(pose.cameraCapture?.frames || {}).length}
+                          >
+                            <span className="teaching-tree-leaf-line" />
+                            <button
+                              type="button"
+                              className="teaching-tree-label"
+                              aria-label={`查看机械臂姿态 ${pose.name}`}
+                              onClick={() => selectPose(task, parkingPoint, pose)}
+                            >
+                              <FileText size={11} />
+                              <span>{pose.name}</span>
+                              <small>{pose.fullBodyJoints?.count || 0}J</small>
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {!parkingPoint.poses?.length && (
+                        <div className="teaching-tree-empty-leaf">暂无机械臂姿态</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {!task.parkingPoints?.length && !task.polylines?.length && (
+              <div className="teaching-tree-empty-leaf">{task.mobileCapture ? `${task.mobileCapture.samples.length} 个 ${mobileDeviceLabel(task.mobileCapture)} Pose · 见右侧详情` : '暂无停车点'}</div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  });
+
+  return (
+    <>
+      <section
+        className="teaching-archive-tree"
+        aria-label="示教数据管理"
+        data-teaching-view="data"
+        data-teaching-task-count={tasks.length}
+        data-parking-point-count={totalParkingPoints}
+        data-teaching-point-count={totalPoses}
+        data-polyline-count={totalPolylines}
+        data-active-teaching-task={selectedTask?.id || ''}
+        data-active-parking-point={selectedParkingPoint?.id || ''}
+        data-teaching-context-match={contextMatches ? 'true' : 'false'}
+        data-parking-merge-planner-ready={mergePlannerAvailable ? 'true' : 'false'}
+        data-parking-merge-server-ready={serverMergeAvailable ? 'true' : 'false'}
+        data-project-export-state={projectExportState?.status || 'idle'}
+        data-project-export-phase={projectExportState?.phase || ''}
+      >
+        <header className="teaching-tree-toolbar">
+          <div>
+            <ListTree size={15} />
+            <span><strong>示教数据树</strong><small>TASK / STOP / POSE{totalPolylines ? ' / PATH' : ''}</small></span>
+          </div>
+          <span>{tasks.length} 任务 · {totalParkingPoints} 停车点 · {totalPoses} 姿态{totalPolylines ? ` · ${totalPolylines} 折线` : ''}</span>
+          {selection?.type === 'pose' && selectedPoint && (
+            <>
+              <button type="button" className="teaching-tree-insert-action"
+                onClick={() => setInsertActionTarget({ ...selection })}>
+                <ListPlus size={13} />插入动作
+              </button>
+              {[
+                ['up', '上移', ArrowUp],
+                ['down', '下移', ArrowDown],
+              ].map(([direction, label, Icon]) => (
+                <button type="button" key={direction}
+                  disabled={Boolean(moveReasons[direction])}
+                  title={moveReasons[direction] || `在当前停车点内${label}姿态`}
+                  onClick={() => onMovePoint(selectedTask.id, selectedParkingPoint.id, selectedPoint.id, direction)}>
+                  <Icon size={13} />{label}
+                </button>
+              ))}
+            </>
+          )}
+          {selectedPoint ? (
+            <button type="button" onClick={() => onViewPose(selectedParkingPoint.id, selectedPoint.id)}>
+              <Bot size={13} />查看姿态
+            </button>
+          ) : selectedParkingPoint && (
+            <button type="button" onClick={() => onViewParkingPoint(selectedParkingPoint.id)}>
+              <MapPin size={13} />查看停车点
+            </button>
+          )}
+          {selection?.type === 'task' && selectedTask && onImportTeachingData && <button
+            type="button"
+            onClick={onImportTeachingData}
+            disabled={teachingImportDisabled}
+            aria-label="导入机器人示教"
+            title="导入为新任务，保留当前任务及其停车点、姿态"
+          >导入机器人示教</button>}
+          {selection?.type === 'task' && selectedTask && <button
+            type="button"
+            aria-label="导出示教数据"
+            onClick={onExportTeachingData}
+            disabled={!canExportTeachingData || exportPacking}
+            title={teachingSpaceMode === 'map'
+              ? '导出 ABXBrainSystem 可直接导入的示教 ZIP：任务、停车点、机器人姿态和路网导航'
+              : '导出当前工程全部轻量示教数据 JSON：机器人定位、关节值、停车点、姿态与导航关系'}
+          >
+            <Download size={11} /> 导出示教数据
+          </button>}
+          {((selection?.type === 'parking' && selectedParkingPoint)
+            || (selection?.type === 'pose' && selectedPoint)) && <button
+            type="button"
+            aria-label={selection.type === 'pose' ? '复制姿态' : '复制停车点'}
+            aria-busy={copying}
+            onClick={copySelectedNode}
+            disabled={copying || !onCopyTeachingNode}
+            title={selection.type === 'pose'
+              ? '按 pre-teaching-pose.json 格式复制头部、躯干和双臂关节角度（deg）'
+              : '复制停车点 JSON：名称、坐标系、底盘位姿和下属姿态'}
+          >
+            <Copy size={11} />{selection.type === 'pose' ? '复制姿态' : '复制停车点'}
+          </button>}
+        </header>
+        <div className="teaching-tree-workspace">
+          <aside className="teaching-tree-pane" aria-label="示教层级树">
+            <header><span>数据结构</span><small>名称 · 子项</small></header>
+            {tasks.length ? (
+              <div className="teaching-tree" role="tree" aria-label="任务停车点与机械臂姿态">
+                {renderTree()}
+              </div>
+            ) : (
+              <div className="teaching-tree-empty">
+                <ListTree size={21} />
+                <strong>暂无示教任务</strong>
+                <span>返回工作台创建任务后，数据会按层级显示在这里。</span>
+              </div>
+            )}
+          </aside>
+
+          <section className="teaching-tree-detail" aria-label="选中节点详情">
+            {!selectedEntity && (
+              <div className="teaching-tree-detail__empty">
+                <FileText size={20} />
+                <span>从左侧树中选择一个节点</span>
+              </div>
+            )}
+
+            {selectedEntity && (
+              <>
+                <header className="teaching-tree-detail__header">
+                  <div className="teaching-tree-breadcrumb">
+                    <span>{selectedTask?.name}</span>
+                    {selectedParkingPoint && <><ChevronRight size={10} /><span>{selectedParkingPoint.name}</span></>}
+                    {selectedPoint && <><ChevronRight size={10} /><strong>{selectedPoint.name}</strong></>}
+                  </div>
+                  <small>{selection?.type === 'task' ? 'TASK' : selection?.type === 'parking' ? 'PARKING STOP' : 'ARM POSE'}</small>
+                </header>
+
+                <div className={`teaching-tree-detail__body is-${selection?.type || 'empty'}`}>
+                  {selectedTask?.abx && <div className="abx-native-notice" role="note">
+                    <p>机器人原生任务 · {selectedTask.abx.header.point_count} 步骤。
+                      导航、拍照、等待、并行和轨迹记录按原顺序保存并导出；虚拟回放仅显示独立关节 Pose。
+                      可修改名称和关节，也可选中姿态后插入预设动作或调整姿态顺序。</p>
+                    {(selectedParkingPoint?.abx?.located === false || selectedPoint?.abx?.located === false)
+                      && <p>此记录缺少 map 定位，坐标不可用于导航或底盘恢复。</p>}
+                    {selection?.type === 'task' && <details><summary>查看原生步骤顺序</summary>
+                      <ol>{selectedTask.abx.lines.map((line) => JSON.parse(line)).filter((line) => line.type === 'point').map((point) => (
+                        <li key={point.seq}>{point.label || `步骤 ${point.seq}`} · {point.record.type || '关节 Pose'}</li>
+                      ))}</ol>
+                    </details>}
+                  </div>}
+                  <label className="teaching-tree-name-field">
+                    <span>{selection?.type === 'task' ? '任务名称' : selection?.type === 'parking' ? '停车点名称' : '姿态名称'}</span>
+                    <input
+                      aria-label={selection?.type === 'task' ? '示教任务名称' : selection?.type === 'parking' ? '停车点名称' : '机械臂姿态名称'}
+                      value={nameDraft}
+                      onChange={(event) => setNameDraft(event.target.value)}
+                      onBlur={commitName}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur();
+                      }}
+                    />
+                  </label>
+
+                  {selection?.type === 'task' && selectedTask && (
+                    <div className="teaching-tree-task-detail">
+                      <dl>
+                        <div><dt>{selectedTask.mobileCapture ? '校准段数' : '停车点'}</dt><dd>{selectedTask.mobileCapture?.calibrations.length ?? (selectedTask.parkingPoints?.length || 0)}</dd></div>
+                        <div><dt>{selectedTask.mobileCapture ? `${mobileDeviceLabel(selectedTask.mobileCapture)} Pose` : '机械臂姿态'}</dt><dd>{selectedTask.mobileCapture?.samples.length ?? poseCountForTask(selectedTask)}</dd></div>
+                        {selectedTask.polylines?.length > 0 && <div><dt>独立折线</dt><dd>{selectedTask.polylines.length}</dd></div>}
+                        <div><dt>{isIndependentTeachingSpace ? '空间点云' : '地图'}</dt><dd>{selectedTask.map?.fileName || '未绑定'}</dd></div>
+                        <div><dt>{selectedTask.mobileCapture ? '采集设备' : '机器人'}</dt><dd>{selectedTask.mobileCapture?.device.model || selectedTask.robot?.name || '未绑定'}</dd></div>
+                        <div><dt>创建时间</dt><dd>{formatCapturedAt(selectedTask.createdAt)}</dd></div>
+                        <div><dt>坐标系</dt><dd>{selectedCoordinateFrame}</dd></div>
+                      </dl>
+                      {!selectedTask.mobileCapture && selectedTask.polylines?.length > 0 && (
+                        <div className="teaching-tree-playback-choice">
+                          <label className="teaching-tree-name-field">
+                            <span>回放内容</span>
+                            <select aria-label="任务回放内容" value={playbackOption?.value || ''}
+                              onChange={(event) => setPlaybackSelection({ taskId: selectedTask.id, value: event.target.value })}>
+                              {playbackOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </select>
+                          </label>
+                          <p>独立折线单独回放，无需停车点；检查通过后自动执行。</p>
+                        </div>
+                      )}
+                      <div className="teaching-tree-task-actions">
+                        {!selectedTask.mobileCapture && <>
+                        <button
+                          type="button"
+                          className="teaching-tree-play-action"
+                          aria-label={`播放示教任务 ${selectedTask.name}`}
+                          disabled={Boolean(playbackDisabledReason)}
+                          title={playbackDisabledReason || (playbackPath
+                            ? '返回 3D 工作台，检查通过后回放所选折线'
+                            : '切换到主工作台，按停车点与姿态顺序执行连续规划轨迹')}
+                          onClick={() => playbackPath ? onOpenPolyline?.(selectedTask.id, playbackPath.id, 'play')
+                            : onPlayTask?.(selectedTask.id)}
+                        >
+                          <Play size={12} fill="currentColor" /> {playbackPath ? '回放折线' : '播放任务'}
+                        </button>
+                        <button
+                          type="button"
+                          className="teaching-tree-merge-action"
+                          aria-label="分析并合并当前任务的近邻停车点"
+                          disabled={
+                            Boolean(selectedTask.abx) || selectedTask.parkingPoints?.length < 2
+                            || !contextMatches
+                            || !mergePlannerAvailable
+                          }
+                          title={selectedTask.parkingPoints?.length < 2
+                            ? '至少需要两个停车点'
+                            : !contextMatches
+                              ? '当前地图或机器人与任务不匹配'
+                              : !mergePlannerAvailable
+                                ? '正在等待带末端相机的机器人运动学模型'
+                                : '聚类距离较近的停车点，并搜索末端姿态可达的公共停车位'}
+                          onClick={openParkingMergeDialog}
+                        >
+                          <GitMerge size={12} /> 合并停车点
+                        </button>
+                        <button
+                          type="button"
+                          className="teaching-tree-server-merge-action"
+                          aria-label="打开合并停车点 Server 导入导出"
+                          disabled={
+                            Boolean(selectedTask.abx) || selectedTask.parkingPoints?.length < 2
+                            || !contextMatches
+                            || !serverMergeAvailable
+                          }
+                          title={selectedTask.parkingPoints?.length < 2
+                            ? '至少需要两个停车点'
+                            : !contextMatches
+                              ? '当前地图或机器人与任务不匹配'
+                              : !mapData?.geometry || !mapData?.sourceHash
+                                ? '请加载带来源指纹的完整地图'
+                                : !serverMergeAvailable
+                                  ? '正在等待带 Zivid 光学坐标系的 URDF 机器人'
+                                  : '导出集群计算包，或导入经过 manifest 校验的 Server 结果'}
+                          onClick={() => setServerMergeTaskId(selectedTask.id)}
+                        >
+                          <Server size={12} /> 合并停车点-Server
+                        </button>
+                        </>}
+                        <button
+                          type="button"
+                          className="teaching-tree-danger"
+                          aria-label="删除当前示教任务"
+                          onClick={() => {
+                            if (window.confirm(`删除 ${selectedTask.name} 及其全部${selectedTask.mobileCapture ? ` ${mobileDeviceLabel(selectedTask.mobileCapture)} Pose` : `停车点、机械臂姿态${selectedTask.polylines?.length ? '和独立折线' : ''}`}？`)) {
+                              onDeleteTask(selectedTask.id);
+                            }
+                          }}
+                        >
+                          <Trash2 size={11} /> 删除任务
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {selection?.type === 'parking' && selectedParkingPoint && (
+                    <div className="teaching-tree-parking-detail">
+                      <div className="teaching-tree-pose-values" aria-label={`停车点 ${coordinateFrameLabel} 位姿`}>
+                        {[
+                          ['X', selectedParkingPoint.mapPose.position.x, 'm'],
+                          ['Y', selectedParkingPoint.mapPose.position.y, 'm'],
+                          ['Z', selectedParkingPoint.mapPose.position.z, 'm'],
+                          ['ROLL', selectedParkingPoint.mapPose.rpy.roll, '°'],
+                          ['PITCH', selectedParkingPoint.mapPose.rpy.pitch, '°'],
+                          ['YAW', selectedParkingPoint.mapPose.rpy.yaw, '°'],
+                        ].map(([label, value, unit]) => (
+                          <div key={label}><span>{label}</span><strong>{selectedParkingPoint.abx?.located === false ? '—' : formatValue(value)}</strong><small>{unit}</small></div>
+                        ))}
+                      </div>
+                      {selectedParkingPoint.abx?.located !== false && <TeachingParkingMap
+                        mapData={mapData}
+                        heightRange={heightRange}
+                        colorMode={colorMode}
+                        parkingPoint={selectedParkingPoint}
+                      />}
+                      <div className="teaching-tree-actions">
+                        <button
+                          type="button"
+                          disabled={!contextMatches || !robotReady}
+                          onClick={() => onApplyParkingPoint(selectedTask.id, selectedParkingPoint.id)}
+                        >
+                          <Play size={11} /> 定位到停车点
+                        </button>
+                        <button
+                          type="button"
+                          className="teaching-tree-danger"
+                          aria-label="删除当前停车点"
+                          disabled={Boolean(selectedTask.abx)}
+                          onClick={() => {
+                            if (window.confirm(`删除 ${selectedParkingPoint.name} 及其 ${selectedParkingPoint.poses?.length || 0} 组机械臂姿态？`)) {
+                              onDeleteParkingPoint(selectedTask.id, selectedParkingPoint.id);
+                            }
+                          }}
+                        >
+                          <Trash2 size={11} /> 删除停车点
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {selection?.type === 'pose' && selectedPoint && (
+                    <div
+                      className="teaching-tree-pose-detail teaching-point-detail"
+                      data-selected-teaching-point={selectedPoint.id}
+                      data-map-x={selectedPoint.mapPose.position.x}
+                      data-map-y={selectedPoint.mapPose.position.y}
+                      data-map-z={selectedPoint.mapPose.position.z}
+                      data-map-roll={selectedPoint.mapPose.rpy.roll}
+                      data-map-pitch={selectedPoint.mapPose.rpy.pitch}
+                      data-map-yaw={selectedPoint.mapPose.rpy.yaw}
+                    >
+                      <div className="teaching-tree-pose-meta">
+                        <span>记录时间</span><strong>{formatCapturedAt(selectedPoint.capturedAt)}</strong>
+                        <span>全身关节</span><strong>{selectedPoint.fullBodyJoints?.count || 0} VALUES</strong>
+                      </div>
+                      <div className="teaching-tree-pose-values" aria-label="机械臂姿态记录位姿">
+                        {[
+                          ['X', selectedPoint.mapPose.position.x, 'm'],
+                          ['Y', selectedPoint.mapPose.position.y, 'm'],
+                          ['Z', selectedPoint.mapPose.position.z, 'm'],
+                          ['ROLL', selectedPoint.mapPose.rpy.roll, '°'],
+                          ['PITCH', selectedPoint.mapPose.rpy.pitch, '°'],
+                          ['YAW', selectedPoint.mapPose.rpy.yaw, '°'],
+                        ].map(([label, value, unit]) => (
+                          <div key={label}><span>{label}</span><strong>{selectedPoint.abx?.located === false ? '—' : formatValue(value)}</strong><small>{unit}</small></div>
+                        ))}
+                      </div>
+
+                      {selectedCameraFrames.length > 0 && (
+                        <section
+                          className="teaching-vision-capture teaching-tree-vision"
+                          aria-label="机械臂姿态双目视觉快照"
+                          data-camera-frame-count={selectedCameraFrames.length}
+                          data-camera-model={selectedPoint.cameraCapture.cameraModel || ''}
+                        >
+                          <header>
+                            <span><Camera size={11} /></span>
+                            <div><strong>双目视觉快照</strong><small>RGB / OPTICAL XYZ</small></div>
+                            <em>{formatBytes(selectedPoint.cameraCapture.storageByteLength)}</em>
+                          </header>
+                          <div className="teaching-vision-grid">
+                            {selectedCameraFrames.map(({ side, frame }) => {
+                              const sideLabel = side === 'left' ? '左臂' : '右臂';
+                              return (
+                                <article
+                                  key={side}
+                                  className="teaching-vision-frame"
+                                  data-camera-side={side}
+                                  data-point-count={frame.pointCloud?.pointCount || 0}
+                                >
+                                  <div className="teaching-vision-frame__heading">
+                                    <strong>{sideLabel} M70</strong>
+                                    <small>{side === 'left' ? 'CAM-L' : 'CAM-R'}</small>
+                                  </div>
+                                  <div className="teaching-vision-thumbnails">
+                                    {[
+                                      { id: 'rgb', label: 'RGB', icon: Camera, image: frame.rgb },
+                                      { id: 'pointcloud', label: 'XYZ', icon: Cloud, image: frame.pointCloud?.preview },
+                                    ].map((item) => {
+                                      const PreviewIcon = item.icon;
+                                      return (
+                                        <button
+                                          type="button"
+                                          key={item.id}
+                                          disabled={!item.image?.dataUrl}
+                                          aria-label={`查看 ${selectedPoint.name} ${sideLabel}${item.label} 快照`}
+                                          onClick={() => setVisionPreview({
+                                            image: item.image,
+                                            title: `${selectedPoint.name} · ${sideLabel} ${item.label}`,
+                                            mode: item.id,
+                                            pointCount: frame.pointCloud?.pointCount || 0,
+                                            frameName: frame.opticalPose?.frameName || '',
+                                          })}
+                                        >
+                                          {item.image?.dataUrl
+                                            ? <img src={item.image.dataUrl} alt="" />
+                                            : <i><PreviewIcon size={13} /></i>}
+                                          <span><PreviewIcon size={9} /> {item.label}</span>
+                                          <Maximize2 size={8} />
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                  <footer>
+                                    <span>{Number(frame.pointCloud?.pointCount || 0).toLocaleString('zh-CN')} PTS</span>
+                                    <span>{frame.pointCloud?.sampleMethod === 'uniform-visible-lod' ? 'LOD' : 'FULL FOV'}</span>
+                                  </footer>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      )}
+
+                      <div className="teaching-joint-heading">
+                        <span>全身关节快照</span>
+                        <small>{jointEntries.length} VALUES · DEG / M</small>
+                      </div>
+                      <div className="teaching-joint-list" aria-label="全身关节快照">
+                        {jointEntries.map(([name, value]) => (
+                          <div key={name}><span title={name}>{name}</span><strong>{formatValue(value)}</strong></div>
+                        ))}
+                        {!jointEntries.length && <p>当前模型没有可动关节值</p>}
+                      </div>
+
+                      <div className="teaching-tree-actions">
+                        <button
+                          type="button"
+                          disabled={!contextMatches || !robotReady}
+                          onClick={() => onApplyPoint(
+                            selectedTask.id,
+                            selectedParkingPoint.id,
+                            selectedPoint.id,
+                          )}
+                        >
+                          <Play size={11} /> 应用到机器人
+                        </button>
+                        <button
+                          type="button"
+                          className="teaching-tree-danger"
+                          aria-label="删除当前机械臂姿态"
+                          disabled={Boolean(selectedTask.abx)}
+                          onClick={() => {
+                            if (window.confirm(`删除机械臂姿态 ${selectedPoint.name}？`)) {
+                              onDeletePoint(
+                                selectedTask.id,
+                                selectedParkingPoint.id,
+                                selectedPoint.id,
+                              );
+                            }
+                          }}
+                        >
+                          <Trash2 size={11} /> 删除姿态
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      </section>
+
+      {insertPose && (
+        <TeachingInsertActionDialog
+          task={insertTask}
+          parkingPoint={insertParking}
+          pose={insertPose}
+          presets={teachingActionPresets(jointPoses, insertTask.robot)}
+          onClose={() => setInsertActionTarget(null)}
+          onConfirm={({ presetId, position }) => {
+            const point = onInsertPreset(insertTask.id, insertParking.id, insertPose.id, presetId, position);
+            setSelection({ type: 'pose', taskId: insertTask.id, parkingPointId: insertParking.id, poseId: point.id });
+            setNameDraft(point.name);
+            onSelectionChange?.({ type: 'pose', task: insertTask, parkingPoint: insertParking, pose: point });
+            setInsertActionTarget(null);
+          }}
+        />
+      )}
+
+      {mergeDialog && (
+        <ParkingPointMergeDialog
+          task={tasks.find((task) => task.id === mergeDialog.taskId)}
+          state={mergeDialog}
+          onClose={closeParkingMergeDialog}
+          onParameterChange={updateParkingMergeParameter}
+          onAnalyze={() => {
+            const task = tasks.find((item) => item.id === mergeDialog.taskId);
+            runParkingMergeAnalysis(task, mergeDialog.parameters);
+          }}
+          onToggleCluster={toggleParkingMergeCluster}
+          onConfirm={confirmParkingPointMerge}
+        />
+      )}
+
+      {serverMergeTaskId && (
+        <ParkingPointServerDialog
+          task={tasks.find((task) => task.id === serverMergeTaskId)}
+          mapData={mapData}
+          robot={robot}
+          onClose={() => setServerMergeTaskId(null)}
+          onImported={acceptServerMergeResult}
+        />
+      )}
+
+      {visionPreview && createPortal(
+        <div
+          className="teaching-vision-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="示教视觉快照大图"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setVisionPreview(null);
+          }}
+        >
+          <section data-preview-mode={visionPreview.mode}>
+            <header>
+              <div><small>TEACHING VISION ARCHIVE · {visionPreview.frameName}</small><strong>{visionPreview.title}</strong></div>
+              <span>{visionPreview.mode === 'pointcloud' ? `${Number(visionPreview.pointCount).toLocaleString('zh-CN')} XYZ POINTS` : `${visionPreview.image.width} × ${visionPreview.image.height}`}</span>
+              <button type="button" aria-label="关闭示教视觉快照" onClick={() => setVisionPreview(null)}><X size={15} /></button>
+            </header>
+            <div>
+              <img src={visionPreview.image.dataUrl} alt={visionPreview.title} />
+              <i className="top-left" /><i className="top-right" />
+              <i className="bottom-left" /><i className="bottom-right" />
+            </div>
+          </section>
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}

@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { applyRobotJointValues, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
-import { getRobotJointCouplingPairs, projectRobotJointCoupling } from '../src/lib/robotJointCoupling.js';
-import { solveMobileTeaching, buildMobileSolvedTask, mobileSampleTarget, measureMobileTarget, mobileMotionGroups } from '../src/lib/mobileTeachingSolver.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
-import { buildTeachingTaskTrajectory } from '../src/lib/teachingPlayback.js';
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { applyRobotJointValues, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { getRobotJointLimits } from "../src/features/robot/model/robotJointLimits.js";
+import { getRobotJointCouplingPairs, projectRobotJointCoupling } from "../src/features/robot/model/robotJointCoupling.js";
+import { solveMobileTeaching, buildMobileSolvedTask, mobileSampleTarget, measureMobileTarget, mobileMotionGroups } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
+import { buildTeachingTaskTrajectory } from "../src/features/teaching/model/teachingPlayback.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
 const robot = restoreMobileTeachingRobot(fixture.robot), baseline = readRobotJointValues(robot);

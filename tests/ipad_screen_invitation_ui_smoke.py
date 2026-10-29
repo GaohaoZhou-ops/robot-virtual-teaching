@@ -20,7 +20,7 @@ DEVICE = os.environ.get('ATLAS_SCREEN_DEVICE_ID', '00008122-0014118A2223801C')
 
 
 def native_status():
-    result = subprocess.run([sys.executable, str(ROOT / 'src/server/ipadScreenUSB.py')], input=json.dumps({
+    result = subprocess.run([sys.executable, str(ROOT / 'src/server/devices/ipadScreenUSB.py')], input=json.dumps({
         'action': 'request', 'deviceId': DEVICE, 'method': 'GET', 'path': '/status'}) + '\n',
         capture_output=True, text=True, timeout=8, check=True)
     return json.loads(result.stdout)['value']['body']

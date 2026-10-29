@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Matrix4, Vector3 } from 'three';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
-import { normalizeProject } from '../src/lib/io.js';
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
 import {
   boundTeachingRelation, boundTeachingTransform, extractTeachingWorkspace, hasLoadedTransferMatrix,
   identityTransferPose, normalizeTransferMatrixImports, parseTransferMatrix, parseTransferMatrixFile, placeTeachingWorkspace,
   transferMatrix, transformTeachingPose, writeBackTeachingWorkspace,
-} from '../src/lib/teachingTransfer.js';
+} from "../src/features/teaching/model/teachingTransfer.js";
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
 
 const close = (a, b, epsilon = 1e-6) => assert.ok(Math.abs(a - b) < epsilon, `${a} ≠ ${b}`);

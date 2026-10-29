@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { solveMobileTeaching, mobileSampleTarget, measureMobileTarget, normalizeMobileSolveReport, buildMobileSolvedTask } from '../src/lib/mobileTeachingSolver.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
-import { mobileParkingCandidates } from '../src/lib/mobileTeachingParking.js';
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { applyRobotJointValues, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { solveMobileTeaching, mobileSampleTarget, measureMobileTarget, normalizeMobileSolveReport, buildMobileSolvedTask } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
+import { mobileParkingCandidates } from "../src/features/teaching/mobile/model/mobileTeachingParking.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
 const bodyNames = ['ankle_pitch_J', 'knee_pitch_J', 'waist_pitch_J'];

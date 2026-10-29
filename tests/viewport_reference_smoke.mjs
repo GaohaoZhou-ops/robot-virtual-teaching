@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createIndependentGround, viewportDistanceScale } from '../src/lib/viewportReference.js';
+import { createIndependentGround, viewportDistanceScale } from "../src/features/viewport/model/viewportReference.js";
 
 for (const bounds of [
   new THREE.Box3(new THREE.Vector3(-0.3, -1.7, -4), new THREE.Vector3(2.4, 3.8, 8)),

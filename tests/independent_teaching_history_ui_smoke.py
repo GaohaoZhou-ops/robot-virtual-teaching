@@ -13,7 +13,7 @@ MATRIX = {"name": "group-b.txt", "mimeType": "text/plain",
 
 
 def history(page):
-    return page.evaluate("""async () => (await import('/src/lib/sessionStore.js')).listIndependentHistory()""")
+    return page.evaluate("""async () => (await import('/src/features/workspace/model/sessionStore.js')).listIndependentHistory()""")
 
 
 def open_new_group(page):
@@ -48,7 +48,7 @@ def restore_group(page, map_name):
 
 def current_group_id(page):
     return page.evaluate("""async () => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const data = await store.loadWorkspaceSnapshot((await store.fetchServiceSession()).sessionId, 'independent');
       return data.map.teachingGroupId;
     }""")

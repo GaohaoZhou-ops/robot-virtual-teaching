@@ -3,7 +3,7 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WebSocket } from 'ws';
-import { createIPadScreenService, SCREEN_PROTOCOL } from '../src/server/ipadScreenService.js';
+import { createIPadScreenService, SCREEN_PROTOCOL } from "../src/server/devices/ipadScreenService.js";
 
 let now = Date.now(), active = false, phase = '', token = '', outgoing = null, wired = true, supportsInvitations = true;
 let cancelOnAccept = false, starts = 0, streams = 0, frames = 0, stops = 0;

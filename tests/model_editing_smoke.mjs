@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { cropModel, defaultModelEditSettings, editModel, encodeModelPly, modelPreview, modelStats, parseEditablePly, voxelReduceModel } from '../src/lib/modelEditing.js';
+import { cropModel, defaultModelEditSettings, editModel, encodeModelPly, modelPreview, modelStats, parseEditablePly, voxelReduceModel } from "../src/features/model-editor/model/modelEditing.js";
 import { Quaternion, Vector3 } from 'three';
-import { modelMatrixFromOrigin, modelPoseFromOrigin, originFromModelPose, readModelOrigin, ZERO_MODEL_ORIGIN } from '../src/lib/modelOriginTransform.js';
+import { modelMatrixFromOrigin, modelPoseFromOrigin, originFromModelPose, readModelOrigin, ZERO_MODEL_ORIGIN } from "../src/features/model-editor/model/modelOriginTransform.js";
 
 const close = (actual, expected, tolerance = 1e-5) => assert.ok(Math.abs(actual - expected) <= tolerance, `${actual} != ${expected}`);
 const bufferOf = (value) => value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);

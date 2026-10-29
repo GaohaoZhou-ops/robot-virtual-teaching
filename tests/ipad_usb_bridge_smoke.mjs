@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { unzipSync, strFromU8 } from 'fflate';
-import { ipadUSBBridgePackage } from '../src/server/ipadUSBBridgePackage.js';
+import { ipadUSBBridgePackage } from "../src/server/devices/ipadUSBBridgePackage.js";
 
 const files = unzipSync(await ipadUSBBridgePackage());
 assert.equal(Object.keys(files).length, 6);

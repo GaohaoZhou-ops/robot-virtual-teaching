@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { normalizeProject } from '../src/lib/io.js';
-import { readProjectArchive } from '../src/lib/projectArchive.js';
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 
 const archivePath = process.argv[2];
 if (!archivePath) throw new Error('usage: node tests/recovered_project_smoke.mjs <project.zip>');

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { normalizePolyline, polylineVertices, readPolylineTcp, samplePolylinePlan, transformPolyline } from '../src/lib/polylineTeaching.js';
-import { buildPolylineDrawingEdges, samplePolylineCurve } from '../src/lib/polylineTeachingCurve.js';
-import { polylinePreviewParts } from '../src/lib/polylineTeachingPreview.js';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { normalizePolyline, polylineVertices, readPolylineTcp, samplePolylinePlan, transformPolyline } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { buildPolylineDrawingEdges, samplePolylineCurve } from "../src/features/teaching/polyline/model/polylineTeachingCurve.js";
+import { polylinePreviewParts } from "../src/features/teaching/polyline/model/polylineTeachingPreview.js";
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
 
 const environment = { kind: 'mesh', positions: new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]), indices: new Uint32Array([0, 1, 2]) };
 const makePath = (vertices, extra = {}) => normalizePolyline({ points: vertices.map((position) => ({ position })), ...extra });

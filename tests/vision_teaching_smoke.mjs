@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { BoxGeometry, PlaneGeometry } from 'three';
-import { packIPadModel, ipadResultTask } from '../src/lib/ipadTeaching.js';
-import { validateIPadResult } from '../src/lib/ipadProtocol.js';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { buildExport, normalizeProject } from '../src/lib/io.js';
-import { buildProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
+import { packIPadModel, ipadResultTask } from "../src/features/devices/model/ipadTeaching.js";
+import { validateIPadResult } from "../src/shared/protocols/ipadProtocol.js";
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { buildExport, normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-vision-'));
 const middleware = createIPadTeachingService({ directory: path.join(directory, 'server') });

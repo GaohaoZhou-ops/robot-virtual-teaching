@@ -4,7 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { BoxGeometry, Matrix4 } from 'three';
-import { packIPadModel } from '../src/lib/ipadTeaching.js';
+import { packIPadModel } from "../src/features/devices/model/ipadTeaching.js";
 
 const output = process.argv[2];
 if (!output) throw new Error('Usage: node tests/iphone_layout_fixture.mjs <output-directory>');

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
 import { OBB } from 'three/addons/math/OBB.js';
-import { createMobileCollisionChecker, obbSeparationLowerBound } from '../src/lib/mobileTeachingCollision.js';
-import { solveMobileTeaching, normalizeMobileSolveReport, validateMobileSolveOptions } from '../src/lib/mobileTeachingSolver.js';
-import { readRobotJointValues, applyRobotJointValues } from '../src/lib/robotLoader.js';
-import { mobileParkingKey } from '../src/lib/mobileTeachingParking.js';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { createMobileCollisionChecker, obbSeparationLowerBound } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { solveMobileTeaching, normalizeMobileSolveReport, validateMobileSolveOptions } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { readRobotJointValues, applyRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { mobileParkingKey } from "../src/features/teaching/mobile/model/mobileTeachingParking.js";
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
 
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-8, `${a} != ${b}`);
 const a = new OBB(new THREE.Vector3(), new THREE.Vector3(0.5, 0.5, 0.5));

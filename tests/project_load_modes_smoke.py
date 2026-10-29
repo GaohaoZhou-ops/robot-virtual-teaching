@@ -21,8 +21,8 @@ def make_fixtures(root):
     subprocess.run(
         ["node", "--input-type=module", "-e", """
           import { writeFile } from 'node:fs/promises';
-          import { buildExport } from './src/lib/io.js';
-          import { buildProjectArchive } from './src/lib/projectArchive.js';
+          import { buildExport } from './src/features/workspace/model/io.js';
+          import { buildProjectArchive } from './src/features/workspace/model/projectArchive.js';
           for (const mode of ['map', 'independent']) {
             const map = {
               name: `${mode}-fixture.ply`, pointCount: 3, faceCount: 0,
@@ -238,7 +238,7 @@ def run():
             }
             # A stale binding must also pass the actual project's type check.
             native.evaluate("""async () => {
-              const { saveProjectDirectoryBinding } = await import('/src/lib/projectDirectoryStore.js');
+              const { saveProjectDirectoryBinding } = await import('/src/features/workspace/model/projectDirectoryStore.js');
               const root = await navigator.storage.getDirectory();
               await saveProjectDirectoryBinding({
                 handle: await root.getDirectoryHandle('independent.atlas-project'),
@@ -288,7 +288,7 @@ def run():
             recovery.goto(BASE_URL, wait_until="networkidle")
             wait_ready(recovery)
             recovery.evaluate("""async (encodedZip) => {
-              const { readProjectArchive } = await import('/src/lib/projectArchive.js');
+              const { readProjectArchive } = await import('/src/features/workspace/model/projectArchive.js');
               const imported = await readProjectArchive(Uint8Array.from(atob(encodedZip), c => c.charCodeAt(0)));
               const db = await new Promise(resolve => {
                 const request = indexedDB.open('atlas-route-studio', 1);
@@ -312,7 +312,7 @@ def run():
             assert open_loader(recovery, "independent").get_attribute("data-default-source") == "recovery"
             close_loader(recovery)
             error = recovery.evaluate("""async () => {
-              const { activateWorkspaceRecovery, fetchServiceSession } = await import('/src/lib/sessionStore.js');
+              const { activateWorkspaceRecovery, fetchServiceSession } = await import('/src/features/workspace/model/sessionStore.js');
               try { await activateWorkspaceRecovery((await fetchServiceSession()).sessionId, 'map'); }
               catch (error) { return error.message; }
               return null;

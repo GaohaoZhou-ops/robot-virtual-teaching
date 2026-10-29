@@ -4,8 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createIPadTeachingService } from '../src/server/ipadTeachingService.js';
-import { IPAD_PROTOCOL } from '../src/lib/ipadProtocol.js';
+import { createIPadTeachingService } from "../src/server/devices/ipadTeachingService.js";
+import { IPAD_PROTOCOL } from "../src/shared/protocols/ipadProtocol.js";
 
 const directory = await mkdtemp(path.join(tmpdir(), 'atlas-pairing-code-'));
 const digest = (value) => createHash('sha256').update(value).digest('hex');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { strToU8, unzipSync, zipSync } from 'fflate';
-import { sha256BytesFallback } from '../src/lib/hash.js';
+import { sha256BytesFallback } from "../src/shared/utils/hash.js";
 import {
   PROJECT_ARCHIVE_MAP_COLORS,
   PROJECT_ARCHIVE_MAP_INDICES_U16,
@@ -11,13 +11,13 @@ import {
   buildProjectArchive,
   readProjectArchive,
   readProjectFile,
-} from '../src/lib/projectArchive.js';
+} from "../src/features/workspace/model/projectArchive.js";
 import {
   normalizeRobotDescriptor,
   registerPortableRobotPackage,
   releasePortableRobotPackage,
-} from '../src/lib/robotLoader.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
+} from "../src/features/robot/model/robotLoader.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
 
 assert.equal(
   await sha256BytesFallback(new TextEncoder().encode('')),

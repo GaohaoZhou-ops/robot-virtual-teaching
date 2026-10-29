@@ -31,7 +31,7 @@ def run():
             page.evaluate("""async () => {
               const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
               const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const fixture = teachingTransferFixture('map');
               const { payload, robotPackage, values } = abxTeachingFixture();
@@ -75,7 +75,7 @@ def run():
                 expect(page.get_by_role('button', name=f'选择当前停车点 N{node_id} · 停车点1', exact=True)).to_be_visible()
                 page.get_by_role('button', name='记录当前姿态', exact=True).click()
             page.wait_for_function("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const config = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'map');
               return config?.config.project.virtualTeaching.tasks[0]?.parkingPoints?.filter(p => p.poses.length === 1).length === 2;
             }""")
@@ -110,9 +110,9 @@ def run():
                 assert json.loads(bundle.read(manifest['tasks'][0]['navigation']['routes'][0])) == route
                 assert json.loads(bundle.read('navigation.json'))['routeImportIncluded'] is True
             saved_route = page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const saved = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'map');
-              const { buildAbxRouteDocuments } = await import('/src/lib/abxRoute.js');
+              const { buildAbxRouteDocuments } = await import('/src/features/navigation/model/abxRoute.js');
               return (await buildAbxRouteDocuments(saved.config.project)).routes[0];
             }""")
             assert saved_route == route, 'teaching must not change the native road graph or create duplicate stations'

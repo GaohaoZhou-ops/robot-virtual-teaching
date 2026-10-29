@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { normalizePolyline, readPolylineTcp, samplePolylinePlan, transformPolyline } from '../src/lib/polylineTeaching.js';
-import { polylineWithSide } from '../src/lib/polylineTeachingTool.js';
-import { planPolylineWithApproach } from '../src/lib/polylineTeachingApproach.js';
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { normalizePolyline, readPolylineTcp, samplePolylinePlan, transformPolyline } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { polylineWithSide } from "../src/features/teaching/polyline/model/polylineTeachingTool.js";
+import { planPolylineWithApproach } from "../src/features/teaching/polyline/model/polylineTeachingApproach.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8')).robot;
 // Older camera preferences must not flip saved offsets on load or arm switch.

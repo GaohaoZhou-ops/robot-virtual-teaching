@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix='atlas-twin-project-') as temporary, syn
     make_fixtures(directory)
     subprocess.run(['node', '--input-type=module', '-e', r'''
       import {writeFile} from 'node:fs/promises';
-      import {buildProjectArchive} from './src/lib/projectArchive.js';
+      import {buildProjectArchive} from './src/features/workspace/model/projectArchive.js';
       import {projectCollectionFixture, projectCollectionOptions} from './tests/project_collection_helpers.mjs';
       import {linkedProjectFixture} from './tests/linked_project_helpers.mjs';
       const config = JSON.parse(process.argv[2]);

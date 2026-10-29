@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WebSocket } from 'ws';
-import { createIPadScreenService, SCREEN_PROTOCOL } from '../src/server/ipadScreenService.js';
-import { screenJointState } from '../src/lib/ipadScreenControl.js';
+import { createIPadScreenService, SCREEN_PROTOCOL } from "../src/server/devices/ipadScreenService.js";
+import { screenJointState } from "../src/shared/protocols/ipadScreenControl.js";
 
 let push, disconnect, releaseFrame, stopCount = 0, realtime = true;
 const calls = [];

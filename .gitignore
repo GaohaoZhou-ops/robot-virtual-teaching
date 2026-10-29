@@ -20,54 +20,10 @@ node_modules/
 .stylelintcache
 
 # Build output and frontend tool caches
-# build_local.sh writes dist/ and build/local/; the native entry points use
-# ipad/build/{device,simulator}/, iphone/build/{device,simulator}/ and vision/build/{device,simulator}/.
-# The build/ rule also covers deploy_ipad.sh's ipad/build/deploy-device/ logs,
-# device/signing reports, products, and native UI verification attachments.
-# Camera/joint collaboration checks use build/{screen-validation,ipad-screen-test}/
-# and ipad/build/screen-tests/, including captured frames and Xcode results.
-# Pose capture and viewport gesture checks use build/screen-{capture,viewport}-validation/;
-# peer.json, state.json, command.json, saved poses and native captures stay local.
-# Menu review captures and preview bundles use build/{menu-review,menu-validation}/.
-# Teaching popup checks and typography reviews use build/teaching-pose-popup-validation/
-# and build/teaching-tree-type-review/, including browser captures and local runners.
-# Independent-browser collaboration and iPad top-action checks use
-# build/{ipad-remote-collaboration,ipad-collaboration-top-actions}/; pairing
-# credentials, exported projects, native test plans and screenshots stay local.
-# Windows USB companion checks use build/ipad-windows-usb/ for the downloadable
-# helper bundle, extracted package checks, browser captures and native test results.
-# Adjustable joint-limit checks use build/robot-soft-limits/ for menu captures,
-# collaboration credentials and simulated device command/state files.
-# Coupled-wrist UI checks use build/robot-joint-coupling/ for browser captures.
-# Detailed joint-limit checks keep animation captures, responsive-layout reviews
-# and service-index backups in test-artifacts/joint-limit-details/.
-# Mac/iPad realtime checks use build/ipad-realtime-*/ and ipad/build/realtime-testing/;
-# performance samples, device/signing settings, captures and Python environments stay local.
-# Bidirectional USB invitation checks use build/ipad-screen-invitations/ for
-# browser/native captures, readiness markers, device reports and deployment logs.
-# The persistent web service uses build/service/.
-# Surface-polyline UI artifacts (selection/new drafts, constraint/help dialogs,
-# tool/pose editing, undo, planning, progress/replay and start-pose ghosts),
-# imported-project reproductions, solver A/B source snapshots, serialized robot
-# collision hulls, playback verification and service-index backups belong in
-# test-artifacts/polyline-*/; maintained regression runners stay in tests/.
-# Spatial-curve previews, playback captures and service-index backups use
-# test-artifacts/polyline-spatial-curve/ under the same ignored output root.
-# Perpendicular-tool planning checks use test-artifacts/polyline-perpendicular/.
-# Live Zivid axes and robot-resource reload checks keep browser captures,
-# temporary runners and service-index backups in
-# test-artifacts/{zivid-optical-axes,robot-resource-persistence}/.
-# Maintained polyline_perpendicular_* and robot_resource_persistence_* tests
-# remain trackable alongside the source modules.
-# Display-settings hierarchy/flyout and whole-body coordinate checks use
-# test-artifacts/{display-settings-groups,display-settings-flyout,robot-coordinate-axes}/
-# for responsive captures, temporary runners and service-index backups.
-# Maintained robot_coordinate_axes_* runners stay trackable under tests/.
-# Reset-confirmation backup checks keep screenshots and service-index backups
-# in test-artifacts/global-reset-export/; exported ZIPs use temporary workspaces.
-# Shared-preset migration and map-origin navigation checks use
-# test-artifacts/{shared-robot-presets,map-origin-navigation}/ for browser
-# captures and service-index backups; their regression runners stay in tests/.
+# Use build/<task>/ for local builds, service logs, validation reports and
+# temporary runners; use test-artifacts/<test>/ for screenshots and downloads.
+# These directory rules cover nested Web / iPad / iPhone / Vision build output,
+# including maintenance-refactor validation. Keep maintained runners in tests/.
 dist/
 build/
 out/
@@ -166,11 +122,12 @@ test-results/
 /test-downloads/
 /test-videos/
 /test-traces/
-/tests/test-artifacts/
-/tests/screenshots/
-/tests/test-downloads/
-/tests/test-videos/
-/tests/test-traces/
+# Also cover the unit / integration directories after test reorganization.
+/tests/**/test-artifacts/
+/tests/**/screenshots/
+/tests/**/test-downloads/
+/tests/**/test-videos/
+/tests/**/test-traces/
 # Native simulator launchers write build.log and DerivedData under simulator-dev/.
 # Mixed-map, virtual Zivid camera, robot-surface, route/floor and parking-arrival
 # render checks stay under vision/test-artifacts/ in per-feature directories.
@@ -183,7 +140,7 @@ test-results/
 # Dated or per-run output roots used when overriding ATLAS_TEST_ARTIFACTS /
 # IPAD_ARTIFACTS / IPHONE_ARTIFACTS / VISION_ARTIFACTS. Match the ZIP variants below.
 /test-artifacts-*/
-/tests/test-artifacts-*/
+/tests/**/test-artifacts-*/
 /ipad/test-artifacts-*/
 /iphone/test-artifacts-*/
 /vision/test-artifacts-*/
@@ -194,8 +151,8 @@ test-results/
 # Match extension case variants consistently across desktop and native output.
 /test-artifacts.[zZ][iI][pP]
 /test-artifacts-*.[zZ][iI][pP]
-/tests/test-artifacts.[zZ][iI][pP]
-/tests/test-artifacts-*.[zZ][iI][pP]
+/tests/**/test-artifacts.[zZ][iI][pP]
+/tests/**/test-artifacts-*.[zZ][iI][pP]
 /ipad/test-artifacts.[zZ][iI][pP]
 /ipad/test-artifacts-*.[zZ][iI][pP]
 /iphone/test-artifacts.[zZ][iI][pP]
@@ -211,13 +168,13 @@ test-results/
 /test-downloads.[zZ][iI][pP]
 /test-traces.[zZ][iI][pP]
 /test-videos.[zZ][iI][pP]
-/tests/playwright-report.[zZ][iI][pP]
-/tests/blob-report.[zZ][iI][pP]
-/tests/test-results.[zZ][iI][pP]
-/tests/screenshots.[zZ][iI][pP]
-/tests/test-downloads.[zZ][iI][pP]
-/tests/test-traces.[zZ][iI][pP]
-/tests/test-videos.[zZ][iI][pP]
+/tests/**/playwright-report.[zZ][iI][pP]
+/tests/**/blob-report.[zZ][iI][pP]
+/tests/**/test-results.[zZ][iI][pP]
+/tests/**/screenshots.[zZ][iI][pP]
+/tests/**/test-downloads.[zZ][iI][pP]
+/tests/**/test-traces.[zZ][iI][pP]
+/tests/**/test-videos.[zZ][iI][pP]
 /ipad/screenshots.[zZ][iI][pP]
 /iphone/screenshots.[zZ][iI][pP]
 /vision/screenshots.[zZ][iI][pP]
@@ -229,9 +186,9 @@ playwright/.auth/
 # Browser smoke tests also create downloaded projects and temporary Chrome
 # profiles when TMPDIR points into the repository. Keep nested fixtures visible.
 /playwright-artifacts-*/
-/tests/playwright-artifacts-*/
+/tests/**/playwright-artifacts-*/
 /playwright_chromiumdev_profile-*/
-/tests/playwright_chromiumdev_profile-*/
+/tests/**/playwright_chromiumdev_profile-*/
 *.lcov
 *.xcresult/
 *.xcresult.[zZ][iI][pP]
@@ -247,6 +204,8 @@ playwright/.auth/
 # UI smoke-test captures in the repository root or beside the test scripts.
 # Include iPad gesture/sync reviews, converted previews and extension case variants.
 # Anchor output names so source artwork and nested fixture media stay trackable.
+# Root and tests/ legacy capture names are retained for existing workflows.
+# Put new output in build/ or test-artifacts/ instead of adding per-run names.
 /atlas-*.[pP][nN][gG]
 /atlas-*.[jJ][pP][gG]
 /atlas-*.[jJ][pP][eE][gG]
@@ -1506,16 +1465,17 @@ parking-merge-*-result.json
 /merge-job/
 
 # Compact regression inputs remain trackable, including export-shaped filenames.
+# Web fixtures may live in tests/fixtures/ or inside a test suite.
 # Keep exceptions after export rules; /**/ covers direct and nested fixture files.
 # Reopen exported-project fixture directories so their file exceptions can apply.
-!tests/fixtures/**/*.atlas-project/
-!tests/fixtures/**/parking-merge-server-*/
-!tests/fixtures/**/*.[pP][lL][yY]
-!tests/fixtures/**/*.[pP][lL][yY].[gG][zZ]
-!tests/fixtures/**/*.atls
-!tests/fixtures/**/*.abxteach.ndjson
-!tests/fixtures/**/*.json
-!tests/fixtures/**/*.[zZ][iI][pP]
+!tests/**/fixtures/**/*.atlas-project/
+!tests/**/fixtures/**/parking-merge-server-*/
+!tests/**/fixtures/**/*.[pP][lL][yY]
+!tests/**/fixtures/**/*.[pP][lL][yY].[gG][zZ]
+!tests/**/fixtures/**/*.atls
+!tests/**/fixtures/**/*.abxteach.ndjson
+!tests/**/fixtures/**/*.json
+!tests/**/fixtures/**/*.[zZ][iI][pP]
 !ipad/Tests/Fixtures/**/*.atlas-project/
 !ipad/Tests/Fixtures/**/parking-merge-server-*/
 !ipad/Tests/Fixtures/**/*.[pP][lL][yY]

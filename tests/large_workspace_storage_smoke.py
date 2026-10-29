@@ -17,7 +17,7 @@ def run():
                 content_type='text/html', body='<html>Workspace storage regression</html>'))
             page.goto(BASE + '/storage-test')
             page.evaluate('''async () => {
-              const s = await import('/src/lib/sessionStore.js');
+              const s = await import('/src/features/workspace/model/sessionStore.js');
               await s.prepareWorkspaceSession('large-workspace');
               const positions = new Uint8Array(90 * 1024 * 1024);
               positions[0] = 17; positions[positions.length - 1] = 29;
@@ -44,7 +44,7 @@ def run():
             }''')
             page.reload()
             result = page.evaluate('''async () => {
-              const s = await import('/src/lib/sessionStore.js');
+              const s = await import('/src/features/workspace/model/sessionStore.js');
               const verify = async ({map, config}) => {
                 const positions = new Uint8Array(map.positionBuffer);
                 const mesh = new Uint8Array(map.portableRobotPackage.files[0].bytes);

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { preparePolylineInterpolation, samplePolylinePlan, normalizePolyline, readPolylineTcp } from '../src/lib/polylineTeaching.js';
-import { preparePolylineTiming } from '../src/lib/polylineTeachingTiming.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { applyRobotJointValues, getRobotEndEffector } from '../src/lib/robotLoader.js';
+import { preparePolylineInterpolation, samplePolylinePlan, normalizePolyline, readPolylineTcp } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { preparePolylineTiming } from "../src/features/teaching/polyline/model/polylineTeachingTiming.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { applyRobotJointValues, getRobotEndEffector } from "../src/features/robot/model/robotLoader.js";
 
 function checkRates(plan, definitions, steps = 20000) {
   const dt = plan.durationMs / steps / 1000;

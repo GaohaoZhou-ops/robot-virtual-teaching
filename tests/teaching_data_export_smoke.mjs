@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { buildTeachingDataExport, buildTeachingParkingPointCopy, TEACHING_DATA_FORMAT } from '../src/lib/teachingData.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { readProjectFile } from '../src/lib/projectArchive.js';
+import { buildTeachingDataExport, buildTeachingParkingPointCopy, TEACHING_DATA_FORMAT } from "../src/features/teaching/model/teachingData.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { readProjectFile } from "../src/features/workspace/model/projectArchive.js";
 import { teachingTransferFixture } from './teaching_transfer_helpers.mjs';
 
 for (const mode of ['map', 'independent']) {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { saveProjectArchive, readProjectArchive } from '../src/lib/projectArchive.js';
+import { saveProjectArchive, readProjectArchive } from "../src/features/workspace/model/projectArchive.js";
 import { teachingTransferFixture } from './teaching_transfer_helpers.mjs';
 
 for (const mode of ['map', 'independent']) {

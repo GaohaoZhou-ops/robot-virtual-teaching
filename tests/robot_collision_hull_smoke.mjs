@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { serializeCollisionHull, collisionHullsSeparated } from '../src/lib/robotCollisionHull.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
+import { serializeCollisionHull, collisionHullsSeparated } from "../src/features/robot/model/robotCollisionHull.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
 
 const cube = new THREE.BoxGeometry(1, 1, 1), hull = serializeCollisionHull(cube);
 const transform = (x, y = 0, z = 0) => new THREE.Matrix4().makeTranslation(x, y, z);

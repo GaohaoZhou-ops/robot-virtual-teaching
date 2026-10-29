@@ -12,9 +12,9 @@ ARTIFACTS = ROOT / 'test-artifacts/mobile-teaching-diagnostics'
 HARNESS = '''
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import MobileTeachingSolveDialog from '../../src/components/MobileTeachingSolveDialog.jsx';
-import MobileTeachingPoseList from '../../src/components/MobileTeachingPoseList.jsx';
-import { DEFAULT_MOBILE_SOLVE_OPTIONS, MOBILE_SOLVE_VERSION } from '../../src/lib/mobileTeachingSolver.js';
+import MobileTeachingSolveDialog from '../../src/features/teaching/mobile/ui/MobileTeachingSolveDialog.jsx';
+import MobileTeachingPoseList from '../../src/features/teaching/mobile/ui/MobileTeachingPoseList.jsx';
+import { DEFAULT_MOBILE_SOLVE_OPTIONS, MOBILE_SOLVE_VERSION } from '../../src/features/teaching/mobile/model/mobileTeachingSolver.js';
 import '../../src/styles.css';
 const mapPose = { position: {x:0,y:0,z:0}, rpy:{roll:0,pitch:0,yaw:0} };
 const measured = { feasible:false, mapPose, frameName:'zivid_left_optical_frame',

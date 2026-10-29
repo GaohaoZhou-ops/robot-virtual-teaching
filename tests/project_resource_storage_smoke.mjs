@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { buildProjectArchive, readProjectArchive, readProjectDirectoryFiles,
-  readProjectDirectoryHandle, readProjectDirectoryMetadata, updateProjectDirectory } from '../src/lib/projectArchive.js';
-import { expandProjectResources, RESOURCE_PROJECT_FORMAT } from '../src/lib/projectResourceStorage.js';
-import { buildExport } from '../src/lib/io.js';
-import { sha256Bytes } from '../src/lib/hash.js';
-import { createTeachingAlignment, placeTeachingWorkspace } from '../src/lib/teachingTransfer.js';
+  readProjectDirectoryHandle, readProjectDirectoryMetadata, updateProjectDirectory } from "../src/features/workspace/model/projectArchive.js";
+import { expandProjectResources, RESOURCE_PROJECT_FORMAT } from "../src/features/workspace/model/projectResourceStorage.js";
+import { buildExport } from "../src/features/workspace/model/io.js";
+import { sha256Bytes } from "../src/shared/utils/hash.js";
+import { createTeachingAlignment, placeTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
 import { teachingTransferFixture, transferSnapshot } from './teaching_transfer_helpers.mjs';
 
 const parse = (bytes) => JSON.parse(strFromU8(bytes));

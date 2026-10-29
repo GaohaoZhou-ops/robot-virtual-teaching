@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { applyRobotJointValues, readRobotJointValues } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { applyRobotJointValues, readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
 import { solveMobileTeaching, mobileParkingArmUsage, measureMobileTarget, mobileSampleTarget,
-  normalizeMobileSolveReport, validateMobileSolveOptions, buildMobileSolvedTask } from '../src/lib/mobileTeachingSolver.js';
-import { normalizeTeachingTasks } from '../src/lib/io.js';
-import { mobileCooperativeParkingCandidates } from '../src/lib/mobileTeachingParking.js';
+  normalizeMobileSolveReport, validateMobileSolveOptions, buildMobileSolvedTask } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { normalizeTeachingTasks } from "../src/features/workspace/model/io.js";
+import { mobileCooperativeParkingCandidates } from "../src/features/teaching/mobile/model/mobileTeachingParking.js";
 
 const joint = (parent, name, axis, range, linear = true) => {
   const node = new THREE.Group(); node.name = name;

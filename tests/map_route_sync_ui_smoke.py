@@ -135,7 +135,7 @@ def run():
             inputs.nth(0).press("Tab")
             expect(inputs.nth(0)).to_have_value("42.00")
             assert page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const config = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'independent');
               return config.config.ui.mapRouteSyncEnabled === true
                 && !config.config.project.waypoints.some(point => point.source === 'temporary-map-route');
@@ -176,7 +176,7 @@ def run():
             expect(arrived).to_have_attribute("data-waypoint-id", synced_id)
             for _ in range(100):
                 if page.evaluate("""async waypointId => {
-                  const store = await import('/src/lib/sessionStore.js');
+                  const store = await import('/src/features/workspace/model/sessionStore.js');
                   const { sessionId } = await store.fetchServiceSession();
                   const saved = await store.loadWorkspaceConfig(sessionId, 'independent');
                   return saved.config.ui.robotWaypointLocation?.waypointId === waypointId;
@@ -260,7 +260,7 @@ def run():
             # Replacing the relation and syncing again replaces the reference
             # frame too. A distant origin must remain drawable and easy to frame.
             page.evaluate("""async () => {
-              const store = await import('/src/lib/sessionStore.js');
+              const store = await import('/src/features/workspace/model/sessionStore.js');
               const { sessionId } = await store.fetchServiceSession();
               const config = await store.loadWorkspaceConfig(sessionId, 'map');
               config.config.project.workspace.transfer.localToMap = {

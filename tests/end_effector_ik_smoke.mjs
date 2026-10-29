@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
 import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector,
-  readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
-import { solveEndEffectorIk } from '../src/lib/robotEndEffectorIk.js';
+  readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { getRobotJointLimits } from "../src/features/robot/model/robotJointLimits.js";
+import { solveEndEffectorIk } from "../src/features/robot/model/robotEndEffectorIk.js";
 
 const fixture = JSON.parse(await readFile(new URL('./fixtures/mobile-teaching-botx.json', import.meta.url), 'utf8'));
 const comfortable = [-20, -30, 15, 45, -12, 5, 8];

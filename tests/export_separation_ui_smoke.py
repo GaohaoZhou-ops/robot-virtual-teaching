@@ -21,8 +21,8 @@ def make_fixtures(directory):
     subprocess.run(['node', '--input-type=module', '-e', '''
       import { writeFile } from 'node:fs/promises';
       import { teachingTransferFixture } from './tests/teaching_transfer_helpers.mjs';
-      import { buildProjectArchive } from './src/lib/projectArchive.js';
-      import { buildTeachingDataExport } from './src/lib/teachingData.js';
+      import { buildProjectArchive } from './src/features/workspace/model/projectArchive.js';
+      import { buildTeachingDataExport } from './src/features/teaching/model/teachingData.js';
       for (const mode of ['map', 'independent']) {
         const fixture = teachingTransferFixture(mode);
         const project = fixture.config.config.project;

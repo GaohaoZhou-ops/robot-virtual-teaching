@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { Color, Vector3 } from 'three';
 import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
-import { normalizePolyline, polylineVertices, polylineDrawingProgress, preparePolylineInterpolation, samplePolylinePlan } from '../src/lib/polylineTeaching.js';
-import { preparePolylineTiming } from '../src/lib/polylineTeachingTiming.js';
-import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, writePolylinePreview } from '../src/lib/polylineTeachingPreview.js';
+import { normalizePolyline, polylineVertices, polylineDrawingProgress, preparePolylineInterpolation, samplePolylinePlan } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { preparePolylineTiming } from "../src/features/teaching/polyline/model/polylineTeachingTiming.js";
+import { POLYLINE_EXECUTED_COLOR, polylinePreviewParts, writePolylinePreview } from "../src/features/teaching/polyline/model/polylineTeachingPreview.js";
 
 const path = normalizePolyline({ points: [[0, 0, .5], [.2, 0, .5], [.2, .2, .5]].map((position) => ({ position })) });
 function makePlan(source, stop = null) {

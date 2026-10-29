@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:work-sync": "node tests/work_sync_smoke.mjs && node tests/work_sync_display_smoke.mjs",
-    "test:robot-twin": "node tests/robot_twin_smoke.mjs && node tests/robot_twin_fleet_smoke.mjs && node tests/robot_twin_appearance_smoke.mjs && node tests/robot_twin_motion_smoke.mjs && node tests/robot_twin_camera_frames_smoke.mjs && node tests/robot_twin_capture_cache_smoke.mjs && node tests/robot_twin_rendering_smoke.mjs && node tests/robot_twin_freshness_smoke.mjs",
-    "test:robot-twin-project": "node tests/robot_twin_project_smoke.mjs",
+    "test:work-sync": "node tests/integration/work_sync_smoke.mjs && node tests/integration/work_sync_display_smoke.mjs",
+    "test:robot-twin": "node tests/integration/robot_twin_smoke.mjs && node tests/integration/robot_twin_fleet_smoke.mjs && node tests/unit/robot_twin_appearance_smoke.mjs && node tests/unit/robot_twin_motion_smoke.mjs && node tests/unit/robot_twin_camera_frames_smoke.mjs && node tests/unit/robot_twin_capture_cache_smoke.mjs && node tests/unit/robot_twin_rendering_smoke.mjs && node tests/integration/robot_twin_freshness_smoke.mjs",
+    "test:robot-twin-project": "node tests/integration/robot_twin_project_smoke.mjs",
     "test:fake-robot": "node tests/fake_robot_smoke.mjs",
     "test:connectivity": "node tests/graph_connectivity_smoke.mjs",
     "test:model-editor": "node tests/model_editing_smoke.mjs",
@@ -65,7 +65,14 @@
     "test:vision:scene": "node tests/vision_scene_colors_smoke.mjs && node tests/vision_scene_smoke.mjs",
     "test:vision:scene-ui": "node tests/vision_scene_smoke.mjs --ui",
     "test:vision:workbench": "node tests/vision_workbench_smoke.mjs",
-    "test:vision:workbench-ui": "node tests/vision_workbench_smoke.mjs --ui"
+    "test:vision:workbench-ui": "node tests/vision_workbench_smoke.mjs --ui",
+    "check:architecture": "node scripts/check_architecture.mjs",
+    "test:architecture": "node tests/unit/architecture_smoke.mjs",
+    "test:workspace-sync": "node tests/unit/workspace_sync_adapter_smoke.mjs",
+    "test:core": "node scripts/run_checks.mjs core",
+    "test:extended": "node scripts/run_checks.mjs extended",
+    "test:external": "node scripts/run_checks.mjs external",
+    "check": "npm run check:architecture && npm run test:core && npm run build"
   },
   "dependencies": {
     "bonjour-service": "^1.4.4",
@@ -79,6 +86,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.8",
     "@vitejs/plugin-react": "^4.3.4",
     "jpeg-js": "0.4.4",
     "vite": "^6.0.5"

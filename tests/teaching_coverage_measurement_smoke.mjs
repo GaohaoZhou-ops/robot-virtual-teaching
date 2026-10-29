@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { measureTeachingCoverage, prepareTeachingCoverageSamples, TEACHING_COVERAGE_SAMPLE_LIMIT } from '../src/lib/teachingCoverageMeasurement.js';
+import { measureTeachingCoverage, prepareTeachingCoverageSamples, TEACHING_COVERAGE_SAMPLE_LIMIT } from "../src/features/teaching/model/teachingCoverageMeasurement.js";
 
 const frame = (depths, overrides = {}) => ({
   worldToCamera: Float64Array.from(new THREE.Matrix4().elements),

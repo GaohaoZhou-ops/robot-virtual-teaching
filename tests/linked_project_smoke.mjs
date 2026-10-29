@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 import { linkedProjectFixture } from './linked_project_helpers.mjs';
-import { linkedWorkspaceRelation, prepareLinkedProjectImport } from '../src/lib/linkedProject.js';
-import { buildProjectArchive, readProjectArchive, readProjectDirectoryFiles, saveProjectArchive } from '../src/lib/projectArchive.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { writeBackTeachingWorkspace } from '../src/lib/teachingTransfer.js';
-import { expandProjectResources } from '../src/lib/projectResourceStorage.js';
+import { linkedWorkspaceRelation, prepareLinkedProjectImport } from "../src/features/workspace/model/linkedProject.js";
+import { buildProjectArchive, readProjectArchive, readProjectDirectoryFiles, saveProjectArchive } from "../src/features/workspace/model/projectArchive.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { writeBackTeachingWorkspace } from "../src/features/teaching/model/teachingTransfer.js";
+import { expandProjectResources } from "../src/features/workspace/model/projectResourceStorage.js";
 
 const modes = ['map', 'independent'];
 const archiveOptions = (pair, mode) => ({

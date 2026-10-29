@@ -8,7 +8,7 @@ import {
   disposeTeachingSurfaceProjectionOverlay,
   TEACHING_SURFACE_PROJECTION_MODE,
   VISION_COVERAGE_EMPTY_CELL_MODE,
-} from '../src/lib/visionCoverage.js';
+} from "../src/features/cameras/model/visionCoverage.js";
 
 const positions = new THREE.Float32BufferAttribute([
   -0.35, 0, 0.60, // In front of a measured surface: covered.

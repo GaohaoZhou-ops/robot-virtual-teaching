@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { getRobotJointLimits } from '../src/lib/robotJointLimits.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
-import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable, transformPolyline } from '../src/lib/polylineTeaching.js';
-import { polylineJointExclusions } from '../src/lib/polylineTeachingJoints.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { planPolylineWithSuggestion } from '../src/lib/polylineTeachingSuggestion.js';
-import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { isRobotBodyJoint } from '../src/lib/robotJointLocks.js';
+import { applyRobotJointValues, configureRobotArmSoftLimits, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { getRobotJointLimits } from "../src/features/robot/model/robotJointLimits.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
+import { normalizePolyline, samplePolylinePlan, readPolylineTcp, isPolylinePlanExecutable, transformPolyline } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { polylineJointExclusions } from "../src/features/teaching/polyline/model/polylineTeachingJoints.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { planPolylineWithSuggestion } from "../src/features/teaching/polyline/model/polylineTeachingSuggestion.js";
+import { restoreMobileTeachingRobot, serializeMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { isRobotBodyJoint } from "../src/shared/robotics/robotJointLocks.js";
 
 const far = { kind: 'mesh', positions: new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]), indices: new Uint32Array([0, 1, 2]) };
 function fixture() {

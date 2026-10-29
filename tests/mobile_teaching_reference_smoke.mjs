@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { solveMobileTeaching, normalizeMobileSolveReport, validateMobileSolveOptions } from '../src/lib/mobileTeachingSolver.js';
-import { mobileReferenceFromPreset } from '../src/lib/mobileTeachingReference.js';
-import { readRobotJointValues } from '../src/lib/robotLoader.js';
+import { solveMobileTeaching, normalizeMobileSolveReport, validateMobileSolveOptions } from "../src/features/teaching/mobile/model/mobileTeachingSolver.js";
+import { mobileReferenceFromPreset } from "../src/features/teaching/mobile/model/mobileTeachingReference.js";
+import { readRobotJointValues } from "../src/features/robot/model/robotLoader.js";
 
 // Two collinear sliders have infinitely many solutions for the same camera
 // target. Their sum is independently known, so the chosen branch must come

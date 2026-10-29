@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import * as THREE from 'three';
-import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from '../src/lib/robotLoader.js';
-import { restoreMobileTeachingRobot } from '../src/lib/mobileTeachingKinematics.js';
-import { normalizePolyline, polylineBasePose, samplePolylinePlan, readPolylineTcp, transformPolyline, polylinePlanFromSearchPosition, repeatPolylinePlan } from '../src/lib/polylineTeaching.js';
-import { planPolyline } from '../src/lib/polylineTeachingSolver.js';
-import { createMobileCollisionChecker } from '../src/lib/mobileTeachingCollision.js';
+import { applyRobotJointValues, getRobotEndEffector, readRobotJointValues, setRobotJointValue } from "../src/features/robot/model/robotLoader.js";
+import { restoreMobileTeachingRobot } from "../src/features/teaching/mobile/model/mobileTeachingKinematics.js";
+import { normalizePolyline, polylineBasePose, samplePolylinePlan, readPolylineTcp, transformPolyline, polylinePlanFromSearchPosition, repeatPolylinePlan } from "../src/features/teaching/polyline/model/polylineTeaching.js";
+import { planPolyline } from "../src/features/teaching/polyline/model/polylineTeachingSolver.js";
+import { createMobileCollisionChecker } from "../src/features/teaching/mobile/model/mobileTeachingCollision.js";
 
 const far = { kind: 'mesh', positions: new Float32Array([100, 100, 100, 101, 100, 100, 100, 101, 100]), indices: new Uint32Array([0, 1, 2]) };
 function fixture() {

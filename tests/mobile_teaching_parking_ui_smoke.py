@@ -131,7 +131,7 @@ def run():
                 assert parking['poses'][0]['fullBodyJoints']['values'] == row['solutions'][row['selectedSide']]['jointValues']
             # Playback's stop/pose targets must retain the independent bases.
             trajectory = page.evaluate('''async (task) => {
-              const {buildTeachingTaskTrajectory}=await import('/src/lib/teachingPlayback.js');
+              const {buildTeachingTaskTrajectory}=await import('/src/features/teaching/model/teachingPlayback.js');
               return buildTeachingTaskTrajectory({task});
             }''', solved)
             assert trajectory['poseCount'] == 3

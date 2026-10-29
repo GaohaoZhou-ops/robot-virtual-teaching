@@ -15,7 +15,7 @@ def seed(page, mode='map', empty=False):
     page.evaluate("""async ({mode, empty}) => {
       const { teachingTransferFixture } = await import('/tests/teaching_transfer_helpers.mjs');
       const { abxTeachingFixture } = await import('/tests/abx_teaching_helpers.mjs');
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const { sessionId } = await store.fetchServiceSession();
       const fixture = teachingTransferFixture(mode);
       const { payload, robotPackage, values } = abxTeachingFixture();
@@ -52,7 +52,7 @@ def seed(page, mode='map', empty=False):
 
 def saved_project(page, mode='map'):
     return page.evaluate("""async mode => {
-      const store = await import('/src/lib/sessionStore.js');
+      const store = await import('/src/features/workspace/model/sessionStore.js');
       const saved = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, mode);
       return saved.config.project;
     }""", mode)

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { strFromU8 } from 'fflate';
-import { buildAbxTeachingArchive } from '../src/lib/abxTeachingExport.js';
-import { parseAbxTeachingTask, readAbxTeachingFile } from '../src/lib/abxTeachingImport.js';
-import { normalizeProject } from '../src/lib/io.js';
-import { buildTeachingDataExport } from '../src/lib/teachingData.js';
-import { insertTeachingPreset, teachingActionPresets } from '../src/lib/teachingPresetInsertion.js';
-import { moveTeachingPose, teachingPoseMoveReason } from '../src/lib/teachingPoseOrder.js';
-import { sha256Bytes } from '../src/lib/hash.js';
+import { buildAbxTeachingArchive } from "../src/features/teaching/model/abxTeachingExport.js";
+import { parseAbxTeachingTask, readAbxTeachingFile } from "../src/features/teaching/model/abxTeachingImport.js";
+import { normalizeProject } from "../src/features/workspace/model/io.js";
+import { buildTeachingDataExport } from "../src/features/teaching/model/teachingData.js";
+import { insertTeachingPreset, teachingActionPresets } from "../src/features/teaching/model/teachingPresetInsertion.js";
+import { moveTeachingPose, teachingPoseMoveReason } from "../src/features/teaching/model/teachingPoseOrder.js";
+import { sha256Bytes } from "../src/shared/utils/hash.js";
 import { abxTeachingFixture } from './abx_teaching_helpers.mjs';
 
 const { payload, robotPackage, model, values, stamp } = abxTeachingFixture();

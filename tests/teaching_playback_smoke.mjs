@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildTeachingTaskTrajectory,
   sampleTeachingTrajectorySegment,
-} from '../src/lib/teachingPlayback.js';
+} from "../src/features/teaching/model/teachingPlayback.js";
 
 const firstPose = {
   id: 'pose-1',

@@ -6,10 +6,10 @@ import {
   disposeRobotCollisionProxies,
   getRobotCollisionJointOptions,
   serializeRobotCollisionProxies,
-} from '../src/lib/robotCollision.js';
-import { resolveRobotCollisionBackend } from '../src/lib/robotCollisionBackend.js';
-import { setRobotVisualBounds } from '../src/lib/robotLoader.js';
-import { groupPresetJoints, presetJointDefinitions } from '../src/lib/robotJointPresets.js';
+} from "../src/features/robot/model/robotCollision.js";
+import { resolveRobotCollisionBackend } from "../src/features/robot/model/robotCollisionBackend.js";
+import { setRobotVisualBounds } from "../src/features/robot/model/robotLoader.js";
+import { groupPresetJoints, presetJointDefinitions } from "../src/features/robot/model/robotJointPresets.js";
 
 const material = () => new THREE.MeshBasicMaterial({ color: '#78909c' });
 
