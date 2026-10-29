@@ -27,7 +27,7 @@ private final class VisionSceneCameraFeed: ObservableObject {
                 }
                 // Serial rendering avoids a backlog; unchanged poses render
                 // once. Closing this window cancels preparation and the loop.
-                try await Task.sleep(for: .milliseconds(100))
+                try await Task.sleep(for: .milliseconds(review.handTeaching.enabled ? 33 : 100))
             }
         } catch is CancellationError { }
         catch { if generation == token { self.error = error.localizedDescription } }
@@ -47,12 +47,24 @@ struct VisionSceneCameraView: View {
                 Label("Zivid 双相机", systemImage: "camera.on.rectangle").font(.title2.weight(.semibold))
                 Text("虚拟取景 · M70").foregroundStyle(.secondary)
                 Spacer()
-                Button { dismissWindow(id: "project-cameras") } label: { Image(systemName: "xmark") }
-                    .fixedSize()
+                Button { dismissWindow(id: "project-cameras") } label: {
+                    Label("关闭", systemImage: "xmark").visionPanelTarget(minWidth: 128, expands: false)
+                }
                     .accessibilityLabel("关闭双相机画面").accessibilityIdentifier("project-cameras-close")
+                    .simultaneousGesture(SpatialEventGesture().onChanged { events in
+                        if events.contains(where: { $0.phase == .active && $0.kind != .pointer }) { review.handTeaching.suspendForUI() }
+                    })
             }
             HStack(alignment: .top, spacing: 20) {
                 ForEach(VisionSceneCameraSide.allCases) { side in camera(side) }
+            }
+            if review.handTeaching.enabled {
+                HStack(spacing: 24) {
+                    ForEach(VisionHandSide.allCases) { side in
+                        Text("\(side.title)：\((review.handTeaching.phases[side] ?? .release).title)")
+                            .foregroundStyle(review.handTeaching.phases[side] == .unreachable ? Color.orange : .primary)
+                    }
+                }.font(.callout)
             }
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
@@ -66,11 +78,19 @@ struct VisionSceneCameraView: View {
                 HStack {
                     Text(feed.error).foregroundStyle(.orange)
                     Spacer()
-                    Button("重试") { retry += 1 }.fixedSize().accessibilityIdentifier("project-cameras-retry")
+                    Button { retry += 1 } label: {
+                        Label("重试", systemImage: "arrow.clockwise").visionPanelTarget(minWidth: 128, expands: false)
+                    }.accessibilityIdentifier("project-cameras-retry")
+                        .simultaneousGesture(SpatialEventGesture().onChanged { events in
+                            if events.contains(where: { $0.phase == .active && $0.kind != .pointer }) { review.handTeaching.suspendForUI() }
+                        })
                 }
             }
         }
-        .padding(24).frame(width: 1120)
+        .padding(28).frame(width: 1120)
+        .buttonStyle(.bordered).controlSize(.large)
+        // Camera images remain passive: looking at them while pinching must
+        // keep controlling the arms. Only actual window buttons claim input.
         .task(id: "\(review.manifest?.id ?? "")-\(retry)") { await feed.run(review) }
         .onAppear {
             review.cameraWindowVisible = true

@@ -58,6 +58,9 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     private var mapDetails = Set<String>()
     private var subscriptions: [EventSubscription] = []
     private let groundTracking = VisionGroundTracking()
+    let handTeaching = VisionHandTeachingController()
+    private var handSubscription: AnyCancellable?
+    private var currentJointValues: [String: Float] = [:]
     private var physicalFloorHeight: Float { groundTracking.floorHeight }
     private var positioned = false
     private var generation = UUID()
@@ -85,6 +88,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
 
     init() {
+        handSubscription = handTeaching.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
         VisionSceneSelection.registerComponent()
         VisionRecallTarget.registerComponent()
         root.addChild(stage); stage.addChild(axes); axes.addChild(content)
@@ -106,6 +110,13 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         groundTracking.onPlacement = { [weak self] transform in self?.applyGroundPlacement(transform) }
         groundTracking.onAnchorMotion = { [weak self] delta in
             guard let self else { return }
+            // ARKit refines a world anchor frequently. Small refinements share
+            // the world frame with hand data and are absorbed by smoothing;
+            // only a substantial relocalization invalidates the clutch origin.
+            let angle = 2 * acos(min(1, abs(simd_quatf(delta).real)))
+            if self.handTeaching.active, simd_length(delta.translation) > 0.03 || angle > 0.08 {
+                self.handTeaching.interrupt(.lost)
+            }
             // Preserve sandbox/locomotion offsets if ARKit refines its origin.
             self.stage.transform = Transform(matrix: delta * self.stage.transform.matrix)
         }
@@ -120,6 +131,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         root.components.set(OpacityComponent(opacity: 1)); environment.children.forEach { $0.removeFromParent() }
         busy = true; error = ""; defer { busy = false }
         try scene.validate(); manifest = scene; clipIndex = nil; time = 0; progress = 0
+        currentJointValues = Dictionary(uniqueKeysWithValues: scene.nodes.compactMap { node in node.joint.map { ($0.name, $0.value) } })
         entities.removeAll(); meshes.removeAll(); mapDetails.removeAll(); clearSelection()
         mapLightDirection = nil
         content.children.filter { $0 !== annotation && $0 !== landing }.forEach { $0.removeFromParent() }
@@ -232,6 +244,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         }
     }
     func stop() {
+        handTeaching.stop()
         playing = false; immersed = false; positioned = false; generation = UUID()
         travelTask?.cancel(); travelTask = nil; travelling = false
         detailTask?.cancel(); detailTask = nil
@@ -255,6 +268,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         lifeSize = true; positioned = true; clearDestination(); configureManipulation(); refreshDetail(at: .zero)
     }
     func alignProjectToFloor() {
+        guard !handTeaching.active else { return }
         guard immersed, immersiveProject else { return }
         travelTask?.cancel(); travelling = false; playing = false; measuring = false
         clearSelection(); clearDestination(); groundTracking.beginPlacement()
@@ -271,6 +285,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         configureManipulation()
     }
     func overview() {
+        guard !handTeaching.active else { return }
         guard let scene = manifest else { return }
         setParkingArrival(nil)
         groundTracking.cancelPlacement(); stage.isEnabled = true
@@ -282,6 +297,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         navigationMessage = "双手捏住沙盘缩放、转动；点选地面后进入该位置"
     }
     func detail(at point: SIMD3<Float>? = nil) {
+        guard !handTeaching.active else { return }
         if immersiveProject {
             if let point { proposeDestination(point); return }
             enterProject(); return
@@ -341,6 +357,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         return hits.isEmpty
     }
     func enterProject() {
+        guard !handTeaching.active else { return }
         if let transform = groundTracking.confirmedPlacement {
             applyGroundPlacement(transform)
             navigationMessage = "已回到地图原点 · 点选地面可继续游走"
@@ -368,6 +385,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         lifeSize = true; positioned = true; configureManipulation(); refreshDetail(at: ground)
     }
     func proposeDestination(_ point: SIMD3<Float>) {
+        guard !handTeaching.active else { return }
         guard immersiveProject, !travelling else { return }
         playing = false; clearSelection(); clearDestination()
         guard let ground = floor(at: point), abs(ground.z - point.z) < 0.35 else {
@@ -386,6 +404,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     func clearDestination() { destination = nil; landing.children.forEach { $0.removeFromParent() } }
     func visit(_ marker: VisionSceneMarker) {
+        guard !handTeaching.active else { return }
         guard !travelling else { return }
         playing = false
         let target = SIMD3<Float>(marker.position)
@@ -397,6 +416,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         } else { clearDestination(); navigationMessage = "该示教点附近暂未找到可进入的地面" }
     }
     func travel() {
+        guard !handTeaching.active else { return }
         guard let ground = destination, !travelling, device() != nil else { return }
         // Validate again because a robot playback may have occupied the landing.
         guard hasClearance(at: ground) else { clearDestination(); navigationMessage = "落点已被占据，请重新选择"; return }
@@ -417,19 +437,20 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         }
     }
     func turn(_ radians: Float) {
+        guard !handTeaching.active else { return }
         guard lifeSize, !travelling, let head = device() else { return }
         clearDestination()
         let pivot = VisionSceneNavigation.groundAnchor(head: head, floorHeight: physicalFloorHeight), rotation = simd_quatf(angle: radians, axis: SIMD3(0, 1, 0))
         stage.position = pivot + rotation.act(stage.position-pivot); stage.orientation = rotation * stage.orientation
     }
-    func returnToRobot() { guard !placingProject else { return }; entryPoint = nil; enterNearRobot(); clearDestination() }
-    func setMeasurement(_ enabled: Bool) { measuring = enabled; clearSelection(); clearDestination() }
+    func returnToRobot() { guard !placingProject, !handTeaching.active else { return }; entryPoint = nil; enterNearRobot(); clearDestination() }
+    func setMeasurement(_ enabled: Bool) { guard !handTeaching.active else { return }; measuring = enabled; clearSelection(); clearDestination() }
     private func configureManipulation() {
         // Geometry HitTargets redirect manipulation here. An enclosing box
         // would intercept surface selections and give incorrect measurements.
         guard manifest != nil else { return }
         if #available(visionOS 26.0, *) {
-            if immersiveProject && lifeSize {
+            if handTeaching.active || (immersiveProject && lifeSize) {
                 stage.components.remove(ManipulationComponent.self)
                 func removeTargets(_ entity: Entity) {
                     entity.components.remove(ManipulationComponent.HitTarget.self)
@@ -448,6 +469,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         }
     }
     func select(_ item: VisionSceneSelection, point: SIMD3<Float>) {
+        guard !handTeaching.active else { return }
         guard !immersiveProject || obstacleFade.amount < 0.8 else { return }
         if immersiveProject && !measuring {
             if item.role == "map" || item.role == "ground" { proposeDestination(point); return }
@@ -467,11 +489,13 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
     }
     func clearSelection() { firstPoint = nil; focusPoint = nil; measurement = nil; selection = ""; annotation.children.forEach { $0.removeFromParent() } }
     func chooseClip(_ index: Int) {
+        guard !handTeaching.active else { return }
         guard manifest?.clips.indices.contains(index) == true else { return }
         clearSelection()
         clipIndex = index; playing = false; time = 0; progress = 0; applyPlayback()
     }
     func togglePlayback() {
+        guard !handTeaching.active else { return }
         guard hasClips else { return }
         if !playing { clearSelection() }
         if clipIndex == nil { chooseClip(0) }
@@ -479,6 +503,7 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         playing.toggle(); applyPlayback()
     }
     func scrub(_ value: Double) {
+        guard !handTeaching.active else { return }
         guard let clip else { return }
         clearSelection()
         playing = false; progress = min(1, max(0, value)); time = progress * clip.totalDurationMs; applyPlayback()
@@ -491,12 +516,45 @@ struct VisionSceneSelection: Component { var nodeID: String; var name: String; v
         let (pose, values) = clip.sample(milliseconds: time)
         if let id = scene.robotRoot { entities[id]?.transform = Transform(matrix: pose.matrix) }
         for node in scene.nodes {
-            if let joint = node.joint, let entity = entities[node.id] { applyJoint(joint, value: values[joint.name] ?? joint.value, to: entity) }
+            if let joint = node.joint, let entity = entities[node.id] {
+                let value = values[joint.name] ?? joint.value
+                currentJointValues[joint.name] = value; applyJoint(joint, value: value, to: entity)
+            }
+        }
+    }
+    func lockForHandTeaching(_ locked: Bool) {
+        if locked { playing = false; measuring = false; clearSelection(); clearDestination() }
+        configureManipulation()
+    }
+    func handToolPose(_ side: VisionHandSide) -> VisionHandPose? {
+        guard let node = manifest?.nodes.first(where: { $0.name == "tool_\(side.rawValue)" }),
+              let entity = entities[node.id] else { return nil }
+        return VisionHandPose(entity.transformMatrix(relativeTo: content))
+    }
+    func handTeachingSnapshot(token: String) -> VisionHandStart? {
+        guard let rootID = manifest?.robotRoot, let robot = entities[rootID], !currentJointValues.isEmpty else { return nil }
+        let base = robot.transformMatrix(relativeTo: content)
+        guard VisionPoseMath.isRigid(base) else { return nil }
+        let pitch = asin(min(1, max(-1, -base.columns.0.z)))
+        let singular = abs(cos(pitch)) < 0.00001
+        let roll: Float = singular ? 0 : atan2(base.columns.1.z, base.columns.2.z)
+        let yaw = singular ? atan2(-base.columns.1.x, base.columns.1.y) : atan2(base.columns.0.y, base.columns.0.x)
+        let pose = VisionScenePose(position: Point3(base.translation),
+            rpy: VisionSceneRPY(roll: roll * 180 / .pi, pitch: pitch * 180 / .pi, yaw: yaw * 180 / .pi))
+        return VisionHandStart(token: token, joints: currentJointValues, baseMatrix: base.elements, basePose: pose)
+    }
+    func applyHandJoints(_ values: [String: Float]) {
+        guard handTeaching.enabled, !handTeaching.recording else { return }
+        for node in manifest?.nodes ?? [] {
+            if let joint = node.joint, let value = values[joint.name], value.isFinite, let entity = entities[node.id] {
+                applyJoint(joint, value: value, to: entity); currentJointValues[joint.name] = value
+            }
         }
     }
     private func update(delta: Double) {
         guard immersed else { return }
         groundTracking.update(delta: delta)
+        handTeaching.update(scene: self, spatialTracking: device() != nil)
         updateObstacleFade(delta: delta)
         updateParkingArrival(delta: delta)
         if let head = device() {

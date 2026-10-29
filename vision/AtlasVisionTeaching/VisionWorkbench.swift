@@ -39,6 +39,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
     private var server: VisionWorkbenchServer?
     private var pendingAction: [String: Any]?
     private var downloads: [ObjectIdentifier: URL] = [:]
+    var invalidateHandTeaching: (() -> Void)?
 
     func openLocal(file: URL? = nil) {
         launch(remote: nil, name: "本机工程", file: file)
@@ -48,6 +49,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
     }
     private func launch(remote address: String?, name: String, file: URL? = nil) {
         guard !loading else { return }
+        invalidateHandTeaching?()
         loading = true; error = ""; ready = false; editorVisible = false; sceneReady = false; hasProject = false
         buildingScene = false; openingScene = false; generation += 1
         Task {
@@ -97,6 +99,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
         self.webView = webView
     }
     func command(_ type: String) {
+        if ["home", "scene", "import", "sync"].contains(type) { invalidateHandTeaching?() }
         if type == "home" {
             sceneOperation?.cancel(); pendingScene = nil; generation += 1
             replacingScene = false; openingScene = false
@@ -177,6 +180,7 @@ final class VisionWorkbench: NSObject, ObservableObject, WKNavigationDelegate, W
         self.error = error.localizedDescription; loading = false
     }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        invalidateHandTeaching?()
         ready = false; loading = false; error = "工作台进程已退出。返回入口后可重新载入自动保存的工程。"
     }
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,

@@ -18,6 +18,7 @@
 | --- | --- |
 | 导入、同步和使用完整地图工程 | [完整工程与沉浸游走](docs/project-workspace.md) |
 | 调整地面、网格、颜色、窗口召回与双相机 | [空间操作](docs/project-workspace.md#沉浸游走) · [唤回控制](docs/project-workspace.md#唤回控制窗口) |
+| 用拇指与食指捏合控制虚拟双臂并记录姿态 | [双臂手部示教](docs/hand-teaching.md)（待真机测试） |
 | 对单个工件记录虚拟相机视点 | [历史单模型示教](docs/virtual-camera.md) |
 | 启动模拟器、编译、签名或连接真机 | [开发与部署](docs/development.md) |
 | 查找测试命令或历史验证范围 | [构建与验证](docs/development.md#构建与验证) · [验证记录](docs/validation-history.md) |

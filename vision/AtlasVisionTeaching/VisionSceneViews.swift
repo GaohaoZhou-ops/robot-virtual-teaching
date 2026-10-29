@@ -1,6 +1,28 @@
 import SwiftUI
 import RealityKit
 
+enum VisionPanelMetrics {
+    static let gap: CGFloat = 28
+}
+
+private struct VisionPanelTarget: ViewModifier {
+    let minimumWidth: CGFloat
+    let expands: Bool
+    @ScaledMetric(relativeTo: .body) private var labelHeight = 72.0
+    func body(content: Content) -> some View {
+        content.frame(minWidth: minimumWidth, maxWidth: expands ? .infinity : nil, minHeight: labelHeight)
+            .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    // Size the label inside the system control so its visible surface, gaze
+    // highlight and hit target grow together. Keep system hover feedback.
+    func visionPanelTarget(minWidth: CGFloat = 0, expands: Bool = true) -> some View {
+        modifier(VisionPanelTarget(minimumWidth: minWidth, expands: expands))
+    }
+}
+
 // The project itself occupies the immersive space. The optional document
 // editor lives in a separate window; no web canvas is used as the scene.
 struct VisionProjectImmersiveView: View {
@@ -51,6 +73,9 @@ struct VisionProjectImmersiveView: View {
                     Text("模拟左手腕").font(.caption).foregroundStyle(.secondary)
                     #endif
                 }.padding(8).glassBackgroundEffect(in: RoundedRectangle(cornerRadius: 24))
+                    .simultaneousGesture(SpatialEventGesture().onChanged { events in
+                        if events.contains(where: { $0.phase == .active && $0.kind != .pointer }) { review.handTeaching.suspendForUI() }
+                    })
             }
         }
         // Use one nearest-hit gesture for spatial controls and map selection,
@@ -66,7 +91,14 @@ struct VisionProjectImmersiveView: View {
                 review.selectFloor(floor.id)
             }
         })
-        .onChange(of: phase) { _, value in if value != .active && review.playing { review.togglePlayback() } }
+        .onChange(of: phase) { _, value in
+            if value != .active {
+                if value == .background || review.handTeaching.enabled {
+                    review.handTeaching.stop(message: "应用已离开前台，手部控制已停止")
+                } else { review.handTeaching.interrupt(.release) }
+                if review.playing { review.togglePlayback() }
+            }
+        }
         .task(id: workbench.toolsPresentation.pending?.replacement) {
             guard let id = workbench.toolsPresentation.pending?.replacement else { return }
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
@@ -91,6 +123,7 @@ struct VisionProjectImmersiveView: View {
     }
 
     private func recallTools() {
+        review.handTeaching.suspendForUI()
         guard workbench.projectImmersed, !workbench.isHome, !workbench.openingScene, !workbench.replacingScene,
               let id = workbench.toolsPresentation.recall(now: ProcessInfo.processInfo.systemUptime) else { return }
         // A fresh value creates a fresh window at utilityPanel's user-relative
@@ -100,7 +133,7 @@ struct VisionProjectImmersiveView: View {
 }
 
 struct VisionProjectToolsView: View {
-    static let defaultSize = CGSize(width: 990, height: 390)
+    static let defaultSize = CGSize(width: 1120, height: 500)
     let windowID: String
     @EnvironmentObject private var review: VisionSceneController
     @EnvironmentObject private var workbench: VisionWorkbench
@@ -108,14 +141,14 @@ struct VisionProjectToolsView: View {
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.dismissImmersiveSpace) private var dismissSpace
     @ScaledMetric(relativeTo: .title) private var headingSize = 32.0
-    @ScaledMetric(relativeTo: .body) private var actionSize = 28.0
-    @ScaledMetric(relativeTo: .callout) private var detailSize = 24.0
+    @ScaledMetric(relativeTo: .body) private var actionSize = 30.0
+    @ScaledMetric(relativeTo: .callout) private var detailSize = 26.0
     @ScaledMetric(relativeTo: .caption) private var captionSize = 20.0
     private var toolsActive: Bool { workbench.projectImmersed || workbench.replacingScene }
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(spacing: 18) {
-                VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: VisionPanelMetrics.gap) {
+            HStack(spacing: VisionPanelMetrics.gap) {
+                VStack(alignment: .leading, spacing: 16) {
                     HStack(spacing: 14) {
                         viewState
                         if review.lifeSize {
@@ -132,11 +165,22 @@ struct VisionProjectToolsView: View {
                     } label: {
                         Label(review.clip?.taskName ?? review.manifest?.name ?? "沉浸式工程", systemImage: "cube.transparent")
                             .lineLimit(1).truncationMode(.middle)
+                            .visionPanelTarget()
                     }
-                    .font(.system(size: detailSize)).disabled(!review.hasClips)
-                }
-                Spacer(minLength: 0)
+                    .font(.system(size: detailSize)).disabled(!review.hasClips || review.handTeaching.active)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                VisionHandTeachingToggle(teaching: review.handTeaching)
                 Menu {
+                    Section("工程") {
+                        Button("更新空间", systemImage: "arrow.clockwise") { workbench.command("scene") }
+                            .disabled(!workbench.sceneReady || workbench.buildingScene || workbench.openingScene)
+                            .accessibilityIdentifier("project-refresh")
+                        Button("保存工程", systemImage: "square.and.arrow.down") { workbench.command("save") }
+                            .disabled(!workbench.ready).accessibilityIdentifier("project-save")
+                        Button("返回工程入口", systemImage: "rectangle.portrait.and.arrow.right") { workbench.command("home") }
+                            .accessibilityIdentifier("project-home")
+                    }
+                    .disabled(review.handTeaching.active)
                     Section("游走") {
                         Button("重新对齐地面", systemImage: "viewfinder.circle") { review.alignProjectToFloor() }
                             .disabled(review.placingProject || review.travelling).accessibilityIdentifier("project-align-floor")
@@ -153,21 +197,13 @@ struct VisionProjectToolsView: View {
                         Toggle("测量两点间距", isOn: Binding(get: { review.measuring }, set: { review.setMeasurement($0) }))
                             .disabled(review.placingProject)
                     }
+                    .disabled(review.handTeaching.active)
                     Section("显示") {
                         Toggle("地面网格（\(Int(review.floorGridSpacing)) 米/格）", isOn: $review.floorGridVisible)
                             .accessibilityIdentifier("project-floor-grid")
                     }
-                    Section("工程") {
-                        Button("更新空间", systemImage: "arrow.clockwise") { workbench.command("scene") }
-                            .disabled(!workbench.sceneReady || workbench.buildingScene || workbench.openingScene)
-                            .accessibilityIdentifier("project-refresh")
-                        Button("保存工程", systemImage: "square.and.arrow.down") { workbench.command("save") }
-                            .disabled(!workbench.ready).accessibilityIdentifier("project-save")
-                        Button("返回工程入口", systemImage: "rectangle.portrait.and.arrow.right") { workbench.command("home") }
-                            .accessibilityIdentifier("project-home")
-                    }
                     #if targetEnvironment(simulator)
-                    Section("模拟器演练") {
+                    Menu("模拟器演练") {
                         Picker("障碍物渐显", selection: $review.simulatedObstacleDistance) {
                             Text("无附近障碍物").tag(Float(3))
                             Text("距离 2 米").tag(Float(2))
@@ -179,23 +215,33 @@ struct VisionProjectToolsView: View {
                         }
                     }
                     #endif
-                } label: { Image(systemName: "ellipsis") }
-                    .fixedSize()
+                } label: {
+                    Label("空间选项", systemImage: "ellipsis")
+                        .visionPanelTarget(minWidth: 180, expands: false)
+                }
                     .accessibilityLabel("空间选项").accessibilityIdentifier("project-options")
             }.disabled(workbench.openingScene || review.busy)
-            projectActions.disabled(workbench.openingScene || review.busy)
+            if !review.handTeaching.active {
+                projectActions.disabled(workbench.openingScene || review.busy)
+            }
+            if review.handTeaching.active || !review.handTeaching.message.isEmpty {
+                VisionHandTeachingView(teaching: review.handTeaching)
+            }
             if review.clip != nil {
                 Slider(value: Binding(get: { review.progress }, set: { review.scrub($0) }), in: 0...1)
-                    .disabled(review.placingProject)
+                    .disabled(review.placingProject || review.handTeaching.active)
                     .accessibilityLabel("回放进度").accessibilityIdentifier("project-timeline")
             }
             if review.destination != nil {
-                HStack {
+                HStack(spacing: VisionPanelMetrics.gap) {
                     Label("落点已选好", systemImage: "mappin.circle.fill").foregroundStyle(.mint)
                     Spacer()
-                    Button("取消") { review.clearDestination() }.fixedSize()
-                    Button("前往此处", systemImage: "figure.walk") { review.travel() }
-                        .fixedSize().tint(.mint).accessibilityIdentifier("project-travel")
+                    Button { review.clearDestination() } label: {
+                        Text("取消").visionPanelTarget(minWidth: 140, expands: false)
+                    }
+                    Button { review.travel() } label: {
+                        Label("前往此处", systemImage: "figure.walk").visionPanelTarget(minWidth: 180, expands: false)
+                    }.tint(.mint).accessibilityIdentifier("project-travel")
                 }.disabled(review.travelling)
             } else if review.travelling { ProgressView("正在前往…") }
             else if let marker = review.arrivedParkingPoint, !review.measuring {
@@ -211,11 +257,13 @@ struct VisionProjectToolsView: View {
                     .accessibilityIdentifier("project-placement-status")
             }
             if !review.selection.isEmpty {
-                HStack {
+                HStack(spacing: VisionPanelMetrics.gap) {
                     Text(review.selection).lineLimit(1)
                     if let distance = review.measurement { Text(distance < 1 ? String(format: "约 %.1f cm", distance * 100) : String(format: "约 %.2f m", distance)).foregroundStyle(.yellow) }
                     Spacer()
-                    Button { review.clearSelection() } label: { Image(systemName: "xmark.circle") }.accessibilityLabel("清除检查标记")
+                    Button { review.clearSelection() } label: {
+                        Label("清除标记", systemImage: "xmark.circle").visionPanelTarget(minWidth: 180, expands: false)
+                    }.accessibilityLabel("清除检查标记")
                 }.font(.system(size: detailSize))
             }
             if !review.proximityMessage.isEmpty {
@@ -227,19 +275,28 @@ struct VisionProjectToolsView: View {
             if workbench.buildingScene || workbench.openingScene {
                 ProgressView(workbench.openingScene ? review.status : workbench.sceneStatus).font(.system(size: captionSize))
             } else if workbench.sceneIsOutdated {
-                HStack {
+                HStack(spacing: VisionPanelMetrics.gap) {
                     Text("工程有更新").foregroundStyle(.secondary)
-                    Button("更新空间", systemImage: "arrow.clockwise") { workbench.command("scene") }.fixedSize()
+                    Button { workbench.command("scene") } label: {
+                        Label("更新空间", systemImage: "arrow.clockwise").visionPanelTarget(minWidth: 180, expands: false)
+                    }
                 }.font(.system(size: detailSize))
             }
-            if let exported = workbench.exportedFile { ShareLink("导出文件", item: exported).accessibilityIdentifier("project-exported") }
+            if let exported = workbench.exportedFile {
+                ShareLink(item: exported) {
+                    Label("导出文件", systemImage: "square.and.arrow.up").visionPanelTarget(minWidth: 180, expands: false)
+                }.accessibilityIdentifier("project-exported")
+            }
             if !workbench.error.isEmpty || !review.error.isEmpty {
                 Text(workbench.error.isEmpty ? review.error : workbench.error).font(.system(size: captionSize)).foregroundStyle(.orange)
             }
             Label("找不到窗口时，抬起左手点击「唤回控制」", systemImage: "hand.raised")
                 .font(.system(size: captionSize)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }.padding(30).frame(width: Self.defaultSize.width)
+        }.padding(36).frame(width: Self.defaultSize.width)
+        .simultaneousGesture(SpatialEventGesture().onChanged { events in
+            if events.contains(where: { $0.phase == .active && $0.kind != .pointer }) { review.handTeaching.suspendForUI() }
+        })
         .frame(minHeight: Self.defaultSize.height, alignment: .topLeading)
         .font(.system(size: actionSize)).buttonStyle(.bordered).controlSize(.large)
         .opacity(toolsActive && workbench.toolsPresentation.current == windowID ? 1 : 0)
@@ -285,55 +342,59 @@ struct VisionProjectToolsView: View {
             #endif
     }
 
-    // Keep the project title out of the action row. At larger text sizes, wrap
-    // whole controls instead of squeezing Chinese labels into several lines.
+    // Separate gaze targets into evenly sized cells; intrinsic-width controls
+    // in a crowded row made adjacent buttons too easy to select accidentally.
     private var projectActions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 18) {
-                playbackButton; scaleButton; editorButton; camerasButton; parkingLabelsToggle
-            }.fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .leading, spacing: 18) {
-                HStack(spacing: 18) { playbackButton; scaleButton }
-                HStack(spacing: 18) { editorButton; camerasButton; parkingLabelsToggle }
-            }.fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .leading, spacing: 18) {
-                playbackButton; scaleButton; editorButton; camerasButton; parkingLabelsToggle
-            }.fixedSize(horizontal: true, vertical: false)
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 290), spacing: VisionPanelMetrics.gap)],
+                  spacing: VisionPanelMetrics.gap) {
+            playbackButton; scaleButton; camerasButton; editorButton; parkingLabelsToggle
         }
         .lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var playbackButton: some View {
-        Button { review.togglePlayback() } label: { Image(systemName: review.playing ? "pause.fill" : "play.fill") }
+        Button { review.togglePlayback() } label: {
+            Label(review.playing ? "暂停回放" : "开始回放", systemImage: review.playing ? "pause.fill" : "play.fill")
+                .visionPanelTarget()
+        }
             .disabled(!review.hasClips || review.travelling || review.placingProject)
             .accessibilityLabel(review.playing ? "暂停回放" : "开始回放").accessibilityIdentifier("project-play")
     }
 
     private var scaleButton: some View {
-        Button(review.placingProject ? "沙盘预览" : review.lifeSize ? "沙盘" : "进入", systemImage: review.lifeSize || review.placingProject ? "square.3.layers.3d" : "figure.walk") {
+        Button {
             if review.lifeSize || review.placingProject { review.overview() } else { review.enterProject() }
+        } label: {
+            Label(review.placingProject ? "沙盘预览" : review.lifeSize ? "沙盘总览" : "进入空间",
+                  systemImage: review.lifeSize || review.placingProject ? "square.3.layers.3d" : "figure.walk").visionPanelTarget()
         }.disabled(review.travelling).accessibilityIdentifier("project-scale")
     }
 
     private var editorButton: some View {
-        Button("编辑工具", systemImage: "slider.horizontal.3") {
+        Button {
             workbench.editorVisible = true; openWindow(id: "workspace", value: "workspace")
+        } label: {
+            Label("编辑工具", systemImage: "slider.horizontal.3").visionPanelTarget()
         }.accessibilityIdentifier("project-editor")
     }
 
     private var camerasButton: some View {
-        Button("双相机", systemImage: "camera.on.rectangle") {
+        Button {
             if review.cameraWindowVisible { dismissWindow(id: "project-cameras") }
             else { openWindow(id: "project-cameras", value: "project-cameras") }
+        } label: {
+            Label("双相机", systemImage: "camera.on.rectangle").visionPanelTarget()
         }.disabled(!review.hasCameras || review.placingProject)
             .tint(review.cameraWindowVisible ? .cyan : nil).accessibilityIdentifier("project-cameras")
     }
 
     private var parkingLabelsToggle: some View {
-        Toggle("显示停车点标签", systemImage: "tag", isOn: $review.parkingLabelsVisible)
+        Toggle(isOn: $review.parkingLabelsVisible) {
+            Label("停车点标签", systemImage: "tag").visionPanelTarget()
+        }
             .toggleStyle(.button).tint(.cyan)
-            .accessibilityIdentifier("project-parking-labels")
+            .accessibilityLabel("显示停车点标签").accessibilityIdentifier("project-parking-labels")
     }
 }
 

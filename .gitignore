@@ -38,6 +38,15 @@ vite.config.*.timestamp-*
 /vision/AtlasVisionTeaching/WebWorkbench/
 /vision/AtlasVisionTeaching/WebWorkbench.[zZ][iI][pP]
 
+# Hand-teaching checks write binaries, project ZIPs, local connection tokens,
+# recordings and xcresult attachments to vision/build/hand-teaching/ (covered
+# by build/ above). Also omit standalone/dated copies used for device review.
+# Keep vision/Tests/, vision/web/, vision/scripts/ and documentation trackable.
+/vision/hand-teaching/
+/vision/hand-teaching-*/
+/vision/hand-teaching.[zZ][iI][pP]
+/vision/hand-teaching-*.[zZ][iI][pP]
+
 # Node.js and browser diagnostic dumps
 *.heapsnapshot
 *.cpuprofile

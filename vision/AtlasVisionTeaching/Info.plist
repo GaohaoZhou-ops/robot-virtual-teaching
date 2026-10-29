@@ -13,6 +13,7 @@
     <key>LSSupportsOpeningDocumentsInPlace</key><true/>
     <key>NSBonjourServices</key><array><string>_atlas-teach._tcp</string></array>
     <key>NSWorldSensingUsageDescription</key><string>识别现场地面，将地图和模型以真实尺寸放在脚下原点；感知前方墙面、桌椅等障碍物，靠近时逐渐显示真实环境。</string>
+    <key>NSHandsTrackingUsageDescription</key><string>通过拇指与食指捏合，在本机虚拟空间控制机器人双臂末端并记录示教姿态。</string>
     <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
     <key>UIApplicationSceneManifest</key><dict>
         <key>UIApplicationSupportsMultipleScenes</key><true/>

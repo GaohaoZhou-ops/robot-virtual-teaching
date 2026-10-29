@@ -90,7 +90,7 @@ VISION_SIMULATOR_ID=<UDID> VISION_ARTIFACTS=/tmp/atlas-vision-check ./scripts/ch
 
 ## 构建与工作台验证
 
-Xcode 在应用构建阶段运行 `scripts/build_vision_workbench.mjs`，打包完整页面、Worker 和样式到生成目录 `AtlasVisionTeaching/WebWorkbench`。构建前运行 `npm install`；Xcode 可使用 `/opt/homebrew/bin` 或 `/usr/local/bin` 的 Node。只附带仓库的 `xian_map.ply` 示例地图，不打包其他本地地图和 `robots/` 目录；用户的完整资源随工程文件或同步传入。
+Xcode 在应用构建阶段运行 `vision/scripts/build_workbench.mjs`，打包完整页面、Worker、样式及 Vision 专用手部示教适配器到生成目录 `AtlasVisionTeaching/WebWorkbench`。构建前运行 `npm install`；Xcode 可使用 `/opt/homebrew/bin` 或 `/usr/local/bin` 的 Node。只附带仓库的 `xian_map.ply` 示例地图，不打包其他本地地图和 `robots/` 目录；用户的完整资源随工程文件或同步传入。共享的 `scripts/build_vision_workbench.mjs` 仍供旧回归测试使用，不含新适配器；最终安装包应由 Xcode 或上述 Vision 专用脚本构建。双臂手部功能及专用验证见 [双臂手部示教](hand-teaching.md)。
 
 本机服务仅监听 `127.0.0.1:21991`，固定 origin 保留 IndexedDB。导入与空间资源写入使用每次进程生成的凭据，限制同源请求；大文件经临时文件流式传输。选择电脑后只转发 Atlas API 到经 LANClient 校验的局域网地址，原生客户端始终作为需要授权的同步参与端。
 
