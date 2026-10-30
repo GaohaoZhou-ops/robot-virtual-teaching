@@ -180,6 +180,7 @@ def main():
             assert page.evaluate('window.batchNoReload') is True
             assert snapshot(page, 'independent') == previous
             assert snapshot(page, 'map')['positions'] == original_map['positions']
+            assert snapshot(page, 'map')['project']['robot'] == original_map['project']['robot']
             actual = groups(page)
             assert {row['name'] for row in actual[1:]} == {'工位 A · 左侧阀门', '工位 B · 右侧阀门'}
             assert len({row['groupId'] for row in actual[1:]}) == 2
@@ -228,8 +229,12 @@ def main():
             assert actual[0]['hash'] == actual[1]['hash'] and actual[0]['groupId'] != actual[1]['groupId']
             assert [row['transfer']['localToMap']['position']['x'] for row in actual] == [5, -8]
             assert snapshot(page, 'map')['pointCount'] == original_map['pointCount'] + actual[0]['count']
+            assert snapshot(page, 'map')['project']['robot'] == original_map['project']['robot']
+            page.reload(wait_until='networkidle')
+            ready(page, 'map')
+            assert snapshot(page, 'map')['project']['robot'] == original_map['project']['robot']
             context.close()
-            print('batch: shared model fan-out, names preserved, independent placement, initial slot passed', flush=True)
+            print('batch: shared model fan-out, names preserved, independent placement, map robot retained after reload, initial slot passed', flush=True)
 
             context, page = new_page()
             seed(page, ['independent'], 'independent')

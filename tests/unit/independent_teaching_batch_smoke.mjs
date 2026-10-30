@@ -31,6 +31,10 @@ const { replacements, mapPlacement } = await prepareIndependentTeachingBatch(ent
 });
 assert.equal(reads, 1, 'The same file is parsed only once');
 assert.deepEqual(map, before, 'Preparation must not mutate the target');
+assert.deepEqual(mapPlacement.config.project.robot, before.config.config.project.robot,
+  'Batch placement must preserve the map robot pose and joints');
+assert.deepEqual(mapPlacement.config.ui.selectedRobot, before.config.config.project.robot,
+  'The restored UI must use the original map robot');
 assert.equal(new Set(replacements.map((item) => item.map.teachingGroupId)).size, 3);
 assert.equal(new Set(replacements.map((item) => item.map.mapId)).size, 3);
 assert.deepEqual(replacements.map((item) => item.config.project.workspace.independentTeachingName), entries.map((item) => item.name));
@@ -62,9 +66,24 @@ const archive = await buildProjectArchive(mapPlacement.config.project, {
   companionWorkspace: snapshot(replacements[0]), independentHistory: replacements.slice(1).map(snapshot),
 });
 const restored = prepareWorkspaceCollectionImport((await readProjectArchive(archive.bytes)).workspaceCollection);
+assert.deepEqual(restored.workspaces.map.config.config.project.robot, before.config.config.project.robot,
+  'The map robot must remain unchanged after saving and restoring the batch');
 const restoredRows = [restored.workspaces.independent, ...restored.independentHistory];
 assert.deepEqual(restoredRows.map((item) => item.config.config.project.workspace.independentTeachingName), entries.map((item) => item.name));
 assert.equal(new Set(restoredRows.map((item) => item.map.teachingGroupId)).size, 3);
+
+const singleRowBatch = await prepareIndependentTeachingBatch([entries[0]], { targetMap: map, settings });
+assert.deepEqual(singleRowBatch.mapPlacement.config.project.robot, before.config.config.project.robot,
+  'The batch import entry point must preserve the map robot even with only one row');
+for (const matrix of [first, null]) {
+  const unplaced = await prepareIndependentTeachingBatch([
+    { file, name: '仅创建独立示教', matrix, syncRoute: false, placeInMap: false },
+  ], { targetMap: map, settings });
+  assert.equal(unplaced.mapPlacement, null, 'Importing without placement must not replace the map');
+  assert.deepEqual(unplaced.replacements[0].config.project.robot.origin,
+    replacements[0].config.project.robot.origin, 'New independent robots still start at their local origin');
+  assert.deepEqual(map, before, 'Imports without placement must leave the target map unchanged');
+}
 await assert.rejects(prepareIndependentTeachingBatch([{ ...entries[0], name: ' ' }], { settings }), /第 1 组.*名称/);
 await assert.rejects(prepareIndependentTeachingBatch([{ ...entries[0], matrix: null }], { settings }), /需要转换矩阵/);
 await assert.rejects(prepareIndependentTeachingBatch([{ ...entries[0], file: new File(['ply\nformat ascii 1.0\nelement vertex 0\nproperty float x\nproperty float y\nproperty float z\nend_header\n'], 'empty.ply') }], { settings }), /第 1 组.*顶点/);

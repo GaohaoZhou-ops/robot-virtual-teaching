@@ -390,7 +390,7 @@ function assertRobotCompatibility(source, target) {
     '两个工程使用不同机器人；请先在地图工程中选择相同机器人，再转换示教内容');
 }
 
-export async function placeTeachingWorkspace(source, target, { localToMap, matrixImports }) {
+export async function placeTeachingWorkspace(source, target, { localToMap, matrixImports, preserveTargetRobot = false }) {
   const local = snapshotProject(source), background = snapshotProject(target);
   requireValue(local.workspace.teachingSpaceMode === 'independent' && background.workspace.teachingSpaceMode === 'map', '请选择独立工程和目标地图工程');
   assertRobotCompatibility(local, background);
@@ -405,7 +405,9 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
     })),
   }));
   const points = transformWaypoints(local.waypoints, matrix).map((point) => ({ ...point, id: newId(point.id) }));
-  const sourceRobot = local.robot || background.robot;
+  const keepTargetRobot = preserveTargetRobot && Boolean(background.robot);
+  const robot = keepTargetRobot ? background.robot
+    : local.robot ? { ...local.robot, origin: transformTeachingPose(local.robot.origin, matrix) } : background.robot;
   const previousTransfer = background.workspace.transfer;
   const priorPlacements = previousTransfer?.kind === 'placement'
     ? [previousTransfer, ...(previousTransfer.previousPlacements || [])] : [];
@@ -417,10 +419,12 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
       ? item.sourceMap.teachingGroupId !== source.map.teachingGroupId
       : item.sourceMap.mapId !== source.map.mapId)
     .map(({ previousPlacements: earlier, mapFrameSources: earlierFrames, geometryLayers: earlierLayers, ...placement }) => placement);
-  map.portableRobotPackage = [source.map.portableRobotPackage, target.map.portableRobotPackage]
-    .find((candidate) => candidate?.relativePath === sourceRobot?.relativePath) || null;
+  const robotPackages = keepTargetRobot
+    ? [target.map.portableRobotPackage, source.map.portableRobotPackage]
+    : [source.map.portableRobotPackage, target.map.portableRobotPackage];
+  map.portableRobotPackage = robotPackages.find((candidate) => candidate?.relativePath === robot?.relativePath) || null;
   const result = snapshotResult({ ...background,
-    robot: local.robot ? { ...local.robot, origin: transformTeachingPose(local.robot.origin, matrix) } : sourceRobot,
+    robot,
     teachingTasks: [...transformTeachingTasks(background.teachingTasks, new Matrix4(), 'map', map), ...importedTasks],
     waypoints: [...background.waypoints, ...points],
     edges: [...background.edges, ...local.edges.map((edge) => ({ ...edge, id: newId(edge.id), from: newId(edge.from), to: newId(edge.to), status: 'unchecked' }))],

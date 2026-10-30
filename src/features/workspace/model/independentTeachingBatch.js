@@ -108,8 +108,9 @@ export async function prepareIndependentTeachingBatch(entries, { targetMap, sett
         onProgress({ progress: (index + 0.5) / entries.length * 0.9, phase: `放置第 ${index + 1} / ${entries.length} 组`, detail: name });
         const target = mapPlacement ? { mode: 'map', map: mapPlacement.map,
           config: { mapId: mapPlacement.map.mapId, config: mapPlacement.config } } : targetMap;
+        // Batch placement adds aligned objects without relocating the map robot.
         mapPlacement = await placeTeachingWorkspace({ mode: 'independent', map, config: { mapId: map.mapId, config } },
-          target, { localToMap: transfer.localToMap, matrixImports: transfer.matrixImports });
+          target, { localToMap: transfer.localToMap, matrixImports: transfer.matrixImports, preserveTargetRobot: true });
       }
     } catch (error) { throw new Error(`第 ${index + 1} 组「${name}」：${error.message}`); }
   }

@@ -966,9 +966,11 @@ playwright/.auth/
 /tests/atlas-new-independent-*.[zZ][iI][pP]
 # Batch directory-picker tests create temporary model/matrix inputs when TMPDIR
 # is local. Captures use test-artifacts/independent-batch/, already ignored above.
-# Scope input workspaces to root/tests so nested regression fixtures stay visible.
+# Scope input workspaces and ZIP copies to root/tests so nested fixtures stay visible.
 /atlas-batch-input-*/
 /tests/atlas-batch-input-*/
+/atlas-batch-input-*.[zZ][iI][pP]
+/tests/atlas-batch-input-*.[zZ][iI][pP]
 # Preset-management UI tests export complete projects into temporary workspaces.
 # Keep root/tests TMPDIR overrides and packed copies local, but retain fixtures.
 /atlas-preset-manager-*/
