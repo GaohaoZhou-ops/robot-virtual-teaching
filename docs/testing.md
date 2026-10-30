@@ -61,6 +61,10 @@
 | 单 / 双模型切换移动、旋转、浏览模式保留视角与高倍缩放 | `uv run --with playwright python tests/model_editor_mode_view_ui_smoke.py`（先启动服务） |
 | 三页旋转灵敏度、平移方向、Shift 切换与深度缩放一致性 | `uv run --with playwright python tests/viewport_navigation_ui_smoke.py`（先启动服务） |
 | 三页触屏双指缩放 / 平移、手指增减、取消及高倍缩放 | `uv run --with playwright python tests/viewport_touch_ui_smoke.py`（先启动服务；Chrome 触屏模拟） |
+| 找到机器人：当前姿态、窗口比例与回放条避让 | `npm run test:robot-focus` |
+| 顶部菜单、机器人模型悬浮展开、键盘逐级返回与窄屏布局 | `BASE_URL=http://127.0.0.1:22176 uv run --with playwright python tests/workbench_toolbar_ui_smoke.py`（先启动独立 Vite） |
+| 两种示教模式机器人模型子菜单、透明度同步与键鼠调节、实时坐标、找到机器人、隐藏恢复、窗口展开与控制状态 | `BASE_URL=http://127.0.0.1:22176 uv run --with playwright python tests/integration/robot_focus_ui_smoke.py`（先启动独立 Vite；可指定 `PLAYWRIGHT_CHROMIUM_EXECUTABLE`） |
+| 回放播放／暂停时找到机器人、保持姿态与继续跟随 | `ATLAS_ROBOT_FOCUS_ONLY=1 BASE_URL=http://127.0.0.1:22176 uv run --with playwright python tests/teaching_playback_smoke.py`（复用回放工程，运行定位专项） |
 | 模型原点三维移动 / 旋转、数值双向同步、取消与导出一致性 | `uv run --with playwright python tests/model_editor_origin_gizmo_ui_smoke.py`（先启动服务） |
 | 模型编辑 Esc 退出、Ctrl / Cmd + Z 撤销、参数分组与导出一致性 | `uv run --with playwright python tests/model_editor_shortcuts_ui_smoke.py`（先启动服务） |
 | 示教回放顺序与首姿态恢复 | `npm run test:playback` |

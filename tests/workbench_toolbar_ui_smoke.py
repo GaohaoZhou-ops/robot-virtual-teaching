@@ -51,17 +51,44 @@ def run():
             expect(details).to_have_count(0)
             expect(project).to_be_focused()
 
-            topbar_action(page, '加载机器人', exact=True).click()
+            robot_trigger = topbar_action(page, '加载机器人', exact=True)
+            robot_trigger.hover()
             robots = page.get_by_role('dialog', name='robots 目录模型', exact=True)
+            robot_menu = page.get_by_role('dialog', name='机器人菜单', exact=True)
             expect(robots).to_be_visible()
-            expect(page.locator('.workbench-menu-panel:visible')).to_have_count(0)
+            expect(robot_menu).to_be_visible()
+            expect(robot_trigger).to_have_attribute('aria-expanded', 'true')
             page.wait_for_function('''() => {
                 const menu = document.querySelector('.robot-picker__menu').getBoundingClientRect();
-                const trigger = document.querySelector('[data-workbench-menu-trigger="robot"]').getBoundingClientRect();
-                return Math.abs(menu.top - trigger.bottom - 8) < 2;
+                const parent = document.querySelector('[data-workbench-menu="robot"]').getBoundingClientRect();
+                return menu.right <= parent.left || menu.left >= parent.right;
             }''')
+            # Crossing the gap and using controls must keep both menu levels open.
+            robots.hover()
+            robots.get_by_role('button', name='刷新机器人列表').click()
+            expect(robots).to_be_visible()
+            expect(robot_menu).to_be_visible()
             page.keyboard.press('Escape')
             expect(robots).to_have_count(0)
+            expect(robot_trigger).to_be_focused()
+            page.keyboard.press('ArrowRight')
+            expect(robots.get_by_role('button', name='刷新机器人列表')).to_be_focused()
+            page.keyboard.press('ArrowLeft')
+            expect(robots).to_have_count(0)
+            expect(robot_trigger).to_be_focused()
+            robot_trigger.hover()
+            robot_menu.get_by_role('button', name='新建预设姿态', exact=True).hover()
+            expect(robots).to_have_count(0)
+            robot_trigger.click()
+            expect(robots).to_be_visible()
+            page.locator('.brand-block').click()
+            expect(robots).to_have_count(0)
+            expect(robot_menu).to_have_count(0)
+            topbar_action(page, '加载机器人', exact=True).hover()
+            page.keyboard.press('Escape')
+            expect(robots).to_have_count(0)
+            expect(robot_trigger).to_be_focused()
+            page.keyboard.press('Escape')
             expect(toolbar.get_by_role('button', name='机器人菜单')).to_be_focused()
 
             if mode == 'independent':
@@ -73,8 +100,8 @@ def run():
                     expect(devices).to_be_visible()
                     expect(devices.get_by_role('button', name=device, exact=True)).to_have_attribute('aria-expanded', 'true')
                     page.keyboard.press('Home')
-                    if device == 'iPad / iPhone':
-                        page.keyboard.press('ArrowDown')
+                    expect(mobile.get_by_role('menuitem', name='画面协作' if device == 'iPad / iPhone' else '完整工程空间查看')).to_be_focused()
+                    page.keyboard.press('ArrowDown')
                     expect(mobile.get_by_role('menuitem', name='示教来源')).to_be_focused()
                     page.keyboard.press('ArrowRight')
                     expect(page.get_by_role('menuitemradio', name='查看独立示教')).to_be_focused()
@@ -192,7 +219,17 @@ def run():
                         return r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
                     }''')
                     assert trigger.evaluate('(el) => el.getBoundingClientRect().right <= innerWidth')
+                    if label == '机器人':
+                        panel.get_by_role('button', name='加载机器人', exact=True).hover()
+                        expect(robots).to_be_visible()
+                        robots.evaluate('el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {})))')
+                        assert robots.evaluate('''el => {
+                            const r = el.getBoundingClientRect();
+                            return r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+                        }''')
                     page.screenshot(path=f'/tmp/atlas-toolbar-{mode}-{width}-{label}.png', full_page=True)
+                    if label == '机器人':
+                        page.keyboard.press('Escape')
                     page.keyboard.press('Escape')
             page.set_viewport_size({'width': 1440, 'height': 900})
             project.click()

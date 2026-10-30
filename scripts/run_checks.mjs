@@ -5,7 +5,7 @@ const suites = {
   core: ['test:architecture', 'test:workspace-sync', 'test:robot-twin', 'test:robot-twin-project',
     'test:work-sync', 'test:fake-robot', 'test:archive', 'test:project-storage', 'test:project-save',
     'test:playback', 'test:connectivity', 'test:model-editor', 'test:viewport-reference',
-    'test:viewport-zoom', 'test:robot-display', 'test:collision-backends'],
+    'test:viewport-zoom', 'test:robot-focus', 'test:robot-display', 'test:collision-backends'],
   extended: ['test:model-composition', 'test:torso', 'test:robot-presets', 'test:robot-limits',
     'test:robot-coupling', 'test:interactive-ik', 'test:polyline', 'test:teaching-insert',
     'test:linked-project', 'test:project-collection', 'test:independent-alignment', 'test:independent-batch', 'test:teaching-data',

@@ -55,6 +55,7 @@ import TeachingSurfaceCoverage from "../../teaching/ui/TeachingSurfaceCoverage.j
 import ViewportInteractionModeButton from "./ViewportInteractionModeButton.jsx";
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_FOV, viewportWheelDelta } from "../model/viewportNavigation.js";
 import { createViewportTouchNavigation } from "../model/viewportTouchNavigation.js";
+import { robotFocusView } from "../model/robotFocus.js";
 import { applyScreenViewportGesture } from "../../collaboration/model/ipadScreenViewport.js";
 import { createIndependentGround, viewportDistanceScale } from "../model/viewportReference.js";
 import { createRobotTwinFollowCamera } from "../../robot-twin/model/robotTwinFollowCamera.js";
@@ -176,6 +177,8 @@ export default function PointCloudViewer({
   robotDescriptor,
   showRobot = true,
   onShowRobotChange,
+  robotOpacity = 1,
+  onRobotOpacityChange,
   robotLoadState,
   robotPose,
   robotJointValues,
@@ -233,7 +236,6 @@ export default function PointCloudViewer({
 }) {
   const pendingPolylineRequest = polylineRequest?.sceneId === mapData?.geometry?.uuid
     && polylineRequest?.robotId === (robotDescriptor?.id || robotDescriptor?.relativePath) ? polylineRequest : null;
-  const [robotOpacity, setRobotOpacity] = useState(1);
   const [displaySettingsSection, setDisplaySettingsSection] = useState('robot');
   const [visibleRobotFrames, setVisibleRobotFrames] = useState(() => new Set());
   const visibleRobotFramesRef = useRef(visibleRobotFrames);
@@ -318,6 +320,7 @@ export default function PointCloudViewer({
   const interactionModeRef = useRef('rotate');
   const precisionPanRef = useRef(null);
   const focusAnimationRef = useRef(null);
+  const focusLayoutFrameRef = useRef(null);
   const robotFollowPositionRef = useRef(null);
   const twinWorkspaceViewRef = useRef(null);
   const twinFollowRef = useRef(null);
@@ -434,6 +437,17 @@ export default function PointCloudViewer({
   lockedRobotJointNamesRef.current = normalizeRobotJointLocks(lockedRobotJointNames);
   const [manualResolution, setManualResolution] = useState({ mapKey: null, index: null });
   const robotFollowEnabled = !robotTelemetry && robotTrajectoryActive && Boolean(teachingPlayback?.followRobot);
+  const robotFollowEnabledRef = useRef(robotFollowEnabled);
+  robotFollowEnabledRef.current = robotFollowEnabled;
+  const cancelFocusAnimation = useCallback((state = 'interrupted') => {
+    if (!focusAnimationRef.current && !focusLayoutFrameRef.current) return;
+    if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+    if (focusLayoutFrameRef.current) cancelAnimationFrame(focusLayoutFrameRef.current);
+    focusAnimationRef.current = null;
+    focusLayoutFrameRef.current = null;
+    const canvas = controlsRef.current?.domElement;
+    if (canvas) canvas.dataset.synchronizedFocusState = state;
+  }, []);
   const stopTwinFollow = useCallback((restore = true) => {
     const follow = twinFollowRef.current;
     if (!follow) return;
@@ -463,10 +477,7 @@ export default function PointCloudViewer({
     } else if (saved) {
       twinWorkspaceViewRef.current = null;
       stopTwinFollow(false);
-      if (focusAnimationRef.current) {
-        cancelAnimationFrame(focusAnimationRef.current);
-        focusAnimationRef.current = null;
-      }
+      cancelFocusAnimation();
       pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
       viewActionsRef.current?.apply(saved.view, 'twin-ended');
     }
@@ -659,7 +670,7 @@ export default function PointCloudViewer({
         if (robot) bounds.union(setRobotVisualBounds(new THREE.Box3(), robot));
         const sphere = bounds.getBoundingSphere(new THREE.Sphere());
         if (!Number.isFinite(sphere.radius)) return;
-        if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+        cancelFocusAnimation();
         precisionPanRef.current?.clear?.();
         const direction = camera.position.clone().sub(controls.target);
         if (direction.lengthSq() < 1e-12) direction.set(-.5, -.8, .45);
@@ -712,7 +723,7 @@ export default function PointCloudViewer({
     if (loadedRobotRef.current) bounds.union(setRobotVisualBounds(new THREE.Box3(), loadedRobotRef.current));
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     if (!Number.isFinite(sphere.radius)) return;
-    if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
+    cancelFocusAnimation();
     precisionPanRef.current?.clear?.();
     const direction = camera.position.clone().sub(controls.target);
     if (direction.lengthSq() < 1e-12) direction.set(-0.5, -0.8, 0.45);
@@ -2436,6 +2447,7 @@ export default function PointCloudViewer({
     };
     const applyProgressiveWheelDelta = (delta) => {
       stopTwinFollow(false);
+      cancelFocusAnimation();
       claimKeyboardFocus('wheel');
       if (navigation.applyWheelDelta(delta)) {
         syncDetailView();
@@ -2745,10 +2757,7 @@ export default function PointCloudViewer({
     };
     const resetCameraView = () => {
       stopTwinFollow(false);
-      if (focusAnimationRef.current) {
-        cancelAnimationFrame(focusAnimationRef.current);
-        focusAnimationRef.current = null;
-      }
+      cancelFocusAnimation();
       applyCameraView(defaultCameraView, 'reset');
       renderer.domElement.dataset.viewResetCount = String(
         Number(renderer.domElement.dataset.viewResetCount || 0) + 1,
@@ -2829,11 +2838,7 @@ export default function PointCloudViewer({
       const deltaY = Number(detail.deltaY) || 0;
       if (!deltaX && !deltaY) return;
       stopTwinFollow(false);
-      if (focusAnimationRef.current) {
-        cancelAnimationFrame(focusAnimationRef.current);
-        focusAnimationRef.current = null;
-        renderer.domElement.dataset.synchronizedFocusState = 'interrupted-by-preview';
-      }
+      cancelFocusAnimation('interrupted-by-preview');
       let changed = false;
       if (kind === 'pan') {
         const sourceWidth = Math.max(Number(detail.sourceWidth) || 1, 1);
@@ -3179,6 +3184,7 @@ export default function PointCloudViewer({
 
     const onPickPointerDown = (event) => {
       if (event.button !== 0 && event.button !== 2) return;
+      cancelFocusAnimation();
       lastPointerSelection = null;
       claimKeyboardFocus('pointer');
       const shiftPressed =
@@ -3203,11 +3209,6 @@ export default function PointCloudViewer({
         pointerStart = null;
         renderer.domElement.dataset.pointerGestureState = 'space-ball';
         return;
-      }
-      if (focusAnimationRef.current) {
-        cancelAnimationFrame(focusAnimationRef.current);
-        focusAnimationRef.current = null;
-        renderer.domElement.dataset.synchronizedFocusState = 'interrupted';
       }
       const panGesture =
         event.button === 2
@@ -3451,6 +3452,7 @@ export default function PointCloudViewer({
 
     const disposeTouchNavigation = createViewportTouchNavigation({ controls, navigation,
       onStart: () => {
+        cancelFocusAnimation();
         finishChassisPointerDrag(null, 'touch-navigation');
         if (transformControls.dragging) { transformControls.reset(); transformControls.pointerUp({ button: 0 }); }
         cancelPointerGesture(null, 'touch-navigation'); controls.enabled = true; claimKeyboardFocus('touch');
@@ -3677,7 +3679,7 @@ export default function PointCloudViewer({
       getState: () => ({ enabled: !renderer.getContext().isContextLost(), aspect: camera.aspect }),
       navigate(command) {
         if (renderer.getContext().isContextLost()) return false;
-        if (focusAnimationRef.current) { cancelAnimationFrame(focusAnimationRef.current); focusAnimationRef.current = null; }
+        cancelFocusAnimation();
         if (!applyScreenViewportGesture(camera, controls, navigation, command)) return false;
         stopTwinFollow(false);
         syncDetailView(); reportCameraView();
@@ -4045,6 +4047,7 @@ export default function PointCloudViewer({
 
       if (filteredSpaceMouseMagnitude >= SPACEMOUSE_FILTER_EPSILON) {
         stopTwinFollow(false);
+        cancelFocusAnimation();
         if (spaceMouseMode === 'rpy') {
           const rollInput = filteredSpaceMouseAxes.roll;
           const pitchInput = filteredSpaceMouseAxes.pitch;
@@ -4455,6 +4458,7 @@ export default function PointCloudViewer({
 
     return () => {
       renderer.setAnimationLoop(null);
+      cancelFocusAnimation();
       twinScene.dispose();
       if (twinSceneRef.current === twinScene) twinSceneRef.current = null;
       stopTwinFollow(false);
@@ -5410,14 +5414,119 @@ export default function PointCloudViewer({
     viewActionsRef.current?.reset?.();
   }, [mapData?.geometry, resetRequest]);
 
+  const transitionCamera = useCallback((target, position, { animate = true, request } = {}) => {
+    const controls = controlsRef.current;
+    const camera = cameraRef.current;
+    const canvas = controls?.domElement;
+    if (!controls || !camera || !canvas) return;
+    cancelFocusAnimation();
+    precisionPanRef.current?.clear?.();
+    const startTarget = controls.target.clone();
+    const startPosition = camera.position.clone();
+    const startZoom = Math.max(camera.zoom, 1);
+    const startedAt = performance.now();
+    const duration = animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 560 : 0;
+    if (request) {
+      canvas.dataset.synchronizedFocusType = request.type;
+      canvas.dataset.synchronizedFocusId = request.id;
+      canvas.dataset.synchronizedFocusRevision = String(request.revision || 0);
+    }
+    canvas.dataset.synchronizedFocusState = duration ? 'animating' : 'settled';
+    canvas.dataset.synchronizedFocusTargetDistance = position.distanceTo(target).toPrecision(8);
+    const step = (now) => {
+      if (!renderActiveRef.current || cameraRef.current !== camera) {
+        cancelFocusAnimation();
+        return;
+      }
+      const progress = duration ? Math.min(1, (now - startedAt) / duration) : 1;
+      const eased = 1 - (1 - progress) ** 3;
+      controls.target.lerpVectors(startTarget, target, eased);
+      camera.position.lerpVectors(startPosition, position, eased);
+      camera.zoom = Math.exp(Math.log(startZoom) * (1 - eased));
+      camera.updateProjectionMatrix();
+      controls.update();
+      canvas.dataset.synchronizedFocusProgress = progress.toFixed(3);
+      if (progress < 1) focusAnimationRef.current = requestAnimationFrame(step);
+      else {
+        focusAnimationRef.current = null;
+        canvas.dataset.synchronizedFocusState = 'settled';
+        viewActionsRef.current?.refreshClipping?.();
+      }
+    };
+    if (duration) focusAnimationRef.current = requestAnimationFrame(step);
+    else step(startedAt);
+  }, [cancelFocusAnimation]);
+
+  const focusRobot = useCallback(({ animate = false, request } = {}) => {
+    const controls = controlsRef.current;
+    const camera = cameraRef.current;
+    const robot = loadedRobotRef.current;
+    if (!controls || !camera || !robot) return;
+    const canvas = controls.domElement;
+    // Read the committed layout: this request may also have expanded the 3D panel.
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) return;
+    const dock = canvas.closest('.panel-body')?.querySelector('.teaching-playback-dock:not(.is-collapsed)');
+    const dockRect = dock?.getBoundingClientRect();
+    const bottomFraction = dockRect?.height > 0
+      ? Math.max(0, rect.bottom - dockRect.top + 12) / rect.height : 0;
+    const aspect = rect.width / rect.height;
+    const view = robotFocusView(camera, controls.target, setRobotVisualBounds(new THREE.Box3(), robot), {
+      aspect, bottomFraction, minDistance: controls.minDistance,
+    });
+    if (!view) return;
+    stopTwinFollow(false);
+    camera.aspect = aspect;
+    const following = robotFollowEnabledRef.current;
+    if (following) {
+      // Reframe once, then let the existing follower translate from this pose.
+      // It must not recenter again or race a second camera animation.
+      const { position } = robotPoseRef.current;
+      robotFollowPositionRef.current = new THREE.Vector3(position.x, position.y, position.z);
+    }
+    transitionCamera(view.target, view.position, {
+      animate: animate && !following,
+      request: request || { type: 'robot', id: robotLoadStateRef.current?.robotId || 'active-robot' },
+    });
+  }, [stopTwinFollow, transitionCamera]);
+
   useEffect(() => {
     const controls = controlsRef.current;
     const camera = cameraRef.current;
     const canvas = controls?.domElement;
     const sphere = mapData?.geometry?.boundingSphere;
-    if (!focusRequest || !controls || !camera || !canvas || !sphere || robotFollowEnabled) {
+    if (!focusRequest || !controls || !camera || !canvas || !sphere) {
       return undefined;
     }
+    if (focusRequest.type === 'robot') {
+      cancelFocusAnimation();
+      canvas.dataset.synchronizedFocusType = 'robot';
+      canvas.dataset.synchronizedFocusId = focusRequest.id;
+      canvas.dataset.synchronizedFocusRevision = String(focusRequest.revision);
+      canvas.dataset.synchronizedFocusState = 'waiting-for-layout';
+      const layoutElements = ['.panel-3d', '.visual-workspace', '.workspace']
+        .map((selector) => canvas.closest(selector)).filter(Boolean);
+      const focusAfterLayout = () => {
+        if (!renderActiveRef.current || cameraRef.current !== camera
+          || canvas.closest('.panel-3d')?.classList.contains('is-collapsed')) {
+          cancelFocusAnimation();
+          return;
+        }
+        // Expanding either panel and resizing the inspector animate the grid.
+        // Wait for their real dimensions rather than fitting a zero-height view.
+        if (layoutElements.some((element) => element.getAnimations().some((animation) =>
+          animation.playState === 'running'
+          && ['grid-template-rows', 'grid-template-columns'].includes(animation.transitionProperty)))) {
+          focusLayoutFrameRef.current = requestAnimationFrame(focusAfterLayout);
+          return;
+        }
+        focusLayoutFrameRef.current = null;
+        focusRobot({ animate: true, request: focusRequest });
+      };
+      focusLayoutFrameRef.current = requestAnimationFrame(focusAfterLayout);
+      return () => cancelFocusAnimation();
+    }
+    if (robotFollowEnabled) return undefined;
     stopTwinFollow(false);
 
     const pointById = new Map(waypoints.map((point) => [point.id, point]));
@@ -5445,21 +5554,6 @@ export default function PointCloudViewer({
         target = start.clone().add(end).multiplyScalar(0.5);
         subjectSpan = start.distanceTo(end);
       }
-    } else if (focusRequest.type === 'robot') {
-      const robot = robotLayerRef.current;
-      if (robot?.children.length) {
-        const robotSphere = setRobotVisualBounds(new THREE.Box3(), robot)
-          .getBoundingSphere(new THREE.Sphere());
-        if (Number.isFinite(robotSphere.radius) && robotSphere.radius > 0) {
-          target = robotSphere.center.clone();
-          subjectSpan = robotSphere.radius * 2;
-          camera.updateMatrixWorld(true);
-          const screenUp = new THREE.Vector3()
-            .setFromMatrixColumn(camera.matrixWorld, 1)
-            .normalize();
-          target.addScaledVector(screenUp, -robotSphere.radius * 0.28);
-        }
-      }
     } else if (focusRequest.type === 'robot-ghost') {
       const robot = robotLayerRef.current;
       const ghostPoseRoot = robotParkingGhostVisualRef.current?.poseRoot;
@@ -5475,12 +5569,7 @@ export default function PointCloudViewer({
     }
     if (!target) return undefined;
 
-    if (focusAnimationRef.current) cancelAnimationFrame(focusAnimationRef.current);
-    precisionPanRef.current?.clear?.();
-    const startTarget = controls.target.clone();
-    const startPosition = camera.position.clone();
-    const startZoom = Math.max(camera.zoom, 1);
-    const viewDirection = startPosition.clone().sub(startTarget);
+    const viewDirection = camera.position.clone().sub(controls.target);
     if (viewDirection.lengthSq() < 1e-18) viewDirection.set(-0.5, -0.8, 0.45);
     viewDirection.normalize();
     const routeScale = Math.max(sphere.radius * 0.006, 0.12);
@@ -5489,55 +5578,22 @@ export default function PointCloudViewer({
         || (focusRequest.type === 'robot-ghost' && !robotParkingGhost?.poseId));
     const baseDistance = focusRequest.type === 'edge'
       ? Math.max(subjectSpan * 1.45, sphere.radius * 0.12, routeScale * 12)
-      : focusRequest.type === 'robot'
-        ? Math.max(subjectSpan * 1.72, 0.9)
-        : focusRequest.type === 'mobile-pose'
-          ? 2.2
-          : focusRequest.type === 'robot-ghost'
-            ? Math.max(subjectSpan * 1.48, 1.05)
-            : Math.max(sphere.radius * WAYPOINT_FOCUS_DISTANCE_RATIO, routeScale * 12);
+      : focusRequest.type === 'mobile-pose'
+        ? 2.2
+        : focusRequest.type === 'robot-ghost'
+          ? Math.max(subjectSpan * 1.48, 1.05)
+          : Math.max(sphere.radius * WAYPOINT_FOCUS_DISTANCE_RATIO, routeScale * 12);
     const desiredDistance = THREE.MathUtils.clamp(
       baseDistance * (isParkingPointFocus ? PARKING_POINT_FOCUS_DISTANCE_SCALE : 1),
       controls.minDistance * 2,
       controls.maxDistance * 0.82,
     );
     const endPosition = target.clone().addScaledVector(viewDirection, desiredDistance);
-    const startedAt = performance.now();
-    const duration = 560;
-
-    canvas.dataset.synchronizedFocusType = focusRequest.type;
-    canvas.dataset.synchronizedFocusId = focusRequest.id;
-    canvas.dataset.synchronizedFocusRevision = String(focusRequest.revision);
-    canvas.dataset.synchronizedFocusState = 'animating';
-    canvas.dataset.synchronizedFocusTargetDistance = desiredDistance.toPrecision(8);
     if (focusRequest.type === 'waypoint') {
       canvas.dataset.waypointFocusDistanceRatio = String(WAYPOINT_FOCUS_DISTANCE_RATIO);
     }
-
-    const animateFocus = (now) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      const eased = 1 - (1 - progress) ** 3;
-      controls.target.lerpVectors(startTarget, target, eased);
-      camera.position.lerpVectors(startPosition, endPosition, eased);
-      camera.zoom = Math.exp(Math.log(startZoom) * (1 - eased));
-      camera.updateProjectionMatrix();
-      controls.update();
-      canvas.dataset.synchronizedFocusProgress = progress.toFixed(3);
-      if (progress < 1) {
-        focusAnimationRef.current = requestAnimationFrame(animateFocus);
-      } else {
-        focusAnimationRef.current = null;
-        canvas.dataset.synchronizedFocusState = 'settled';
-      }
-    };
-    focusAnimationRef.current = requestAnimationFrame(animateFocus);
-
-    return () => {
-      if (focusAnimationRef.current) {
-        cancelAnimationFrame(focusAnimationRef.current);
-        focusAnimationRef.current = null;
-      }
-    };
+    transitionCamera(target, endPosition, { request: focusRequest });
+    return () => cancelFocusAnimation();
   }, [focusRequest, mapData?.geometry]);
 
   useEffect(() => {
@@ -5893,6 +5949,7 @@ export default function PointCloudViewer({
       if (twinFollowRef.current && document.querySelector('[aria-modal="true"], dialog[open]')) return;
       stopTwinFollow(false);
       const isActionKey = code !== 'ShiftLeft' && code !== 'ShiftRight';
+      if (isActionKey) cancelFocusAnimation();
       if (isActionKey) event.preventDefault();
       pressedKeysRef.current.add(code);
       if (!event.repeat && isActionKey) keyboardImpulseRef.current.add(code);
@@ -6624,6 +6681,7 @@ export default function PointCloudViewer({
 
   const focusOrigin = () => {
     stopTwinFollow(false);
+    cancelFocusAnimation();
     const controls = controlsRef.current;
     const camera = cameraRef.current;
     if (!controls || !camera) return;
@@ -6641,10 +6699,7 @@ export default function PointCloudViewer({
     const origin = teachingSpaceMode === 'independent' ? mapOriginGroupRef.current?.position : new THREE.Vector3();
     if (preset === 'origin' && !origin) return;
     stopTwinFollow(false);
-    if (focusAnimationRef.current) {
-      cancelAnimationFrame(focusAnimationRef.current);
-      focusAnimationRef.current = null;
-    }
+    cancelFocusAnimation();
     pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
     let view;
     if (preset === 'origin') {
@@ -6677,10 +6732,7 @@ export default function PointCloudViewer({
     const camera = cameraRef.current;
     const mapOrigin = mapOriginGroupRef.current;
     if (!controls || !camera || !mapOrigin || !mapData?.geometry?.boundingBox) return;
-    if (focusAnimationRef.current) {
-      cancelAnimationFrame(focusAnimationRef.current);
-      focusAnimationRef.current = null;
-    }
+    cancelFocusAnimation();
     // Frame both coordinate origins and the independent model without moving
     // any source geometry or changing the default/reset view.
     const sphere = mapData.geometry.boundingBox.clone()
@@ -6699,32 +6751,12 @@ export default function PointCloudViewer({
     controls.update();
   };
 
-  const focusRobot = () => {
-    stopTwinFollow(false);
-    const controls = controlsRef.current;
-    const camera = cameraRef.current;
-    const robot = robotLayerRef.current;
-    if (!controls || !camera || !robot?.children.length) return;
-    const sphere = setRobotVisualBounds(new THREE.Box3(), robot)
-      .getBoundingSphere(new THREE.Sphere());
-    if (!Number.isFinite(sphere.radius) || sphere.radius <= 0) return;
-    precisionPanRef.current?.clear?.();
-    const direction = camera.position.clone().sub(controls.target);
-    if (direction.lengthSq() < 1e-12) direction.set(-0.55, -0.8, 0.42);
-    direction.normalize();
-    controls.target.copy(sphere.center);
-    camera.position.copy(sphere.center).addScaledVector(direction, sphere.radius * 2.85);
-    camera.zoom = 1;
-    camera.updateProjectionMatrix();
-    controls.update();
-  };
-
   const focusTwinRobots = () => {
     const controls = controlsRef.current, camera = cameraRef.current;
     const bounds = twinSceneRef.current?.bounds();
     if (!controls || !camera || !bounds || bounds.isEmpty()) return;
     stopTwinFollow();
-    if (focusAnimationRef.current) { cancelAnimationFrame(focusAnimationRef.current); focusAnimationRef.current = null; }
+    cancelFocusAnimation();
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const direction = camera.position.clone().sub(controls.target).normalize();
     controls.target.copy(sphere.center);
@@ -6743,9 +6775,7 @@ export default function PointCloudViewer({
     const previousView = viewActionsRef.current?.capture();
     if (!previousView) return;
     twinFollowRef.current = { tracker, previousView, controlsEnabled: controls.enabled };
-    if (focusAnimationRef.current) {
-      cancelAnimationFrame(focusAnimationRef.current); focusAnimationRef.current = null;
-    }
+    cancelFocusAnimation();
     pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
     precisionPanRef.current?.clear?.();
     controls.enabled = false;
@@ -7348,9 +7378,9 @@ export default function PointCloudViewer({
                           value={Math.round(robotOpacity * 100)} aria-label="机器人模型透明度"
                           aria-valuetext={`${Math.round(robotOpacity * 100)}%`}
                           title="100% 为完全不透明，调低可透过机器人观察表面"
-                          disabled={teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
+                          disabled={!onRobotOpacityChange || teachingCaptureBusy || robotLoadState?.status !== 'loaded'}
                           style={{ '--vision-coverage-opacity': `${Math.round(robotOpacity * 100)}%` }}
-                          onChange={(event) => setRobotOpacity(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
+                          onChange={(event) => onRobotOpacityChange?.(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
                         <output>{Math.round(robotOpacity * 100)}%</output>
                       </label>
                       <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames} />

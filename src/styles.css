@@ -421,11 +421,18 @@ code {
   color: var(--red);
 }
 
+.robot-picker__trigger[data-submenu-side="left"] > svg:last-child {
+  transform: rotate(180deg);
+}
+
 .robot-picker__menu {
   position: fixed;
   z-index: 390;
-  width: 342px;
+  width: min(342px, calc(100vw - 16px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(89, 219, 232, 0.3);
+  outline: none;
   background: rgba(7, 17, 20, 0.98);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62), 0 0 0 1px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(16px);
@@ -493,6 +500,58 @@ code {
 }
 
 .robot-picker__visibility { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.robot-picker__visibility .robot-picker__opacity { padding: 5px 4px 0; border-bottom: 0; font-size: 11px; }
+
+.robot-picker__position {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(89, 219, 232, 0.025);
+}
+
+.robot-picker__position-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.robot-picker__position-heading > span { color: #9fc8c8; font-size: 11px; }
+.robot-picker__position-heading > small { color: var(--muted-2); font: 9px "SFMono-Regular", Menlo, monospace; }
+.robot-picker__position-name {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.robot-picker__coordinates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.robot-picker__coordinates > div { min-width: 0; padding: 8px; border: 1px solid var(--line); background: rgba(2, 9, 11, 0.4); }
+.robot-picker__coordinates > div > span { color: #8ca9a9; font-size: 10px; }
+.robot-picker__coordinates [data-axis="x"] > span { color: var(--red); }
+.robot-picker__coordinates [data-axis="y"] > span { color: var(--green); }
+.robot-picker__coordinates [data-axis="yaw"] > span { color: #70b7e7; }
+.robot-picker__coordinates > div > div { display: flex; align-items: baseline; gap: 4px; margin-top: 5px; }
+.robot-picker__coordinates b { overflow: hidden; color: #d3e5e1; font: 11px "SFMono-Regular", Menlo, monospace; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
+.robot-picker__coordinates small { color: var(--muted-2); font-size: 9px; }
+
+.robot-focus-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  margin-top: 10px;
+  padding: 0 10px;
+  border: 1px solid rgba(89, 219, 232, 0.35);
+  background: rgba(16, 39, 45, 0.9);
+  color: var(--cyan);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.robot-focus-button:hover:not(:disabled) { border-color: var(--cyan); background: #173740; }
+.robot-focus-button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.robot-focus-button:disabled { opacity: 0.4; cursor: default; }
 .robot-visibility-switch {
   display: flex;
   align-items: center;
@@ -1858,7 +1917,8 @@ code {
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  margin-left: 10px;
+  margin-left: auto;
+  padding-left: 10px;
 }
 
 .panel-heading__display-settings:empty { display: none; }
@@ -1917,31 +1977,6 @@ code {
   align-items: center;
   gap: 5px;
   white-space: nowrap;
-}
-
-.robot-position-readout__label {
-  color: #7db9bd;
-  font-size: 9px;
-}
-
-.robot-position-readout b {
-  min-width: 6ch;
-  color: #b8cecc;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.robot-position-readout small {
-  color: var(--muted-2);
-  font-size: 8px;
-}
-
-.robot-position-readout .axis.yaw {
-  width: auto;
-  padding-inline: 4px;
-  border-radius: 8px;
-  background: #70b7e7;
 }
 
 /* Map manifest and current project configuration. */
@@ -14093,9 +14128,7 @@ input[type="number"]::-webkit-inner-spin-button {
 @media (max-width: 1300px) {
   .panel-3d .panel-heading { padding-inline: 8px; }
   .panel-3d .panel-heading__title { min-width: 112px; gap: 6px; }
-  .panel-3d .robot-position-readout { gap: 5px; padding-left: 6px; font-size: 8px; }
-  .panel-3d .robot-position-readout__label { display: none; }
-  .panel-3d .panel-heading__display-settings { gap: 4px; margin-left: 4px; }
+  .panel-3d .panel-heading__display-settings { gap: 4px; padding-left: 4px; }
   .panel-3d .panel-heading .viewer-menu__trigger { gap: 4px; padding-inline: 6px; }
   .panel-3d .panel-heading .viewer-menu__trigger > svg:first-child { display: none; }
   .panel-3d .height-range,

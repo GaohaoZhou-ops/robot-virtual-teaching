@@ -128,6 +128,9 @@ test-results/
 # Display-sync, capture-task details and view-preset reviews use
 # test-artifacts/{work-sync-display,capture-task-info,view-presets}/.
 # Screenshots, exported projects and temporary review runners stay local.
+# Robot framing, hover-menu and opacity checks use test-artifacts/robot-focus/;
+# service snapshots stay in build/robot-*/. Both roots are ignored without
+# hiding the maintained robotFocus model or unit / integration test sources.
 /test-artifacts/
 /screenshots/
 /test-downloads/
@@ -529,15 +532,28 @@ playwright/.auth/
 /atlas-toolbar-*.[zZ][iI][pP]
 /tests/atlas-toolbar-*.[zZ][iI][pP]
 # Menu/preset layout review copies from build/menu-review/, including captures
-# and the previous service index. Keep source artwork and nested fixtures visible.
+# and the previous service index. Match converted images and extension case
+# variants; keep source artwork and nested fixtures visible.
 /menu-review/
 /tests/menu-review/
 /menu-review.[zZ][iI][pP]
 /tests/menu-review.[zZ][iI][pP]
-/preset-manager-*.png
-/tests/preset-manager-*.png
-/robot-menu-*.png
-/tests/robot-menu-*.png
+/preset-manager-*.[pP][nN][gG]
+/tests/preset-manager-*.[pP][nN][gG]
+/preset-manager-*.[jJ][pP][gG]
+/tests/preset-manager-*.[jJ][pP][gG]
+/preset-manager-*.[jJ][pP][eE][gG]
+/tests/preset-manager-*.[jJ][pP][eE][gG]
+/preset-manager-*.[wW][eE][bB][pP]
+/tests/preset-manager-*.[wW][eE][bB][pP]
+/robot-menu-*.[pP][nN][gG]
+/tests/robot-menu-*.[pP][nN][gG]
+/robot-menu-*.[jJ][pP][gG]
+/tests/robot-menu-*.[jJ][pP][gG]
+/robot-menu-*.[jJ][pP][eE][gG]
+/tests/robot-menu-*.[jJ][pP][eE][gG]
+/robot-menu-*.[wW][eE][bB][pP]
+/tests/robot-menu-*.[wW][eE][bB][pP]
 # Grouped inspector layout / button-size captures and packed review copies.
 # Scope these to local output roots; source artwork and fixtures stay visible.
 /atlas-inspector-*/

@@ -12,3 +12,12 @@ def topbar_action(page, name, exact=False):
                 trigger.click()
             return menu_action
     return action
+
+
+def robot_model_menu(page):
+    """Open Robot → Robot model, including its current-pose and focus controls."""
+    menu = page.get_by_role('dialog', name='robots 目录模型', exact=True)
+    if not menu.is_visible():
+        topbar_action(page, name='加载机器人', exact=True).hover()
+    menu.evaluate('el => Promise.all(el.getAnimations().map(animation => animation.finished.catch(() => {})))')
+    return menu

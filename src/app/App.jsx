@@ -376,6 +376,7 @@ export default function App() {
   const [showPathNames3D, setShowPathNames3D] = useState(false);
   const [showHeightLegend3D, setShowHeightLegend3D] = useState(true);
   const [showRobotModel, setShowRobotModel] = useState(true);
+  const [robotOpacity, setRobotOpacity] = useState(1);
   const [collapsedPanel, setCollapsedPanel] = useState(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [inspectorPageRequest, setInspectorPageRequest] = useState(null);
@@ -4928,6 +4929,14 @@ export default function App() {
     setShowRobotModel(Boolean(visible));
   }, []);
 
+  const findRobot = useCallback(() => {
+    if (!mapData?.geometry || robotLoadState.status !== 'loaded'
+      || teachingCaptureState.status === 'capturing') return;
+    setShowRobotModel(true);
+    setCollapsedPanel((current) => current === '3d' ? null : current);
+    requestSynchronizedFocus('robot', selectedRobot?.id || selectedRobot?.relativePath || 'active-robot');
+  }, [mapData?.geometry, robotLoadState.status, teachingCaptureState.status, selectedRobot, requestSynchronizedFocus]);
+
   const handleRobotControlChange = useCallback(
     (enabled, { announce = true } = {}) => {
       const nextEnabled = Boolean(enabled) && robotLoadState.status === 'loaded';
@@ -6806,6 +6815,11 @@ export default function App() {
                     showRobot={showRobotModel}
                     visibilityDisabled={teachingCaptureState.status === 'capturing'}
                     onShowRobotChange={handleShowRobotChange}
+                    robotOpacity={robotOpacity}
+                    onRobotOpacityChange={setRobotOpacity}
+                    robotPose={displayedRobotPose}
+                    coordinateFrame={coordinateFrame}
+                    onFindRobot={findRobot}
                   />
                   <button type="button" className="action-button" disabled={!robotPresetReady}
                     title={robotPresetReady ? '输入双臂、躯干和头部关节值并保存' : '请先加载具有可动关节的机器人模型'}
@@ -6897,32 +6911,6 @@ export default function App() {
                       : mapData?.faceCount > 0 ? '三维点云 / 网格' : '三维点云'}
                   </strong>
                 </div>
-              </div>
-              <div
-                className="panel-stats robot-position-readout"
-                role="group"
-                aria-label="机器人实时坐标"
-                title={selectedRobot && robotLoadState.status === 'loaded'
-                  ? `机器人在 ${coordinateFrame.toUpperCase()} 坐标系中的实时 X/Y 位置（米）与 Yaw 朝向（度）`
-                  : '加载机器人后显示实时 X/Y 位置（米）与 Yaw 朝向（度）'}
-              >
-                <span className="robot-position-readout__label"><Bot size={12} /> 机器人定位</span>
-                {['x', 'y'].map((axis) => (
-                  <span key={axis} data-axis={axis}>
-                    <i className={`axis ${axis}`}>{axis.toUpperCase()}</i>
-                    <b>{selectedRobot && robotLoadState.status === 'loaded'
-                      ? (Math.round(displayedRobotPose.position[axis] * 1000) / 1000).toFixed(3)
-                      : '—'}</b>
-                  </span>
-                ))}
-                <small>m</small>
-                <span data-axis="yaw">
-                  <i className="axis yaw">Yaw</i>
-                  <b>{selectedRobot && robotLoadState.status === 'loaded'
-                    ? (Math.round(displayedRobotPose.rpy.yaw * 10) / 10).toFixed(1)
-                    : '—'}</b>
-                  <small>°</small>
-                </span>
               </div>
               <div
                 className="panel-heading__display-settings"
@@ -7020,6 +7008,8 @@ export default function App() {
                 robotDescriptor={selectedRobot}
                 showRobot={showRobotModel}
                 onShowRobotChange={handleShowRobotChange}
+                robotOpacity={robotOpacity}
+                onRobotOpacityChange={setRobotOpacity}
                 robotLoadState={robotLoadState}
                 robotPose={displayedRobotPose}
                 robotJointValues={displayedRobotJoints}

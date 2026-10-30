@@ -1,4 +1,4 @@
-from topbar_tools_helpers import topbar_action
+from topbar_tools_helpers import robot_model_menu, topbar_action
 
 import json
 import os
@@ -50,6 +50,52 @@ def assert_following(before, after):
             assert abs(after[key][axis] - expected) < 0.0015, (key, before, after)
     assert after["up"] == before["up"]
     assert after["zoom"] == before["zoom"]
+
+
+def check_robot_focus(page, canvas, dock, follow_switch):
+    find_robot = page.get_by_role("button", name="找到机器人", exact=True)
+
+    def locate():
+        robot_model_menu(page)
+        revision = canvas.get_attribute("data-synchronized-focus-revision")
+        expect(find_robot).to_be_enabled()
+        find_robot.click()
+        expect(canvas).not_to_have_attribute("data-synchronized-focus-revision", revision or "")
+        expect(canvas).to_have_attribute("data-synchronized-focus-state", "settled")
+        expect(canvas).to_have_attribute("data-robot-control-enabled", "false")
+
+    locate()
+    expect(dock).to_have_attribute("data-playback-status", "playing")
+    expect(follow_switch).to_have_attribute("aria-checked", "false")
+    page.get_by_role("button", name="暂停示教轨迹播放", exact=True).click()
+    expect(dock).to_have_attribute("data-playback-status", "paused")
+    page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+    paused_pose = scene_pose(page)
+    paused_joints = canvas.get_attribute("data-robot-joint-values")
+    locate()
+    assert scene_pose(page) == paused_pose
+    assert canvas.get_attribute("data-robot-joint-values") == paused_joints
+    expect(dock).to_have_attribute("data-playback-status", "paused")
+
+    follow_switch.click()
+    expect(canvas).to_have_attribute("data-robot-follow-enabled", "true")
+    locate()
+    expect(follow_switch).to_have_attribute("aria-checked", "true")
+    expect(canvas).to_have_attribute("data-robot-follow-enabled", "true")
+    assert scene_pose(page) == paused_pose
+    assert canvas.get_attribute("data-robot-joint-values") == paused_joints
+    following_view = scene_view(page)
+    page.get_by_role("button", name="继续示教轨迹播放", exact=True).click()
+    page.wait_for_function("x => Math.abs(Number(document.querySelector('.three-canvas').dataset.robotX) - x) > 0.03", arg=following_view["robot"][0])
+    assert_following(following_view, scene_view(page))
+    locate()  # Reframe again during actual chassis motion.
+    expect(dock).to_have_attribute("data-playback-status", "playing")
+    expect(follow_switch).to_have_attribute("aria-checked", "true")
+    page.get_by_role("button", name="暂停示教轨迹播放", exact=True).click()
+    artifacts = ROOT / "test-artifacts/robot-focus"
+    artifacts.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(artifacts / "playback-follow.png"), full_page=True)
+    print("PASS robot focus: playing/paused, unchanged robot state and continued camera following during chassis motion", flush=True)
 
 
 def run():
@@ -239,7 +285,13 @@ def run():
         assert page.locator(".point-cloud-view").get_attribute(
             "data-robot-trajectory-active"
         ) == "true"
+        if os.environ.get("ATLAS_ROBOT_FOCUS_ONLY") == "1":
+            check_robot_focus(page, canvas, dock, follow_switch)
+            assert not errors, errors
+            browser.close()
+            return
         assert viewer_tool(page, name="定位机器人模型").is_disabled()
+        page.get_by_role("button", name="视图工具", exact=True).click()
         page.get_by_role("combobox", name="示教轨迹播放速度").select_option("0.5")
         page.wait_for_timeout(700)
         page.screenshot(path="/tmp/atlas-teaching-playback-active.png", full_page=True)
@@ -426,6 +478,7 @@ def run():
         assert_following(followed_view, scene_view(page))
         assert page.locator(".point-cloud-view").get_attribute("data-robot-trajectory-active") == "true"
         assert viewer_tool(page, name="定位机器人模型").is_disabled()
+        page.get_by_role("button", name="视图工具", exact=True).click()
 
         # Turning following off freezes the camera while the robot keeps moving.
         follow_switch.press("Space")
