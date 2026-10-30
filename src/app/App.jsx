@@ -6821,11 +6821,6 @@ export default function App() {
                     coordinateFrame={coordinateFrame}
                     onFindRobot={findRobot}
                   />
-                  <button type="button" className="action-button" disabled={!robotPresetReady}
-                    title={robotPresetReady ? '输入双臂、躯干和头部关节值并保存' : '请先加载具有可动关节的机器人模型'}
-                    onClick={() => openRobotPreset()}><Plus size={15} /><span>新建预设姿态</span></button>
-                  <button type="button" className="action-button" disabled={!robotPresetManagerReady}
-                    onClick={openRobotPresetManager}><List size={15} /><span>管理预设姿态</span></button>
                 </section>
                 <RobotJointLimitSettings ratio={robotArmSoftLimitRatio} onChange={setRobotArmSoftLimitRatio}
                   customCount={Object.keys(robotArmSoftLimitOverrides).length} onOpenDetails={openRobotJointLimits}
@@ -6840,6 +6835,11 @@ export default function App() {
                         : (polylineTeachingBusy || ['playing', 'paused'].includes(teachingPlayback.status)) ? '停止轨迹播放或折线任务后可调整耦合约束。'
                           : mobileComputation ? '结束示教计算后可调整耦合约束。' : ''} />
                 <section className="workbench-menu-section robot-presets-list">
+                  <button type="button" className="action-button" disabled={!robotPresetReady}
+                    title={robotPresetReady ? '输入双臂、躯干和头部关节值并保存' : '请先加载具有可动关节的机器人模型'}
+                    onClick={() => openRobotPreset()}><Plus size={15} /><span>新建预设姿态</span></button>
+                  <button type="button" className="action-button" disabled={!robotPresetManagerReady}
+                    onClick={openRobotPresetManager}><List size={15} /><span>管理预设姿态</span></button>
                   <p>预设姿态{robotPresets.length > 0 ? ` · ${robotPresets.length}` : ''}</p>
                   {robotPresets.map((pose) => <button key={pose.id} type="button" className="action-button"
                     aria-label={`应用预设姿态 ${pose.name}`} title={pose.name}
