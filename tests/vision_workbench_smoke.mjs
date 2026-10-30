@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -41,9 +41,14 @@ try {
   const get = (route, options) => fetch(c.origin + route, options);
   assert.equal((await get('/workbench')).status, 200);
   assert.equal((await get('/model-editor/dual')).status, 200);
-  const example = await get('/xian_map.ply');
-  assert.equal(example.status, 200);
-  assert.deepEqual(Buffer.from(await example.arrayBuffer()), await readFile('maps/xian_map.ply'), 'large bundled map streams without truncation');
+  const bundleRoot = path.resolve('vision/AtlasVisionTeaching/WebWorkbench');
+  await assert.rejects(access(path.join(bundleRoot, 'xian_map.ply')), { code: 'ENOENT' }, 'private maps must not ship with the application');
+  const html = await (await get('/workbench')).text();
+  const scriptPath = html.match(/src="([^"]+\.js)"/)?.[1];
+  assert.ok(scriptPath, 'workbench references its bundled application script');
+  const engine = await get(scriptPath);
+  assert.equal(engine.status, 200);
+  assert.deepEqual(Buffer.from(await engine.arrayBuffer()), await readFile(path.join(bundleRoot, scriptPath)), 'large application script streams without truncation');
   assert.equal((await get('/__atlas/session')).status, 200);
   assert.equal((await get('/__atlas/vision-native/imports/' + c.importID)).status, 401);
   assert.equal((await get('/__atlas/session', { headers: { Origin: 'https://example.com' } })).status, 403);

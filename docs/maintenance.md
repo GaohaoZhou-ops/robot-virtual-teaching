@@ -52,7 +52,9 @@ Pose 批量编辑、标题栏布局和 M70 取景对照检查使用的 `atlas-po
 
 iPad 传输进度与电脑端模型一致性检查的 `atlas-transfer-progress-*`、`atlas-model-consistency-*` 临时目录，在仓库根目录、`tests/` 或 `ipad/` 下均会被忽略；原生网络、配对码、二维码和服务发现测试的临时目录也覆盖 `tests/`。
 
-保留源码、锁文件、共享 Xcode 配置、设计素材及环境变量示例。本地 `robots/` 和 `recovered-projects/` 仅匹配仓库根目录，避免屏蔽测试夹具中的同名子目录。Web、iPad 和 Vision Pro 的测试夹具目录统一保留 PLY、ATLS、ABX、JSON 和 ZIP 输入，例外规则位于导出规则之后，同时覆盖目录直属文件和嵌套文件。可用 `git check-ignore -v --no-index -- 路径` 查看命中的规则；忽略规则不会删除本地文件。
+保留源码、锁文件、共享 Xcode 配置、设计素材及环境变量示例。本地 `maps/`、`robots/` 和 `recovered-projects/` 仅匹配仓库根目录，避免屏蔽测试夹具中的同名子目录。`maps/` 及其备份目录、ZIP / TAR 副本均属于本地素材，不允许为单张地图添加跟踪例外；Vision Pro 工作台打包也不携带这些地图。最近工程回归产生的 `atlas-recent-projects-*` 临时目录与 ZIP 副本同样保留在本机。
+
+Web、iPad 和 Vision Pro 的测试夹具目录统一保留 PLY、ATLS、ABX、JSON 和 ZIP 输入，例外规则位于导出规则之后，同时覆盖目录直属文件和嵌套文件。可用 `git check-ignore -v --no-index -- 路径` 查看命中的规则；忽略规则不会删除本地文件，也不会自动取消跟踪或清除旧提交中的文件。
 
 <details>
 <summary>删除条件与数据保护规则</summary>

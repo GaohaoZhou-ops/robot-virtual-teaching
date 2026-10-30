@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
+import RecentProjects from '../../features/workspace/ui/RecentProjects.jsx';
 
 const normalizeMode = (value) => value === 'independent' ? 'independent' : 'map';
 
@@ -26,6 +27,8 @@ export default function StartPage({
   syncControl,
   onNewProject,
   onLoadProject,
+  onOpenRecentProject,
+  recentProjectOpeningId,
   onContinue,
   onOpenTeachingData,
   onOpenModelEditor,
@@ -199,6 +202,8 @@ export default function StartPage({
             </div>
           )}
         </section>
+
+        <RecentProjects disabled={controlsDisabled} openingId={recentProjectOpeningId} onOpen={onOpenRecentProject} />
 
         {hasWorkspace && (
           <section className="start-page__resume" aria-label="当前工作现场">

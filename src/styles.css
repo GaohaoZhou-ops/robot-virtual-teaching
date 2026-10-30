@@ -7789,16 +7789,19 @@ input[type="number"]::-webkit-inner-spin-button {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: minmax(310px, 0.7fr) minmax(590px, 1.3fr);
-  gap: 24px 54px;
-  width: min(1320px, calc(100% - 72px));
+  grid-template-columns: minmax(210px, 0.65fr) minmax(510px, 1.45fr) minmax(300px, 0.9fr);
+  grid-template-areas: "intro flow history" "resume resume resume";
+  gap: 24px;
+  width: min(1600px, calc(100% - 64px));
   margin: 0 auto;
   padding: clamp(34px, 5vh, 68px) 0 28px;
   overflow: auto;
-  align-content: center;
+  align-content: safe center;
 }
 
 .start-page__intro {
+  grid-area: intro;
+  min-width: 0;
   align-self: center;
   padding: 8px 0 12px;
   animation: start-page-rise 430ms ease-out both;
@@ -7810,9 +7813,12 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 
 .start-page__intro h1 { display: flex; margin: 0; flex-direction: column; line-height: 1.04; }
-.start-page__intro h1 strong { color: #e4eeeb; font-size: clamp(38px, 3.7vw, 59px); font-weight: 690; letter-spacing: -0.045em; }
+.start-page__intro h1 strong { color: #e4eeeb; font-size: clamp(30px, 2.35vw, 40px); font-weight: 690; letter-spacing: -0.045em; }
 
 .start-page__flow {
+  grid-area: flow;
+  align-self: start;
+  min-width: 0;
   position: relative;
   padding: 22px;
   border: 1px solid rgba(120, 157, 160, 0.18);
@@ -7923,7 +7929,7 @@ input[type="number"]::-webkit-inner-spin-button {
 .start-page__boot-status i { width: 7px; height: 7px; border: 1px solid var(--start-accent); border-radius: 50%; animation: start-status-pulse 700ms ease-in-out infinite alternate; }
 
 .start-page__resume {
-  grid-column: 1 / -1;
+  grid-area: resume;
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) auto auto;
   align-items: center;
@@ -7973,10 +7979,14 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 .start-page__footer span { display: inline-flex; align-items: center; gap: 6px; }
 
-@media (max-width: 1080px) {
-  .start-page__main { grid-template-columns: 1fr; width: min(760px, calc(100% - 36px)); align-content: start; }
+@media (max-width: 1280px) {
+  .start-page__main { grid-template-columns: minmax(0, 1fr) minmax(300px, 0.7fr); grid-template-areas: "intro history" "flow history" "resume resume"; width: calc(100% - 48px); align-content: start; }
   .start-page__intro { padding-top: 0; }
   .start-page__intro h1 strong { font-size: 32px; }
+}
+
+@media (max-width: 900px) {
+  .start-page__main { grid-template-columns: minmax(0, 1fr); grid-template-areas: "intro" "flow" "history" "resume"; width: min(760px, calc(100% - 36px)); }
 }
 
 @media (max-width: 720px) {

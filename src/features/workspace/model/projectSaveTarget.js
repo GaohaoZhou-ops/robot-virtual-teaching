@@ -31,6 +31,11 @@ export const loadProjectSaveTarget = (mapId, mode) => withStore('readonly', (sto
   };
 });
 
+export const listProjectSaveTargets = () => withStore('readonly', (store, done) => {
+  const request = store.getAll();
+  request.onsuccess = () => done(request.result.filter((target) => target.handle?.kind === 'file'));
+});
+
 export const rememberProjectSaveTarget = (target) => withStore('readwrite', (store) => {
   store.put({ ...target, teachingSpaceMode: modeKey(target.teachingSpaceMode) });
 });

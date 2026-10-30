@@ -919,6 +919,11 @@ playwright/.auth/
 /atlas-file-picker-*/
 /atlas-portable-test-*/
 /atlas-server-result-*/
+# Recent-project checks contain saved engineering files and browser handles.
+/atlas-recent-projects-*/
+/atlas-recent-projects-*.[zZ][iI][pP]
+/tests/atlas-recent-projects-*/
+/tests/atlas-recent-projects-*.[zZ][iI][pP]
 # These runners also use TMPDIR; cover tests/ overrides without hiding fixtures.
 /tests/atlas-load-modes-*/
 /tests/atlas-file-picker-*/
@@ -1378,8 +1383,18 @@ Desktop.ini
 *.swo
 *~
 
-# Local robot assets live at the repository root and can be large.
+# Local map and robot assets are private inputs, not repository content.
 # Keep same-named directories inside source packages and fixtures visible.
+/maps/
+/maps-*/
+/maps (*)/
+/maps.[zZ][iI][pP]
+/maps-*.[zZ][iI][pP]
+/maps (*).[zZ][iI][pP]
+/maps.tar
+/maps.tar.*
+/maps-*.tar
+/maps-*.tar.*
 /robots/
 /robots.[zZ][iI][pP]
 /robots-*.[zZ][iI][pP]
@@ -1428,12 +1443,12 @@ Desktop.ini
 /380B平地巡检.[zZ][iI][pP]
 /380B平地巡检/
 
-# Point-cloud assets are ignored by default; keep the bundled example map.
+# Point-cloud assets stay local; only explicit synthetic test fixtures below
+# are trackable. Do not add exceptions for private maps/ resources.
 *.[pP][lL][yY]
 # Compressed copies of imported/exported models stay local too.
 *.[pP][lL][yY].[zZ][iI][pP]
 *.[pP][lL][yY].[gG][zZ]
-!maps/xian_map.ply
 
 # Local iPhone / iPad / Vision Pro model-transfer payloads
 # Match extension case variants without hiding deliberate fixture inputs below.

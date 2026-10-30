@@ -15,6 +15,7 @@
 | Web 服务 | Node.js、npm；服务脚本使用 Bash |
 | 浏览器 | 支持 WebGL；浏览器条件见[工程目录与权限](projects.md)和 [SpaceMouse](workbench.md#spacemouse) |
 | 克隆仓库 | 安装 Git，以下 SSH 地址需要已配置 GitHub SSH 认证 |
+| 地图与点云素材 | 使用自己的本地 PLY 文件；根目录 `maps/` 及其打包副本不随 Git 分发 |
 | 机器人模型 | 自行放入根目录 `robots/`，包括模型及网格资源；该目录不随 Git 分发 |
 | 机械臂控制 | 需要包含关节定义的 URDF 模型，才能使用关节控制与 IK 示教 |
 

@@ -1,0 +1,26 @@
+.recent-projects { grid-area: history; align-self: start; min-width: 0; padding: 22px; border: 1px solid rgba(120, 157, 160, 0.18); border-top-color: rgba(var(--start-accent-rgb), 0.55); background: rgba(7, 17, 20, 0.84); box-shadow: 0 24px 70px rgba(0, 0, 0, 0.22); }
+.recent-projects button { color: inherit; font: inherit; cursor: pointer; }
+.recent-projects button:disabled { opacity: 0.45; cursor: wait; }
+.recent-projects button:focus-visible { outline: 1px solid var(--start-accent); outline-offset: -2px; }
+.recent-projects__toggle { display: flex; align-items: center; gap: 10px; width: 100%; padding: 0 0 6px; border: 0; background: transparent; text-align: left; }
+.recent-projects__toggle > svg:first-child { color: var(--start-accent); }
+.recent-projects__toggle strong { font-size: 12px; font-weight: 600; }
+.recent-projects__toggle span { color: #8ba5a7; font: 10px "SFMono-Regular", Menlo, monospace; }
+.recent-projects__toggle > svg:last-child { margin-left: auto; transition: transform 150ms ease; }
+.recent-projects__toggle .is-expanded { transform: rotate(180deg); }
+.recent-projects__hint { margin: 10px 0; color: #81999c; font-size: 10px; line-height: 1.6; }
+.recent-projects__empty, .recent-projects__error { margin: 12px 0; padding: 18px 12px; border: 1px dashed rgba(120, 157, 160, 0.22); font-size: 11px; line-height: 1.7; color: #a3b7b8; }
+.recent-projects__error { color: #e5b27c; }
+.recent-projects__list { max-height: clamp(180px, calc(100dvh - 340px), 480px); overflow-y: auto; margin: 0; padding: 0; list-style: none; scrollbar-width: thin; }
+.recent-projects__list li { display: flex; align-items: stretch; border-top: 1px solid rgba(120, 157, 160, 0.12); }
+.recent-projects__list li:hover { background: rgba(var(--start-accent-rgb), 0.045); }
+.recent-projects__open { display: grid; grid-template-columns: 28px minmax(0, 1fr) 14px; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 12px 4px; border: 0; text-align: left; background: transparent; }
+.recent-projects__icon { color: var(--start-accent); }
+.recent-projects__copy { display: flex; flex-direction: column; min-width: 0; gap: 5px; }
+.recent-projects__copy > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; }
+.recent-projects__path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #91a8aa; font: 10px "SFMono-Regular", Menlo, monospace; }
+.recent-projects__meta { display: flex; flex-wrap: wrap; gap: 5px 10px; color: #81999c; font-size: 9px; }
+.recent-projects__meta > span:first-child { color: #b0c7c8; }
+.recent-projects__meta em { color: #cfb88e; font-style: normal; }
+.recent-projects .recent-projects__remove { align-self: center; padding: 9px; margin-left: 4px; border: 0; background: transparent; color: #81999c; }
+.recent-projects .recent-projects__remove:hover:not(:disabled) { color: #e6abab; }
