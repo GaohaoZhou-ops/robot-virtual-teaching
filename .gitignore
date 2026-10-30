@@ -131,6 +131,10 @@ test-results/
 # Robot framing, hover-menu and opacity checks use test-artifacts/robot-focus/;
 # service snapshots stay in build/robot-*/. Both roots are ignored without
 # hiding the maintained robotFocus model or unit / integration test sources.
+# Surface-zoom before/after captures and samples.json use
+# test-artifacts/viewport-surface-zoom*/; temporary baseline runners and service
+# backups use build/viewport-surface-zoom/. The shared roots cover all of these;
+# keep tests/fixtures/viewport_surface_zoom_fixture.mjs and regression sources.
 /test-artifacts/
 /screenshots/
 /test-downloads/

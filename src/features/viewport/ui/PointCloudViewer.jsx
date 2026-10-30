@@ -56,6 +56,7 @@ import ViewportInteractionModeButton from "./ViewportInteractionModeButton.jsx";
 import { configureViewportTrackball, createViewportNavigation, DETAIL_DOLLY_FLOOR_RATIO, MAX_OPTICAL_ZOOM, VIEWPORT_FOV, viewportWheelDelta } from "../model/viewportNavigation.js";
 import { createViewportTouchNavigation } from "../model/viewportTouchNavigation.js";
 import { robotFocusView } from "../model/robotFocus.js";
+import { createSurfaceZoomAnchor } from "../scene/surfaceZoom.js";
 import { applyScreenViewportGesture } from "../../collaboration/model/ipadScreenViewport.js";
 import { createIndependentGround, viewportDistanceScale } from "../model/viewportReference.js";
 import { createRobotTwinFollowCamera } from "../../robot-twin/model/robotTwinFollowCamera.js";
@@ -2396,6 +2397,7 @@ export default function PointCloudViewer({
     );
     renderer.domElement.dataset.mapRenderIsolation = 'scene-map-only';
     scene.add(mapLayer);
+    const anchorZoomToSurface = createSurfaceZoomAnchor(camera, controls, mapLayer.children);
 
     // Dolly toward the target first, then continue optically before floating-point
     // precision can collapse camera.position onto controls.target.
@@ -2449,6 +2451,7 @@ export default function PointCloudViewer({
       stopTwinFollow(false);
       cancelFocusAnimation();
       claimKeyboardFocus('wheel');
+      anchorZoomToSurface();
       if (navigation.applyWheelDelta(delta)) {
         syncDetailView();
         reportCameraView();
