@@ -19,11 +19,11 @@ function endpointGhost(model, name, color) {
   return ghost;
 }
 
-export default function RobotJointLimitPreview({ robot, joint, values, ratio, overrides }) {
+export default function RobotJointLimitPreview({ robot, joint, values, ratio, overrides, unit = 'degree' }) {
   const viewportRef = useRef(null), canvasRef = useRef(null), readoutRef = useRef(null);
   const contextRef = useRef(null), modelsRef = useRef(null), animationRef = useRef({ elapsed: 0 });
-  const configRef = useRef({ joint, values, ratio, overrides });
-  configRef.current = { joint, values, ratio, overrides };
+  const configRef = useRef({ joint, values, ratio, overrides, unit });
+  configRef.current = { joint, values, ratio, overrides, unit };
   const [playing, setPlaying] = useState(true);
   const playingRef = useRef(playing); playingRef.current = playing;
   const [load, setLoad] = useState({ status: 'loading', detail: '正在装配预览模型' });
@@ -107,7 +107,8 @@ export default function RobotJointLimitPreview({ robot, joint, values, ratio, ov
         if (now - lastReadout > 80) {
           canvas.dataset.angle = String(angle); canvas.dataset.phase = String(progress);
           canvas.dataset.playing = String(playingRef.current);
-          if (readoutRef.current) readoutRef.current.textContent = `${angle.toFixed(1)}°`;
+          if (readoutRef.current) readoutRef.current.textContent = configRef.current.unit === 'radian'
+            ? `${THREE.MathUtils.degToRad(angle).toFixed(3)} rad` : `${angle.toFixed(1)}°`;
           lastReadout = now;
         }
       }
@@ -180,7 +181,7 @@ export default function RobotJointLimitPreview({ robot, joint, values, ratio, ov
       <div className="joint-limit-preview__legend">
         <span><i className="is-start" />红色虚影 · 起点 / 下限</span>
         <span><i className="is-end" />蓝色虚影 · 终点 / 上限</span>
-        <span><i />实体模型 · 当前角度</span>
+        <span><i />实体模型 · 当前{unit === 'radian' ? '弧度' : '角度'}</span>
       </div>
     </div>
     <div className="joint-limit-preview__transport">

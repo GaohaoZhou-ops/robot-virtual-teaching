@@ -739,6 +739,22 @@ playwright/.auth/
 /tests/atlas-iphone-*-test
 /tests/atlas-iphone-*-tests
 
+# Coverage diagnostics exported from the native app cache include live-camera
+# snapshots. Keep standalone copies local as well as the ignored artifact roots;
+# similarly named source files and nested regression fixtures remain trackable.
+/coverage-diagnostics.json
+/coverage-diagnostics.[pP][nN][gG]
+/coverage-diagnostics.[zZ][iI][pP]
+/ipad/coverage-diagnostics.json
+/ipad/coverage-diagnostics.[pP][nN][gG]
+/ipad/coverage-diagnostics.[zZ][iI][pP]
+/iphone/coverage-diagnostics.json
+/iphone/coverage-diagnostics.[pP][nN][gG]
+/iphone/coverage-diagnostics.[zZ][iI][pP]
+/tests/coverage-diagnostics.json
+/tests/coverage-diagnostics.[pP][nN][gG]
+/tests/coverage-diagnostics.[zZ][iI][pP]
+
 # xcresulttool exports UUID-named images, recordings, snapshots and a manifest.
 # Include numbered retry folders such as atlas-ipad-level-shots-2.
 /atlas-ipad-*-shots/

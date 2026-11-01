@@ -568,7 +568,9 @@ final class AtlasTeachingUITests: XCTestCase {
         registerPhonePermissionHandler()
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
-        let app = XCUIApplication(); app.launch()
+        let app = XCUIApplication()
+        app.launchEnvironment["ATLAS_COVERAGE_DIAGNOSTICS"] = "1"
+        app.launch()
         XCTAssertTrue(app.buttons["scan-pairing-code"].waitForExistence(timeout: 15))
         let project = app.buttons.matching(NSPredicate(format:
             "identifier BEGINSWITH 'local-project-' AND label CONTAINS 'UI-iPhone-LiveAR'")).firstMatch
@@ -596,10 +598,13 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "enabled == true"), object: capture)], timeout: 15), .completed)
         let before = app.staticTexts["floating-pose-count"].label
+        let initialShot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        initialShot.name = "iPhone before first live Pose"; initialShot.lifetime = .keepAlways; add(initialShot)
         capture.tap()
         let nearby = app.buttons["confirm-nearby-pose"]
         if nearby.waitForExistence(timeout: 2) { nearby.tap() }
         XCTAssertNotEqual(app.staticTexts["floating-pose-count"].label, before)
+        Thread.sleep(forTimeInterval: 2)
         for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
             RunLoop.current.run(until: Date().addingTimeInterval(0.8))
@@ -753,7 +758,7 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertTrue(app.buttons["close-pose-review"].isHittable)
             let list = app.collectionViews["pose-review-list"].exists ? app.collectionViews["pose-review-list"] : app.tables["pose-review-list"]
             XCTAssertGreaterThan(list.frame.height, 90)
-            let mode = app.buttons["phone-pose-preview-mode"]
+            let mode = app.buttons["pose-preview-mode-toggle"]
             let quality = app.sliders["pose-preview-quality"]
             let toolbar = app.otherElements["phone-pose-preview-toolbar"]
             let preview = app.otherElements["pose-review-preview"]
@@ -762,10 +767,13 @@ final class AtlasTeachingUITests: XCTestCase {
             XCTAssertFalse(app.buttons["pose-preview-mode-3d"].exists)
             XCTAssertLessThanOrEqual(toolbar.frame.height, 60, "Phone preview controls occupy one row")
             XCTAssertEqual(mode.value as? String, "3D模型")
+            XCTAssertEqual(mode.label, "切换为2D图像")
             let initialQuality = quality.value as? String
+            let floatingResetFrame = app.buttons["reset-pose-preview"].frame
             for expectedMode in ["2D图像", "3D模型"] {
                 mode.tap()
                 XCTAssertEqual(mode.value as? String, expectedMode)
+                XCTAssertEqual(mode.label, expectedMode == "3D模型" ? "切换为2D图像" : "切换为3D模型")
                 XCTAssertEqual(preview.value as? String, expectedMode == "3D模型" ? "3D 交互视图" : "2D 记录视角图像")
                 XCTAssertEqual(quality.value as? String, initialQuality)
                 for control in [quality, app.buttons["close-pose-review"]] {
@@ -809,10 +817,14 @@ final class AtlasTeachingUITests: XCTestCase {
                     collapse.tap()
                     XCTAssertEqual(reset.frame.minY, preview.frame.minY + 12, accuracy: 1)
                 } else {
-                    XCTAssertTrue(toolbar.frame.contains(reset.frame), "The 2D image retains its full-frame restore action")
-                    XCTAssertEqual(reset.frame.midY, mode.frame.midY, accuracy: 2)
-                    XCTAssertLessThanOrEqual(quality.frame.maxX, reset.frame.minX)
-                    XCTAssertLessThanOrEqual(reset.frame.maxX, mode.frame.minX)
+                    let viewport = app.otherElements["pose-review-viewport"]
+                    XCTAssertEqual(reset.label, "恢复完整画幅")
+                    XCTAssertEqual(reset.frame.maxX, viewport.frame.maxX - 12, accuracy: 1)
+                    XCTAssertEqual(reset.frame.minY, floatingResetFrame.minY, accuracy: 1)
+                    XCTAssertTrue(viewport.frame.contains(reset.frame))
+                    XCTAssertFalse(toolbar.frame.intersects(reset.frame))
+                    reset.tap()
+                    XCTAssertEqual(mode.value as? String, "2D图像")
                 }
             }
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -1980,22 +1992,29 @@ final class AtlasTeachingUITests: XCTestCase {
         var modelFromCamera = matrix_identity_float4x4; modelFromCamera.columns.3.z = 1
         camera.simdTransform = object.simdWorldTransform * modelFromCamera
         ar.view.scene.rootNode.addChildNode(camera)
+        ar.view.frame = CGRect(x: 0, y: 0, width: 320, height: 240)
+        ar.view.pointOfView = camera
+        let window = UIWindow(frame: ar.view.frame)
+        let host = UIViewController(); host.view = ar.view
+        window.rootViewController = host; window.makeKeyAndVisible()
+        ar.view.layoutIfNeeded()
+        defer { window.isHidden = true }
+        try await Task.sleep(for: .milliseconds(200))
         let renderer = SCNRenderer(device: try XCTUnwrap(MTLCreateSystemDefaultDevice()), options: nil)
         renderer.scene = ar.view.scene; renderer.pointOfView = camera
-        func coveragePixels(_ name: String, origin: TeachingPoseOrigin = .ipad) throws -> Int {
-            let image = renderer.snapshot(atTime: 0, with: CGSize(width: 320, height: 240), antialiasingMode: .none)
+        func coveragePixels(_ name: String, origin: TeachingPoseOrigin = .ipad, liveView: Bool = false) throws -> Int {
+            let image = liveView ? ar.view.snapshot()
+                : renderer.snapshot(atTime: 0, with: CGSize(width: 320, height: 240), antialiasingMode: .none)
             let cg = try XCTUnwrap(image.cgImage)
             let context = try XCTUnwrap(CGContext(data: nil, width: cg.width, height: cg.height,
                 bitsPerComponent: 8, bytesPerRow: cg.width * 4, space: CGColorSpaceCreateDeviceRGB(),
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue))
             context.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
             let pixels = try XCTUnwrap(context.data).assumingMemoryBound(to: UInt8.self)
+            let expected = origin.rgb * 255
             let count = (0..<(cg.width * cg.height)).filter { index in
                 let offset = index * 4
-                if origin == .ipad {
-                    return Int(pixels[offset]) > Int(pixels[offset + 1]) + 20 && Int(pixels[offset + 1]) > Int(pixels[offset + 2]) + 30
-                }
-                return Int(pixels[offset + 1]) > Int(pixels[offset]) + 40 && Int(pixels[offset + 1]) > Int(pixels[offset + 2]) + 15
+                return (0..<3).allSatisfy { abs(Float(pixels[offset + $0]) - expected[$0]) < 8 }
             }.count
             let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
             return count
@@ -2003,6 +2022,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let coverage = TeachingCoverageRenderer(); coverage.attach(to: geometry); coverage.opacity = 1
         coverage.update(model: model, samples: [])
         let baseline = try coveragePixels("Placed model before recording")
+        let liveBaseline = try coveragePixels("AR view before recording", liveView: true)
         let sample = TeachingSample(segmentId: "coverage-regression", kind: "keyframe",
             cameraPose: TeachingCoordinates.opticalPose(camera: camera.simdWorldTransform, worldFromModel: object.simdWorldTransform))
         var mac = sample; mac.id = "mac-coverage-regression"; mac.origin = .desktop
@@ -2027,6 +2047,8 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(coverage.coveredFraction, macFraction, "recording the same area must not double-count Mac references")
         XCTAssertGreaterThan(try coveragePixels("Placed model after recording") - baseline, 5000,
                              "recording must color the already displayed and arbitrarily placed model")
+        XCTAssertGreaterThan(try coveragePixels("AR view after recording", liveView: true) - liveBaseline, 5000,
+                             "the live AR view must display the same coverage as the offscreen renderer")
         coverage.enabled = false
         XCTAssertLessThan(abs(try coveragePixels("Placed model coverage hidden") - baseline), 100)
     }
@@ -2294,6 +2316,12 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertEqual(material.shaderModifiers?[.fragment], liveShader, "preview clipping must not change the live model")
         XCTAssertTrue(material.value(forKey: "atlasCoverageFrames") as? MTLBuffer === frames)
         XCTAssertFalse(view.overviewObject.geometry === geometry)
+        let ground = try XCTUnwrap(view.overviewGroundPlane)
+        XCTAssertTrue(ground.parent === view.overviewView.scene?.rootNode)
+        XCTAssertEqual(ground.boundingBox.min.z, 0, accuracy: 0.000001)
+        XCTAssertEqual(ground.boundingBox.max.z, 0, accuracy: 0.000001)
+        XCTAssertNil(view.sceneView.scene?.rootNode.childNode(withName: PoseGroundPlaneRenderer.nodeName, recursively: true),
+                     "the ground reference belongs only to the global model scene")
         XCTAssertLessThan(local.boundingBox.max.x - local.boundingBox.min.x, 1.2, "the orbit bounds cover only the selected surface")
         XCTAssertEqual(view.overviewObject.boundingBox.max.x - view.overviewObject.boundingBox.min.x, 4, accuracy: 0.001)
         view.camera.simdOrientation = simd_quatf(angle: 1.1, axis: simd_normalize(SIMD3<Float>(1, 2, 3)))
@@ -2640,7 +2668,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let review = app.buttons["review-poses"]
         XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
         let profile = app.staticTexts["pose-camera-profile"]
-        let imageMode = app.buttons["pose-preview-mode-2d"]
+        let imageMode = app.buttons["pose-preview-mode-toggle"]
         XCTAssertTrue(imageMode.waitForExistence(timeout: 10))
         XCTAssertFalse(profile.exists, "free 3D inspection does not display capture camera parameters")
         imageMode.tap()
@@ -2655,7 +2683,7 @@ final class AtlasTeachingUITests: XCTestCase {
         for (orientation, mode) in [(UIDeviceOrientation.landscapeLeft, "2d"), (.landscapeLeft, "3d"),
                                     (.portrait, "3d"), (.landscapeLeft, "3d")] {
             XCUIDevice.shared.orientation = orientation
-            app.buttons["pose-preview-mode-\(mode)"].tap()
+            if imageMode.value as? String != (mode == "2d" ? "2D图像" : "3D模型") { imageMode.tap() }
             let pending = app.staticTexts["正在提取当前 Pose 点云…"]
             XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(
                 predicate: NSPredicate(format: "exists == false"), object: pending)], timeout: 30), .completed)
@@ -2690,10 +2718,10 @@ final class AtlasTeachingUITests: XCTestCase {
         let review = app.buttons["review-poses"]
         XCTAssertTrue(review.waitForExistence(timeout: 30)); review.tap()
         let preview = app.otherElements["pose-review-preview"]
-        let image = app.buttons["pose-preview-mode-2d"], interactive = app.buttons["pose-preview-mode-3d"]
+        let mode = app.buttons["pose-preview-mode-toggle"]
         let reset = app.buttons["reset-pose-preview"]
         let close = app.buttons["close-pose-review"]
-        XCTAssertTrue(image.waitForExistence(timeout: 10)); XCTAssertTrue(preview.exists)
+        XCTAssertTrue(mode.waitForExistence(timeout: 10)); XCTAssertTrue(preview.exists)
         XCTAssertFalse(app.navigationBars.staticTexts["查看 / 编辑 Pose"].exists)
         XCTAssertGreaterThanOrEqual(close.frame.minX, reset.frame.maxX)
         XCTAssertEqual(close.frame.midY, reset.frame.midY, accuracy: 2)
@@ -2768,7 +2796,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let rotated = preview.screenshot().pngRepresentation
         preview.pinch(withScale: 1.5, velocity: 1)
         XCTAssertNotEqual(preview.screenshot().pngRepresentation, rotated, "pinch changes the rendered model size")
-        image.tap()
+        mode.tap()
         XCTAssertEqual(preview.value as? String, "2D 记录视角图像"); XCTAssertTrue(reset.isEnabled)
         XCTAssertTrue(reset.label.contains("恢复完整画幅"))
         let denseImage = preview.screenshot().pngRepresentation
@@ -2794,7 +2822,8 @@ final class AtlasTeachingUITests: XCTestCase {
         XCTAssertNotEqual(preview.screenshot().pngRepresentation, panned, "fit restores the complete image")
         for orientation: UIDeviceOrientation in [.portrait, .landscapeLeft] {
             XCUIDevice.shared.orientation = orientation
-            XCTAssertTrue(image.isHittable); XCTAssertTrue(interactive.isHittable)
+            XCTAssertTrue(mode.isHittable)
+            XCTAssertEqual(mode.label, "切换为3D模型")
             XCTAssertTrue(close.isHittable)
             XCTAssertTrue(quality.isHittable)
             XCTAssertGreaterThanOrEqual(close.frame.minX, reset.frame.maxX)
@@ -2803,15 +2832,15 @@ final class AtlasTeachingUITests: XCTestCase {
             screenshot.name = "Pose 2D image \(orientation.isLandscape ? "landscape" : "portrait")"
             screenshot.lifetime = .keepAlways; add(screenshot)
         }
-        interactive.tap(); XCTAssertEqual(preview.value as? String, "3D 交互视图")
+        mode.tap(); XCTAssertEqual(preview.value as? String, "3D 交互视图")
         reset.tap()
         let rows = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "review-pose-"))
         XCTAssertGreaterThanOrEqual(rows.count, 2)
         let firstLabel = preview.label
-        image.tap(); rows.element(boundBy: 1).tap()
+        mode.tap(); rows.element(boundBy: 1).tap()
         XCTAssertNotEqual(preview.label, firstLabel)
         XCTAssertEqual(preview.value as? String, "2D 记录视角图像")
-        interactive.tap(); XCTAssertTrue(reset.isEnabled)
+        mode.tap(); XCTAssertTrue(reset.isEnabled)
         let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         screenshot.name = "Interactive Pose point cloud"; screenshot.lifetime = .keepAlways; add(screenshot)
         thumbnail.doubleTap(); XCTAssertTrue(poseSwitch.waitForExistence(timeout: 5)); poseSwitch.tap()
@@ -3992,16 +4021,18 @@ final class AtlasTeachingUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.8))
             XCTAssertTrue(app.buttons["close-pose-review"].isHittable)
             XCTAssertFalse(app.buttons["phone-pose-details"].exists)
-            XCTAssertFalse(app.buttons["phone-pose-preview-mode"].exists)
-            XCTAssertTrue(app.buttons["pose-preview-mode-3d"].isHittable)
-            XCTAssertTrue(app.buttons["pose-preview-mode-2d"].isHittable)
+            let mode = app.buttons["pose-preview-mode-toggle"]
+            XCTAssertTrue(mode.isHittable)
+            XCTAssertEqual(mode.label, "切换为2D图像")
             XCTAssertEqual(app.buttons["reset-pose-preview"].frame.midY, app.buttons["close-pose-review"].frame.midY, accuracy: 2,
                            "iPad keeps reset beside the toolbar's return action")
-            app.buttons["pose-preview-mode-2d"].tap()
+            mode.tap()
             XCTAssertEqual(app.otherElements["pose-review-preview"].value as? String, "2D 记录视角图像")
-            app.buttons["pose-preview-mode-3d"].tap()
+            XCTAssertEqual(mode.label, "切换为3D模型")
+            mode.tap()
+            XCTAssertEqual(app.otherElements["pose-review-preview"].value as? String, "3D 交互视图")
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            shot.name = "Unchanged iPad review \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+            shot.name = "iPad review target-mode toggle \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
         }
         app.buttons["close-pose-review"].tap()
         back.tap()

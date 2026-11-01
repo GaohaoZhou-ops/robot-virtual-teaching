@@ -96,8 +96,9 @@ def run():
                     page.locator('[data-project-guide-input]').set_input_files({
                         'name': 'desktop.json', 'mimeType': 'application/json', 'buffer': json.dumps(project).encode()})
                     original = saved_workspace(page, 'desktop-task-1', 2)['project']['virtualTeaching']['tasks']
-                    expect(open_ipad_menu(page, '传输任务')).to_contain_text('暂无传输任务')
                     topbar_action(page, name='iPad / iPhone', exact=True).click()
+                    expect(page.get_by_role('menuitem', name='传输任务', exact=True)).to_have_count(0)
+                    page.keyboard.press('Escape')
                     assert not mutations, 'browsing menus must not create a transfer'
                     open_ipad_dialog(page)
                     dialog = page.get_by_role('dialog', name='iPad / iPhone 示教')
@@ -126,9 +127,10 @@ def run():
                     wrong, bad_result = complete(wrong, {**archive['result'], 'id': str(uuid.uuid4())})
                     bad_archive = {**archive, 'manifest': wrong['manifest'], 'result': bad_result}
                     page.evaluate("items => localStorage.setItem('atlas-ipad-handoffs-v1', JSON.stringify(items))", [ticket, wrong])
-                    history = open_ipad_menu(page, '传输任务')
-                    page.screenshot(path=str(ARTIFACTS / 'history-menu-1280.png'), full_page=True)
-                    history.locator('[data-transfer-id="' + wrong['id'] + '"]').click()
+                    open_ipad_dialog(page, 'Wi-Fi 同步')
+                    dialog.locator('.ipad-sync-details > summary').click()
+                    dialog.get_by_label('传输任务').select_option(wrong['id'])
+                    page.screenshot(path=str(ARTIFACTS / 'history-details-1280.png'), full_page=True)
                     expect(dialog.get_by_label('电脑局域网地址')).to_be_visible()
                     expect(dialog.get_by_role('button', name='接收示教结果', exact=True)).to_be_enabled()
                     expect(dialog.get_by_label('传输任务')).to_have_value(wrong['id'])
@@ -219,7 +221,9 @@ def run():
                         'name': 'rotation-map.ply', 'mimeType': 'application/octet-stream', 'buffer': changed_ply.encode()})
                     ready(page)
                     saved_workspace(page, None, 0)
-                    open_ipad_menu(page, '传输任务').locator('[data-transfer-id="' + ticket['id'] + '"]').click()
+                    open_ipad_dialog(page, 'Wi-Fi 同步')
+                    dialog.locator('.ipad-sync-details > summary').click()
+                    dialog.get_by_label('传输任务').select_option(ticket['id'])
                     expect(dialog.get_by_label('传输任务')).to_have_value(ticket['id'])
                     dialog.get_by_role('button', name='再次接收（去重）').click()
                     expect(warning).to_be_visible()

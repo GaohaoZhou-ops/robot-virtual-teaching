@@ -342,6 +342,7 @@ import AppKit
 
         let display = TeachingCoverageRenderer()
         let sample = TeachingSample(segmentId: "test", kind: "keyframe", cameraPose: camera())
+        node.geometry = geometry
         display.attach(to: geometry); display.update(model: flat, samples: [sample, sample])
         for _ in 0..<500 { if !display.preparing { break }; try await Task.sleep(nanoseconds: 10_000_000) }
         precondition(display.error.isEmpty && !display.preparing && display.poseCount == 2 && display.hitCount == 1)
@@ -350,7 +351,15 @@ import AppKit
         precondition(initialProgress == firstFraction && display.categoryFractions[.ipad] == firstFraction
                      && display.categoryPercentages[.ipad] == display.coveragePercentage
                      && display.categoryPercentages[.leftArm] == "0%")
+        let recordedPixels = capture("recorded-pose-default-intensity.png")
+        precondition(Int(recordedPixels[center + 2]) > Int(recordedPixels[center]) + 5,
+                     "async recording must tint the displayed geometry at the default intensity")
         display.opacity = 1
+        let opaquePixels = capture("recorded-pose-full-intensity.png")
+        for channel in 0..<3 {
+            precondition(abs(Float(opaquePixels[center + channel]) - TeachingPoseCategory.ipad.rgb[channel] * 255) < 5,
+                         "intensity updates must reach the installed coverage shader")
+        }
         precondition(display.coveredFraction == initialProgress, "opacity changes appearance, not coverage")
         let failedSample = TeachingSample(segmentId: "test", kind: "keyframe", cameraPose: camera(position: SIMD3(0, 0, -1)))
         display.update(model: flat, samples: [sample, failedSample])
@@ -402,6 +411,9 @@ import AppKit
                      "deleting the last pose cancels stale work and clears the surface")
         precondition(display.coveredFraction == 0 && display.coveragePercentage == "0%"
                      && display.categoryPercentages.values.allSatisfy { $0 == "0%" })
+        let clearedPixels = capture("deleted-pose-original-colors.png")
+        precondition(Array(clearedPixels[center..<(center + 4)]) == Array(plain[center..<(center + 4)]),
+                     "deleting all Poses must restore the displayed model's original pixels")
         print("M70 surface coverage: GPU occlusion, FOV/range, shader pixels, area-weighted coverage, per-category unions and overlap, partial triangles, overlap/duplicate/order/batch invariance, hidden-overlay updates, point clouds and delete/cancel passed.")
     }
 }

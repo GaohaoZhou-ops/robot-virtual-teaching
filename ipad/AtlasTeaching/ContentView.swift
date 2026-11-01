@@ -1368,6 +1368,22 @@ struct TeachingView: View {
                 // Start surface feedback in the recording action itself; the
                 // publisher also handles deletion, review and project restore.
                 if let project = session.current { coverage.update(model: geometry, samples: project.result.samples) }
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["ATLAS_COVERAGE_DIAGNOSTICS"] == "1" {
+                    Task { @MainActor in
+                        for _ in 0..<500 where coverage.preparing { try? await Task.sleep(for: .milliseconds(20)) }
+                        let visible = ar.view.scene.rootNode.childNode(withName: "independent-teaching-object", recursively: true)
+                        var state = coverage.diagnosticState
+                        state["visibleGeometry"] = visible?.geometry.map { String(describing: ObjectIdentifier($0)) } ?? "nil"
+                        state["visibleMaterials"] = visible?.geometry?.materials.map { ["id": String(describing: ObjectIdentifier($0)),
+                            "shader": $0.shaderModifiers != nil, "count": $0.value(forKey: "atlasCoverageCount") ?? -1] } ?? []
+                        let root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                        try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys, .prettyPrinted])
+                            .write(to: root.appendingPathComponent("coverage-diagnostics.json"))
+                        try? ar.view.snapshot().pngData()?.write(to: root.appendingPathComponent("coverage-diagnostics.png"))
+                    }
+                }
+                #endif
                 return true
             }
             if !completed { await ar.start() }
@@ -1448,15 +1464,26 @@ struct TeachingView: View {
 
             VStack(spacing: 8) {
                 phoneToolbar(landscape: !portrait)
-                parkingReferenceLegend
                 if liveCamera && levelVisible && (sidebarCollapsed || !portrait) && (portrait || !ar.adjustingPlacement) {
                     HStack {
                         SpatialLevelView(reading: ar.levelReading, compact: true)
                             .frame(width: 180).allowsHitTesting(false)
                         Spacer(minLength: 0)
-                    }.padding(.horizontal, 12)
+                    }.padding(.leading, 4).padding(.trailing, 12)
                 }
                 Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 8) {
+                    if sidebarCollapsed && !portrait && ((!completed && !canRecordPose) || !session.error.isEmpty) {
+                        Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(2).padding(.horizontal, 12).padding(.vertical, 8)
+                            .frame(maxWidth: min(360, controlsWidth - leadingInset - 24), alignment: .leading)
+                            .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+                            .allowsHitTesting(false).accessibilityIdentifier("phone-landscape-hint")
+                            .padding(.leading, 8)
+                    }
+                    parkingReferenceLegend
+                }
+                .padding(.bottom, portrait ? (sidebarCollapsed ? 0 : panelHeight + 8) : max(12, phoneSafeArea.bottom))
                 if sidebarCollapsed && portrait {
                     phonePortraitControls
                 }
@@ -1472,15 +1499,6 @@ struct TeachingView: View {
                     .overlay(alignment: .leading) { Rectangle().fill(.white.opacity(0.12)).frame(width: 1) }
                     .accessibilityElement(children: .contain).accessibilityIdentifier("phone-landscape-controls")
                     .frame(width: size.width, height: size.height, alignment: .trailing)
-                if (!completed && !canRecordPose) || !session.error.isEmpty {
-                    Text(viewportMessage).font(.caption).foregroundStyle(.secondary)
-                        .lineLimit(2).padding(.horizontal, 12).padding(.vertical, 8)
-                        .frame(maxWidth: min(360, controlsWidth - leadingInset - 24), alignment: .leading)
-                        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
-                        .allowsHitTesting(false).accessibilityIdentifier("phone-landscape-hint")
-                        .padding(.leading, leadingInset + 8).padding(.bottom, max(12, phoneSafeArea.bottom))
-                        .frame(width: size.width, height: size.height, alignment: .bottomLeading)
-                }
             }
 
             if !sidebarCollapsed {
@@ -2016,55 +2034,90 @@ struct ModelDisplaySettingsView: View {
     }
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    ObjectPreviewView(geometry: geometry, rendered: renderer.geometry)
-                        .frame(height: 260).clipShape(RoundedRectangle(cornerRadius: 14))
-                        .accessibilityLabel("物体显示预览，拖动旋转，双指缩放")
-                    HStack(spacing: 12) {
-                        ForEach(ModelDisplayMode.allCases) { option in
-                            Button { mode.wrappedValue = option } label: {
-                                Label(option.label, systemImage: option == .mesh ? "cube.transparent" : "circle.dotted")
-                                    .frame(maxWidth: .infinity).padding(.vertical, 8)
-                            }.buttonStyle(.bordered)
-                                .tint(mode.wrappedValue == option ? accent : .secondary)
-                                .accessibilityAddTraits(mode.wrappedValue == option ? .isSelected : [])
-                                .accessibilityIdentifier("display-mode-\(option.rawValue)")
-                                .disabled(option == .mesh && geometry.indices == 0)
-                        }
+            Group {
+                if TeachingDevice.isPhone {
+                    GeometryReader { viewport in
+                        let landscape = viewport.size.width > viewport.size.height
+                        let layout = landscape ? AnyLayout(HStackLayout(alignment: .top, spacing: 20))
+                            : AnyLayout(VStackLayout(alignment: .leading, spacing: 22))
+                        // Keep the SceneKit view alive while rotating so manual
+                        // inspection survives both layout and default zoom changes.
+                        layout {
+                            preview(magnification: landscape ? 3 : 2.5)
+                                .frame(height: landscape ? nil : 260)
+                                .frame(maxWidth: .infinity, maxHeight: landscape ? .infinity : nil)
+                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                            ScrollView {
+                                qualityControls
+                            }
+                            .frame(width: landscape ? min(320, viewport.size.width * 0.4) : nil)
+                            .frame(maxWidth: landscape ? nil : .infinity, maxHeight: .infinity)
+                            .accessibilityIdentifier("display-settings-controls")
+                        }.padding(landscape ? 16 : 24)
                     }
-                    HStack {
-                        Label("点云密度", systemImage: "circle.dotted")
-                        Spacer()
-                        Picker("点云密度", selection: settings.pointDensity) {
-                            ForEach(PointDensity.allCases) { Text($0.label).tag($0) }
-                        }.pickerStyle(.menu).accessibilityIdentifier("point-density")
-                            .disabled(mode.wrappedValue != .points)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            preview(magnification: 1)
+                                .frame(height: 260).clipShape(RoundedRectangle(cornerRadius: 14))
+                            qualityControls
+                        }.padding(24)
                     }
-                    HStack {
-                        Label("Mesh 质量", systemImage: "cube.transparent")
-                        Spacer()
-                        Picker("Mesh 质量", selection: settings.meshQuality) {
-                            ForEach(MeshQuality.allCases) { Text($0.label).tag($0) }
-                        }.pickerStyle(.menu).accessibilityIdentifier("mesh-quality")
-                            .disabled(!geometry.usesMesh(session.displaySettings))
-                    }
-                    Divider()
-                    if renderer.preparing { ProgressView("正在本机更新显示…").accessibilityIdentifier("model-render-progress") }
-                    Text(geometry.summary(renderer.appliedSettings ?? session.displaySettings))
-                        .font(.system(.callout, design: .monospaced)).foregroundStyle(accent)
-                        .accessibilityIdentifier("model-render-summary")
-                    if !renderer.error.isEmpty { Text(renderer.error).foregroundStyle(.orange) }
-                    if geometry.indices == 0 {
-                        Text("此项目只有点云。若电脑源模型包含 Mesh，请新建传输以接收网格。")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }.padding(24)
+                }
             }
             .background(Color(red: 0.025, green: 0.05, blue: 0.065))
             .navigationTitle("显示设置").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.accessibilityIdentifier("close-display-settings") } }
         }.presentationDetents([.large])
+    }
+
+    private func preview(magnification: CGFloat) -> some View {
+        ObjectPreviewView(geometry: geometry, rendered: renderer.geometry, defaultMagnification: magnification)
+            .accessibilityLabel("物体显示预览，拖动旋转，双指缩放")
+            .accessibilityIdentifier("display-settings-preview")
+    }
+
+    private var qualityControls: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 12) {
+                ForEach(ModelDisplayMode.allCases) { option in
+                    Button { mode.wrappedValue = option } label: {
+                        Label(option.label, systemImage: option == .mesh ? "cube.transparent" : "circle.dotted")
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    }.buttonStyle(.bordered)
+                        .tint(mode.wrappedValue == option ? accent : .secondary)
+                        .accessibilityAddTraits(mode.wrappedValue == option ? .isSelected : [])
+                        .accessibilityIdentifier("display-mode-\(option.rawValue)")
+                        .disabled(option == .mesh && geometry.indices == 0)
+                }
+            }
+            HStack {
+                Label("点云密度", systemImage: "circle.dotted")
+                Spacer()
+                Picker("点云密度", selection: settings.pointDensity) {
+                    ForEach(PointDensity.allCases) { Text($0.label).tag($0) }
+                }.pickerStyle(.menu).accessibilityIdentifier("point-density")
+                    .disabled(mode.wrappedValue != .points)
+            }
+            HStack {
+                Label("Mesh 质量", systemImage: "cube.transparent")
+                Spacer()
+                Picker("Mesh 质量", selection: settings.meshQuality) {
+                    ForEach(MeshQuality.allCases) { Text($0.label).tag($0) }
+                }.pickerStyle(.menu).accessibilityIdentifier("mesh-quality")
+                    .disabled(!geometry.usesMesh(session.displaySettings))
+            }
+            Divider()
+            if renderer.preparing { ProgressView("正在本机更新显示…").accessibilityIdentifier("model-render-progress") }
+            Text(geometry.summary(renderer.appliedSettings ?? session.displaySettings))
+                .font(.system(.callout, design: .monospaced)).foregroundStyle(accent)
+                .accessibilityIdentifier("model-render-summary")
+            if !renderer.error.isEmpty { Text(renderer.error).foregroundStyle(.orange) }
+            if geometry.indices == 0 {
+                Text("此项目只有点云。若电脑源模型包含 Mesh，请新建传输以接收网格。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -2140,6 +2193,8 @@ struct PoseReviewView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var selectedID: String?
     @State private var poseName = ""
+    @State private var poseToRename: TeachingSample?
+    @State private var renamedPoseName = ""
     @State private var selectingForDeletion = false
     @State private var deletionIDs: Set<String> = []
     @State private var previewMode: PosePreviewMode = .interactive
@@ -2168,7 +2223,7 @@ struct PoseReviewView: View {
                         posePreview(defaultMagnification: landscape ? 3 : 1, fillsInspectionViewport: !landscape)
                             .frame(height: landscape ? nil : max(180, viewport.size.height * 0.53))
                         VStack(spacing: 0) {
-                            poseList()
+                            poseList(compactRows: !landscape)
                             Button { phoneDetailsOpen = true } label: {
                                 HStack {
                                     Image(systemName: selectingForDeletion ? "trash" : "info.circle")
@@ -2222,6 +2277,17 @@ struct PoseReviewView: View {
                             .accessibilityIdentifier("close-phone-pose-details")
                     } }
             }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+        }.alert("重命名 Pose", isPresented: Binding(
+            get: { poseToRename != nil }, set: { if !$0 { poseToRename = nil } }
+        ), presenting: poseToRename) { sample in
+            TextField("Pose 名称", text: $renamedPoseName)
+                .accessibilityIdentifier("rename-pose-name")
+            Button("取消", role: .cancel) {}.accessibilityIdentifier("cancel-rename-pose")
+            Button("保存") {
+                session.renameSample(sample.id, name: renamedPoseName)
+                if selected?.id == sample.id { poseName = selected?.name ?? "" }
+            }.disabled(session.busy || completed || renamedPoseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("confirm-rename-pose")
         }.onAppear { poseName = selected?.name ?? "" }
             .onChange(of: samples.map(\.id)) { _, ids in
                 deletionIDs.formIntersection(ids)
@@ -2242,7 +2308,7 @@ struct PoseReviewView: View {
             }
     }
 
-    private func poseList(headerHeight: CGFloat = 0) -> some View {
+    private func poseList(headerHeight: CGFloat = 0, compactRows: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text("\(samples.count) 个 Pose").font(.subheadline.weight(.medium))
@@ -2282,7 +2348,7 @@ struct PoseReviewView: View {
             }
             List {
                 ForEach(samples) { sample in
-                    poseRow(sample)
+                    poseRow(sample, compact: compactRows)
                 }
             }.listStyle(.plain).scrollDismissesKeyboard(.interactively)
                 .accessibilityIdentifier("pose-review-list")
@@ -2291,7 +2357,7 @@ struct PoseReviewView: View {
 
     private var allPosesSelected: Bool { !samples.isEmpty && deletionIDs.count == samples.count }
 
-    private func poseRow(_ sample: TeachingSample) -> some View {
+    private func poseRow(_ sample: TeachingSample, compact: Bool) -> some View {
         let highlighted = selectingForDeletion ? deletionIDs.contains(sample.id) : sample.id == selected?.id
         let origin = sample.category
         return Button {
@@ -2306,16 +2372,29 @@ struct PoseReviewView: View {
                     Image(systemName: deletionIDs.contains(sample.id) ? "checkmark.square.fill" : "square")
                         .font(.title3).foregroundStyle(accent)
                 }
-                VStack(alignment: .leading, spacing: 7) {
+                if compact {
                     Text(sample.name.isEmpty ? "Pose" : sample.name)
-                        .foregroundStyle(origin.color)
-                    Label(origin.label, systemImage: origin.symbol)
-                        .font(.caption).foregroundStyle(origin.color)
-                    Text(sample.capturedAt).font(.caption2).foregroundStyle(.secondary)
+                        .foregroundStyle(origin.color).lineLimit(1)
+                    Spacer(minLength: 8)
+                    HStack(spacing: 6) {
+                        Image(systemName: origin == .ipad ? "iphone" : origin.symbol)
+                            .foregroundStyle(origin.color).accessibilityLabel(origin.label)
+                        Text(sample.capturedAt).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    }.font(.caption).lineLimit(1).minimumScaleFactor(0.75).layoutPriority(1)
+                } else {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text(sample.name.isEmpty ? "Pose" : sample.name)
+                            .foregroundStyle(origin.color)
+                        Label(origin.label, systemImage: origin.symbol)
+                            .font(.caption).foregroundStyle(origin.color)
+                        Text(sample.capturedAt).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
-            }.padding(.vertical, 5).contentShape(Rectangle())
+            }.padding(.vertical, compact ? 0 : 5)
+                .frame(minHeight: compact ? 44 : nil).contentShape(Rectangle())
         }.listRowBackground(highlighted ? origin.color.opacity(0.12) : Color.clear)
+            .listRowInsets(compact ? EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16) : nil)
             .disabled(session.busy)
             .accessibilityIdentifier("review-pose-\(sample.id)")
             .accessibilityValue(selectingForDeletion ? (deletionIDs.contains(sample.id) ? "已勾选" : "未勾选") : "")
@@ -2325,6 +2404,12 @@ struct PoseReviewView: View {
                     Button("删除", role: .destructive) { deletePoses([sample.id]) }
                         .tint(.red)
                         .accessibilityIdentifier("swipe-delete-pose-\(sample.id)")
+                    Button("重命名", systemImage: "pencil") {
+                        poseNameFocused = false
+                        renamedPoseName = sample.name
+                        poseToRename = sample
+                    }.tint(.blue)
+                        .accessibilityIdentifier("swipe-rename-pose-\(sample.id)")
                 }
             }
     }
@@ -2337,21 +2422,20 @@ struct PoseReviewView: View {
                         Image(systemName: "arrow.uturn.backward").frame(width: 44, height: 44)
                     }.accessibilityLabel("返回示教").accessibilityIdentifier("close-pose-review")
                     previewQualityControl(compact: true).frame(maxWidth: .infinity)
-                    if previewMode == .image { resetPreviewButton.labelStyle(.iconOnly) }
-                    phonePreviewModeButton
+                    previewModeButton
                 }.padding(.horizontal, 10).padding(.vertical, 6)
                     .accessibilityElement(children: .contain).accessibilityIdentifier("phone-pose-preview-toolbar")
             } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 12) {
-                    previewModeButtons; Spacer(minLength: 0); previewQualityControl(); previewActions
+                    previewModeButton; Spacer(minLength: 0); previewQualityControl(); previewActions
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 12) { previewModeButtons; Spacer(minLength: 0); previewActions }
+                    HStack(spacing: 12) { previewModeButton; Spacer(minLength: 0); previewActions }
                     previewQualityControl()
                 }
                 VStack(alignment: .trailing, spacing: 8) {
-                    HStack { previewModeButtons; Spacer(minLength: 0) }
+                    HStack { previewModeButton; Spacer(minLength: 0) }
                     HStack { previewQualityControl(); Spacer(minLength: 0) }
                     previewActions
                 }
@@ -2396,7 +2480,7 @@ struct PoseReviewView: View {
                         .accessibilityIdentifier("pose-review-preview")
                         .frame(width: area.size.width, height: area.size.height)
                         .overlay(alignment: .topTrailing) {
-                            if TeachingDevice.isPhone && interactive {
+                            if TeachingDevice.isPhone {
                                 phoneFloatingResetPreviewButton
                                     .padding(.trailing, 12)
                                     .padding(.top, 12)
@@ -2410,33 +2494,20 @@ struct PoseReviewView: View {
             .accessibilityElement(children: .contain).accessibilityIdentifier("pose-review-viewport")
     }
 
-    private var phonePreviewModeButton: some View {
-        Button {
+    private var previewModeButton: some View {
+        let targetTitle = previewMode == .interactive ? "2D图像" : "3D模型"
+        return Button {
             poseNameFocused = false
             previewMode = previewMode == .interactive ? .image : .interactive
         } label: {
-            Label(previewMode == .interactive ? "3D模型" : "2D图像", systemImage: "arrow.triangle.2.circlepath")
+            Label(targetTitle, systemImage: previewMode == .interactive ? "photo" : "cube.transparent")
                 .font(.subheadline.weight(.medium)).padding(.vertical, 5)
         }.buttonStyle(.bordered).tint(accent)
             .fixedSize(horizontal: true, vertical: false).disabled(selected == nil)
-            .accessibilityLabel("切换 3D / 2D")
+            .accessibilityLabel("切换为\(targetTitle)")
             .accessibilityValue(previewMode == .interactive ? "3D模型" : "2D图像")
             .accessibilityHint(previewMode == .interactive ? "显示 2D 记录图像" : "显示 3D 交互模型")
-            .accessibilityIdentifier("phone-pose-preview-mode")
-    }
-
-    private var previewModeButtons: some View {
-        HStack(spacing: 6) {
-            ForEach(PosePreviewMode.allCases) { mode in
-                Button { poseNameFocused = false; previewMode = mode } label: {
-                    Label(mode == .interactive ? "3D模型" : "2D 图像",
-                          systemImage: mode == .interactive ? "cube.transparent" : "photo")
-                        .font(.subheadline.weight(.medium)).padding(.vertical, 5)
-                }.buttonStyle(.bordered).tint(previewMode == mode ? accent : .secondary)
-                    .accessibilityAddTraits(previewMode == mode ? .isSelected : [])
-                    .accessibilityIdentifier("pose-preview-mode-\(mode.rawValue)")
-            }
-        }.fixedSize(horizontal: true, vertical: false).disabled(selected == nil)
+            .accessibilityIdentifier("pose-preview-mode-toggle")
     }
 
     private var qualityOptions: [ModelDisplaySettings] {
@@ -2529,7 +2600,7 @@ struct PoseReviewView: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.18), lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 12))
         }.buttonStyle(.plain)
-            .accessibilityLabel("恢复记录视角")
+            .accessibilityLabel(previewMode == .image ? "恢复完整画幅" : "恢复记录视角")
             .accessibilityIdentifier("reset-pose-preview")
     }
 

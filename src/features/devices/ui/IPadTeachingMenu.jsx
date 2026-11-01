@@ -48,7 +48,7 @@ export default function IPadTeachingMenu({ device = 'ipad', mapData, source, des
   const sections = allowTeaching ? [
     { id: 'source', label: '示教来源', detail: currentSourceLabel, icon: Bot },
     { id: 'sync', label: '同步与接收', detail: currentTicket ? transferStatus[currentTicket.status] : vision ? '配对码 / 局域网' : '文件 / 扫码 / Wi-Fi', icon: ArrowLeftRight },
-    { id: 'history', label: '传输任务', detail: `${tickets.length} 个任务`, icon: History },
+    ...(vision ? [{ id: 'history', label: '传输任务', detail: `${tickets.length} 个任务`, icon: History }] : []),
   ] : [];
 
   useEffect(() => { if (!isActive || disabled) { setOpen(false); setSection(null); } }, [isActive, disabled]);

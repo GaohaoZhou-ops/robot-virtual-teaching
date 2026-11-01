@@ -199,6 +199,12 @@ def run():
                     ('iPad / iPhone', 'ipad-ui-transfer', 'vision-ui-transfer'),
                 ):
                     topbar_action(page, device, exact=True).click()
+                    if device == 'iPad / iPhone':
+                        expect(page.get_by_role('menuitem', name='传输任务', exact=True)).to_have_count(0)
+                        expect(page.get_by_role('menuitem', name='示教来源', exact=True)).to_be_visible()
+                        expect(page.get_by_role('menuitem', name='同步与接收', exact=True)).to_be_visible()
+                        page.keyboard.press('Escape')
+                        continue
                     page.get_by_role('menuitem', name='传输任务', exact=True).click()
                     history = page.get_by_role('menu', name='传输任务', exact=True)
                     expect(history.locator(f'[data-transfer-id="{transfer_id}"]')).to_be_visible()

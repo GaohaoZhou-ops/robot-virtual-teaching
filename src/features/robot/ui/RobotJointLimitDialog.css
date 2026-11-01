@@ -27,7 +27,7 @@
 .joint-limit-dialog__range-heading { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .joint-limit-dialog__range-heading strong { font: 14px Menlo, monospace; color: #dcf0eb; }
 .joint-limit-dialog__range-heading span { display: block; margin-top: 7px; font-size: 10px; color: #819e9b; }
-.joint-limit-dialog__range-heading > b { font-size: 10px; font-weight: 400; color: #a2bcb8; padding: 4px 7px; border: 1px solid #36524f; border-radius: 3px; white-space: nowrap; }
+.joint-limit-dialog__range-heading > .joint-limit-dialog__unit { flex-shrink: 0; min-width: 52px; padding: 7px 10px; font-size: 11px; color: var(--cyan); border-color: #36524f; white-space: nowrap; }
 .joint-limit-dialog__endpoints { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 16px; }
 .joint-limit-dialog__endpoints > div { display: grid; gap: 10px; }
 .joint-limit-dialog__endpoints h3 { margin: 0 0 1px; font-size: 11px; font-weight: 400; color: #94c6ff; display: flex; align-items: center; gap: 7px; }

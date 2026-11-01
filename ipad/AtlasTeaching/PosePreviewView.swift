@@ -189,6 +189,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     let overviewView = SCNView()
     let overviewCamera = SCNNode()
     let overviewObject = SCNNode()
+    private(set) var overviewGroundPlane: SCNNode?
     let overviewPose = SCNNode()
     let overviewOrigin = SCNNode()
     let cameraPoseSwitch = UISwitch()
@@ -414,6 +415,12 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             sourceOverview = overview
             updateOverviewGeometry()
         }
+        if overviewChanged || (overview == nil && geometryChanged) {
+            overviewGroundPlane?.removeFromParentNode()
+            overviewGroundPlane = (overview ?? rendered).flatMap { PoseGroundPlaneRenderer.makeNode(bounds: $0.boundingBox) }
+            if let overviewGroundPlane { overviewView.scene?.rootNode.addChildNode(overviewGroundPlane) }
+            updateOverviewAccessibility()
+        }
         if poseChanged {
             sampleID = sample.id; sampleCategory = sample.category; recordedTransform = transform.elements; recordedProjection = projection
             recordedCamera.simdTransform = transform
@@ -627,9 +634,14 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
             pendingOverviewFit = true; return
         }
         pendingOverviewFit = false
-        // Include parking references but exclude origin axes and camera rays.
-        let (minimum, maximum) = ParkingReferenceRenderer.bounds(navigationReference,
+        // Include the z=0 reference even when the entire model is above/below it.
+        // Origin axes and camera rays must not enlarge the fitted view.
+        var (minimum, maximum) = ParkingReferenceRenderer.bounds(navigationReference,
             minimum: geometry.boundingBox.min, maximum: geometry.boundingBox.max)
+        if let ground = overviewGroundPlane?.boundingBox {
+            minimum = SCNVector3(min(minimum.x, ground.min.x), min(minimum.y, ground.min.y), min(minimum.z, ground.min.z))
+            maximum = SCNVector3(max(maximum.x, ground.max.x), max(maximum.y, ground.max.y), max(maximum.z, ground.max.z))
+        }
         let lower = SIMD3<Float>(minimum.x, minimum.y, minimum.z)
         let upper = SIMD3<Float>(maximum.x, maximum.y, maximum.z)
         let center = (lower + upper) / 2
@@ -742,7 +754,7 @@ final class PosePreviewSurface: UIView, UIGestureRecognizerDelegate, UIScrollVie
     private func updateOverviewAccessibility() {
         let camera = showsCameraPose ? "相机姿态与投影已显示" : "相机姿态与投影已隐藏"
         let origin = showsModelOrigin ? "模型坐标原点已显示" : "模型坐标原点已隐藏"
-        overviewView.accessibilityValue = "\(camera)；\(origin)"
+        overviewView.accessibilityValue = "\(camera)；\(origin)" + (overviewGroundPlane == nil ? "" : "；z=0 地面参考")
         overviewContainer.accessibilityValue = overviewView.accessibilityValue
     }
 

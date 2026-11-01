@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -88,7 +89,7 @@ def run():
                 expect(preview).to_have_attribute('data-joint', name)
                 endpoint('lower', HARD[name][0]); endpoint('upper', HARD[name][1])
                 expect_number('下限百分比', 0); expect_number('上限百分比', 100)
-                expect(dialog).to_contain_text('默认 100%')
+                expect(dialog.get_by_role('button', name='切换为弧度', exact=True)).to_have_text('弧度')
             dialog.get_by_role('button', name='设置 left_J1 软限位', exact=True).click()
             expect(preview).to_have_attribute('data-joint', 'left_J1')
             endpoint('lower', hard_angle('left_J1', .025)); endpoint('upper', hard_angle('left_J1', .975))
@@ -99,6 +100,34 @@ def run():
             angle = float(preview.get_attribute('data-angle'))
             page.wait_for_timeout(400)
             assert float(preview.get_attribute('data-angle')) == angle
+            original_endpoints = [float(preview.get_attribute(f'data-{key}')) for key in ['lower', 'upper']]
+            readout = dialog.locator('.joint-limit-preview__transport strong')
+            for _ in range(3):
+                dialog.get_by_role('button', name='切换为弧度', exact=True).click()
+                expect(dialog.get_by_role('button', name='切换为角度', exact=True)).to_have_text('角度')
+                expect_number('下限弧度', math.radians(original_endpoints[0]), .00051)
+                expect_number('上限弧度', math.radians(original_endpoints[1]), .00051)
+                expect(readout).to_have_text(re.compile(r' rad$'))
+                expect(dialog.locator('.joint-limit-dialog__range-heading')).to_contain_text(' rad')
+                expect(dialog.get_by_role('slider', name='软限位下限滑块', exact=True)).to_have_attribute('aria-valuetext', re.compile(r' rad，'))
+                dialog.get_by_role('button', name='切换为角度', exact=True).click()
+                expect_number('下限角度', original_endpoints[0])
+                expect_number('上限角度', original_endpoints[1])
+                expect_number('下限百分比', 2.5); expect_number('上限百分比', 97.5)
+                assert [float(preview.get_attribute(f'data-{key}')) for key in ['lower', 'upper']] == original_endpoints
+                assert float(preview.get_attribute('data-angle')) == angle, 'switching units must not restart the preview'
+                expect(dialog).to_contain_text('所有关节使用默认范围')
+
+            dialog.get_by_role('button', name='切换为弧度', exact=True).click()
+            set_number('上限弧度', .75)
+            endpoint('upper', math.degrees(.75))
+            set_number('下限弧度', -.5, commit=False)
+            dialog.get_by_role('button', name='切换为角度', exact=True).click()
+            endpoint('lower', math.degrees(-.5))
+            expect_number('下限角度', math.degrees(-.5))
+            expect_number('上限角度', math.degrees(.75))
+            dialog.get_by_role('button', name='此关节恢复统一比例').click()
+            endpoint('lower', original_endpoints[0]); endpoint('upper', original_endpoints[1])
             dialog.get_by_role('button', name='播放软限位预览').click()
             page.wait_for_function('(angle) => Math.abs(Number(document.querySelector(".joint-limit-preview__canvas").dataset.angle) - angle) > 5', arg=angle)
             assert live_values() == before, 'animation must never move the workbench robot'
@@ -138,7 +167,8 @@ def run():
 
             open_settings()
             assert number('统一软限位百分比') == 95
-            set_number('下限角度', 30); set_number('上限百分比', 80)
+            dialog.get_by_role('button', name='切换为弧度', exact=True).click()
+            set_number('下限弧度', math.radians(30)); set_number('上限百分比', 80)
             dialog.get_by_role('button', name='设置 right_J2 软限位').click()
             set_number('下限百分比', 20); set_number('上限百分比', 80)
             for name in WAIST:
@@ -231,7 +261,7 @@ def run():
             expect_number('统一软限位百分比', 80.25)
             dialog.get_by_role('button', name='取消', exact=True).click()
             assert not errors, errors
-            print('PASS soft-limit details: 18 arm/waist joints, legacy defaults, actual robot/red-blue ghosts, loop/pause, numeric/dual sliders, cancellation isolation, live bounds, ZIP/reload, resets, keyboard and responsive layout')
+            print('PASS soft-limit details: 18 arm/waist joints, degree/radian round trips and input persistence, actual robot/red-blue ghosts, loop/pause, numeric/dual sliders, cancellation isolation, live bounds, ZIP/reload, resets, keyboard and responsive layout')
         except Exception:
             page.screenshot(path=str(OUTPUT / 'failure.png'), full_page=True)
             print('Page errors:', errors)

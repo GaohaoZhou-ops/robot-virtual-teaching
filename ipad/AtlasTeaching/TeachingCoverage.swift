@@ -679,6 +679,15 @@ final class TeachingCoverageRenderer: ObservableObject {
     }
 
     func attach(to geometry: SCNGeometry?) { rendered = geometry; apply() }
+    #if DEBUG
+    var diagnosticState: [String: Any] {
+        ["enabled": enabled, "opacity": opacity, "poses": poseCount, "hits": hitCount,
+         "percentage": coveragePercentage, "status": status, "error": error,
+         "geometry": rendered.map { String(describing: ObjectIdentifier($0)) } ?? "nil",
+         "materials": rendered?.materials.map { ["id": String(describing: ObjectIdentifier($0)),
+             "shader": $0.shaderModifiers != nil, "count": $0.value(forKey: "atlasCoverageCount") ?? -1] } ?? []]
+    }
+    #endif
     func cancel() { generation = UUID(); task?.cancel(); preparing = false }
     func resume() { if snapshot == nil || appliedPoses != poses { rebuild() } }
 
@@ -728,6 +737,9 @@ final class TeachingCoverageRenderer: ObservableObject {
     }
 
     private func apply() {
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
         for material in rendered?.materials ?? [] {
             guard enabled, let snapshot, snapshot.frameCount > 0 else {
                 material.shaderModifiers = nil
@@ -741,6 +753,13 @@ final class TeachingCoverageRenderer: ObservableObject {
 
     static func apply(_ snapshot: TeachingCoverageSnapshot, opacity: Float, to material: SCNMaterial,
                       clipOutside: Bool = false) {
+        // Keep an installed program when adding Poses or changing intensity.
+        // Register its arguments before binding their values, and publish the
+        // program, buffers and counts together to the continuous AR renderer.
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
+        if material.shaderModifiers != coverageModifiers { material.shaderModifiers = coverageModifiers }
         material.setValue(snapshot.frames, forKey: "atlasCoverageFrames")
         material.setValue(snapshot.depths, forKey: "atlasCoverageDepths")
         material.setValue(snapshot.frameCount, forKey: "atlasCoverageCount")
@@ -760,7 +779,9 @@ final class TeachingCoverageRenderer: ObservableObject {
         material.setValue(SCNVector4(frustum.tangents.x, frustum.tangents.y, frustum.offset.x, frustum.offset.y), forKey: "atlasCoverageProjection")
         material.setValue(SCNVector4(frustum.near, frustum.far, Float(frustum.columns), Float(frustum.rows)), forKey: "atlasCoverageLimits")
         material.setValue(SCNVector3(frustum.tolerance.x, frustum.tolerance.y, frustum.tolerance.z), forKey: "atlasCoverageTolerance")
-        material.shaderModifiers = [.geometry: """
+    }
+
+    private static let coverageModifiers: [SCNShaderModifierEntryPoint: String] = [.geometry: """
             #pragma varyings
             float3 atlasCoveragePosition;
             #pragma body
@@ -808,5 +829,4 @@ final class TeachingCoverageRenderer: ObservableObject {
             }
             if (atlasCoverageClipOutside != 0 && !atlasCovered) discard_fragment();
             """]
-    }
 }

@@ -13,9 +13,9 @@ const WAIST_LABELS = { ankle_pitch: '踝部俯仰', knee_pitch: '膝部俯仰', 
 const jointLabel = (joint) => WAIST_LABELS[joint.name.replace(/[_-]J$/i, '').toLowerCase()]
   || joint.name.replace(/^(left|right)[_-]/i, '');
 
-function LimitNumber({ label, value, min, max, suffix, onChange, disabled }) {
+function LimitNumber({ label, value, min, max, suffix, step = 0.1, onChange, disabled }) {
   const [draft, setDraft] = useState(format(value));
-  useEffect(() => setDraft(format(value)), [value]);
+  useEffect(() => setDraft(format(value)), [value, suffix]);
   const commit = () => {
     if (draft === format(value) || disabled) return;
     const parsed = draft.trim() ? Number(draft) : NaN;
@@ -24,7 +24,7 @@ function LimitNumber({ label, value, min, max, suffix, onChange, disabled }) {
     if (Math.abs(next - value) > 1e-9) onChange(next);
   };
   return <label className="joint-limit-number"><span>{label}</span><div>
-    <input type="number" aria-label={label} min={min} max={max} step="0.1" value={draft} disabled={disabled}
+    <input type="number" aria-label={label} min={min} max={max} step={step} value={draft} disabled={disabled}
       onChange={(event) => setDraft(event.target.value)} onBlur={commit}
       onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); commit(); } }} />
     <small>{suffix}</small>
@@ -33,6 +33,7 @@ function LimitNumber({ label, value, min, max, suffix, onChange, disabled }) {
 
 export default function RobotJointLimitDialog({ snapshot, onApply, onClose, returnFocusRef }) {
   const [ratio, setRatio] = useState(snapshot.ratio);
+  const [unit, setUnit] = useState('degree');
   const [overrides, setOverrides] = useState(() => normalizeArmSoftLimitOverrides(snapshot.overrides));
   const [selectedName, setSelectedName] = useState(snapshot.joints.find((joint) => /^left[_-]/i.test(joint.name))?.name || snapshot.joints[0]?.name);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
@@ -43,6 +44,12 @@ export default function RobotJointLimitDialog({ snapshot, onApply, onClose, retu
   const hardSpan = selected ? selected.hardUpper - selected.hardLower : 1;
   const lower = (selected?.hardLower || 0) + hardSpan * range.lower;
   const upper = (selected?.hardLower || 0) + hardSpan * range.upper;
+  const radians = unit === 'radian';
+  const angleFactor = radians ? Math.PI / 180 : 1;
+  const angleLabel = radians ? '弧度' : '角度';
+  const angleSuffix = radians ? 'rad' : '°';
+  const targetUnitLabel = radians ? '角度' : '弧度';
+  const formatAngle = (value) => `${format(value * angleFactor)}${radians ? ' rad' : '°'}`;
   const customCount = Object.keys(overrides).length;
   const groups = useMemo(() => ['left', 'right', 'waist'].map((side) => ({ side, label: { left: '左臂', right: '右臂', waist: '腰部' }[side],
     joints: snapshot.joints.filter((joint) => robotSoftLimitJointGroup(joint.name) === side),
@@ -101,7 +108,7 @@ export default function RobotJointLimitDialog({ snapshot, onApply, onClose, retu
         <button type="button" ref={closeRef} aria-label="关闭关节软限位设置" disabled={busy} onClick={onClose}><X size={18} /></button>
       </header>
       <div className="joint-limit-dialog__body">
-        <RobotJointLimitPreview robot={snapshot.robot} joint={selected} values={snapshot.values} ratio={ratio} overrides={overrides} />
+        <RobotJointLimitPreview robot={snapshot.robot} joint={selected} values={snapshot.values} ratio={ratio} overrides={overrides} unit={unit} />
         <div className="joint-limit-dialog__editor">
           <section className="joint-limit-dialog__default" aria-label="统一软限位比例">
             <div><strong>双臂统一比例</strong><span>双臂使用硬限位中间范围；腰部未单独设置时保留 100%。</span></div>
@@ -121,15 +128,18 @@ export default function RobotJointLimitDialog({ snapshot, onApply, onClose, retu
           </section>
           {selected && <section className="joint-limit-dialog__range" aria-label={`${selected.name} 软限位范围`} key={selected.name}>
             <div className="joint-limit-dialog__range-heading"><div><strong>{selected.name}</strong>
-              <span>硬限位 {format(selected.hardLower)}° ～ {format(selected.hardUpper)}°</span></div>
-              <b>{overrides[selected.name] ? '单独设置' : isWaist ? '默认 100%' : '统一比例'}</b></div>
+              <span>硬限位 {formatAngle(selected.hardLower)} ～ {formatAngle(selected.hardUpper)}</span></div>
+              <button type="button" className="joint-limit-dialog__unit" disabled={busy}
+                aria-label={`切换为${targetUnitLabel}`} title={`切换为${targetUnitLabel}`}
+                onClick={() => setUnit(radians ? 'degree' : 'radian')}>{targetUnitLabel}</button></div>
             <div className="joint-limit-dialog__endpoints">
               {[['lower', '起点 / 下限', lower], ['upper', '终点 / 上限', upper]].map(([key, title, value]) => <div key={key} data-limit-end={key}>
                 <h3><i />{title}</h3>
-                <LimitNumber label={key === 'lower' ? '下限角度' : '上限角度'} value={value} suffix="°" disabled={busy}
-                  min={key === 'lower' ? selected.hardLower : lower + hardSpan * MIN_ARM_SOFT_LIMIT_RATIO}
-                  max={key === 'upper' ? selected.hardUpper : upper - hardSpan * MIN_ARM_SOFT_LIMIT_RATIO}
-                  onChange={(angle) => changeEndpoint(key, (angle - selected.hardLower) / hardSpan)} />
+                <LimitNumber label={`${key === 'lower' ? '下限' : '上限'}${angleLabel}`} value={value * angleFactor}
+                  suffix={angleSuffix} step={radians ? 0.001 : 0.1} disabled={busy}
+                  min={(key === 'lower' ? selected.hardLower : lower + hardSpan * MIN_ARM_SOFT_LIMIT_RATIO) * angleFactor}
+                  max={(key === 'upper' ? selected.hardUpper : upper - hardSpan * MIN_ARM_SOFT_LIMIT_RATIO) * angleFactor}
+                  onChange={(angle) => changeEndpoint(key, (angle / angleFactor - selected.hardLower) / hardSpan)} />
                 <LimitNumber label={key === 'lower' ? '下限百分比' : '上限百分比'} value={range[key] * 100} suffix="%" disabled={busy}
                   min={key === 'lower' ? 0 : (range.lower + MIN_ARM_SOFT_LIMIT_RATIO) * 100}
                   max={key === 'upper' ? 100 : (range.upper - MIN_ARM_SOFT_LIMIT_RATIO) * 100}
@@ -141,14 +151,14 @@ export default function RobotJointLimitDialog({ snapshot, onApply, onClose, retu
               <div className="joint-limit-dual-slider__track"><i /></div>
               <input type="range" min="0" max="100" step="0.1" value={range.lower * 100} disabled={busy} data-limit-end="lower"
                 aria-label="软限位下限滑块" aria-valuemax={(range.upper - MIN_ARM_SOFT_LIMIT_RATIO) * 100}
-                aria-valuetext={`${format(lower)} 度，${format(range.lower * 100)}%`}
+                aria-valuetext={`${formatAngle(lower)}，${format(range.lower * 100)}%`}
                 onChange={(event) => changeEndpoint('lower', Number(event.target.value) / 100)} />
               <input type="range" min="0" max="100" step="0.1" value={range.upper * 100} disabled={busy} data-limit-end="upper"
                 aria-label="软限位上限滑块" aria-valuemin={(range.lower + MIN_ARM_SOFT_LIMIT_RATIO) * 100}
-                aria-valuetext={`${format(upper)} 度，${format(range.upper * 100)}%`}
+                aria-valuetext={`${formatAngle(upper)}，${format(range.upper * 100)}%`}
                 onChange={(event) => changeEndpoint('upper', Number(event.target.value) / 100)} />
             </div>
-            <div className="joint-limit-dialog__scale"><span>0% · {format(selected.hardLower)}°</span><strong>保留 {format((range.upper - range.lower) * 100)}%</strong><span>100% · {format(selected.hardUpper)}°</span></div>
+            <div className="joint-limit-dialog__scale"><span>0% · {formatAngle(selected.hardLower)}</span><strong>保留 {format((range.upper - range.lower) * 100)}%</strong><span>100% · {formatAngle(selected.hardUpper)}</span></div>
             <p className="joint-limit-dialog__explanation">百分比按硬限位的下限（0%）至上限（100%）计算。左右滑块分别调整起点和终点，最小范围为 1%。</p>
             <button type="button" className="joint-limit-dialog__reset-joint" disabled={busy || !overrides[selected.name]} onClick={resetJoint}>
               <RotateCcw size={12} />{isWaist ? '此关节恢复 100%' : '此关节恢复统一比例'}</button>
