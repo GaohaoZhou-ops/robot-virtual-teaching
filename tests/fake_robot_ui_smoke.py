@@ -56,8 +56,9 @@ with sync_playwright() as p:
         first_x = canvas.get_attribute('data-robot-x')
         expect(canvas).not_to_have_attribute('data-robot-x', first_x)
         assert len(json.loads(canvas.get_attribute('data-robot-joint-values'))) >= 20
-        follow = page.get_by_role('button', name='机器人后上方跟随视角')
+        follow = page.get_by_role('button', name='跟随视角', exact=True)
         follow.click()
+        page.get_by_role('dialog', name='选择跟随形态', exact=True).get_by_role('button', name='BEV', exact=True).click()
         expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
         first_camera = canvas.get_attribute('data-camera-x')
         expect(canvas).not_to_have_attribute('data-camera-x', first_camera)

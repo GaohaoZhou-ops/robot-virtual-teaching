@@ -7,6 +7,8 @@ from pathlib import Path
 from urllib.request import urlopen
 from playwright.sync_api import sync_playwright, expect
 from teaching_transfer_ui_smoke import seed, CHROME
+from robot_twin_follow_helpers import select_follow_mode
+from topbar_tools_helpers import topbar_action
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / 'test-artifacts' / 'robot-twin-smoothing'
@@ -73,6 +75,9 @@ try:
         try:
             seed(page, ['map'], 'map')
             canvas = page.locator('.three-canvas')
+            topbar_action(page, name='加载机器人', exact=True).click()
+            page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70', exact=True).click()
+            expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
             offline = canvas.get_attribute('data-robot-origin')
             page.get_by_role('button', name='同步作业', exact=True).click()
             page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
@@ -80,7 +85,7 @@ try:
             dialog.get_by_label('管理员密码', exact=True).fill('admin')
             dialog.get_by_role('button', name='连接并同步', exact=True).click()
             expect(dialog).not_to_be_visible(timeout=10000)
-            page.get_by_role('button', name='机器人后上方跟随视角', exact=True).click()
+            select_follow_mode(page)
             # Non-followed robots no longer carry an active presentation buffer.
             # Let this newly enabled follower collect its first pair of samples.
             page.wait_for_timeout(650)
@@ -105,6 +110,59 @@ try:
             assert all(abs(f['fleet'] - f['x']) < .00001 for f in frames)
             lag = [f['lag'] for f in frames if f['lag'] is not None]
             assert 550 < statistics.median(lag) < 630, statistics.median(lag)
+            # On the real URDF, the chest view stays just ahead of the housing
+            # and aligned with its axes through continuously interpolated joints.
+            select_follow_mode(page, '第一人称-胸摄')
+            def sample_follow_mount(mount_name):
+                return page.evaluate('''async mountName => {
+              const {RobotTwinScene} = await import('/src/features/robot-twin/model/robotTwinScene.js');
+              const update = RobotTwinScene.prototype.update;
+              let mount;
+              RobotTwinScene.prototype.update = function(...args) {
+                mount ||= this.base?.getObjectByName(mountName);
+                return update.apply(this, args);
+              };
+              try { return await new Promise(done => {
+                const frames = [], start = performance.now();
+                const read = () => {
+                  if (mount) {
+                    const Vector3 = mount.position.constructor;
+                    const d = document.querySelector('.three-canvas').dataset;
+                    const eye = new Vector3(+d.cameraX, +d.cameraY, +d.cameraZ);
+                    const direction = new Vector3(+d.targetX, +d.targetY, +d.targetZ).sub(eye).normalize();
+                    const forward = new Vector3(1,0,0).transformDirection(mount.matrixWorld);
+                    const offset = eye.clone().sub(new Vector3().setFromMatrixPosition(mount.matrixWorld));
+                    const up = new Vector3(+d.cameraUpX, +d.cameraUpY, +d.cameraUpZ);
+                    frames.push({distance: offset.length(), ahead: offset.dot(forward),
+                      local: eye.clone().applyMatrix4(mount.matrixWorld.clone().invert()).toArray(),
+                      direction: direction.dot(forward), up: up.dot(new Vector3(0,0,1).transformDirection(mount.matrixWorld))});
+                  }
+                  if (performance.now()-start < 2000) requestAnimationFrame(read); else done(frames);
+                }; requestAnimationFrame(read);
+              }); } finally { RobotTwinScene.prototype.update = update; }
+            }''', mount_name)
+            chest_frames = sample_follow_mount('camera_waist_L')
+            assert len(chest_frames) > 50, len(chest_frames)
+            assert all(.04 < f['distance'] < .06 and f['ahead'] > .04 for f in chest_frames)
+            assert all(f['direction'] > .99999 and f['up'] > .99999 for f in chest_frames)
+            page.get_by_role('button', name='跟随视角', exact=True).click()
+            page.screenshot(path=str(ARTIFACTS / 'chest-follow-menu.png'))
+            page.keyboard.press('Escape')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'chest')
+            select_follow_mode(page, '第一人称-头部')
+            head_frames = sample_follow_mount('camera_head_L')
+            assert len(head_frames) > 50, len(head_frames)
+            # The supplied combined stereo visual spans x [-.001, .018],
+            # y [-.0309972, .0310028], z [-.028, .028] in its camera link.
+            # The eye stays at that center, including during head articulation.
+            head_center = [.0085, .0000027921, 0]
+            assert all(all(abs(a-b) < 1e-5 for a, b in zip(f['local'], head_center)) for f in head_frames)
+            assert all(f['direction'] > .99999 and f['up'] > .99999 for f in head_frames)
+            expect(canvas).to_have_attribute('data-camera-fov', '46')
+            page.get_by_role('button', name='跟随视角', exact=True).click()
+            page.screenshot(path=str(ARTIFACTS / 'head-follow-menu.png'))
+            page.keyboard.press('Escape')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'head')
             monitor = page.get_by_role('complementary', name='任务监控台', exact=True)
             camera = monitor.get_by_role('region', name='本体相机', exact=True)
             page.evaluate('window.delayTwinDecode=true')
@@ -151,7 +209,7 @@ try:
             with urlopen(address + '/__fake_robot/status', timeout=3) as response:
                 requests = json.load(response)['requests']
             assert all(key.startswith('GET ') or key in ['POST /api/v1/access/login', 'POST /api/v1/body-cameras/preview', 'POST /api/v1/body-cameras/frame'] for key in requests if '/api/' in key)
-            print(f'Twin smoothing: {len(frames)} frames, {moving:.1%} moving, median display delay {statistics.median(lag):.0f} ms. Camera background decode, fixed layout, retained stale frame and recovery passed.')
+            print(f'Twin smoothing: {len(frames)} BEV frames, {moving:.1%} moving, median display delay {statistics.median(lag):.0f} ms; {len(chest_frames)} chest and {len(head_frames)} head frames aligned with the articulated cameras. Camera background decode, fixed layout, retained stale frame and recovery passed.')
         except Exception:
             page.screenshot(path=str(ARTIFACTS / 'failure.png'))
             print('Page errors:', errors)

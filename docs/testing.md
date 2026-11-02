@@ -19,10 +19,10 @@
 | 范围 | 入口 |
 | --- | --- |
 | 工作台点云加载、路径编辑、工程 ZIP 往返和三维缩放 | `BASE_URL=http://127.0.0.1:22170 uv run --with playwright python tests/browser_smoke.py`（先启动独立 Vite；可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定浏览器） |
-| 孪生协议、慢响应时效、跟随对象独立插值、变速转向平滑、晚到数据恢复、模型更新开销与相机换帧生命周期 | `npm run test:robot-twin` |
+| 孪生协议、慢响应时效、BEV RPY 角度与归零、胸摄 / 头部视角、双摄几何中心与自身遮挡、跟随对象独立插值、变速转向平滑、晚到数据恢复、模型更新开销与相机换帧生命周期 | `npm run test:robot-twin` |
 | 机器人卡片的工程归档、工作区集合、地址合并及密码隔离 | `npm run test:robot-twin-project` |
 | 另存为 / 导出后在新浏览器恢复机器人卡片、端口及勾选状态 | `BASE_URL=http://127.0.0.1:22070 uv run --with playwright python tests/robot_twin_project_ui_smoke.py`（先启动独立 Vite 开发服务；测试不会连接机器人） |
-| 连续运动、跟随相机同步、显示延迟、相机后台解码与弱网布局稳定 | `BASE_URL=http://127.0.0.1:22067 uv run --with playwright python tests/robot_twin_smoothing_ui_smoke.py`（独立 Vite 开发服务；测试自行启动本地模拟机器人） |
+| 连续运动、BEV / 胸摄 / 头部与模型同步、显示延迟、相机后台解码与弱网布局稳定 | `BASE_URL=http://127.0.0.1:22067 uv run --with playwright python tests/robot_twin_smoothing_ui_smoke.py`（独立 Vite 开发服务；测试自行启动本地模拟机器人） |
 | 离线协作授权、增量合并、旧缓存升级及显示配置归档 | `npm run test:work-sync` |
 | 一次申请自动传输、打包进度、重复申请防护与通知通道不可用时恢复 | `uv run --with playwright python tests/work_sync_approval_ui_smoke.py`（先启动独立 Vite 开发服务，通过 `BASE_URL` 指定地址） |
 | 两端地图 / 独立对象颜色、实时显示设置、刷新导出与旧缓存修复 | `BASE_URL=http://127.0.0.1:22063 uv run --with playwright python tests/work_sync_display_ui_smoke.py`（先在该端口启动独立 Vite 开发服务） |

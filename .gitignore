@@ -247,6 +247,8 @@ playwright/.auth/
 # Motion-latency and camera-frame retention reviews use
 # test-artifacts/robot-twin-smoothing/; keep robot_twin_motion_*,
 # robot_twin_camera_frames_* and robot_twin_smoothing_* regression sources.
+# BEV RPY menus and chest/head follow reviews use these same artifact roots;
+# keep RobotTwin* UI/model sources, follow helpers and unit tests trackable.
 # Continuous-photo cache/decode checks use test-artifacts/robot-twin-capture/;
 # keep robot_twin_capture_* runners and the synthetic capture fixture in tests/.
 # Card-portability checks use test-artifacts/robot-twin-project/ for browser
@@ -293,6 +295,10 @@ playwright/.auth/
 /tests/robot-twin-*.[jJ][sS][oO][nN][lL]
 /robot-twin-*.[nN][dD][jJ][sS][oO][nN]
 /tests/robot-twin-*.[nN][dD][jJ][sS][oO][nN]
+# Gzip copies of standalone telemetry, HAR and frame diagnostics stay local.
+# Preserve compressed fixture inputs and documentation assets in other paths.
+/robot-twin-*.[gG][zZ]
+/tests/robot-twin-*.[gG][zZ]
 
 # Simulator PID/locks/logs live in .atlas-cache/fake-robot/; twin, confidence,
 # history-list and offline-to-twin UI captures use test-artifacts/{robot-twin,

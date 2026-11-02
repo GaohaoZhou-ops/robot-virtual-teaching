@@ -59,8 +59,8 @@ import { robotFocusView } from "../model/robotFocus.js";
 import { createSurfaceZoomAnchor } from "../scene/surfaceZoom.js";
 import { applyScreenViewportGesture } from "../../collaboration/model/ipadScreenViewport.js";
 import { createIndependentGround, viewportDistanceScale } from "../model/viewportReference.js";
-import { createRobotTwinFollowCamera } from "../../robot-twin/model/robotTwinFollowCamera.js";
-import "../../robot-twin/ui/RobotTwinFollow.css";
+import { createRobotTwinFollowCamera, renderRobotTwinFollowView, normalizeRobotTwinBevAngles, ZERO_ROBOT_TWIN_BEV_ANGLES } from "../../robot-twin/model/robotTwinFollowCamera.js";
+import { RobotTwinFollowMenu } from "../../robot-twin/ui/RobotTwinFollowMenu.jsx";
 import RobotDistanceWarning from "../../robot/ui/RobotDistanceWarning.jsx";
 import RobotCollisionJointSettings from "../../robot/ui/RobotCollisionJointSettings.jsx";
 import { RobotJointCouplingContext, RobotJointLimitContext, RobotJointSoftRangesContext } from "../../robot/ui/RobotJointLimitContext.js";
@@ -325,7 +325,8 @@ export default function PointCloudViewer({
   const robotFollowPositionRef = useRef(null);
   const twinWorkspaceViewRef = useRef(null);
   const twinFollowRef = useRef(null);
-  const [twinFollowEnabled, setTwinFollowEnabled] = useState(false);
+  const [twinFollowMode, setTwinFollowMode] = useState(null);
+  const [twinBevAngles, setTwinBevAngles] = useState(ZERO_ROBOT_TWIN_BEV_ANGLES);
   const pointerInteractionRef = useRef(null);
   const viewActionsRef = useRef(null);
   const initialViewRef = useRef(initialView);
@@ -453,12 +454,14 @@ export default function PointCloudViewer({
     const follow = twinFollowRef.current;
     if (!follow) return;
     twinFollowRef.current = null;
-    setTwinFollowEnabled(false);
+    setTwinFollowMode(null);
+    setTwinBevAngles(ZERO_ROBOT_TWIN_BEV_ANGLES);
     pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
     const controls = controlsRef.current;
     if (controls) {
       controls.enabled = follow.controlsEnabled;
       controls.domElement.dataset.twinFollowEnabled = 'false';
+      controls.domElement.dataset.twinFollowMode = '';
     }
     if (restore) viewActionsRef.current?.apply(follow.previousView, 'twin-follow-ended');
   }, []);
@@ -2173,14 +2176,15 @@ export default function PointCloudViewer({
     renderer.domElement.dataset.teachingSpaceMode = mapData.teachingSpaceMode || 'map';
     renderer.domElement.dataset.coordinateFrame = mapData.coordinateFrame || 'map';
     renderer.domElement.dataset.twinFollowEnabled = 'false';
+    renderer.domElement.dataset.twinFollowMode = '';
     renderer.domElement.dataset.spaceOrigin = '0,0,0';
     mount.appendChild(renderer.domElement);
     // Capture before TrackballControls so the very first drag/touch takes over
     // from the current follow view. Include the 3D toolbar, but preserve the
-    // follow toggle's explicit restore/start behavior.
+    // follow menu's explicit restore/start/switch behavior.
     const viewportPanel = mount.closest('.panel-3d') || mount;
     const onViewportInteraction = (event) => {
-      if (!event.target?.closest?.('.robot-twin-follow-toggle')) stopTwinFollow(false);
+      if (!event.target?.closest?.('.robot-twin-follow, .robot-twin-follow-menu')) stopTwinFollow(false);
     };
     viewportPanel.addEventListener('pointerdown', onViewportInteraction, true);
     viewportPanel.addEventListener('click', onViewportInteraction, true);
@@ -3651,6 +3655,7 @@ export default function PointCloudViewer({
         || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
       return twinInputs;
     };
+    const renderScene = () => renderer.render(scene, camera);
     // Capture synchronously after rendering, before WebGL discards its buffer.
     // This also refreshes the scene when the workbench's animation loop is hidden.
     const captureCollaborationViewport = (target) => {
@@ -3660,10 +3665,10 @@ export default function PointCloudViewer({
       if (following && robotTelemetryRef.current) {
         const view = following.tracker.update(robotPoseRef.current);
         camera.position.copy(view.position); controls.target.copy(view.target);
-        camera.up.set(0, 0, 1); camera.lookAt(controls.target); camera.updateMatrixWorld(true);
+        camera.up.copy(view.up); camera.lookAt(controls.target); camera.updateMatrixWorld(true);
       }
       twinScene.project(camera, renderer.domElement);
-      renderer.render(scene, camera);
+      renderRobotTwinFollowView(following?.tracker, renderScene);
       const source = renderer.domElement;
       if (!source.width || !source.height) return false;
       // Keep the source aspect ratio instead of baking colored bars into the
@@ -4152,7 +4157,7 @@ export default function PointCloudViewer({
       if (twinFollow && robotTelemetryRef.current) {
         const view = twinFollow.tracker.update(robotPoseRef.current);
         camera.position.copy(view.position); controls.target.copy(view.target);
-        camera.up.set(0, 0, 1); camera.lookAt(controls.target);
+        camera.up.copy(view.up); camera.lookAt(controls.target);
         syncDetailView();
       } else controls.update();
       reportZividCameraPoses();
@@ -4456,7 +4461,7 @@ export default function PointCloudViewer({
         if (twinInputs.robots.length > 1) focusTwinRobotsRef.current?.();
       }
       twinScene.project(camera, renderer.domElement);
-      renderer.render(scene, camera);
+      renderRobotTwinFollowView(twinFollowRef.current?.tracker, renderScene);
     });
 
     return () => {
@@ -6769,25 +6774,37 @@ export default function PointCloudViewer({
   };
   focusTwinRobotsRef.current = focusTwinRobots;
 
-  const toggleTwinFollow = () => {
-    if (twinFollowRef.current) { stopTwinFollow(); return; }
+  const changeTwinFollowMode = (mode, bevAngles = ZERO_ROBOT_TWIN_BEV_ANGLES) => {
+    if (!mode) { stopTwinFollow(); return; }
+    const angles = normalizeRobotTwinBevAngles(bevAngles);
+    if (twinFollowRef.current?.mode === mode) {
+      if (mode === 'bev') {
+        twinFollowRef.current.tracker.setAngles(angles);
+        setTwinBevAngles(angles);
+      }
+      return;
+    }
     const controls = controlsRef.current, camera = cameraRef.current;
     if (!robotTelemetryRef.current || !isActive || !showRobot || !loadedRobotRef.current || !controls || !camera) return;
     const bounds = setRobotVisualBounds(new THREE.Box3(), robotLayerRef.current);
-    const tracker = createRobotTwinFollowCamera(robotPoseRef.current, bounds.max.z - bounds.min.z);
-    const previousView = viewActionsRef.current?.capture();
+    const tracker = createRobotTwinFollowCamera(robotPoseRef.current, bounds.max.z - bounds.min.z,
+      { mode, robot: loadedRobotRef.current, bevAngles: angles });
+    const previous = twinFollowRef.current;
+    const previousView = previous?.previousView || viewActionsRef.current?.capture();
     if (!previousView) return;
-    twinFollowRef.current = { tracker, previousView, controlsEnabled: controls.enabled };
+    twinFollowRef.current = { tracker, mode, previousView, controlsEnabled: previous?.controlsEnabled ?? controls.enabled };
     cancelFocusAnimation();
     pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
     precisionPanRef.current?.clear?.();
     controls.enabled = false;
     camera.zoom = 1; camera.updateProjectionMatrix();
     camera.position.copy(tracker.position); controls.target.copy(tracker.target);
-    camera.up.set(0, 0, 1); camera.lookAt(controls.target);
+    camera.up.copy(tracker.up); camera.lookAt(controls.target);
     viewActionsRef.current?.refreshClipping();
     controls.domElement.dataset.twinFollowEnabled = 'true';
-    setTwinFollowEnabled(true);
+    controls.domElement.dataset.twinFollowMode = mode;
+    setTwinFollowMode(mode);
+    setTwinBevAngles(mode === 'bev' ? angles : ZERO_ROBOT_TWIN_BEV_ANGLES);
   };
 
   const setRobotControlMode = (enabled) => {
@@ -7166,11 +7183,9 @@ export default function PointCloudViewer({
             </aside>
           )}
           {displaySettingsContainer && createPortal(<>
-            {robotTelemetry && <button type="button" className="robot-twin-follow-toggle"
-              aria-label="机器人后上方跟随视角" aria-pressed={twinFollowEnabled}
-              disabled={!isActive || !showRobot || robotLoadState?.status !== 'loaded'}
-              title={twinFollowEnabled ? '退出跟随并恢复之前的视角' : '从机器人后上方观察局部场景，随定位和朝向自动跟随'}
-              onClick={toggleTwinFollow}><Eye size={13} />{twinFollowEnabled ? '退出跟随' : '跟随视角'}</button>}
+            {robotTelemetry && <RobotTwinFollowMenu mode={twinFollowMode} onChange={changeTwinFollowMode}
+              bevAngles={twinBevAngles} onBevAnglesChange={angles => changeTwinFollowMode('bev', angles)}
+              disabled={!isActive || !showRobot || robotLoadState?.status !== 'loaded'} />}
             {!robotTelemetry && <button type="button" className="polyline-teaching-launch" aria-label={polylineOpen ? '图谱控制台' : '表面折线示教'} aria-pressed={polylineOpen}
               aria-controls={polylineOpen ? 'inspector-panel-content' : 'inspector-polyline-content'}
               disabled={!isActive || (!polylineOpen && (robotLoadState?.status !== 'loaded' || externalRobotTrajectoryActive || teachingCaptureBusy || teachingPoseEditing || !mapData?.faceCount))}

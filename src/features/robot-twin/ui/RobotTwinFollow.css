@@ -1,5 +1,41 @@
-.robot-twin-follow-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 7px 9px; border: 1px solid #3e6858; border-radius: 4px; background: #132c23; color: #b1dec9; font: inherit; font-size: 11px; white-space: nowrap; cursor: pointer; }
-.robot-twin-follow-toggle:hover:not(:disabled) { border-color: #79d8b0; background: #1b3d2f; }
-.robot-twin-follow-toggle[aria-pressed=true] { border-color: #79d8b0; background: #23523d; color: #d8f5e5; }
+.robot-twin-follow { flex: 0 0 auto; }
+.robot-twin-follow .robot-twin-follow-toggle { gap: 5px; border: 1px solid #3e6858; border-radius: 4px; background: #132c23; color: #b1dec9; }
+.robot-twin-follow .robot-twin-follow-toggle:hover:not(:disabled) { border-color: #79d8b0; background: #1b3d2f; }
+.robot-twin-follow .robot-twin-follow-toggle[aria-pressed=true] { border-color: #79d8b0; background: #23523d; color: #d8f5e5; }
 .robot-twin-follow-toggle:focus-visible { outline: 2px solid #79d8b0; outline-offset: 2px; }
 .robot-twin-follow-toggle:disabled { opacity: .4; cursor: default; }
+.viewer-menu__panel.robot-twin-follow-menu { width: min(280px, calc(100vw - 24px)); border-color: #3e6858; }
+.robot-twin-follow-menu__options { padding: 5px; }
+.robot-twin-follow-menu__row { display: flex; border-radius: 3px; }
+.robot-twin-follow-menu__row.is-expanded { background: #79d8b012; }
+.robot-twin-follow-menu__row > .robot-twin-follow-menu__option { flex: 1; min-width: 0; }
+.robot-twin-follow-menu__expand { display: grid; place-items: center; flex: 0 0 26px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.robot-twin-follow-menu__expand:hover, .robot-twin-follow-menu__expand[aria-expanded=true] { color: #b1dec9; border-color: #3e6858; background: #79d8b012; }
+.robot-twin-follow-menu:has(.robot-twin-bev-settings[data-side=left]:not([hidden])) .robot-twin-follow-menu__expand > svg { transform: rotate(180deg); }
+.robot-twin-follow-menu:has(.robot-twin-bev-settings[data-side=below]:not([hidden])) .robot-twin-follow-menu__expand > svg { transform: rotate(90deg); }
+.robot-twin-follow-menu__option { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 9px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); text-align: left; font: inherit; cursor: pointer; }
+.robot-twin-follow-menu__option > span { flex: 1; }
+.robot-twin-follow-menu__option strong { display: block; color: var(--text); font-size: 11px; font-weight: 600; }
+.robot-twin-follow-menu__option small { display: block; margin-top: 5px; font-size: 10px; line-height: 1.5; }
+.robot-twin-follow-menu__check { visibility: hidden; }
+.robot-twin-follow-menu__option[aria-pressed=true] { background: #79d8b012; color: #b1dec9; }
+.robot-twin-follow-menu__option[aria-pressed=true] .robot-twin-follow-menu__check { visibility: visible; }
+.robot-twin-follow-menu__option:hover, .robot-twin-follow-menu__option:focus-visible { border-color: #3e6858; background: #79d8b012; }
+.robot-twin-follow-menu__exit { display: flex; align-items: center; gap: 7px; width: 100%; padding: 11px 14px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--muted); text-align: left; font: inherit; font-size: 11px; cursor: pointer; }
+.robot-twin-follow-menu__exit:hover:not(:disabled) { color: #d8f5e5; background: #79d8b012; }
+.robot-twin-follow-menu__exit:disabled { opacity: .4; cursor: default; }
+.robot-twin-bev-settings { position: fixed; z-index: 391; width: min(300px, calc(100vw - 16px)); padding: 12px; overflow-y: auto; border: 1px solid #3e6858; background: #0b191e; color: var(--text); box-shadow: 0 16px 44px #0007; }
+.robot-twin-bev-settings[hidden] { display: none; }
+.robot-twin-bev-settings > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
+.robot-twin-bev-settings button { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--muted); cursor: pointer; }
+.robot-twin-bev-settings button:hover:not(:disabled) { border-color: #3e6858; background: #79d8b012; color: #d8f5e5; }
+.robot-twin-bev-settings button:disabled { opacity: .35; cursor: default; }
+.robot-twin-bev-settings > p { margin: 5px 0 15px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.robot-twin-bev-settings__axis + .robot-twin-bev-settings__axis { margin-top: 12px; }
+.robot-twin-bev-settings__axis label, .robot-twin-bev-settings__axis label > span { display: flex; align-items: center; gap: 8px; }
+.robot-twin-bev-settings__axis label { justify-content: space-between; font-size: 11px; }
+.robot-twin-bev-settings__axis b { width: 12px; color: #b1dec9; font: 600 11px var(--mono, monospace); }
+.robot-twin-bev-settings__axis output { color: #b1dec9; font-variant-numeric: tabular-nums; }
+.robot-twin-bev-settings__control { display: grid; grid-template-columns: minmax(0, 1fr) 26px; align-items: center; gap: 8px; margin-top: 3px; }
+.robot-twin-bev-settings__control input[type=range] { width: 100%; min-width: 0; height: 24px; margin: 0; accent-color: #79d8b0; cursor: pointer; }
+.robot-twin-bev-settings__control input:focus-visible { outline: 1px solid #79d8b0; outline-offset: 2px; }

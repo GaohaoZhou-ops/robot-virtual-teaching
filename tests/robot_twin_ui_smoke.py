@@ -12,6 +12,7 @@ from urllib.parse import parse_qs
 from playwright.sync_api import sync_playwright, expect
 from topbar_tools_helpers import topbar_action
 from viewer_tools_helpers import viewer_tool
+from robot_twin_follow_helpers import select_follow_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:22061')
@@ -227,7 +228,7 @@ try:
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
             before = reading(canvas)
             offline_view = camera_view(canvas)
-            expect(page.get_by_role('button', name='机器人后上方跟随视角')).to_have_count(0)
+            expect(page.get_by_role('button', name='跟随视角', exact=True)).to_have_count(0)
             page.get_by_role('button', name='同步作业', exact=True).click()
             page.get_by_role('dialog').get_by_role('button', name='真机孪生').click()
             dialog = page.get_by_role('dialog', name='真机孪生', exact=True)
@@ -291,10 +292,21 @@ try:
                        for s in snapshots[-4:]), (live['pose'], snapshots[-1]['pose'])
             assert live['pose']['z'] == before['pose']['z']
             assert all(any(abs(live['joints'][name] - s['joints'][name]) < 1e-5 for s in snapshots[-4:] if name in s['joints']) for name in NAMES)
-            follow_view = page.get_by_role('button', name='机器人后上方跟随视角', exact=True)
+            follow_view = page.get_by_role('button', name='跟随视角', exact=True)
             original_view = camera_view(canvas)
             saved_view_signature = canvas.get_attribute('data-view-signature')
             follow_view.click()
+            follow_menu = page.get_by_role('dialog', name='选择跟随形态', exact=True)
+            expect(follow_menu).to_be_visible()
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
+            assert camera_view(canvas) == original_view, 'opening the menu does not move the camera'
+            follow_menu.get_by_role('button', name='BEV', exact=True).hover()
+            bev_settings = page.get_by_role('dialog', name='BEV 观测角度', exact=True)
+            expect(bev_settings).to_be_visible()
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
+            assert camera_view(canvas) == original_view, 'hover only opens the optional settings'
+            follow_menu.get_by_role('button', name='BEV', exact=True).click()
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
             expect(follow_view).to_have_attribute('aria-pressed', 'true')
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
             expect(canvas).to_have_attribute('data-robot-control-enabled', 'false')
@@ -303,6 +315,66 @@ try:
             dx, dy = offset[0] - live['pose']['x'], offset[1] - live['pose']['y']
             assert dx * math.cos(heading) + dy * math.sin(heading) < -3
             assert offset[2] > live['pose']['z'] + 2
+            if not args.live:
+                # Sliders preview without closing either menu or releasing follow.
+                follow_view.click()
+                follow_menu.get_by_role('button', name='BEV', exact=True).hover()
+                roll = bev_settings.get_by_role('slider', name='BEV R 横滚', exact=True)
+                pitch = bev_settings.get_by_role('slider', name='BEV P 俯仰', exact=True)
+                yaw = bev_settings.get_by_role('slider', name='BEV Y 偏航', exact=True)
+                for slider in [roll, pitch, yaw]:
+                    expect(slider).to_have_value('0')
+                roll.focus()
+                roll.press('ArrowRight')
+                expect(roll).to_have_value('1')
+                expect(roll).to_be_focused()
+                expect(bev_settings).to_be_visible()
+                expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
+                pitch_box = pitch.bounding_box()
+                pitch.click(position={'x': pitch_box['width'] * .75, 'y': pitch_box['height'] / 2})
+                assert float(pitch.input_value()) > 20
+                yaw_box = yaw.bounding_box()
+                page.mouse.move(yaw_box['x'] + yaw_box['width'] / 2, yaw_box['y'] + yaw_box['height'] / 2)
+                page.mouse.down()
+                page.mouse.move(yaw_box['x'] + yaw_box['width'] * .75, yaw_box['y'] + yaw_box['height'] / 2, steps=8)
+                page.mouse.up()
+                assert float(yaw.input_value()) > 50
+                page.wait_for_function('''before => {
+                    const d=document.querySelector('.three-canvas').dataset;
+                    return Math.abs(+d.cameraX-before[0])+Math.abs(+d.cameraY-before[1])>.1;
+                }''', arg=offset)
+                assert all(abs(a-b) < 1e-6 for a, b in zip(camera_view(canvas)[3:], offset[3:])), 'orbit keeps its observation target'
+                pitch_value, yaw_value = pitch.input_value(), yaw.input_value()
+                bev_settings.get_by_role('button', name='重置 BEV R 横滚', exact=True).click()
+                expect(roll).to_have_value('0')
+                expect(pitch).to_have_value(pitch_value)
+                expect(yaw).to_have_value(yaw_value)
+                page.screenshot(path=str(artifacts / 'bev-angle-submenu.png'))
+                page.keyboard.press('Escape')
+                expect(bev_settings).not_to_be_visible()
+                expect(follow_menu).to_be_visible()
+                expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
+                follow_menu.get_by_role('button', name='BEV', exact=True).press('ArrowRight')
+                expect(roll).to_be_focused()
+                expect(pitch).to_have_value(pitch_value)
+                for name in ['重置 BEV P 俯仰', '重置 BEV Y 偏航']:
+                    bev_settings.get_by_role('button', name=name, exact=True).click()
+                page.wait_for_function('''before => {
+                    const d=document.querySelector('.three-canvas').dataset;
+                    return ['cameraX','cameraY','cameraZ','targetX','targetY','targetZ'].every((key,i)=>Math.abs(+d[key]-before[i])<1e-6);
+                }''', arg=offset)
+                yaw.focus(); yaw.press('ArrowRight')
+                expect(yaw).to_have_value('1')
+                follow_menu.get_by_role('button', name='第一人称-胸摄', exact=True).hover()
+                expect(bev_settings).not_to_be_visible()
+                expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
+                # Direct selection uses the old, unadjusted BEV even after editing.
+                follow_menu.get_by_role('button', name='BEV', exact=True).click()
+                expect(follow_menu).not_to_be_visible()
+                page.wait_for_function('''before => {
+                    const d=document.querySelector('.three-canvas').dataset;
+                    return ['cameraX','cameraY','cameraZ','targetX','targetY','targetZ'].every((key,i)=>Math.abs(+d[key]-before[i])<1e-6);
+                }''', arg=offset)
             if not args.live:
                 fixture.update(x=3.75, y=-4)
                 page.wait_for_function('''([dx, dy]) => { const d = document.querySelector('.three-canvas').dataset;
@@ -326,8 +398,27 @@ try:
                 fixture.update(stale=False, x=2.5, yaw=1)
                 expect(page.locator('.work-sync:visible')).to_have_attribute('data-twin-phase', 'live')
             assert canvas.get_attribute('data-view-signature') == saved_view_signature, 'following must not overwrite the saved workspace view'
-            follow_view.click()
+            # Switching modes preserves the first saved view and keeps following.
+            select_follow_mode(page, '第一人称-胸摄')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'chest')
+            chest_view = camera_view(canvas)
+            assert any(abs(a - b) > .1 for a, b in zip(chest_view, offset))
+            follow_view.press('ArrowDown')
+            expect(follow_menu.get_by_role('button', name='第一人称-胸摄', exact=True)).to_have_attribute('aria-pressed', 'true')
+            page.screenshot(path=str(artifacts / 'fixture-twin-follow-menu.png'))
+            page.keyboard.press('Escape')
+            expect(follow_menu).not_to_be_visible()
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'chest')
+            select_follow_mode(page, 'BEV')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
+            select_follow_mode(page, '第一人称-胸摄')
+            select_follow_mode(page, '第一人称-头部')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'head')
+            head_view = camera_view(canvas)
+            assert any(abs(a - b) > .01 for a, b in zip(head_view, chest_view))
+            select_follow_mode(page, '退出跟随')
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', '')
             assert all(abs(a - b) < 1e-6 for a, b in zip(camera_view(canvas), original_view)), 'leaving follow restores the original view'
             canvas.press('ArrowRight')
             page.wait_for_function('''previous => {
@@ -336,7 +427,8 @@ try:
             }''', arg=original_view)
             if not args.live:
                 for action in ['rotate', 'pan', 'wheel', 'keyboard', 'toolbar']:
-                    follow_view.click()
+                    select_follow_mode(page, '第一人称-头部' if action in ['rotate', 'wheel']
+                        else '第一人称-胸摄' if action == 'keyboard' else 'BEV')
                     expect(follow_view).to_have_attribute('aria-pressed', 'true')
                     bounds = canvas.bounding_box()
                     x, y = bounds['x'] + bounds['width'] * .25, bounds['y'] + bounds['height'] * .4
@@ -519,7 +611,7 @@ try:
             expect(canvas).to_have_attribute('data-robot-control-enabled', 'false')
             page.get_by_role('button', name='视图工具', exact=True).click()
             page.screenshot(path=str(artifacts / ('live-scene.png' if args.live else 'fixture-scene.png')))
-            follow_view.click()
+            select_follow_mode(page, '第一人称-头部')
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')

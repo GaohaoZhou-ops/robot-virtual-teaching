@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.request import urlopen
 from playwright.sync_api import sync_playwright, expect
 from topbar_tools_helpers import topbar_action
+from robot_twin_follow_helpers import select_follow_mode
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:22061')
@@ -240,8 +241,8 @@ try:
             expect(page.get_by_role('button', name='查看全部机器人', exact=True)).to_have_count(0)
             expect(page.locator('.work-sync > .work-sync__status')).to_have_count(0)
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
-            follow = page.get_by_role('button', name='机器人后上方跟随视角', exact=True)
-            follow.click()
+            follow = page.get_by_role('button', name='跟随视角', exact=True)
+            select_follow_mode(page)
             expect(follow).to_have_attribute('aria-pressed', 'true')
             command({'motion': True})
             page.wait_for_timeout(1100)
@@ -274,6 +275,15 @@ try:
             costs = sorted(performance['costs'])
             print(json.dumps({'followFrames': len(frames), 'otherRobotUpdates': changes[False],
                 'sceneUpdateMedianMs': costs[len(costs)//2], 'sceneUpdateP95Ms': costs[int(len(costs)*.95)]}))
+            select_follow_mode(page, '第一人称-头部')
+            selected = canvas.get_attribute('data-selected-twin-robot')
+            other = 'robot-1' if selected == 'robot-0' else 'robot-0'
+            monitor.get_by_role('button', name='当前监控机器人', exact=True).click()
+            page.get_by_role('listbox', name='当前监控机器人', exact=True).get_by_role('option',
+                name='2 号机器人' if other == 'robot-1' else '1 号机器人', exact=True).click()
+            expect(canvas).to_have_attribute('data-selected-twin-robot', other)
+            expect(canvas).to_have_attribute('data-smoothed-twin-robot', other)
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'head')
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect_view(page, second_view)
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
