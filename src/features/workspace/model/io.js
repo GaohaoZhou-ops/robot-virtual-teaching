@@ -63,7 +63,10 @@ const normalizeMapTransform = (value) => {
   if (value == null) return null;
   if (value.version !== 1 || !Array.isArray(value.values) || value.values.length !== 16
     || !value.values.every(Number.isFinite)) throw new Error('地图示教转换矩阵记录无效');
-  return { version: 1, name: String(value.name || '转换矩阵.txt'), values: [...value.values] };
+  return { version: 1, name: String(value.name || '转换矩阵.txt'), values: [...value.values],
+    ...(value.sourceCoordinates?.version === 1 && Array.isArray(value.sourceCoordinates.waypoints)
+      && Array.isArray(value.sourceCoordinates.tasks) ? { sourceCoordinates: structuredClone(value.sourceCoordinates) } : {}),
+  };
 };
 
 export const createId = (prefix) =>

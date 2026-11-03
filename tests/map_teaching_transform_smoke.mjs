@@ -4,6 +4,7 @@ import { Matrix4, Vector3 } from 'three';
 import { buildExport, normalizeProject } from '../src/features/workspace/model/io.js';
 import { buildProjectArchive, readProjectArchive } from '../src/features/workspace/model/projectArchive.js';
 import { readMapTeachingMatrix, transformMapTeachingWorkspace } from '../src/features/teaching/model/mapTeachingTransform.js';
+import { mapTeachingMatrixDefinition } from '../src/features/teaching/model/mapTeachingCoordinates.js';
 import { boundTeachingTransform, createTeachingAlignment, identityTransferPose, placeTeachingWorkspace,
   transferMatrix, transformTeachingPose, mapTeachingCalibrationMatrix } from '../src/features/teaching/model/teachingTransfer.js';
 import { placedObjectLayers } from '../src/features/viewport/model/placedObjectRendering.js';
@@ -99,7 +100,8 @@ const archive = await buildProjectArchive(rounded.config.project, {
   mapResource: rounded.map, existingRobotPackage: rounded.map.portableRobotPackage,
 });
 const restored = await readProjectArchive(archive.bytes);
-assert.deepEqual(restored.payload.workspace.mapTransform, sample);
+assert.deepEqual(mapTeachingMatrixDefinition(restored.payload.workspace.mapTransform), sample);
+assert.equal(JSON.stringify(restored.payload.workspace.mapTransform.sourceCoordinates), JSON.stringify(rounded.config.project.workspace.mapTransform.sourceCoordinates));
 const restoredMap = { ...restored.resources.map, mapId: rounded.map.mapId };
 const restoredSnapshot = { mode: 'map', map: restoredMap,
   config: { mapId: restoredMap.mapId, config: { project: restored.payload } } };
@@ -111,7 +113,7 @@ new Float32Array(replacedAfterArchive.map.positionBuffer).forEach((v, i) => clos
 const appended = await placeTeachingWorkspace(local, transferSnapshot(first), {
   localToMap: boundTeachingTransform(local.map, null, first.map, first.config.project.workspace.transfer),
 });
-assert.deepEqual(appended.config.project.workspace.mapTransform, quarter);
+assert.deepEqual(appended.config.project.workspace.mapTransform, first.config.project.workspace.mapTransform);
 assert.equal(buildExport({ ...normalizeProject(first.config.project), ...normalizeProject(first.config.project).workspace,
   mapData: first.map, heightRange: [0, 2], teachingSpaceMode: 'independent' }).workspace.mapTransform, undefined);
 

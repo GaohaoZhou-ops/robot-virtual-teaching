@@ -2212,14 +2212,17 @@ export default function App() {
       const graph = buildExport({ teachingSpaceMode: 'map', heightRange: normalized.slice || [0, 0],
         waypoints: merged.waypoints, edges: merged.edges, abxRoutes: merged.abxRoutes });
       const config = { ...expectedConfig.config,
-        project: { ...project, abxRoutes: graph.abxRoutes, waypoints: graph.waypoints, paths: graph.paths },
+        project: { ...project, abxRoutes: graph.abxRoutes, waypoints: graph.waypoints, paths: graph.paths,
+          workspace: { ...project.workspace, ...(merged.mapTransform ? { mapTransform: merged.mapTransform } : {}) } },
         ui: { ...expectedConfig.config.ui, validation: initialValidation } };
       const { record, summary } = await commitMapWorkspaceConfig(sessionIdRef.current, {
         expectedConfig, config, activeMode: current.teachingSpaceMode,
       });
       if (current.teachingSpaceMode === 'map') {
         latestWorkspaceRef.current = { ...current, abxRoutes: merged.abxRoutes,
-          waypoints: merged.waypoints, edges: merged.edges, validation: initialValidation };
+          waypoints: merged.waypoints, edges: merged.edges, validation: initialValidation,
+          ...(merged.mapTransform ? { mapTransform: merged.mapTransform } : {}) };
+        if (merged.mapTransform) setMapTransform(merged.mapTransform);
         setAbxRoutes(merged.abxRoutes); setWaypoints(merged.waypoints); setEdges(merged.edges);
         setValidation(initialValidation);
       }
@@ -4487,7 +4490,9 @@ export default function App() {
       // success notification must not race the normal debounced autosave.
       latestWorkspaceRef.current = { ...current, abxRoutes: merged.abxRoutes,
         waypoints: merged.waypoints, edges: merged.edges, teachingTasks: tasks, jointPoses: merged.jointPoses,
+        ...(merged.mapTransform ? { mapTransform: merged.mapTransform } : {}),
         activeTeachingTaskId: nextTaskId, activeTeachingParkingPointId: nextParkingId, validation: initialValidation };
+      if (merged.mapTransform) setMapTransform(merged.mapTransform);
       setAbxRoutes(merged.abxRoutes);
       setWaypoints(merged.waypoints); setEdges(merged.edges);
       setTeachingTasks(tasks); setJointPoses(merged.jointPoses);
@@ -4588,7 +4593,7 @@ export default function App() {
       if (poseId && !point) throw new Error('未找到选中的姿态');
       const data = point
         ? buildRobotPresetFile(point.fullBodyJoints)
-        : buildTeachingParkingPointCopy(task, parkingPoint);
+        : buildTeachingParkingPointCopy(task, parkingPoint, latestWorkspaceRef.current.mapTransform);
       await writeClipboardText(`${JSON.stringify(data, null, 2)}\n`);
       notify(`${label}「${(point || parkingPoint).name}」已复制到剪贴板`, 'success');
     } catch (error) {

@@ -1026,6 +1026,13 @@ playwright/.auth/
 /tests/map-matrix-*/
 /map-matrix-*.[zZ][iI][pP]
 /tests/map-matrix-*.[zZ][iI][pP]
+# Display-alignment export checks retain original robot task files, navigation
+# JSON and complete projects. Ignore local TMPDIR copies and packed workspaces;
+# keep the maintained runners and nested synthetic fixtures trackable.
+/atlas-display-export-*/
+/tests/atlas-display-export-*/
+/atlas-display-export-*.[zZ][iI][pP]
+/tests/atlas-display-export-*.[zZ][iI][pP]
 # Batch directory-picker tests create temporary model/matrix inputs when TMPDIR
 # is local. Captures use test-artifacts/independent-batch/, already ignored above.
 # Scope input workspaces and ZIP copies to root/tests so nested fixtures stay visible.

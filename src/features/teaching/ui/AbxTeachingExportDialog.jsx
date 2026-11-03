@@ -55,6 +55,7 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
         <div className="abx-export-notice" role="note">
           <strong>机器人示教 · 任务与路网导入包</strong>
           <p>{result?.summary.notice || '正在检查任务和关联路网。已导入工程的路网将随任务打包，在大脑“示教任务 → 导入”中一并导入。'}</p>
+          {snapshot.payload.workspace?.mapTransform && <p aria-label="转换关系保存范围">转换矩阵仅用于虚拟场景对齐。导出使用对齐前的机器人地图坐标，保留真机停车定位和关节读数；矩阵及场景对齐状态仅随完整工程保存。</p>}
         </div>
         {!result && !error && <p className="abx-export-loading" role="status"><LoaderCircle className="is-spinning" size={16} />正在校验机器人姿态与导航坐标…</p>}
         {error && <p className="abx-export-error" role="alert">{error}</p>}

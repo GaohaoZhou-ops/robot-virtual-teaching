@@ -1,6 +1,7 @@
 import { sha256Bytes } from "../../../shared/utils/hash.js";
 import { abxAssert as check, abxBytes, abxEqual, parseAbxJson } from "../../teaching/model/abxFormat.js";
 import { Euler, Vector3 } from 'three';
+import { robotTeachingCoordinates } from '../../teaching/model/mapTeachingCoordinates.js';
 
 const fields = (value, names, label) => check(value && !Array.isArray(value)
   && abxEqual(Object.keys(value).sort(), names.sort()), `${label}字段不匹配`);
@@ -116,6 +117,7 @@ export function abxRouteToProject(document) {
 // Keep imported IDs, nullable headings and scene bindings across editing and
 // project saves. New Atlas points go into the single selected graph.
 export async function buildAbxRouteDocuments(payload, { includeTeachingPoints = true } = {}) {
+  payload = robotTeachingCoordinates(payload);
   const unit = payload.coordinateSystem?.angleUnit || 'degree';
   check(['degree', 'degrees', 'deg', 'radian', 'radians', 'rad'].includes(unit), '路网角度单位无效');
   check(['meter', 'm'].includes(payload.coordinateSystem?.distanceUnit || 'meter'), '路网需要米制坐标');

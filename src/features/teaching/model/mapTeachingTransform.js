@@ -3,6 +3,7 @@ import { buildExport, normalizeProject } from '../../workspace/model/io.js';
 import { createGeometryCache, restoreGeometryFromCache, serializeBounds } from '../../workspace/model/workspaceGeometry.js';
 import { placedObjectLayers, recoverPlacedObjectLayers } from '../../viewport/model/placedObjectRendering.js';
 import { sha256Bytes } from '../../../shared/utils/hash.js';
+import { mapTeachingMatrixDefinition, robotTeachingCoordinates, sameMapTeachingCoordinates, snapshotMapTeachingCoordinates } from './mapTeachingCoordinates.js';
 import { hasLoadedMapWorkspace, mapTeachingCalibrationMatrix, parseTransferMatrixFile,
   transformTeachingPose, transformTeachingTasks } from './teachingTransfer.js';
 
@@ -16,12 +17,20 @@ export async function readMapTeachingMatrix(file) {
 // The stored matrix is an absolute virtual-to-map calibration. Replacing A
 // with B uses B * inverse(A), never B * A. This also preserves edits made in
 // the calibrated frame, without retaining a stale copy of the whole project.
+// This is a display alignment only. Keep source readings so robot exports can
+// remove it without changing the original parking poses or joint readings.
 export async function transformMapTeachingWorkspace(source, imported, { loadSource } = {}) {
   if (!hasLoadedMapWorkspace(source)) throw new Error('请先加载完整的地图示教工程');
   const project = normalizeProject(source.config.config.project);
   const nextMatrix = mapTeachingCalibrationMatrix(imported);
   const previous = project.workspace.mapTransform;
   const previousMatrix = mapTeachingCalibrationMatrix(previous);
+  const displayed = { ...source.config.config.project,
+    workspace: project.workspace, waypoints: project.waypoints, robot: project.robot,
+    virtualTeaching: { ...source.config.config.project.virtualTeaching, tasks: project.teachingTasks },
+  };
+  const robotCoordinates = robotTeachingCoordinates(displayed);
+  const sourceCoordinates = snapshotMapTeachingCoordinates(robotCoordinates);
   const unchanged = nextMatrix.elements.every((value, index) => Math.abs(value - previousMatrix.elements[index]) < 1e-12);
   const delta = unchanged ? new Matrix4() : nextMatrix.clone().multiply(previousMatrix.clone().invert());
   const originalTransfer = project.workspace.transfer;
@@ -75,21 +84,26 @@ export async function transformMapTeachingWorkspace(source, imported, { loadSour
       ...((originalTransfer.mapFrameSources || []).some((item) => item.sourceHash === source.map.sourceHash)
         ? [] : [{ mapId: source.map.mapId, name: source.map.name, sourceHash: source.map.sourceHash }])],
   } : originalTransfer;
-  const waypoints = unchanged ? project.waypoints : project.waypoints.map((point) => {
+  const waypoints = robotCoordinates.waypoints.map((point) => {
     const pose = transformTeachingPose({ position: point.pose,
-      rpy: { roll: point.pose.roll, pitch: point.pose.pitch, yaw: point.pose.yaw } }, delta);
+      rpy: { roll: point.pose.roll, pitch: point.pose.pitch, yaw: point.pose.yaw } }, nextMatrix);
     return { ...point, pose: { ...pose.position, ...pose.rpy } };
   });
+  const tasks = transformTeachingTasks(robotCoordinates.virtualTeaching.tasks, nextMatrix, 'map', map);
+  const robotPose = project.robot ? transformTeachingPose(robotCoordinates.robot.origin, nextMatrix) : null;
+  const coordinatesUnchanged = unchanged && sameMapTeachingCoordinates(displayed, { waypoints,
+    virtualTeaching: { tasks }, robot: robotPose ? { origin: robotPose } : null });
   const payload = buildExport({
     ...project, ...project.workspace, mapData: map,
     heightRange: project.slice || [map.bounds.min.z, map.bounds.max.z],
-    waypoints, edges: unchanged ? project.edges : project.edges.map((edge) => ({ ...edge, status: 'unchecked' })),
-    teachingTasks: unchanged ? project.teachingTasks : transformTeachingTasks(project.teachingTasks, delta, 'map', map),
-    robotPose: project.robot && !unchanged ? transformTeachingPose(project.robot.origin, delta) : project.robot?.origin,
+    waypoints: coordinatesUnchanged ? project.waypoints : waypoints,
+    edges: unchanged ? project.edges : project.edges.map((edge) => ({ ...edge, status: 'unchecked' })),
+    teachingTasks: coordinatesUnchanged ? project.teachingTasks : tasks,
+    robotPose: coordinatesUnchanged ? project.robot?.origin : robotPose,
     robotJointValues: project.robot?.joints, lockedRobotJointNames: project.robot?.lockedJoints,
     ignoredRobotCollisionJointNames: project.robot?.collisionIgnoredJoints, robotHeightLocked: project.robot?.heightLocked,
     meshRenderQuality: project.rendering?.meshQuality || 'auto',
-    transfer, mapTransform: imported,
+    transfer, mapTransform: { ...mapTeachingMatrixDefinition(imported), sourceCoordinates },
     // Geometry changes must not be written into an old directory's config
     // without replacing its geometry resources; use the normal Save As flow.
     directoryAutosaveSuspended: true,

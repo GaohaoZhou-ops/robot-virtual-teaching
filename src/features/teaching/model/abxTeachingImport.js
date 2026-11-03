@@ -1,3 +1,4 @@
+import { projectMapTeachingImport, sameMapTeachingPose } from './mapTeachingCoordinates.js';
 import { unzipSync } from 'fflate';
 import { Euler, Quaternion } from 'three';
 import { sha256Bytes } from "../../../shared/utils/hash.js";
@@ -234,6 +235,8 @@ export async function readAbxTeachingFile(file, options = {}) {
 
 // Validate the whole addition before committing any React state.
 export function mergeAbxImport(current, imported) {
+  const calibration = current.mapTransform || current.workspace?.mapTransform;
+  imported = projectMapTeachingImport(imported, calibration);
   const routes = new Map((current.abxRoutes || []).map((route) => [route.id, route]));
   for (const route of imported.abxRoutes || []) {
     check(!routes.has(route.id) || abxEqual(routes.get(route.id), route), `路网 ${route.name} 与当前工程同 ID 路网冲突，请在另一工程导入`);
@@ -243,13 +246,15 @@ export function mergeAbxImport(current, imported) {
     const result = new Map(previous.map((item) => [item.id, item]));
     for (const item of additions) {
       const existing = result.get(item.id);
-      check(!existing || abxEqual(existing.pose, item.pose) && existing.from === item.from && existing.to === item.to,
+      check(!existing || (abxEqual(existing.pose, item.pose) || calibration && sameMapTeachingPose(existing.pose, item.pose, true))
+        && existing.from === item.from && existing.to === item.to,
         `导入内容与当前已编辑数据冲突：${item.name || item.id}`);
       if (!existing) result.set(item.id, item);
     }
     return [...result.values()];
   };
-  return { abxRoutes: [...routes.values()], waypoints: merge(current.waypoints, imported.waypoints),
+  return { ...(imported.mapTransform ? { mapTransform: imported.mapTransform } : {}),
+    abxRoutes: [...routes.values()], waypoints: merge(current.waypoints, imported.waypoints),
     edges: merge(current.edges, imported.edges), tasks: [...(current.teachingTasks || []), ...(imported.tasks || [])],
     jointPoses: [...(current.jointPoses || []), ...(imported.jointPoses || [])] };
 }

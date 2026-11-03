@@ -1,3 +1,4 @@
+import { robotTeachingCoordinates } from './mapTeachingCoordinates.js';
 import { sha256Bytes } from "../../../shared/utils/hash.js";
 import { zipSync } from 'fflate';
 import { abxNodeName, abxStationHeightContext, buildAbxRouteDocuments, matchAbxStation } from "../../navigation/model/abxRoute.js";
@@ -242,6 +243,7 @@ const instructions = [
   '   RGB/XYZ 视觉参考仍在完整工程中，不作为真机拍摄记录，也不自动触发相机。',
   '   移动设备 Pose（iPad / Vision Pro） 须先求解为机器人关节姿态，独立示教须先转换到地图坐标后再导出。',
   '6. 导出为当前快照；修改示教数据后请重新导出。原工程 ZIP 继续用于完整备份和恢复。',
+  '   地图示教的转换矩阵仅用于虚拟场景对齐，机器人导出使用对齐前的地图坐标，保留停车定位和关节读数。',
   '',
 ];
 
@@ -512,6 +514,7 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null, att
   const mode = payload.teachingSpace?.mode || payload.workspace?.teachingSpaceMode || payload.map?.teachingSpaceMode || 'map';
   if (mode !== 'map') return null;
   try {
+    payload = robotTeachingCoordinates(payload);
     if (payload.virtualTeaching?.tasks?.some((task) => task.polylines?.length)) {
       throw new Error('当前任务包含表面折线，第一版仅支持工程保存与虚拟回放，不能导出为机器人 ABX 动作。请单独导出不含折线的任务。');
     }
@@ -531,6 +534,8 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null, att
 // Use the supplied robot's existing native navigation importer. Keep explicit
 // v11 conversion available for older installations, without dropping routes in
 // the normal UI export or stripping newer native actions.
+// Display calibration is removed before station matching; the archive contains
+// robot coordinates and readings, never display poses or project matrices.
 export async function buildAbxTeachingArchive(payload, options = {}) {
   const taskVersion = options.taskVersion ?? VERSION;
   requireExport([11, VERSION].includes(taskVersion), '不支持的机器人示教导出版本');

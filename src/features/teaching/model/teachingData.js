@@ -1,3 +1,4 @@
+import { robotTeachingCoordinates } from './mapTeachingCoordinates.js';
 export const TEACHING_DATA_FORMAT = 'atlas-route-studio-teaching-data';
 export const TEACHING_DATA_VERSION = 1;
 
@@ -45,7 +46,11 @@ const parkingPointData = (parking, frame, sequence) => ({
 });
 
 // Temporary clipboard contract; keep it separate from the robot ZIP format.
-export function buildTeachingParkingPointCopy(task, parkingPoint) {
+export function buildTeachingParkingPointCopy(task, parkingPoint, mapTransform = null) {
+  if (mapTransform) {
+    task = robotTeachingCoordinates({ workspace: { mapTransform }, virtualTeaching: { tasks: [task] } }).virtualTeaching.tasks[0];
+    parkingPoint = task.parkingPoints.find((parking) => parking.id === parkingPoint?.id);
+  }
   const index = task?.parkingPoints?.findIndex((item) => item.id === parkingPoint?.id) ?? -1;
   if (index < 0) throw new Error('未找到选中的停车点');
   const frame = task.coordinateFrame || parkingPoint.mapPose?.frameId || 'map';
@@ -83,10 +88,13 @@ const mobileCapture = (capture) => ({
   })),
 });
 
+// Keep the exchange schema explicit: workspace.mapTransform and workspace.transfer
+// belong to project saves. Robot output must exclude the display alignment.
 export function buildTeachingDataExport(project) {
   if (!project || typeof project !== 'object' || Array.isArray(project)) {
     throw new Error('没有可导出的示教数据');
   }
+  project = robotTeachingCoordinates(project);
   const mode = (project.workspace?.teachingSpaceMode ?? project.teachingSpace?.mode) === 'independent'
     ? 'independent' : 'map';
   const frame = project.coordinateSystem?.frameId || (mode === 'independent' ? 'virtual_origin' : 'map');
