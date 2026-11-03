@@ -191,6 +191,14 @@ test-results/
 /tests/test-artifacts*.[tT][aA][rR]
 /tests/test-artifacts*.[tT][aA][rR].*
 /tests/test-artifacts*.[tT][gG][zZ]
+# Archives saved beside reorganized test runners, including bird-view reviews.
+# Keep these scopes direct so nested fixtures remain trackable.
+/tests/unit/test-artifacts*.[tT][aA][rR]
+/tests/unit/test-artifacts*.[tT][aA][rR].*
+/tests/unit/test-artifacts*.[tT][gG][zZ]
+/tests/integration/test-artifacts*.[tT][aA][rR]
+/tests/integration/test-artifacts*.[tT][aA][rR].*
+/tests/integration/test-artifacts*.[tT][gG][zZ]
 # ZIP copies of the test-output directories above stay local.
 # Use explicit output paths so fixture archives and design media stay visible.
 /playwright-report.[zZ][iI][pP]

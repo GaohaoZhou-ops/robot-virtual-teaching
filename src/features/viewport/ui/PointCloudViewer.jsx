@@ -333,6 +333,7 @@ export default function PointCloudViewer({
   const [twinBevAngles, setTwinBevAngles] = useState(ZERO_ROBOT_TWIN_BEV_ANGLES);
   const pointerInteractionRef = useRef(null);
   const viewActionsRef = useRef(null);
+  const birdViewCycleRef = useRef(null);
   const initialViewRef = useRef(initialView);
   const onViewChangeRef = useRef(onViewChange);
   const onRobotLoadStateRef = useRef(onRobotLoadState);
@@ -2197,6 +2198,7 @@ export default function PointCloudViewer({
     const mount = mountRef.current;
     const geometry = mapData?.geometry;
     if (!mount || !geometry) return undefined;
+    birdViewCycleRef.current = null;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x071014);
@@ -2452,6 +2454,15 @@ export default function PointCloudViewer({
     scene.add(mapLayer);
     const anchorZoomToSurface = createSurfaceZoomAnchor(camera, controls, mapLayer.children);
 
+    const captureCameraView = () => ({
+      version: 1,
+      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+      target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+      up: { x: camera.up.x, y: camera.up.y, z: camera.up.z },
+      zoom: Math.max(camera.zoom, 1),
+      projectionOffset: { x: projectionPan.x, y: projectionPan.y },
+    });
+
     // Dolly toward the target first, then continue optically before floating-point
     // precision can collapse camera.position onto controls.target.
     const syncDetailView = () => {
@@ -2464,6 +2475,12 @@ export default function PointCloudViewer({
         )));
       }
       const { distance, opticalZoom, effectiveDistance, near: nextNear } = navigation.syncClipping();
+      // Invalidate as soon as any input changes the view, even if a later
+      // gesture returns to the same pose. This also runs during twin follow.
+      if (birdViewCycleRef.current
+        && birdViewCycleRef.current.signature !== cameraViewSignature(captureCameraView())) {
+        birdViewCycleRef.current = null;
+      }
       const normalizedDistance = Math.max(effectiveDistance / (radius * 0.35), 1e-24);
       const pointSizeScale = Math.min(1, Math.max(normalizedDistance ** 0.82, 2e-5));
 
@@ -2774,14 +2791,6 @@ export default function PointCloudViewer({
       renderer.domElement.dataset.panImplementation = 'world';
     };
 
-    const captureCameraView = () => ({
-      version: 1,
-      position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
-      target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
-      up: { x: camera.up.x, y: camera.up.y, z: camera.up.z },
-      zoom: Math.max(camera.zoom, 1),
-      projectionOffset: { x: projectionPan.x, y: projectionPan.y },
-    });
     let lastReportedView = '';
     const reportCameraView = (force = false) => {
       // Fleet overview, manual navigation and following all belong to the
@@ -2797,6 +2806,7 @@ export default function PointCloudViewer({
     const applyCameraView = (candidate, state = 'restored') => {
       const nextView = normalizeCameraView(candidate);
       if (!nextView) return false;
+      birdViewCycleRef.current = null;
       camera.position.set(nextView.position.x, nextView.position.y, nextView.position.z);
       controls.target.set(nextView.target.x, nextView.target.y, nextView.target.z);
       camera.up.set(nextView.up.x, nextView.up.y, nextView.up.z).normalize();
@@ -3529,6 +3539,7 @@ export default function PointCloudViewer({
       const width = mount.clientWidth || 1;
       const height = mount.clientHeight || 1;
       renderer.setSize(width, height, false);
+      if (camera.aspect !== width / height) birdViewCycleRef.current = null;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
       applyProjectionPan();
@@ -6786,6 +6797,9 @@ export default function PointCloudViewer({
     if (!camera || !controls || !previous || !mapData?.geometry?.boundingBox) return;
     const origin = teachingSpaceMode === 'independent' ? mapOriginGroupRef.current?.position : new THREE.Vector3();
     if (preset === 'origin' && !origin) return;
+    const cycle = birdViewCycleRef.current;
+    const birdStep = preset === 'bird' && cycle?.signature === cameraViewSignature(previous)
+      ? (cycle.step + 1) % 8 : 0;
     stopTwinFollow(false);
     cancelFocusAnimation();
     pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
@@ -6805,13 +6819,20 @@ export default function PointCloudViewer({
       const limitingHalfFov = Math.min(halfFov, Math.atan(Math.tan(halfFov) * camera.aspect));
       const distance = Math.max(sphere.radius, 1) / Math.sin(limitingHalfFov) * 1.15;
       const direction = preset === 'top' ? new THREE.Vector3(0, 0, 1)
+        : preset === 'bird' ? new THREE.Vector3(-1, -1, Math.SQRT2).normalize()
+          .applyAxisAngle(new THREE.Vector3(0, 0, 1), birdStep * Math.PI / 4)
         : preset === 'side' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, -1, 0);
       view = { position: sphere.center.clone().addScaledVector(direction, distance), target: sphere.center,
         up: preset === 'top' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1),
         zoom: 1, projectionOffset: { x: 0, y: 0 } };
     }
-    viewActionsRef.current.apply(view, `preset-${preset}`);
-    controls.domElement.focus({ preventScroll: true });
+    if (!viewActionsRef.current.apply(view, `preset-${preset}`)) return;
+    if (preset === 'bird') {
+      birdViewCycleRef.current = {
+        step: birdStep,
+        signature: cameraViewSignature(viewActionsRef.current.capture()),
+      };
+    } else controls.domElement.focus({ preventScroll: true });
   };
 
   const focusMapOrigin = () => {
@@ -7433,9 +7454,10 @@ export default function PointCloudViewer({
               <ViewerDisplaySettings expanded={displaySettingsSection} onExpandedChange={setDisplaySettingsSection}
                 sections={[
                   { id: 'view', label: '还原视角', icon: RotateCcw,
-                    description: '地图原点 · 俯视 · 侧视 · 正视', content: <div className="viewer-display-presets">
+                    description: '地图原点 · 鸟瞰 · 俯视 · 侧视 · 正视', content: <div className="viewer-display-presets">
                       {[
                         { id: 'origin', label: '地图原点', icon: Crosshair, description: '定位地图坐标原点' },
+                        { id: 'bird', label: '鸟瞰图', icon: Rotate3D, description: '连续点击旋转 45°，调整视角后重置' },
                         { id: 'top', label: '俯视图', icon: Layers, description: '从上方观察 XY 平面' },
                         { id: 'side', label: '侧视图', icon: Box, description: '从侧面观察 YZ 平面' },
                         { id: 'front', label: '正视图', icon: Eye, description: '从正面观察 XZ 平面' },
