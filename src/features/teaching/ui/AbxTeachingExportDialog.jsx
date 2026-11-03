@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bot, Download, LoaderCircle, X } from 'lucide-react';
 import { abxTeachingNeedsRobot, buildAbxTeachingArchive, readAbxRobotPackage } from "../model/abxTeachingExport.js";
+import { teachingStandardAvailability } from '../model/abxTeachingStandards.js';
 import "./AbxTeachingExportDialog.css";
 
 function download(blob, name) {
@@ -17,25 +18,38 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [downloaded, setDownloaded] = useState(false);
+  const [includeStandards, setIncludeStandards] = useState(false);
+  const [includeClouds, setIncludeClouds] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [readyKey, setReadyKey] = useState(null);
+  const selectionKey = `${includeStandards}:${includeClouds}`;
+  const ready = result && readyKey === selectionKey;
+  const availability = useMemo(() => teachingStandardAvailability(snapshot.payload), [snapshot]);
   useEffect(() => {
     const previous = document.activeElement;
     panel.current?.focus();
+    return () => previous?.focus?.();
+  }, []);
+  useEffect(() => {
     const controller = new AbortController();
+    setError(''); setDownloaded(false); setProgress(null); setReadyKey(null);
     (async () => {
       try {
         const needsRobot = abxTeachingNeedsRobot(snapshot.payload);
         const robotPackage = needsRobot
           ? await readAbxRobotPackage(snapshot.robot, snapshot.robotPackage, { signal: controller.signal }) : null;
-        const archive = await buildAbxTeachingArchive(snapshot.payload, { robotPackage });
-        if (!controller.signal.aborted) setResult(archive);
+        const archive = await buildAbxTeachingArchive(snapshot.payload, { robotPackage,
+          includeStandards, includeClouds, signal: controller.signal,
+          onProgress: (value) => { if (!controller.signal.aborted) setProgress(value); } });
+        if (!controller.signal.aborted) { setResult(archive); setReadyKey(selectionKey); }
       } catch (reason) { if (!controller.signal.aborted) setError(reason.message); }
     })();
-    return () => { controller.abort(); previous?.focus?.(); };
-  }, [snapshot]);
+    return () => controller.abort();
+  }, [snapshot, includeStandards, includeClouds, selectionKey]);
   const keyDown = (event) => {
     if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
     if (event.key !== 'Tab') return;
-    const buttons = [...panel.current.querySelectorAll('button:not(:disabled)')];
+    const buttons = [...panel.current.querySelectorAll('button:not(:disabled), input:not(:disabled)')];
     const first = buttons[0], last = buttons.at(-1);
     if (event.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) {
       event.preventDefault(); last?.focus();
@@ -57,7 +71,28 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
           <p>{result?.summary.notice || '正在检查任务和关联路网。已导入工程的路网将随任务打包，在大脑“示教任务 → 导入”中一并导入。'}</p>
           {snapshot.payload.workspace?.mapTransform && <p aria-label="转换关系保存范围">转换矩阵仅用于虚拟场景对齐。导出使用对齐前的机器人地图坐标，保留真机停车定位和关节读数；矩阵及场景对齐状态仅随完整工程保存。</p>}
         </div>
-        {!result && !error && <p className="abx-export-loading" role="status"><LoaderCircle className="is-spinning" size={16} />正在校验机器人姿态与导航坐标…</p>}
+        <fieldset className="abx-export-standards">
+          <legend>随任务导出的标准资源</legend>
+          <div className="abx-export-standard-options">
+            <label className={includeStandards ? 'is-selected' : ''}>
+              <input type="checkbox" checked={includeStandards} disabled={!availability.imageCount}
+                onChange={(event) => setIncludeStandards(event.target.checked)} />
+              <span><strong>导出标准图</strong><small>左右相机 · 可用 {availability.imageCount} 张</small></span>
+              <em>PNG</em>
+            </label>
+            <label className={includeClouds ? 'is-selected' : ''}>
+              <input type="checkbox" checked={includeClouds} disabled={!availability.cloudCount}
+                onChange={(event) => setIncludeClouds(event.target.checked)} />
+              <span><strong>导出标准点云</strong><small>左右相机 · 可用 {availability.cloudCount} 份</small></span>
+              <em>XYZ</em>
+            </label>
+          </div>
+          <p>两项可分别选择，随同一个 ZIP 导入机器人并关联对应 Pose。使用示教时已保存的虚拟相机采集数据。</p>
+          {!availability.imageCount && !availability.cloudCount && <p>当前任务尚无相机采集数据。请在工作台记录 Pose 时采集图像与点云，再导出标准资源。</p>}
+          {ready && (includeStandards || includeClouds) && <p className="abx-export-standard-summary" role="status">已打包 {result.summary.standardImageCount} 张标准图 · {result.summary.standardCloudCount} 份标准点云 · 关联 {result.summary.standardPoseCount} 个 Pose</p>}
+          {ready && result.summary.standardWarnings?.length > 0 && <ul aria-label="标准资源导出提示">{result.summary.standardWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+        </fieldset>
+        {!ready && !error && <p className="abx-export-loading" role="status"><LoaderCircle className="is-spinning" size={16} />{progress ? `正在打包标准资源 ${progress.completed} / ${progress.total} · ${progress.label}` : '正在校验机器人姿态与导航坐标…'}</p>}
         {error && <p className="abx-export-error" role="alert">{error}</p>}
         {result && <>
           <dl className="abx-export-counts"><div><dt>示教任务</dt><dd>{result.summary.taskCount}</dd></div><div><dt>机器人 Pose</dt><dd>{result.summary.poseCount}</dd></div><div><dt>导航目标</dt><dd>{new Set(targets.map((point) => point.nodeId)).size}</dd></div><div><dt>导航步骤</dt><dd>{result.summary.navigationCount}</dd></div></dl>
@@ -68,9 +103,9 @@ export default function AbxTeachingExportDialog({ snapshot, onClose }) {
           {targets.length > 0 && <div className="abx-export-targets"><table aria-label="路网导航目标预览"><thead><tr><th>目标</th><th>X / m</th><th>Y / m</th><th>Yaw / rad</th></tr></thead><tbody>{targets.slice(0, 12).map((point, index) => <tr key={index}><td title={point.name}>{point.name}</td>{['x_m', 'y_m', 'yaw_rad'].map((key) => <td key={key}>{point.target?.[key] == null ? '—' : point.target[key].toFixed(6)}</td>)}</tr>)}</tbody></table>{targets.some((point) => !point.target) && <p>“—” 表示原任务仅包含站点编号，未提供对应地图坐标。</p>}{targets.length > 12 && <p>其余 {targets.length - 12} 项保存在完整导航清单中。</p>}</div>}
         </>}
       </div>
-      <footer><span role="status">{downloaded ? '已下载 · 在大脑示教任务页面导入 ZIP' : '导出本地文件'}</span><div>
-        <button type="button" disabled={!result} onClick={() => download(new Blob([result.navigationBytes], { type: 'application/json' }), `robot-navigation-${stamp}.json`)}>下载导航清单</button>
-        <button type="button" className="abx-export-primary" disabled={!result} onClick={() => { download(result.blob, `robot-teaching-${stamp}.zip`); setDownloaded(true); }}><Download size={14} />下载机器人导入包</button>
+      <footer><span role="status">{downloaded && ready ? '已下载 · 在大脑示教任务页面导入 ZIP' : '导出本地文件'}</span><div>
+        <button type="button" disabled={!ready} onClick={() => download(new Blob([result.navigationBytes], { type: 'application/json' }), `robot-navigation-${stamp}.json`)}>下载导航清单</button>
+        <button type="button" className="abx-export-primary" disabled={!ready} onClick={() => { download(result.blob, `robot-teaching-${stamp}.zip`); setDownloaded(true); }}><Download size={14} />下载机器人导入包</button>
       </div></footer>
     </section>
   </div>, document.body);

@@ -77,7 +77,7 @@ call('init')
 manifest = json.loads((folder / 'abx/manifest.json').read_text())
 navigation = json.loads((folder / 'abx/navigation.json').read_text())
 assert navigation['mode'] == 'route' and navigation['nativeTaskNavigationSupported'] is True
-assert teaching.VERSION == 23, 'Review the supplied Brain contract before changing export assumptions'
+assert teaching.VERSION in (23, 32), 'Review the supplied Brain contract before changing export assumptions'
 assert validate_route(navigation['route']) == navigation['route']
 # Existing business route and active selection must survive native imports.
 library = RouteLibrary()

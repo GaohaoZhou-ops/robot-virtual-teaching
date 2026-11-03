@@ -66,7 +66,7 @@ def context_of(rows):
 
 
 call('init')
-assert teaching.VERSION == 23
+assert teaching.VERSION in (23, 32), 'Review a new robot importer version before extending this contract'
 library = RouteLibrary()
 existing = dict(schema_version=1, id='existing-business-route', name='已有路网', scene_name='existing-map',
                 nodes=[dict(id=0, label='已有站点', x_m=100, y_m=200, yaw_rad=None)], edges=[])

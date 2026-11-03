@@ -9,7 +9,7 @@ const suites = {
   extended: ['test:model-composition', 'test:torso', 'test:robot-presets', 'test:robot-limits',
     'test:robot-coupling', 'test:interactive-ik', 'test:polyline', 'test:teaching-insert',
     'test:linked-project', 'test:project-collection', 'test:independent-alignment', 'test:independent-batch', 'test:teaching-data',
-    'test:independent-export', 'test:directory', 'test:abx',
+    'test:independent-export', 'test:directory', 'test:abx', 'test:abx-standards',
     'test:ipad', 'test:ipad:navigation', 'test:ipad:qr', 'test:ipad:file', 'test:ipad:discovery',
     'test:ipad:screen', 'test:mobile-solve', 'test:transfer', 'test:map-transform', 'test:route-sync',
     'test:waypoint-labels', 'test:robot-grounding', 'test:coverage', 'test:vision:scene'],

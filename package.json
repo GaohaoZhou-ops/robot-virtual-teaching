@@ -33,6 +33,8 @@
     "test:directory": "node tests/project_directory_smoke.mjs",
     "test:abx": "node tests/abx_teaching_bundle_smoke.mjs && node tests/abx_teaching_presets_smoke.mjs && node tests/abx_teaching_v11_smoke.mjs && node tests/abx_route_identity_smoke.mjs",
     "test:abx-bundle": "node tests/abx_teaching_bundle_smoke.mjs",
+    "test:abx-standards": "node tests/unit/abx_teaching_standards_smoke.mjs",
+    "test:abx-standards-contract": "node tests/integration/abx_teaching_standards_contract.mjs",
     "test:abx-v11": "node tests/abx_teaching_v11_smoke.mjs",
     "test:abx-extended": "node tests/abx_teaching_export_smoke.mjs",
     "test:abx-exchange": "node tests/abx_workspace_exchange_smoke.mjs",

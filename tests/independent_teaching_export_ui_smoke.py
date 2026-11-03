@@ -32,6 +32,7 @@ def seed(page, variant='linked'):
         await store.saveWorkspaceMap(sessionId, entry.map.mapId, entry.map.name, entry.map, entry.mode);
         await store.saveWorkspaceConfig(sessionId, entry.map.mapId, entry.config.config, entry.mode);
       }
+      await store.importSharedRobotPresets(sessionId, fixture.local.config.config.project.virtualTeaching.jointPoses);
       await store.activateWorkspaceMode(sessionId, variant === 'map' ? 'map' : 'independent');
       return {route: fixture.route, local: fixture.local.config.config.project};
     }""", variant)
@@ -42,6 +43,9 @@ def seed(page, variant='linked'):
     page.locator('.loading-curtain').wait_for(state='hidden')
     name = '地图已有旧任务' if variant == 'map' else '当前独立任务'
     page.get_by_role('button', name=f'选择示教任务 {name}', exact=True).click()
+    # The shared preset library is merged/reordered when loading a workspace.
+    # JSON export must match that current library, not the pre-migration fixture.
+    fixture['local']['virtualTeaching']['jointPoses'] = snapshot(page, 'independent')['project']['virtualTeaching']['jointPoses']
     return fixture
 
 

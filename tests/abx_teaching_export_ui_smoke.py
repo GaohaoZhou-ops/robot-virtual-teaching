@@ -144,6 +144,12 @@ def run():
                     assert int(output_rows[0]['basic_pose_count']) == int(original_rows[0].get('basic_pose_count', '0')) + 2
                 page.keyboard.press('Escape')
             for invalid in [True, 'preset']:
+                # Isolate IndexedDB/shared presets and pending autosaves from
+                # the preceding valid workspace before seeding invalid data.
+                page.close()
+                page = browser.new_page(viewport={'width': 1440, 'height': 1000}, accept_downloads=True)
+                page.set_default_timeout(30000)
+                page.on('pageerror', lambda error: errors.append(str(error)))
                 seed(page, invalid=invalid)
                 page.get_by_role('button', name='导出示教数据', exact=True).click()
                 dialog = page.get_by_role('dialog', name='导出机器人示教', exact=True)

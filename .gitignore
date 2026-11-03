@@ -1549,15 +1549,30 @@ Desktop.ini
 /ABXBrainSystem (*).[zZ][iI][pP]
 /abx-brain-readonly-*/
 /tests/abx-brain-readonly-*/
+# Standard-resource contract/UI tests use temporary workspaces; keep them local
+# even when TMPDIR points at the repository root. Maintained tests stay visible.
+/atlas-abx-standards-*/
+/atlas-standards-ui-*/
 /380B平地巡检.[zZ][iI][pP]
 /380B平地巡检/
+
+# Extracted standard PNG/XYZ bundles and robot reference-storage copies.
+# Root-scoped directories do not hide source assets or nested test fixtures.
+/standards/
+/standards.[zZ][iI][pP]
+/teaching-references/
+/teaching-references.[zZ][iI][pP]
 
 # Point-cloud assets stay local; only explicit synthetic test fixtures below
 # are trackable. Do not add exceptions for private maps/ resources.
 *.[pP][lL][yY]
+# Native ABXXYZ1 standard/execution clouds may be large and contain scene data.
+*.[xX][yY][zZ][bB][iI][nN]
 # Compressed copies of imported/exported models stay local too.
 *.[pP][lL][yY].[zZ][iI][pP]
 *.[pP][lL][yY].[gG][zZ]
+*.[xX][yY][zZ][bB][iI][nN].[zZ][iI][pP]
+*.[xX][yY][zZ][bB][iI][nN].[gG][zZ]
 
 # Local iPhone / iPad / Vision Pro model-transfer payloads
 # Match extension case variants without hiding deliberate fixture inputs below.
@@ -1614,6 +1629,8 @@ parking-merge-*-result.json
 !tests/**/fixtures/**/parking-merge-server-*/
 !tests/**/fixtures/**/*.[pP][lL][yY]
 !tests/**/fixtures/**/*.[pP][lL][yY].[gG][zZ]
+!tests/**/fixtures/**/*.[xX][yY][zZ][bB][iI][nN]
+!tests/**/fixtures/**/*.[xX][yY][zZ][bB][iI][nN].[gG][zZ]
 !tests/**/fixtures/**/*.[aA][tT][lL][sS]
 !tests/**/fixtures/**/*.abxteach.ndjson
 !tests/**/fixtures/**/*.json
@@ -1622,6 +1639,8 @@ parking-merge-*-result.json
 !ipad/Tests/Fixtures/**/parking-merge-server-*/
 !ipad/Tests/Fixtures/**/*.[pP][lL][yY]
 !ipad/Tests/Fixtures/**/*.[pP][lL][yY].[gG][zZ]
+!ipad/Tests/Fixtures/**/*.[xX][yY][zZ][bB][iI][nN]
+!ipad/Tests/Fixtures/**/*.[xX][yY][zZ][bB][iI][nN].[gG][zZ]
 !ipad/Tests/Fixtures/**/*.[aA][tT][lL][sS]
 !ipad/Tests/Fixtures/**/*.abxteach.ndjson
 !ipad/Tests/Fixtures/**/*.json
@@ -1630,6 +1649,8 @@ parking-merge-*-result.json
 !vision/Tests/Fixtures/**/parking-merge-server-*/
 !vision/Tests/Fixtures/**/*.[pP][lL][yY]
 !vision/Tests/Fixtures/**/*.[pP][lL][yY].[gG][zZ]
+!vision/Tests/Fixtures/**/*.[xX][yY][zZ][bB][iI][nN]
+!vision/Tests/Fixtures/**/*.[xX][yY][zZ][bB][iI][nN].[gG][zZ]
 !vision/Tests/Fixtures/**/*.[aA][tT][lL][sS]
 !vision/Tests/Fixtures/**/*.abxteach.ndjson
 !vision/Tests/Fixtures/**/*.json

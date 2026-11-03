@@ -75,6 +75,9 @@
 | 示教姿态编辑与躯干调整回写 | `uv run --with playwright python tests/teaching_pose_edit_smoke.py`（先启动服务） |
 | 机器人 v11 导出适配 | `npm run test:abx-v11` |
 | 机器人任务与完整路网导出 | `npm run test:abx-bundle` |
+| 标准图 / 点云四种导出组合、单位、Pose 关联、校验和与取消 | `npm run test:abx-standards` |
+| 新版机器人原始 ZIP 读取器、标准资源导入与再导出 | `ABX_WORKSPACE_ZIP=ABXBrainSystem.zip npm run test:abx-standards-contract`（使用含标准点云导入的源码包；临时数据库，无真机连接） |
+| 标准资源弹窗、WebP 转 PNG、下载、缺失 / 损坏提示与窄屏 | `uv run --with playwright python tests/integration/abx_teaching_standards_ui_smoke.py`（先启动独立 Vite；可设置 `BASE_URL`） |
 | 清理与数据保护 | `node tests/clean_build_smoke.mjs` |
 | 构建脚本参数与失败处理 | `node tests/build_scripts_smoke.mjs` |
 | iPhone / iPad / Vision Pro 模拟器 start、stop、status、设备隔离与并发控制（模拟 Apple 工具） | `node tests/apple_simulator_control_smoke.mjs` |

@@ -6,9 +6,11 @@ import { appendImportedAbxTasks } from "./abxTeachingRoundtrip.js";
 import { abxNestedRecords, parseAbxTeachingTask } from "./abxTeachingImport.js";
 import { buildAbxV11Files } from "./abxTeachingV11.js";
 import { teachingActionPresets } from "./teachingPresetInsertion.js";
+import { appendAbxTeachingStandards } from './abxTeachingStandards.js';
 import { ABX_VERSION as VERSION, ABX_JOINT_ORDER as JOINT_ORDER, ABX_JOINT_NAMES as JOINT_NAMES } from "./abxFormat.js";
 
-// Contract: supplied ABXBrainSystem.zip, teaching_store.py v23.
+// Keep the proven v23 task format; optional standards also target the supplied
+// v32 robot importer. All conversion stays in the virtual teaching project.
 const MAX_LINE_BYTES = 12000;
 const NAVIGATION_CHUNK_BYTES = 4096;
 const POSITION_TOLERANCE_M = 1e-6;
@@ -221,7 +223,7 @@ const instructions = [
   'ABX 机器人示教与路网',
   '',
   '1. 在大脑“示教任务 → 导入”选择 robot-teaching-*.zip；完整工程备份中的本目录仅供提取参考。',
-  '   适用于提供的 ABXBrainSystem 源码（teaching_store.py v23），ZIP 清单为 abx-teaching-export v1。',
+  '   任务保持 v23 格式，已验证兼容提供的 ABXBrainSystem v32 导入器；ZIP 清单为 abx-teaching-export v1。',
   '   任务使用支持内嵌路网和预设的 v23；没有附加路网或预设的旧版原生任务保持原格式与原始记录。',
   '2. ' + navigationNotice,
   '   每个非空停车点的首个 Pose 前，以及同一停车点内底盘目标变化处，插入 route_navigation 步骤。',
@@ -240,7 +242,7 @@ const instructions = [
   '5. 每个任务携带对应机器人的全部预设姿态，包括未插入任务的预设；原生任务已有的基础姿态保留。',
   '   预设按 basic_pose 记录写入任务文件，导入时合并到机器人的基础动作库，不增加任务执行步骤。',
   '   导入由大脑分配新任务 ID，source-mapping.json 记录源项目到包内任务和 Pose 的对应关系。',
-  '   RGB/XYZ 视觉参考仍在完整工程中，不作为真机拍摄记录，也不自动触发相机。',
+  '   可选标准图 / 标准点云来自虚拟示教采集，标记为模拟参考；随任务 ZIP 导入，不自动触发相机。',
   '   移动设备 Pose（iPad / Vision Pro） 须先求解为机器人关节姿态，独立示教须先转换到地图坐标后再导出。',
   '6. 导出为当前快照；修改示教数据后请重新导出。原工程 ZIP 继续用于完整备份和恢复。',
   '   地图示教的转换矩阵仅用于虚拟场景对齐，机器人导出使用对齐前的地图坐标，保留停车定位和关节读数。',
@@ -537,8 +539,11 @@ export async function buildAbxTeachingExport(payload, { robotPackage = null, att
 // Display calibration is removed before station matching; the archive contains
 // robot coordinates and readings, never display poses or project matrices.
 export async function buildAbxTeachingArchive(payload, options = {}) {
+  options.signal?.throwIfAborted();
   const taskVersion = options.taskVersion ?? VERSION;
   requireExport([11, VERSION].includes(taskVersion), '不支持的机器人示教导出版本');
+  requireExport(taskVersion !== 11 || !options.includeStandards && !options.includeClouds,
+    '旧版 v11 导出不支持标准资源，请使用默认机器人示教 ZIP');
   const result = await buildAbxTeachingExport(payload, { ...options, attachLegacyRoutes: taskVersion !== 11 });
   requireExport(result, '请先将独立示教转换到地图示教，再导出机器人示教数据');
   requireExport(result.summary.status === 'ready', result.summary.message);
@@ -567,6 +572,8 @@ export async function buildAbxTeachingArchive(payload, options = {}) {
       taskVersion: navigation.taskVersion, notice, manifestFile: 'manifest.json', navigationFile: 'navigation.json' };
     compatible = { files, summary, navigation, navigationBytes: files['navigation.json'] };
   }
+  compatible = await appendAbxTeachingStandards(compatible, payload, options);
+  options.signal?.throwIfAborted();
   const archiveBytes = zipSync(compatible.files, { level: 0 });
   return { ...compatible, bytes: archiveBytes, byteLength: archiveBytes.length,
     blob: new Blob([archiveBytes], { type: 'application/zip' }) };
