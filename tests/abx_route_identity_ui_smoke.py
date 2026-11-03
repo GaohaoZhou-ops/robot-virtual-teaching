@@ -1,6 +1,7 @@
-"""Import a repeated-label robot route, teach at N31/N62, and inspect the ZIP."""
+"""Export measured stations after ordinary/aligned movement and legacy restore."""
 import base64
 import json
+import os
 from pathlib import Path
 import tempfile
 import zipfile
@@ -8,9 +9,12 @@ import zipfile
 from playwright.sync_api import expect, sync_playwright
 from abx_teaching_export_ui_smoke import BASE_URL, CHROME
 from topbar_tools_helpers import topbar_action
+from map_teaching_transform_ui_smoke import SAMPLE, choose
+from teaching_transfer_ui_smoke import ready
 
 
-def run():
+def run(alignment=''):
+    wanted = [31, 98] if alignment else [31, 62]
     reference = Path(__file__).resolve().parent.parent / '1019平地路网终版测试.json'
     if reference.exists():
         route = json.loads(reference.read_text())
@@ -58,7 +62,9 @@ def run():
             search = page.get_by_label('搜索导航点', exact=True)
             for node_id in [1, 31, 62, 98]:
                 expect(search).to_contain_text(f'N{node_id} · 停车点1')
-            for index, node_id in enumerate([31, 62]):
+            if alignment:
+                choose(page, str(SAMPLE))
+            for index, node_id in enumerate(wanted):
                 page.get_by_role('tab', name='路径与导航', exact=True).click()
                 search.select_option(f'abx-route:{route["id"]}:N{node_id}')
                 expect(page.locator('.property-editor h3')).to_contain_text(f'N{node_id} · 停车点1')
@@ -74,11 +80,36 @@ def run():
                     page.get_by_role('button', name='新增停车点', exact=True).click()
                 expect(page.get_by_role('button', name=f'选择当前停车点 N{node_id} · 停车点1', exact=True)).to_be_visible()
                 page.get_by_role('button', name='记录当前姿态', exact=True).click()
-            page.wait_for_function("""async () => {
+            saved = page.evaluate("""async () => {
               const store = await import('/src/features/workspace/model/sessionStore.js');
-              const config = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'map');
-              return config?.config.project.virtualTeaching.tasks[0]?.parkingPoints?.filter(p => p.poses.length === 1).length === 2;
+              const {sessionId} = await store.fetchServiceSession();
+              const deadline = Date.now() + 20000;
+              while (Date.now() < deadline) {
+                const saved = await store.loadWorkspaceConfig(sessionId, 'map');
+                if (saved?.config.project.virtualTeaching.tasks[0]?.parkingPoints?.filter(p => p.poses.length === 1).length === 2) return saved;
+                await new Promise(resolve => setTimeout(resolve, 100));
+              }
+              throw new Error('The two recorded stations were not persisted');
             }""")
+            if alignment == 'legacy':
+                # Restore already-saved captures from the old map-mode command:
+                # the displayed route XY was retained while only Z changed.
+                # Unload the editor first so autosave cannot replace the fixture.
+                page.goto(BASE_URL + '/tests/fixtures/virtual2map.txt')
+                page.evaluate("""async saved => {
+                  const store = await import('/src/features/workspace/model/sessionStore.js');
+                  const {sessionId} = await store.fetchServiceSession();
+                  const project = saved.config.project;
+                  for (const parking of project.virtualTeaching.tasks[0].parkingPoints) {
+                    const node = project.waypoints.find(point => point.abx && point.name === parking.name);
+                    parking.mapPose.position.x = node.pose.x;
+                    parking.mapPose.position.y = node.pose.y;
+                    parking.poses.forEach(pose => { pose.mapPose = structuredClone(parking.mapPose); });
+                  }
+                  await store.saveWorkspaceConfig(sessionId, saved.mapId, saved.config, 'map');
+                }""", saved)
+                page.goto(BASE_URL + '/workbench', wait_until='networkidle')
+                ready(page, 'map')
             topbar_action(page, name='打开示教数据管理页', exact=True).click()
             page.locator('.loading-curtain').wait_for(state='hidden')
             expect(page.locator('[data-page="teaching-data"]')).to_have_attribute('data-teaching-task-count', '1')
@@ -93,8 +124,8 @@ def run():
                 raise AssertionError(dialog.inner_text()) from error
             table = dialog.get_by_role('table', name='路网导航目标预览')
             expect(dialog.get_by_label('随包路网')).to_contain_text(f"1 个路网 · {len(route['nodes'])} 个节点 · {len(route['edges'])} 条有向边")
-            expect(table).to_contain_text('N31 · 停车点1')
-            expect(table).to_contain_text('N62 · 停车点1')
+            for node_id in wanted:
+                expect(table).to_contain_text(f'N{node_id} · 停车点1')
             with page.expect_download() as pending:
                 button.click()
             output = Path(folder) / 'route-teaching.zip'
@@ -102,13 +133,15 @@ def run():
             with zipfile.ZipFile(output) as bundle:
                 manifest = json.loads(bundle.read('manifest.json'))
                 rows = [json.loads(line) for line in bundle.read(manifest['tasks'][0]['file']).splitlines()]
-                assert [row['name'] for row in rows if row['type'] == 'parking'] == ['N31 · 停车点1', 'N62 · 停车点1']
-                assert [row['record']['node_id'] for row in rows if row.get('record', {}).get('type') == 'route_navigation'] == ['N31', 'N62']
+                assert [row['name'] for row in rows if row['type'] == 'parking'] == [f'N{node_id} · 停车点1' for node_id in wanted]
+                assert [row['record']['node_id'] for row in rows if row.get('record', {}).get('type') == 'route_navigation'] == [f'N{node_id}' for node_id in wanted]
                 assert rows[0]['version'] == 23
                 context = json.loads(b''.join(base64.b64decode(row['data']) for row in rows if row['type'] == 'navigation_chunk'))
                 assert context['routes'] == [route], 'the complete graph, not just visited stations, must be embedded'
                 assert json.loads(bundle.read(manifest['tasks'][0]['navigation']['routes'][0])) == route
-                assert json.loads(bundle.read('navigation.json'))['routeImportIncluded'] is True
+                navigation = json.loads(bundle.read('navigation.json'))
+                assert navigation['routeImportIncluded'] is True
+                assert any('历史示教记录中的高度偏移' in warning for warning in navigation['warnings']) == (alignment == 'legacy')
             saved_route = page.evaluate("""async () => {
               const store = await import('/src/features/workspace/model/sessionStore.js');
               const saved = await store.loadWorkspaceConfig((await store.fetchServiceSession()).sessionId, 'map');
@@ -116,12 +149,12 @@ def run():
               return (await buildAbxRouteDocuments(saved.config.project)).routes[0];
             }""")
             assert saved_route == route, 'teaching must not change the native road graph or create duplicate stations'
-            page.screenshot(path='/tmp/atlas-abx-route-identity.png', full_page=True)
+            page.screenshot(path=f'/tmp/atlas-abx-route-identity-{alignment or "original"}.png', full_page=True)
             assert not errors, errors
         finally:
             browser.close()
-    print('Route import labels, N31/N62 movement/teaching names, persisted snapshot, ZIP station mapping and unchanged graph passed')
+    print(f'Route {wanted}, {alignment or "original"} movement/captures, persisted snapshot, ZIP station mapping and unchanged measured graph passed')
 
 
 if __name__ == '__main__':
-    run()
+    run(os.environ.get('ATLAS_MAP_DISPLAY_ALIGNMENT', ''))

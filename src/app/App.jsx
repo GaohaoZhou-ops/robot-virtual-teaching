@@ -588,7 +588,9 @@ export default function App() {
   const waypoints = useMemo(() => buildTeachingWaypoints(storedWaypoints, teachingTasks, {
     mapData,
     coordinateFrame,
-  }), [storedWaypoints, teachingTasks, mapData, coordinateFrame]);
+    mapTransform,
+    abxRoutes,
+  }), [storedWaypoints, teachingTasks, mapData, coordinateFrame, mapTransform, abxRoutes]);
   const edges = useMemo(() => navigationEdgesForWaypoints(storedEdges, waypoints), [storedEdges, waypoints]);
   const arrivedWaypointId = useMemo(() => {
     if (!robotWaypointLocation || !selectedRobot

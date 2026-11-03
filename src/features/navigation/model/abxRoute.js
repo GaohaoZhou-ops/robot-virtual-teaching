@@ -1,7 +1,7 @@
 import { sha256Bytes } from "../../../shared/utils/hash.js";
 import { abxAssert as check, abxBytes, abxEqual, parseAbxJson } from "../../teaching/model/abxFormat.js";
 import { Euler, Vector3 } from 'three';
-import { robotTeachingCoordinates } from '../../teaching/model/mapTeachingCoordinates.js';
+import { robotTeachingCoordinates, ROBOT_EXPORT_HEIGHT_DIRECTIONS } from '../../teaching/model/mapTeachingCoordinates.js';
 
 const fields = (value, names, label) => check(value && !Array.isArray(value)
   && abxEqual(Object.keys(value).sort(), names.sort()), `${label}字段不匹配`);
@@ -15,8 +15,8 @@ export const abxNodeLabel = (id, name) => {
   return name === `N${id}` ? '' : name.startsWith(prefix) ? name.slice(prefix.length) : name;
 };
 
-// Older independent navigation kept local X/Y while substituting the robot's
-// calibrated Z. A saved placement proves the direction of that height offset.
+// Older navigation kept display/local X/Y while substituting the robot's Z.
+// Saved display/placement matrices prove the direction of that height offset.
 // Use it only for named teaching stations, never as a larger distance tolerance.
 export function abxStationHeightContext(payload, routeId) {
   const transfer = payload.workspace?.transfer;
@@ -30,6 +30,8 @@ export function abxStationHeightContext(payload, routeId) {
       ...['roll', 'pitch', 'yaw'].map((axis) => pose.rpy[axis] * Math.PI / 180), 'ZYX'));
     return Math.abs(up.z) > 1e-6 ? [up] : [];
   });
+  directions.push(...(payload[ROBOT_EXPORT_HEIGHT_DIRECTIONS] || []).filter((up) =>
+    ['x', 'y', 'z'].every((axis) => Number.isFinite(up[axis])) && Math.abs(up.z) > 1e-6));
   const heights = new Map((payload.waypoints || []).filter((point) => point.abx?.routeId === routeId)
     .map((point) => [point.abx.nodeId, point.pose?.z ?? 0]));
   return { directions, heights };

@@ -1,3 +1,6 @@
+import { mapTeachingCalibrationMatrix } from './teachingCoordinates.js';
+import { matchesUnprojectedRobotStation, unprojectedRobotStations } from './mapTeachingCoordinates.js';
+
 export const TEACHING_WAYPOINT_SOURCE = 'teaching-parking-point';
 export const TEMPORARY_MAP_ROUTE_SOURCE = 'temporary-map-route';
 
@@ -24,7 +27,7 @@ export const parkingWaypointPose = (mapPose) => ({
 // Replacing local Z alone moves map X/Y when the two frames are tilted.
 export function waypointRobotPose(point, height) {
   const { x, y, z, roll, pitch, yaw } = point.pose;
-  const up = point.source === TEMPORARY_MAP_ROUTE_SOURCE ? point.navigationUp : null;
+  const up = point.navigationUp || null;
   if (up && Math.abs(up.z) < 1e-6) return null;
   const offset = up ? (height - z) / up.z : 0;
   return { position: { x: x + (up?.x || 0) * offset, y: y + (up?.y || 0) * offset, z: height },
@@ -50,7 +53,7 @@ export function teachingParkingName(waypoints, pose, fallback, selectedId) {
   return aligned.length === 1 ? aligned[0].name : fallback;
 }
 
-export function buildTeachingWaypoints(storedWaypoints, tasks, { mapData, coordinateFrame } = {}) {
+export function buildTeachingWaypoints(storedWaypoints, tasks, { mapData, coordinateFrame, mapTransform, abxRoutes } = {}) {
   const parkingById = new Map();
   for (const task of tasks) {
     // Native route nodes are imported separately. A historical parking
@@ -90,7 +93,15 @@ export function buildTeachingWaypoints(storedWaypoints, tasks, { mapData, coordi
   for (const [id, parking] of parkingById) {
     if (!seen.has(id)) points.push(parking);
   }
-  return points;
+  if (coordinateFrame !== 'map' || !mapTransform) return points;
+  const matrix = mapTeachingCalibrationMatrix(mapTransform);
+  const navigationUp = { x: matrix.elements[8], y: matrix.elements[9], z: matrix.elements[10] };
+  const unprojected = unprojectedRobotStations({ workspace: { mapTransform }, abxRoutes, waypoints: storedWaypoints });
+  // Keep robot-map X/Y fixed while retaining the current display height.
+  // This derived direction is rebuilt on load and never saved as route data.
+  return points.map((point) => point.source === TEMPORARY_MAP_ROUTE_SOURCE
+    ? point : { ...point, navigationUp: matchesUnprojectedRobotStation(point.pose, point.name, unprojected, true)
+      ? { x: 0, y: 0, z: 1 } : navigationUp });
 }
 
 export function navigationEdgesForWaypoints(edges, waypoints) {

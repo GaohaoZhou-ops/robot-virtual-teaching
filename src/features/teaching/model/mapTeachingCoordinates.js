@@ -1,6 +1,10 @@
 import { mapTeachingCalibrationMatrix, transferMatrix, transformTeachingPose, transformTeachingTasks } from './teachingCoordinates.js';
 import { calculatePathDistances } from '../../navigation/model/pathMetrics.js';
 
+// Internal export context survives object spreads but never JSON serialization.
+// It proves the direction of a height-only move made in the aligned display.
+export const ROBOT_EXPORT_HEIGHT_DIRECTIONS = Symbol('robot-export-height-directions');
+
 const axes = ['x', 'y', 'z'], angles = ['roll', 'pitch', 'yaw'];
 const asPose = (value) => ({ position: Object.fromEntries(axes.map((axis) => [axis, value?.[axis] ?? 0])),
   rpy: Object.fromEntries(angles.map((axis) => [axis, value?.[axis] ?? 0])) });
@@ -19,6 +23,32 @@ export function sameMapTeachingPose(a, b, flat = false) {
     const second = transferMatrix(flat ? asPose(b) : b).elements;
     return first.every((value, index) => Math.abs(value - second[index]) < 1e-9);
   } catch { return false; }
+}
+
+const nativeStationPose = (node) => ({ x: node.x_m, y: node.y_m, z: 0, roll: 0, pitch: 0,
+  yaw: (node.yaw_rad ?? 0) * 180 / Math.PI });
+
+// Older projects could retain the display matrix while importing a fresh robot
+// route without projecting it. Native coordinates and headings prove which
+// stations are still in the robot frame; a name alone is never that proof.
+export function unprojectedRobotStations(payload) {
+  const calibration = payload.workspace?.mapTransform;
+  if (!calibration) return [];
+  const sources = byId(calibration.sourceCoordinates?.waypoints);
+  const routes = new Map((payload.abxRoutes || []).map((route) => [route.id, byId(route.nodes)]));
+  return (payload.waypoints || []).filter((point) => {
+    if (sources.has(point.id)) return false;
+    const node = routes.get(point.abx?.routeId)?.get(point.abx?.nodeId);
+    return node && sameMapTeachingPose(point.pose, nativeStationPose(node), true);
+  });
+}
+
+export function matchesUnprojectedRobotStation(pose, name, stations, flat = false) {
+  if (!pose) return false;
+  const namedId = /^N(0|[1-9]\d*)(?: · |$)/.exec(name || '')?.[1];
+  const value = flat ? asPose(pose) : pose;
+  return stations.filter((station) => (namedId === undefined || String(station.abx.nodeId) === namedId)
+    && sameMapTeachingPose({ ...value, position: { ...value.position, z: station.pose.z } }, asPose(station.pose))).length === 1;
 }
 
 // A calibration definition may be copied into a placement/alignment marker;
@@ -69,18 +99,33 @@ function transformPayload(payload, matrix) {
 function restoreExactCoordinates(result, displayed, sources) {
   const waypointSources = byId(sources?.waypoints);
   const routeSources = new Map((displayed.abxRoutes || []).map((route) => [route.id, byId(route.nodes)]));
+  const unprojected = unprojectedRobotStations(displayed);
   result.waypoints = result.waypoints.map((point, index) => {
     const original = routeSources.get(point.abx?.routeId)?.get(point.abx?.nodeId);
-    const native = original && { x: original.x_m, y: original.y_m, z: 0, roll: 0, pitch: 0,
-      yaw: (original.yaw_rad ?? 0) * 180 / Math.PI };
+    const native = original && nativeStationPose(original);
     const source = [waypointSources.get(point.id)?.pose, native].find((pose) => sameMapTeachingPose(point.pose, pose, true));
-    const pose = source || (!waypointSources.has(point.id) && sameMapTeachingPose(displayed.waypoints[index].pose, native, true) ? native : point.pose);
+    const display = displayed.waypoints[index];
+    const alreadyRobotFrame = !waypointSources.has(point.id) && (sameMapTeachingPose(display.pose, native, true)
+      || matchesUnprojectedRobotStation(display.pose, display.name, unprojected, true));
+    const pose = source || (alreadyRobotFrame ? display.pose : point.pose);
     return { ...point, pose: structuredClone(pose), ...(point.xzy ? { xzy: [pose.x, pose.z, pose.y] } : {}),
       ...(point.rpy ? { rpy: angles.map((axis) => pose[axis]) } : {}) };
   });
   if (sameMapTeachingPose(result.robot?.origin, sources?.robotOrigin)) result.robot.origin = structuredClone(sources.robotOrigin);
+  else if (!sources?.robotOrigin && matchesUnprojectedRobotStation(displayed.robot?.origin, '', unprojected)) {
+    result.robot.origin = structuredClone(displayed.robot.origin);
+  }
   const taskSources = byId(sources?.tasks);
-  const restorePoint = (point, source, display) => {
+  const restorePoint = (point, source, display, stationName) => {
+    if (!source?.mapPose && matchesUnprojectedRobotStation(display.mapPose, stationName, unprojected)) {
+      // All world poses belonging to this capture share its unchanged frame.
+      // Keep camera-local data and the captured joint readings untouched too.
+      for (const key of ['mapPose', 'opticalTargets', 'cameraCapture', 'mergeHistory', 'replanningHistory']) {
+        if (Object.hasOwn(display, key)) point[key] = structuredClone(display[key]);
+        else delete point[key];
+      }
+      return;
+    }
     const pose = [source?.mapPose, point.abx?.mapPose].find((value) => sameMapTeachingPose(point.mapPose, value));
     if (pose) point.mapPose = structuredClone(pose);
     // Old projects could import a real robot task after the display matrix was
@@ -99,8 +144,8 @@ function restoreExactCoordinates(result, displayed, sources) {
     task.parkingPoints.forEach((parking, index) => {
       const saved = parkingSources.get(parking.id), poseSources = byId(saved?.poses);
       const display = displayed.virtualTeaching.tasks[taskIndex].parkingPoints[index];
-      restorePoint(parking, saved, display);
-      parking.poses.forEach((point, poseIndex) => restorePoint(point, poseSources.get(point.id), display.poses[poseIndex]));
+      restorePoint(parking, saved, display, display.name);
+      parking.poses.forEach((point, poseIndex) => restorePoint(point, poseSources.get(point.id), display.poses[poseIndex], display.name));
     });
   });
 }
@@ -123,6 +168,7 @@ export function robotTeachingCoordinates(payload) {
   // Nested route/teaching exporters can safely share the prepared payload.
   const { mapTransform, ...workspace } = payload.workspace;
   result.workspace = { ...workspace, ...(workspace.transfer ? { transfer: restorePlacement(workspace.transfer) } : {}) };
+  result[ROBOT_EXPORT_HEIGHT_DIRECTIONS] = [{ x: inverse.elements[8], y: inverse.elements[9], z: inverse.elements[10] }];
   return result;
 }
 

@@ -1,6 +1,7 @@
 import { createId, normalizeProject } from "../../workspace/model/io.js";
-import { boundTeachingTransform, identityTransferPose, transferMatrix, transformTeachingPose } from "../../teaching/model/teachingTransfer.js";
+import { boundTeachingTransform, identityTransferPose, mapTeachingCalibrationMatrix, transferMatrix, transformTeachingPose } from "../../teaching/model/teachingTransfer.js";
 import { TEMPORARY_MAP_ROUTE_SOURCE } from "../../teaching/model/teachingNavigation.js";
+import { matchesUnprojectedRobotStation, unprojectedRobotStations } from "../../teaching/model/mapTeachingCoordinates.js";
 
 function syncContext(independentMap, independentTransfer, mapConfig) {
   const payload = mapConfig?.config?.project;
@@ -11,7 +12,7 @@ function syncContext(independentMap, independentTransfer, mapConfig) {
   // Navigation only needs the graph and relation, not captured images or robot tasks.
   const project = normalizeProject({
     map: payload.map, workspace: payload.workspace, coordinateSystem: payload.coordinateSystem,
-    waypoints: payload.waypoints, paths: payload.paths,
+    waypoints: payload.waypoints, paths: payload.paths, abxRoutes: payload.abxRoutes,
   });
   if (project.workspace.teachingSpaceMode !== 'map') {
     return { available: false, reason: '路径来源必须是地图示教工程' };
@@ -35,7 +36,9 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
   const context = syncContext(independentMap, independentTransfer, mapConfig);
   if (!context.available) throw new Error(context.reason);
   const inverse = transferMatrix(context.localToMap).invert();
-  const navigationUp = { x: inverse.elements[8], y: inverse.elements[9], z: inverse.elements[10] };
+  const robotToLocal = inverse.clone().multiply(mapTeachingCalibrationMatrix(context.project.workspace.mapTransform));
+  const navigationUp = { x: robotToLocal.elements[8], y: robotToLocal.elements[9], z: robotToLocal.elements[10] };
+  const unprojected = unprojectedRobotStations(context.project);
   const prefix = createId('map-route');
   const ids = new Map(context.project.waypoints.map((point) => [point.id, `${prefix}:${point.id}`]));
   const waypoints = context.project.waypoints.map((point) => {
@@ -47,7 +50,8 @@ export function syncMapRouteToIndependent(independentMap, independentTransfer, m
     return { id: ids.get(point.id), name: point.name, source: TEMPORARY_MAP_ROUTE_SOURCE,
       sourceWaypointId: point.id,
       sourceWaypointSource: point.source,
-      navigationUp: { ...navigationUp },
+      navigationUp: matchesUnprojectedRobotStation(point.pose, point.name, unprojected, true)
+        ? { x: inverse.elements[8], y: inverse.elements[9], z: inverse.elements[10] } : { ...navigationUp },
       pose: { ...pose.position, ...pose.rpy } };
   });
   const edges = context.project.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to)).map((edge) => {
