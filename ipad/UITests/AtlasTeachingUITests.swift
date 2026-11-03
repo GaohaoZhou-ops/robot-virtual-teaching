@@ -7,6 +7,212 @@ import Metal
 
 @MainActor
 final class AtlasTeachingUITests: XCTestCase {
+    private func extensionInvitationButton(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons[UIDevice.current.userInterfaceIdiom == .pad ? "collaboration-mode-extension" : "invite-usb-collaboration"]
+    }
+
+    func testCollaborationModeDeviceScope() throws {
+        continueAfterFailure = false
+        registerPhonePermissionHandler()
+        XCUIDevice.shared.orientation = UIDevice.current.userInterfaceIdiom == .pad ? .landscapeLeft : .portrait
+        let app = XCUIApplication(); app.launch()
+        let purpose = app.segmentedControls["library-pairing-purpose"]
+        if purpose.waitForExistence(timeout: 2) { purpose.buttons["画面协作"].tap() }
+        else if UIDevice.current.userInterfaceIdiom == .phone {
+            let method = app.segmentedControls["phone-pairing-method"]
+            XCTAssertTrue(method.waitForExistence(timeout: 10)); method.buttons["数据线"].tap()
+            XCTAssertTrue(app.buttons["refresh-usb-connection"].waitForExistence(timeout: 5))
+            XCTAssertFalse(app.buttons["collaboration-mode-offline"].exists)
+            XCTAssertFalse(app.buttons["open-ipad-workbench"].exists)
+            // LiDAR iPhones already use the compact receive-model home page;
+            // preserve that page rather than adding an invitation entry to it.
+            return
+        }
+        let invite = extensionInvitationButton(app)
+        XCTAssertTrue(invite.waitForExistence(timeout: 10))
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            let offline = app.buttons["collaboration-mode-offline"]
+            XCTAssertFalse(app.buttons["invite-usb-collaboration"].exists)
+            XCTAssertFalse(app.buttons["cancel-usb-invitation"].exists)
+            for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+                XCUIDevice.shared.orientation = orientation
+                XCTAssertTrue(offline.waitForExistence(timeout: 5))
+                XCTAssertTrue(app.staticTexts["screen-pairing-status"].isHittable)
+                XCTAssertEqual(app.staticTexts["screen-pairing-status"].label, "选择协作方式")
+                XCTAssertTrue(invite.isHittable); XCTAssertTrue(offline.isHittable)
+                let visibleArea = app.scrollViews["library-pairing-scroll"].frame
+                XCTAssertTrue(visibleArea.contains(invite.frame))
+                XCTAssertTrue(visibleArea.contains(offline.frame))
+                XCTAssertEqual(invite.frame.minX, offline.frame.minX, accuracy: 1)
+                XCTAssertEqual(invite.frame.width, offline.frame.width, accuracy: 1)
+                XCTAssertLessThan(invite.frame.maxY, offline.frame.minY)
+                XCTAssertFalse(app.buttons["cancel-collaboration-mode"].exists)
+                let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                shot.name = "Stacked iPad collaboration buttons \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+                offline.tap()
+                XCTAssertTrue(app.buttons["open-ipad-workbench"].waitForExistence(timeout: 5), "Open directly without a mode-selection sheet")
+                app.buttons["ipad-workbench-cancel"].tap()
+                XCTAssertTrue(invite.waitForExistence(timeout: 5))
+            }
+        } else {
+            XCTAssertFalse(app.buttons["collaboration-mode-offline"].exists)
+            XCTAssertFalse(app.buttons["collaboration-mode-extension"].exists)
+        }
+        invite.tap()
+        XCTAssertTrue(app.buttons["cancel-usb-invitation"].waitForExistence(timeout: 10))
+        if UIDevice.current.userInterfaceIdiom == .pad { XCTAssertFalse(app.buttons["collaboration-mode-offline"].isEnabled) }
+        app.buttons["cancel-usb-invitation"].tap()
+    }
+
+    private func openIPadWorkbench(_ app: XCUIApplication, address: String) {
+        app.launchArguments = ["-ipadWorkbenchAddress", address]
+        app.launch()
+        let purpose = app.segmentedControls["library-pairing-purpose"]
+        if purpose.waitForExistence(timeout: 10) { purpose.buttons["画面协作"].tap() }
+        let offline = app.buttons["collaboration-mode-offline"]
+        XCTAssertTrue(offline.waitForExistence(timeout: 5)); offline.tap()
+        let open = app.buttons["open-ipad-workbench"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5)); XCTAssertTrue(open.isEnabled); open.tap()
+        allowPhoneCameraIfNeeded()
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+    }
+
+    private func returnFromIPadWorkbench(_ app: XCUIApplication) {
+        let brand = app.webViews.firstMatch.buttons["虚拟示教平台，返回应用"]
+        XCTAssertTrue(brand.waitForExistence(timeout: 5)); brand.tap()
+    }
+
+    func testIPadOfflineLibraryPersistenceAndReopen() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad,
+              let address = ProcessInfo.processInfo.environment["ATLAS_IPAD_WORKBENCH_FIXTURE"] else {
+            throw XCTSkip("Requires tests/ipad_workbench_fixture.mjs")
+        }
+        continueAfterFailure = false; registerPhonePermissionHandler()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); openIPadWorkbench(app, address: address)
+        let seed = app.webViews.firstMatch.buttons["准备两个离线工程"]
+        XCTAssertTrue(seed.waitForExistence(timeout: 10)); seed.tap()
+        XCTAssertTrue(app.webViews.firstMatch.staticTexts["离线工程B.ply"].waitForExistence(timeout: 30))
+        returnFromIPadWorkbench(app)
+        let first = app.buttons["local-offline-project-map:ipad-library-A"]
+        let second = app.buttons["local-offline-project-map:ipad-library-B"]
+        XCTAssertTrue(first.waitForExistence(timeout: 15)); XCTAssertTrue(second.exists)
+        XCTAssertTrue(first.label.contains("2 个 Pose"), first.label)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Offline projects in native iPad library"; shot.lifetime = .keepAlways; add(shot)
+        app.terminate(); app.launch()
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(second.exists)
+        for letter in ["A", "B"] {
+            app.buttons["local-offline-project-map:ipad-library-\(letter)"].tap()
+            let name = app.webViews.firstMatch.staticTexts["离线工程\(letter).ply"]
+            XCTAssertTrue(name.waitForExistence(timeout: 30), app.debugDescription)
+            XCTAssertTrue(app.webViews.firstMatch.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@", "工程\(letter)的任务")).firstMatch.waitForExistence(timeout: 10))
+            returnFromIPadWorkbench(app)
+            XCTAssertTrue(first.waitForExistence(timeout: 15)); XCTAssertTrue(second.exists)
+        }
+        XCTAssertEqual(app.buttons.matching(identifier: "local-offline-project-map:ipad-library-A").count, 1)
+        XCTAssertEqual(app.buttons.matching(identifier: "local-offline-project-map:ipad-library-B").count, 1)
+    }
+
+    func testIPadWorkbenchTouchSelection() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad,
+              let address = ProcessInfo.processInfo.environment["ATLAS_IPAD_WORKBENCH_FIXTURE"] else {
+            throw XCTSkip("Run tests/ipad_workbench_fixture.mjs and set ATLAS_IPAD_WORKBENCH_FIXTURE")
+        }
+        continueAfterFailure = false; registerPhonePermissionHandler()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); openIPadWorkbench(app, address: address)
+        let web = app.webViews.firstMatch
+        let title = web.staticTexts["iPad 完整工作台验证"]
+        XCTAssertTrue(title.waitForExistence(timeout: 10))
+        title.press(forDuration: 1.2)
+        XCTAssertTrue(web.staticTexts["界面误选：0"].exists, app.debugDescription)
+        let drag = web.staticTexts["长按并拖动此处"]
+        let start = drag.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 1.2, thenDragTo: start.withOffset(CGVector(dx: 100, dy: 0)))
+        XCTAssertTrue(web.staticTexts["拖动成功"].waitForExistence(timeout: 5))
+        XCTAssertTrue(web.staticTexts["界面误选：0"].exists)
+        let field = web.textFields["验证工程名"]
+        field.tap(); field.typeText(" QA")
+        XCTAssertTrue((field.value as? String ?? "").contains("QA"))
+        field.doubleTap()
+        let copy = app.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", ["Copy", "复制"])).firstMatch
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), "Text fields must retain native selection and copy")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "iPad UI long press blocked, input selection preserved"; shot.lifetime = .keepAlways; add(shot)
+        copy.tap()
+        returnFromIPadWorkbench(app)
+    }
+
+    func testIPadWorkbenchBrowserCapabilitiesAndPersistence() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad,
+              let address = ProcessInfo.processInfo.environment["ATLAS_IPAD_WORKBENCH_FIXTURE"] else {
+            throw XCTSkip("Run tests/ipad_workbench_fixture.mjs and set ATLAS_IPAD_WORKBENCH_FIXTURE")
+        }
+        continueAfterFailure = false; registerPhonePermissionHandler()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); openIPadWorkbench(app, address: address)
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.staticTexts["能力检查通过：WebGL / Worker / WebSocket / IndexedDB"].waitForExistence(timeout: 30), app.debugDescription)
+        web.buttons["保存验证工程"].tap()
+        XCTAssertTrue(web.staticTexts["已保存：iPad 本机工程"].waitForExistence(timeout: 5))
+        web.buttons["重新加载验证页面"].tap()
+        XCTAssertTrue(web.staticTexts["已读取：iPad 本机工程"].waitForExistence(timeout: 10))
+        web.buttons["验证确认对话框"].tap()
+        XCTAssertTrue(app.alerts["工作台提示"].waitForExistence(timeout: 5))
+        app.alerts["工作台提示"].buttons["确定"].tap()
+        XCTAssertTrue(web.staticTexts["确认成功"].waitForExistence(timeout: 5))
+        returnFromIPadWorkbench(app)
+        XCTAssertTrue(extensionInvitationButton(app).waitForExistence(timeout: 5))
+        app.terminate()
+        openIPadWorkbench(app, address: address)
+        XCTAssertTrue(web.staticTexts["已读取：iPad 本机工程"].waitForExistence(timeout: 15))
+        web.buttons["导出验证工程"].tap()
+        // Downloads must open the system share sheet, rather than navigating to
+        // an unsupported blob URL. Inspect the saved JSON in the app container.
+        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 10), app.debugDescription)
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "iPad native web export"; shot.lifetime = .keepAlways; add(shot)
+        app.terminate()
+    }
+
+    func testIPadActualWebWorkbench() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad,
+              let address = ProcessInfo.processInfo.environment["ATLAS_IPAD_WORKBENCH_FIXTURE"] else {
+            throw XCTSkip("Run tests/ipad_workbench_fixture.mjs and set ATLAS_IPAD_WORKBENCH_FIXTURE")
+        }
+        continueAfterFailure = false; registerPhonePermissionHandler()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let app = XCUIApplication(); openIPadWorkbench(app, address: address)
+        let web = app.webViews.firstMatch
+        XCTAssertTrue(web.buttons["打开实际示教工程"].waitForExistence(timeout: 20)); web.buttons["打开实际示教工程"].tap()
+        let sync = web.descendants(matching: .any)["同步作业"].firstMatch
+        XCTAssertTrue(sync.waitForExistence(timeout: 60), app.debugDescription)
+        XCTAssertTrue(web.descendants(matching: .any)["显示设置"].firstMatch.exists)
+        XCTAssertTrue(web.descendants(matching: .any)["视图工具"].firstMatch.exists)
+        XCTAssertTrue(web.staticTexts["map-transfer.ply"].exists)
+        sync.tap()
+        XCTAssertTrue(web.staticTexts["选择同步模式"].waitForExistence(timeout: 5))
+        XCTAssertTrue(web.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "离线协作")).firstMatch.exists)
+        web.buttons["关闭同步作业"].tap()
+        for orientation in [UIDeviceOrientation.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            let brand = web.buttons["虚拟示教平台，返回应用"]
+            XCTAssertTrue(brand.isHittable)
+            XCTAssertFalse(app.buttons["ipad-workbench-close"].exists)
+            XCTAssertFalse(app.buttons["ipad-workbench-reload"].exists)
+            XCTAssertLessThan(web.frame.minY - app.frame.minY, 36)
+            XCTAssertGreaterThan(web.frame.height, app.frame.height - 60, "Only system safe areas should reduce the web height")
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            shot.name = "Full height iPad workbench \(orientation.rawValue)"; shot.lifetime = .keepAlways; add(shot)
+        }
+        web.buttons["返回主页面"].tap()
+        XCTAssertTrue(web.buttons["虚拟示教平台，返回应用"].waitForExistence(timeout: 5))
+        returnFromIPadWorkbench(app)
+        XCTAssertTrue(extensionInvitationButton(app).waitForExistence(timeout: 10))
+    }
+
     func testLiveUSBBidirectionalInvitations() throws {
         guard ProcessInfo.processInfo.environment["ATLAS_USB_INVITATIONS_LIVE"] == "1" else {
             throw XCTSkip("Run with tests/ipad_screen_invitation_ui_smoke.py on the USB-connected iPad")
@@ -14,7 +220,7 @@ final class AtlasTeachingUITests: XCTestCase {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .landscapeLeft
         let app = XCUIApplication(); app.launch()
-        let invite = app.buttons["invite-usb-collaboration"]
+        let invite = extensionInvitationButton(app)
         XCTAssertTrue(invite.waitForExistence(timeout: 20))
         invite.tap()
         let declined = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS %@", "电脑已拒绝"),
@@ -80,7 +286,7 @@ final class AtlasTeachingUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         app.launch()
-        XCTAssertTrue(app.buttons["invite-usb-collaboration"].waitForExistence(timeout: 20))
+        XCTAssertTrue(extensionInvitationButton(app).waitForExistence(timeout: 20))
         print("ATLAS_INVITATION_LARGE_TEXT_READY")
         let accept = app.buttons["accept-screen-invitation"].firstMatch
         let reject = app.buttons["reject-screen-invitation"].firstMatch
@@ -91,7 +297,7 @@ final class AtlasTeachingUITests: XCTestCase {
                 XCTAssertTrue(button.isHittable)
                 XCTAssertTrue(app.windows.firstMatch.frame.contains(button.frame))
             }
-            XCTAssertFalse(app.buttons["invite-usb-collaboration"].isHittable)
+            XCTAssertFalse(extensionInvitationButton(app).isHittable)
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.08)).tap()
             XCTAssertTrue(accept.exists, "Tapping outside must not dismiss or accept an invitation")
             let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -4086,7 +4292,7 @@ final class AtlasTeachingUITests: XCTestCase {
             purpose.buttons["画面协作"].tap()
             let waiting = app.staticTexts["screen-pairing-status"]
             XCTAssertTrue(waiting.waitForExistence(timeout: 5))
-            XCTAssertEqual(waiting.label, "连接电脑，开始协作")
+            XCTAssertEqual(waiting.label, "选择协作方式")
             XCTAssertFalse(app.staticTexts["方式一"].exists)
             XCTAssertFalse(app.otherElements["usb-receiving-panel"].exists)
             XCTAssertFalse(app.otherElements["model-transfer-progress"].exists)

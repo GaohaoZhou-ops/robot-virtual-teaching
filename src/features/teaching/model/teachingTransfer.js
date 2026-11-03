@@ -36,14 +36,19 @@ export function isTeachingAlignmentTarget(relation, map, mapTransfer) {
 
 // Keep earlier placements so a restored independent group can reuse its own
 // transform. A new group may use the same PLY, but must not inherit that binding.
-export function boundTeachingRelation(independentMap, independentTransfer, map, mapTransfer) {
+export function boundTeachingRelation(independentMap, independentTransfer, map, mapTransfer, mapTransform = null) {
   const placements = mapTransfer?.kind === 'placement'
     ? [mapTransfer, ...(Array.isArray(mapTransfer.previousPlacements) ? mapTransfer.previousPlacements : [])] : [];
-  const relation = placements.find((item) => item?.kind === 'placement' && sameTeachingMap(item.sourceMap, independentMap))
-    || ((independentTransfer?.kind === 'extraction' && sameTeachingMap(independentTransfer.sourceMap, map))
+  const placement = placements.find((item) => item?.kind === 'placement' && sameTeachingMap(item.sourceMap, independentMap));
+  const relation = placement || ((independentTransfer?.kind === 'extraction' && sameTeachingMap(independentTransfer.sourceMap, map))
       || isTeachingAlignmentTarget(independentTransfer, map, mapTransfer)
       ? independentTransfer : null);
-  return relation?.localToMap ? relation : null;
+  if (!relation?.localToMap) return null;
+  // Placed bindings already move with the map objects. An independent-only
+  // alignment still uses the calibration that existed when it was created.
+  if (placement || (!mapTransform && !relation.mapTransform)) return relation;
+  const delta = mapTeachingCalibrationMatrix(mapTransform).multiply(mapTeachingCalibrationMatrix(relation.mapTransform).invert());
+  return { ...relation, localToMap: transformTeachingPose(relation.localToMap, delta) };
 }
 
 export function boundTeachingTransform(...args) {
@@ -95,6 +100,13 @@ export function parseTransferMatrixFile(text) {
       new Vector3(1, 1, 1),
     ),
   };
+}
+
+export function mapTeachingCalibrationMatrix(record) {
+  if (!record) return new Matrix4();
+  if (!Array.isArray(record.values) || record.values.length !== 16) throw new Error('地图示教转换矩阵记录无效');
+  return parseTransferMatrixFile([0, 4, 8, 12]
+    .map((offset) => record.values.slice(offset, offset + 4).join(' ')).join('\n')).matrix;
 }
 
 const matrixFileKey = (values) => Array.isArray(values) && values.length === 16
@@ -312,6 +324,8 @@ export async function createTeachingAlignment(target, { localToMap, matrixImport
     version: 1, kind: 'alignment', id: createId('transfer'),
     sourceMap: await mapIdentity(target.map),
     localToMap: structuredClone(localToMap),
+    ...(target.config.config.project.workspace.mapTransform
+      ? { mapTransform: structuredClone(target.config.config.project.workspace.mapTransform) } : {}),
     matrixImports: normalizeTransferMatrixImports(matrixImports),
     createdAt: new Date().toISOString(),
   };
@@ -370,6 +384,7 @@ export async function extractTeachingWorkspace(source, { bounds, localToMap, nam
   selected.edges = project.edges.filter((edge) => ids.has(edge.from) && ids.has(edge.to));
   const transfer = { version: 1, kind: 'extraction', id: createId('transfer'),
     sourceMap: await mapIdentity(source.map), localToMap, bounds,
+    ...(project.workspace.mapTransform ? { mapTransform: structuredClone(project.workspace.mapTransform) } : {}),
     matrixImports: normalizeTransferMatrixImports(matrixImports),
     createdAt: new Date().toISOString(), baseline: await createBaseline(selected),
     robotPath: project.robot?.relativePath || null,
@@ -442,6 +457,7 @@ export async function placeTeachingWorkspace(source, target, { localToMap, matri
     ...(previousPlacements.length ? { previousPlacements } : {}),
     matrixImports: normalizeTransferMatrixImports(matrixImports ?? boundTeachingRelation(
       source.map, local.workspace.transfer, target.map, background.workspace.transfer,
+      background.workspace.mapTransform,
     )?.matrixImports),
   });
   return result;

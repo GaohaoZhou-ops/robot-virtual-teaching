@@ -24,10 +24,10 @@ export function useProjectImportProgress() {
   const finishTimer = useRef(null);
   useEffect(() => () => window.clearTimeout(finishTimer.current), []);
 
-  const begin = useCallback((sourceName) => {
+  const begin = useCallback((sourceName, { showOverlay = true } = {}) => {
     window.clearTimeout(finishTimer.current);
     clearCheckpoint();
-    current.current = { sourceName, progress: 0.02, stage: '读取工程', resuming: false };
+    current.current = { sourceName, progress: 0.02, stage: '读取工程', resuming: false, showOverlay };
     setState(current.current);
   }, []);
   const step = useCallback((progress, stage) => {

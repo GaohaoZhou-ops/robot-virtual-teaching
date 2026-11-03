@@ -359,6 +359,7 @@ const summarizeWorkspace = (mode, map, config, previous = null) => {
     available: true,
     mode: normalizeWorkspaceMode(mode),
     mapId: map?.mapId || config?.mapId || project?.map?.mapId || null,
+    mapRevision: map?.savedAt ?? previous?.mapRevision ?? 0,
     mapName: map?.name || project?.map?.fileName || previous?.mapName || '未命名工作现场',
     teachingName: project ? normalizeIndependentTeachingName(project.workspace?.independentTeachingName) : previous?.teachingName || '',
     pointCount: Number(map?.pointCount ?? project?.map?.pointCount ?? previous?.pointCount) || 0,
@@ -817,7 +818,7 @@ export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null,
   const transaction = database.transaction(STORE_NAME, 'readwrite');
   const store = transaction.objectStore(STORE_NAME);
   const completion = transactionComplete(transaction);
-  let library, modes;
+  let library, modes, changedMap;
   try {
     const [workspaceIndex, meta, storedLibrary] = await Promise.all([
       requestResult(store.get(WORKSPACE_INDEX_KEY)),
@@ -850,7 +851,10 @@ export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null,
       if (map && (map.sessionId !== sessionId || map.mapId !== mapId)) {
         throw new Error('地图已变化，请重新选择机器人');
       }
-      if (map?.portableRobotPackage) store.put({ ...map, portableRobotPackage: null });
+      if (map?.portableRobotPackage) {
+        changedMap = { ...map, portableRobotPackage: null, savedAt };
+        store.put(changedMap);
+      }
     }
     const configRecord = {
       key: workspaceConfigKey(workspaceMode), sessionId, mapId, config,
@@ -860,7 +864,7 @@ export async function saveWorkspaceConfig(sessionId, mapId, config, mode = null,
       map: workspaceIndex?.modes?.map || null,
       independent: workspaceIndex?.modes?.independent || null,
     };
-    modes[workspaceMode] = summarizeWorkspace(workspaceMode, null, configRecord, modes[workspaceMode]);
+    modes[workspaceMode] = summarizeWorkspace(workspaceMode, changedMap, configRecord, modes[workspaceMode]);
     store.put(configRecord);
     store.delete('map');
     store.delete('config');
@@ -1169,7 +1173,12 @@ export async function clearAllWorkspaceCaches(sessionId) {
   try {
     const meta = await requestResult(store.get('meta'));
     if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工作会话已变化，请刷新页面后重试');
-    store.clear();
+    // Saved native library projects are durable documents, not workspace caches.
+    const keys = await requestResult(store.getAllKeys());
+    for (const key of keys) {
+      if (key !== IPAD_LIBRARY_KEY && !String(key).startsWith('ipad-library-map:')
+        && !String(key).startsWith('ipad-library-config:')) store.delete(key);
+    }
     store.put({ key: 'meta', sessionId, activeMode: 'map', startedAt: Date.now() });
     store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode: 'map', modes: { map: null, independent: null }, updatedAt: Date.now() });
   } catch (error) {
@@ -1592,4 +1601,127 @@ export async function resetWorkspaceSession(sessionId) {
   const database = await openDatabase();
   await replaceSession(database, sessionId);
   clearWorkspaceViewState();
+}
+
+// Native iPad library snapshots live outside the replaceable workspace slots.
+// Reuse packed geometry, copying it only when its revision changes; ordinary
+// pose autosaves update small configuration records and the native list only.
+const IPAD_LIBRARY_KEY = 'ipad-project-library';
+const ipadMapKey = (id) => `ipad-library-map:${id}`;
+const ipadConfigKey = (id) => `ipad-library-config:${id}`;
+
+export async function saveIPadProjectLibrary(sessionId) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction), store = transaction.objectStore(STORE_NAME);
+  try {
+    const [meta, index, library, history] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(WORKSPACE_INDEX_KEY)),
+      requestResult(store.get(IPAD_LIBRARY_KEY)), requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+    ]);
+    if (!sessionId || meta?.sessionId !== sessionId) throw new Error('工程会话已变化，请重试保存');
+    const entries = new Map((library?.entries || []).map((entry) => [entry.id, entry]));
+    const candidates = WORKSPACE_MODES.flatMap((mode) => {
+      const summary = index?.modes?.[mode];
+      return summary?.mapId ? [{ mode, mapId: summary.mapId, revision: summary.mapRevision || 0,
+        mapKey: workspaceMapKey(mode), configKey: workspaceConfigKey(mode) }] : [];
+    });
+    for (const entry of history?.entries || []) {
+      if (candidates.some((item) => item.mode === 'independent' && item.mapId === entry.mapId)) continue;
+      candidates.push({ mode: 'independent', mapId: entry.mapId,
+        revision: entry.archivedAt, archivedAt: entry.archivedAt,
+        mapKey: historyMapKey(entry.historyId), configKey: historyConfigKey(entry.historyId) });
+    }
+    const companions = {
+      ...Object.fromEntries(candidates.filter((item) => !item.archivedAt).map((item) => [item.mode, `${item.mode}:${item.mapId}`])),
+      history: candidates.filter((item) => item.archivedAt).map((item) => `${item.mode}:${item.mapId}`),
+    };
+    for (const candidate of candidates) {
+      const id = `${candidate.mode}:${candidate.mapId}`, previous = entries.get(id);
+      const config = await requestResult(store.get(candidate.configKey));
+      // A map import writes geometry before its configuration. Keep the last
+      // complete snapshot until both records agree; never publish a partial row.
+      if (!config?.config?.project || config.mapId !== candidate.mapId) continue;
+      const copyMap = !previous || previous.mapRevision !== candidate.revision;
+      if (copyMap) {
+        const map = await requestResult(store.get(candidate.mapKey));
+        if (!map || map.mapId !== config.mapId || (!map.positionBuffer && !map.blob)) continue;
+        store.put({ ...map, key: ipadMapKey(id) });
+      }
+      const project = config.config.project;
+      const tasks = project.virtualTeaching?.tasks || project.teachingTasks || [];
+      const entry = { id, mode: candidate.mode, mapRevision: candidate.revision,
+        name: project.workspace?.independentTeachingName || project.map?.fileName || '未命名工程',
+        taskCount: tasks.length,
+        poseCount: tasks.reduce((sum, task) => sum + (task.parkingPoints || []).reduce((count, point) => count + (point.poses || []).length, 0), 0),
+        savedAt: config.savedAt || Date.now(),
+        companions: candidate.archivedAt && previous ? previous.companions : companions,
+      };
+      store.put({ ...config, key: ipadConfigKey(id) });
+      entries.set(id, entry);
+    }
+    const saved = [...entries.values()].sort((a, b) => b.savedAt - a.savedAt);
+    for (const entry of saved) {
+      entry.companions = {
+        ...Object.fromEntries(WORKSPACE_MODES.filter((mode) => entries.has(entry.companions?.[mode]))
+          .map((mode) => [mode, entry.companions[mode]])),
+        history: (entry.companions?.history || []).filter((id) => entries.has(id)),
+      };
+    }
+    store.put({ key: IPAD_LIBRARY_KEY, entries: saved });
+    await completion;
+    return saved.map(({ id, name, mode, savedAt, taskCount, poseCount }) => ({ id, name, mode, savedAt, taskCount, poseCount }));
+  } catch (error) {
+    try { transaction.abort(); } catch { /* Already rolled back by IndexedDB. */ }
+    await completion.catch(() => undefined); throw error;
+  }
+}
+
+export async function restoreIPadLibraryProject(sessionId, id) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STORE_NAME, 'readwrite');
+  const completion = transactionComplete(transaction), store = transaction.objectStore(STORE_NAME);
+  try {
+    const [meta, library, history] = await Promise.all([
+      requestResult(store.get('meta')), requestResult(store.get(IPAD_LIBRARY_KEY)), requestResult(store.get(INDEPENDENT_HISTORY_KEY)),
+    ]);
+    if (meta?.sessionId !== sessionId) throw new Error('工程会话已变化，请重新打开');
+    const entry = library?.entries?.find((item) => item.id === id);
+    if (!entry) throw new Error('未找到此 iPad 上的工程数据，请确认使用保存时的电脑地址');
+    const keys = { ...entry.companions, [entry.mode]: id };
+    const required = [...new Set([keys.map, keys.independent, ...(keys.history || [])].filter(Boolean))];
+    const snapshots = new Map();
+    for (const key of required) {
+      const [map, config] = await Promise.all([requestResult(store.get(ipadMapKey(key))), requestResult(store.get(ipadConfigKey(key)))]);
+      if (!map || !config?.config?.project || map.mapId !== config.mapId) throw new Error('本地工程快照不完整，原有工程已保留');
+      snapshots.set(key, { map, config });
+    }
+    const modes = {}, savedAt = Date.now();
+    for (const mode of WORKSPACE_MODES) {
+      const snapshot = snapshots.get(keys[mode]);
+      if (!snapshot) { store.delete(workspaceMapKey(mode)); store.delete(workspaceConfigKey(mode)); modes[mode] = null; continue; }
+      const map = { ...snapshot.map, key: workspaceMapKey(mode), sessionId, savedAt };
+      const config = { ...snapshot.config, key: workspaceConfigKey(mode), sessionId, savedAt };
+      store.put(map); store.put(config); modes[mode] = summarizeWorkspace(mode, map, config);
+    }
+    for (const item of history?.entries || []) { store.delete(historyMapKey(item.historyId)); store.delete(historyConfigKey(item.historyId)); }
+    const restoredHistory = [];
+    for (const key of keys.history || []) {
+      if (key === keys.independent) continue;
+      const snapshot = snapshots.get(key), historyId = snapshot.map.mapId;
+      const map = { ...snapshot.map, key: historyMapKey(historyId), sessionId };
+      const config = { ...snapshot.config, key: historyConfigKey(historyId), sessionId };
+      store.put(map); store.put(config);
+      restoredHistory.push({ ...summarizeRecovery({ sourceSessionId: sessionId, archivedAt: config.savedAt }, map, config),
+        historyId, teachingGroupId: map.teachingGroupId, portableOriginalMapId: map.portableOriginalMapId });
+    }
+    store.put({ key: INDEPENDENT_HISTORY_KEY, entries: restoredHistory });
+    store.put({ key: WORKSPACE_INDEX_KEY, sessionId, activeMode: entry.mode, modes, updatedAt: savedAt });
+    store.put({ ...meta, activeMode: entry.mode, activatedRecoveryId: null });
+    store.delete('map'); store.delete('config');
+    await completion; clearWorkspaceViewState();
+  } catch (error) {
+    try { transaction.abort(); } catch { /* Already rolled back by IndexedDB. */ }
+    await completion.catch(() => undefined); throw error;
+  }
 }

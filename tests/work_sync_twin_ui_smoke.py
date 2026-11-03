@@ -50,7 +50,8 @@ with sync_playwright() as playwright:
         peer.get_by_role('button', name='同步作业', exact=True).click()
         chooser = peer.get_by_role('dialog', name='选择同步模式', exact=True)
         expect(chooser.get_by_role('button', name='真机孪生')).to_be_disabled()
-        expect(chooser.get_by_role('progressbar', name='离线工程同步进度')).to_have_attribute('value', '50')
+        expect(control(peer).locator('.work-sync__trigger progress')).to_have_attribute('value', '50')
+        expect(chooser.get_by_role('progressbar')).to_have_count(0)
         peer.screenshot(path=str(artifacts / 'project-transferring.png'))
         bundle[0].continue_()
         deadline = time.monotonic() + 60
@@ -61,11 +62,11 @@ with sync_playwright() as playwright:
         if not chooser.is_visible():
             peer.get_by_role('button', name='同步作业', exact=True).click()
         expect(chooser.get_by_role('button', name='真机孪生')).to_be_disabled()
-        expect(chooser.get_by_role('progressbar', name='离线工程同步进度')).to_have_attribute('value', '99')
+        expect(control(peer).locator('.work-sync__trigger progress')).to_have_attribute('value', '99')
         completion[0].continue_()
         for page in [host, peer]:
             expect(control(page)).to_have_attribute('data-sync-complete', 'true')
-        expect(chooser.get_by_role('progressbar', name='离线工程同步进度')).to_have_attribute('value', '100')
+        expect(control(peer).locator('.work-sync__trigger progress')).to_have_attribute('value', '100')
         expect(chooser.get_by_role('button', name='真机孪生')).to_be_enabled()
         peer.screenshot(path=str(artifacts / 'project-complete.png'))
         saved = snapshot(peer, MODE)

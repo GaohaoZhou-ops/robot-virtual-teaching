@@ -1,0 +1,18 @@
+.ipad-return-brand {
+  appearance: none;
+  margin: 0;
+  min-height: 44px;
+  border-top: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ipad-return-brand:active { background-color: rgba(89, 219, 232, 0.12); }
+.ipad-return-brand:focus-visible { outline: 2px solid var(--cyan); outline-offset: -4px; }

@@ -59,6 +59,13 @@ const normalizeWorkspaceTransfer = (value) => {
     }) } : {}) };
 };
 
+const normalizeMapTransform = (value) => {
+  if (value == null) return null;
+  if (value.version !== 1 || !Array.isArray(value.values) || value.values.length !== 16
+    || !value.values.every(Number.isFinite)) throw new Error('地图示教转换矩阵记录无效');
+  return { version: 1, name: String(value.name || '转换矩阵.txt'), values: [...value.values] };
+};
+
 export const createId = (prefix) =>
   `${prefix}-${
     globalThis.crypto?.randomUUID?.() ||
@@ -767,6 +774,7 @@ export function normalizeProject(payload) {
         : null,
       inspectorCollapsed: workspace.inspectorCollapsed === true,
       transfer: normalizeWorkspaceTransfer(workspace.transfer),
+      mapTransform: teachingSpaceMode === 'map' ? normalizeMapTransform(workspace.mapTransform) : null,
       directoryAutosaveSuspended: workspace.directoryAutosaveSuspended === true,
     },
     robot: robot?.relativePath ? robot : null,
@@ -811,6 +819,7 @@ export function buildExport({
   collapsedPanel = null,
   inspectorCollapsed = false,
   transfer = null,
+  mapTransform = null,
   independentTeachingName = '',
   directoryAutosaveSuspended = false,
 }) {
@@ -869,6 +878,8 @@ export function buildExport({
       collapsedPanel: ['2d', '3d'].includes(collapsedPanel) ? collapsedPanel : null,
       inspectorCollapsed: inspectorCollapsed === true,
       ...(transfer ? { transfer } : {}),
+      ...(normalizedTeachingSpaceMode === 'map' && mapTransform
+        ? { mapTransform: normalizeMapTransform(mapTransform) } : {}),
       ...(directoryAutosaveSuspended ? { directoryAutosaveSuspended: true } : {}),
     },
     map: {

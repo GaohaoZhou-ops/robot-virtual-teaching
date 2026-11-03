@@ -5,6 +5,7 @@ Run against an isolated Vite server: BASE_URL=http://127.0.0.1:21991 python test
 import os
 import time
 import json
+import re
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 from teaching_transfer_ui_smoke import ready, snapshot, CHROME
@@ -28,7 +29,7 @@ def offline(page):
     panel = page.get_by_role('dialog', name='离线协作', exact=True)
     if not panel.is_visible():
         page.get_by_role('button', name='同步作业', exact=True).click()
-        page.get_by_role('dialog', name='选择同步模式', exact=True).get_by_role('button', name='离线协作').click()
+        page.get_by_role('dialog', name='选择同步模式', exact=True).get_by_role('button', name=re.compile(r'^离线协作')).click()
     return panel
 
 

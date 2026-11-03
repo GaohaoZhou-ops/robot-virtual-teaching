@@ -17,7 +17,7 @@ function syncContext(independentMap, independentTransfer, mapConfig) {
     return { available: false, reason: '路径来源必须是地图示教工程' };
   }
   const localToMap = boundTeachingTransform(independentMap, independentTransfer,
-    { ...project.map, mapId: mapConfig.mapId }, project.workspace.transfer);
+    { ...project.map, mapId: mapConfig.mapId }, project.workspace.transfer, project.workspace.mapTransform);
   if (!localToMap) {
     return { available: false, reason: '请先将当前独立模型与地图示教建立转换关系' };
   }

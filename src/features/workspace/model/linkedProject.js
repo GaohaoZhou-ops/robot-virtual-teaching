@@ -13,6 +13,7 @@ export function linkedWorkspaceRelation(workspaces) {
     independent?.config?.config?.project?.workspace?.transfer,
     map?.map,
     map?.config?.config?.project?.workspace?.transfer,
+    map?.config?.config?.project?.workspace?.mapTransform,
   );
 }
 

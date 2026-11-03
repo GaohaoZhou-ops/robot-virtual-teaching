@@ -694,9 +694,14 @@ struct ScreenCollaborationHost: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var screen = ScreenCollaboration()
+    @State private var offlineWorkbench: IPadWorkbenchLaunch?
     var body: some View {
         ZStack {
-            ContentView()
+            ContentView(onOpenOfflineWorkbench: { project in
+                guard UIDevice.current.userInterfaceIdiom == .pad, !screen.active, !screen.connecting else { return }
+                screen.stop()
+                offlineWorkbench = IPadWorkbenchLaunch(project: project)
+            })
                 .environmentObject(screen)
                 .environment(\.screenCollaborationActive, screen.active)
                 .allowsHitTesting(screen.incomingUSBInvitation == nil)
@@ -712,8 +717,15 @@ struct ScreenCollaborationHost: View {
         .fullScreenCover(isPresented: Binding(get: { screen.active }, set: { if !$0 { screen.finish() } })) {
             ScreenCollaborationView(screen: screen).interactiveDismissDisabled()
         }
-        .onAppear { if scenePhase == .active { screen.start() } }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { screen.start() } else { screen.stop() } }
+        .fullScreenCover(item: $offlineWorkbench, onDismiss: {
+            if scenePhase == .active { screen.start() }
+        }) { launch in
+            IPadWorkbenchView(project: launch.project).interactiveDismissDisabled()
+        }
+        .onAppear { if scenePhase == .active && offlineWorkbench == nil { screen.start() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && offlineWorkbench == nil { screen.start() } else { screen.stop() }
+        }
         .onChange(of: screen.incomingUSBInvitation?.id) { _, id in
             if id != nil {
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

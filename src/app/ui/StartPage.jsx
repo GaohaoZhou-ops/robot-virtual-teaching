@@ -8,13 +8,13 @@ import {
   FolderPlus,
   Map as MapIcon,
   PencilRuler,
-  Route,
   ScanLine,
   Server,
   ShieldCheck,
   Trash2,
 } from 'lucide-react';
 import RecentProjects from '../../features/workspace/ui/RecentProjects.jsx';
+import IPadReturnBrand from '../../features/devices/ui/IPadReturnBrand.jsx';
 
 const normalizeMode = (value) => value === 'independent' ? 'independent' : 'map';
 
@@ -65,10 +65,9 @@ export default function StartPage({
       data-session-state={sessionState?.status || 'checking'}
     >
       <header className="start-page__topbar">
-        <div className="start-page__brand">
-          <span><Route size={20} strokeWidth={1.7} /></span>
-          <div><strong>虚拟示教平台</strong></div>
-        </div>
+        <IPadReturnBrand className="start-page__brand" strokeWidth={1.7}>
+          <strong>虚拟示教平台</strong>
+        </IPadReturnBrand>
         <div className="start-page__system">
           <span className={`is-${sessionState?.status || 'checking'}`}>
             <ShieldCheck size={12} />

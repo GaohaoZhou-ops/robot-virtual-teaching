@@ -1020,6 +1020,12 @@ playwright/.auth/
 /tests/atlas-new-independent-*/
 /atlas-new-independent-*.[zZ][iI][pP]
 /tests/atlas-new-independent-*.[zZ][iI][pP]
+# Map calibration ZIP round trips use this temporary directory prefix.
+# Ignore local TMPDIR workspaces and packed copies, preserving fixture inputs.
+/map-matrix-*/
+/tests/map-matrix-*/
+/map-matrix-*.[zZ][iI][pP]
+/tests/map-matrix-*.[zZ][iI][pP]
 # Batch directory-picker tests create temporary model/matrix inputs when TMPDIR
 # is local. Captures use test-artifacts/independent-batch/, already ignored above.
 # Scope input workspaces and ZIP copies to root/tests so nested fixtures stay visible.
@@ -1202,6 +1208,22 @@ playwright/.auth/
 /VisionWorkbenchImports.[zZ][iI][pP]
 /tests/VisionWorkbenchImports.[zZ][iI][pP]
 /vision/VisionWorkbenchImports.[zZ][iI][pP]
+
+# Copies of the iPad native offline-project index and WebKit export directory.
+# These contain local server addresses and complete teaching projects; keep
+# application sources and deliberately nested test fixtures trackable.
+/AtlasWorkbenchProjects/
+/ipad/AtlasWorkbenchProjects/
+/tests/AtlasWorkbenchProjects/
+/AtlasWorkbenchProjects.[zZ][iI][pP]
+/ipad/AtlasWorkbenchProjects.[zZ][iI][pP]
+/tests/AtlasWorkbenchProjects.[zZ][iI][pP]
+/Workbench Exports/
+/ipad/Workbench Exports/
+/tests/Workbench Exports/
+/Workbench Exports.[zZ][iI][pP]
+/ipad/Workbench Exports.[zZ][iI][pP]
+/tests/Workbench Exports.[zZ][iI][pP]
 
 # Offscreen Vision Pro review copies contain imported project data and rendered
 # frames. Keep root-level scratch output and compiled runners local; maintained
@@ -1485,6 +1507,8 @@ Desktop.ini
 /sample-pre-teaching-pose.json
 /pre-teaching-pose.json
 /position_[0-9]*.txt
+/virtual2map*.[tT][xX][tT]
+/virtual2map*.[zZ][iI][pP]
 /1014平地路网终版.json
 /1019平地路网终版测试.json
 # Robot-export reference bundles contain local tasks, routes and model metadata.

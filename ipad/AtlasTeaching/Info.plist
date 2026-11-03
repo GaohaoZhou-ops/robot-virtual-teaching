@@ -14,7 +14,7 @@
     <key>NSCameraUsageDescription</key><string>使用相机扫描电脑上的配对二维码，并与 LiDAR 一起在本机定位物体、逐个记录 Pose。</string>
     <key>NSLocalNetworkUsageDescription</key><string>连接局域网中的 Atlas 电脑工作台，凭配对码接收物体、同步 Pose，或协作查看相机与调整虚拟机器人关节。</string>
     <key>NSBonjourServices</key><array><string>_atlas-teach._tcp</string></array>
-    <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
+    <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/><key>NSAllowsArbitraryLoadsInWebContent</key><true/></dict>
     <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
     <key>UILaunchScreen</key><dict/>
     <key>UIRequiredDeviceCapabilities</key><array><string>arkit</string><string>arm64</string></array>

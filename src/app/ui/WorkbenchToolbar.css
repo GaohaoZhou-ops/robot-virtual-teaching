@@ -52,6 +52,7 @@
 .workbench-menu-panel[hidden] { display: none; }
 .workbench-menu-section + .workbench-menu-section { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--line); }
 .workbench-menu-section > p { margin: 7px 10px 5px; color: #78918f; font-size: 10px; letter-spacing: 0.06em; }
+.workbench-menu-separator { margin: 5px 0; border: 0; border-top: 1px dashed var(--line); }
 
 .workbench-menu-panel button.action-button {
   display: flex;

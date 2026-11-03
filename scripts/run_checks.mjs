@@ -11,7 +11,7 @@ const suites = {
     'test:linked-project', 'test:project-collection', 'test:independent-alignment', 'test:independent-batch', 'test:teaching-data',
     'test:independent-export', 'test:directory', 'test:abx',
     'test:ipad', 'test:ipad:navigation', 'test:ipad:qr', 'test:ipad:file', 'test:ipad:discovery',
-    'test:ipad:screen', 'test:mobile-solve', 'test:transfer', 'test:route-sync',
+    'test:ipad:screen', 'test:mobile-solve', 'test:transfer', 'test:map-transform', 'test:route-sync',
     'test:waypoint-labels', 'test:robot-grounding', 'test:coverage', 'test:vision:scene'],
   external: ['test:abx-extended', 'test:abx-exchange'],
 };

@@ -13,7 +13,7 @@ export function buildIndependentMapTeachingExport(payload, independentMap, mapCo
   const background = mapConfig.config.project;
   const map = { ...background.map, mapId: mapConfig.mapId, name: background.map.fileName };
   const localToMap = boundTeachingTransform(independentMap, payload.workspace.transfer,
-    map, background.workspace?.transfer);
+    map, background.workspace?.transfer, background.workspace?.mapTransform);
   const matrix = transferMatrix(localToMap);
   const tasks = transformTeachingTasks(normalizeTeachingTasks(payload), matrix, 'map', map);
   const previous = background.workspace?.transfer;

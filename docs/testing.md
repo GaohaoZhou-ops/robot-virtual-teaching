@@ -48,6 +48,7 @@
 | 二维码配对 / 结果同步 | `npm run test:ipad:qr` |
 | Bonjour 发现 | `npm run test:ipad:discovery`（macOS） |
 | 示教转换 | `npm run test:transfer` |
+| 地图校准矩阵、对象 / 路网变换、替换与工程往返 | `npm run test:map-transform`；`BASE_URL=http://127.0.0.1:22293 uv run --with playwright python tests/map_teaching_transform_ui_smoke.py`（先启动独立 Vite） |
 | 模型坐标、裁剪、降采样与 PLY 往返 | `npm run test:model-editor` |
 | 双模型姿态、旋转包络替换、合并与属性 / PLY 完整性 | `npm run test:model-composition` |
 | 双模型入口、加载、三维姿态、替换 / 合并、保存与响应式页面 | `uv run --with playwright python tests/model_pair_editor_ui_smoke.py`（先启动服务） |
@@ -121,6 +122,14 @@ BASE_URL=http://127.0.0.1:22001 python tests/ipad_teaching_ui_smoke.py
 </details>
 
 ## iPad 画面协作回归
+
+iPad 完整工作台回归使用独立服务：`node tests/ipad_workbench_fixture.mjs`（默认端口 `22076`）。以 `TEST_RUNNER_ATLAS_IPAD_WORKBENCH_FIXTURE=http://127.0.0.1:22076` 运行 iPad 模拟器的 `testIPadWorkbenchBrowserCapabilitiesAndPersistence` 和 `testIPadActualWebWorkbench`，验证真实 WebKit 中的 WebGL、Worker、WebSocket、IndexedDB、退出重进、网页确认对话框、Blob 导出分享，以及带模型的实际 Web 工作台。导出文件位于测试 App 的 `Documents/Workbench Exports/`，验证 JSON 内容后保留 XCTest 截图。真机运行时使用电脑可达的局域网地址。
+
+`testCollaborationModeDeviceScope` 分别在 iPad 和 iPhone 上运行：iPad 验证横竖屏两个按钮上下对齐、直接打开离线工作台、“作为扩展”直接发出邀请及取消恢复；iPhone 验证原有数据线入口且没有新菜单。测试服务只使用合成工程和独立端口。
+
+`testIPadWorkbenchTouchSelection` 使用同一完整工作台测试服务，在原生 WebKit 中长按普通文字、长按后拖动，验证不产生网页选区且拖动事件正常；再验证输入框可编辑并能打开系统复制菜单。
+
+`testIPadActualWebWorkbench` 同时检查横竖屏下没有额外的原生返回／刷新工具栏、Web 占满安全区域，并可从欢迎页品牌区域返回 App。`testIPadOfflineLibraryPersistenceAndReopen` 通过工作台的“虚拟示教平台”返回入口，验证两个离线工程保存到原生列表、App 重启后仍可见、逐个打开正确的地图和任务，重复打开不产生重复条目。`BASE_URL=http://127.0.0.1:22076 uv run --with playwright python tests/ipad_project_library_smoke.py` 使用独立浏览器检查 IndexedDB 快照的多工程、关联历史组、清缓存、服务会话变化、70 MiB 几何和失败回滚；不访问用户工程。
 
 <details>
 <summary>画面协作协议、USB 助手与真机用例</summary>

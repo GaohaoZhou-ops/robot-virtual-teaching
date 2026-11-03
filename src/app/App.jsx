@@ -65,7 +65,9 @@ import { useRobotTwin } from "../features/robot-twin/hooks/useRobotTwin.js";
 import { robotTwinDisplayPose } from "../shared/protocols/robotTwin.js";
 import { loadRobotTwinProfiles, restoreRobotTwinProfiles } from "../features/robot-twin/model/robotTwinProfiles.js";
 import VisionWorkbenchBridge from "../features/devices/ui/VisionWorkbenchBridge.jsx";
+import IPadReturnBrand from "../features/devices/ui/IPadReturnBrand.jsx";
 import { isVisionWorkbench } from "../features/devices/model/visionWorkbench.js";
+import { bindIPadLibrarySave, prepareIPadLibrary, reportIPadLibraryError, saveIPadLibrary } from "../features/devices/model/ipadWorkbenchLibrary.js";
 import { useProjectImportProgress } from "../features/workspace/hooks/useProjectImportProgress.js";
 import { createWorkspaceSyncAdapter } from '../features/workspace/client/workspaceSyncAdapter.js';
 import ModelEditorPage from "../features/model-editor/ui/ModelEditorPage.jsx";
@@ -98,6 +100,7 @@ import { mergeAbxImport, readAbxTeachingFile } from "../features/teaching/model/
 import { IPadModelMismatchError, ipadResultTask } from "../features/devices/model/ipadTeaching.js";
 import { mobileDeviceKey, mobileDeviceLabel } from "../shared/protocols/ipadProtocol.js";
 import { createTeachingAlignment, extractTeachingWorkspace, hasLoadedMapWorkspace, placeTeachingWorkspace, writeBackTeachingWorkspace } from "../features/teaching/model/teachingTransfer.js";
+import { readMapTeachingMatrix, transformMapTeachingWorkspace } from "../features/teaching/model/mapTeachingTransform.js";
 import { mapRouteSyncStatus, syncMapRouteToIndependent } from "../features/navigation/model/mapRouteSync.js";
 import { connectivityCopy, connectivityTopology, inspectConnectivity } from "../features/navigation/model/graph.js";
 import {
@@ -265,6 +268,9 @@ const clampJointValue = (rawValue, definition) => {
 
 export default function App() {
   const mapInputRef = useRef(null);
+  const mapMatrixInputRef = useRef(null);
+  const mapMatrixTargetRef = useRef(null);
+  const mapMatrixBusyRef = useRef(false);
   const independentCloudInputRef = useRef(null);
   const newIndependentDialogRevisionRef = useRef(0);
   const independentSwitchBusyRef = useRef(false);
@@ -329,6 +335,7 @@ export default function App() {
   const [appPage, setAppPage] = useState(appPageFromLocation);
   const [startPageMode, setStartPageMode] = useState(null);
   const [workspaceTransfer, setWorkspaceTransfer] = useState(null);
+  const [mapTransform, setMapTransform] = useState(null);
   const [independentTeachingName, setIndependentTeachingName] = useState('');
   const [independentNameDialog, setIndependentNameDialog] = useState(null);
   const [independentHistory, setIndependentHistory] = useState({ status: 'idle', entries: [] });
@@ -606,6 +613,7 @@ export default function App() {
     abxRoutes,
     mapRouteSyncEnabled,
     workspaceTransfer,
+    mapTransform,
     independentTeachingName,
     directoryAutosaveSuspended,
     mapData,
@@ -890,6 +898,7 @@ export default function App() {
       ? buildExport({
           robotTwin: loadRobotTwinProfiles(),
           transfer: current.workspaceTransfer,
+          mapTransform: current.mapTransform,
           independentTeachingName: current.independentTeachingName,
           directoryAutosaveSuspended: current.directoryAutosaveSuspended,
           mapData: current.mapData,
@@ -981,6 +990,7 @@ export default function App() {
           { presetLibrary: project ? sharedRobotPresetsRef.current : undefined },
         );
         if (saved?.presetLibrary) sharedRobotPresetsRef.current = saved.presetLibrary;
+        await saveIPadLibrary(sessionId).catch(reportIPadLibraryError);
         return saved;
       })
       .catch(reportSessionFailure);
@@ -1027,6 +1037,13 @@ export default function App() {
       projectDirectoryWriteChainRef.current,
     ]);
   }, [reportProjectDirectoryFailure, reportSessionFailure]);
+
+  useEffect(() => bindIPadLibrarySave(async () => {
+    const hasProject = Boolean(latestWorkspaceRef.current?.mapData);
+    await persistWorkspaceNow();
+    if (hasProject && !sessionReadyRef.current) throw new Error('工程尚未完成本机保存，请重试或先导出备份');
+    if (sessionReadyRef.current && sessionIdRef.current) await saveIPadLibrary(sessionIdRef.current);
+  }), [persistWorkspaceNow]);
 
   const queueWorkspaceSave = useCallback(() => {
     if (!sessionReadyRef.current) return;
@@ -1198,6 +1215,7 @@ export default function App() {
       setSynchronizedFocus(null);
       if (!preserveGraph) {
         setWorkspaceTransfer(null);
+        setMapTransform(null);
         setIndependentTeachingName(normalizedTeachingSpaceMode === 'independent' ? defaultIndependentTeachingName(name) : '');
         setMapRouteSyncEnabled(false);
         setSyncedMapOrigin(null);
@@ -1370,7 +1388,8 @@ export default function App() {
         const presetLibrary = await loadSharedRobotPresets();
         if (!isCurrent()) return;
         sharedRobotPresetsRef.current = presetLibrary;
-        const stored = await prepareWorkspaceSession(service.sessionId, { preserveExisting: true });
+        const prepared = await prepareWorkspaceSession(service.sessionId, { preserveExisting: true });
+        const stored = await prepareIPadLibrary(prepared);
         if (!isCurrent()) return;
         const identity = { sessionId: stored.sessionId };
         sessionIdRef.current = identity.sessionId;
@@ -1395,6 +1414,7 @@ export default function App() {
           const project = snapshot?.project ? normalizeProject(snapshot.project) : null;
           if (project) project.jointPoses = withSharedRobotPresets(project.jointPoses, presetLibrary.poses);
           setWorkspaceTransfer(project?.workspace?.transfer || null);
+          setMapTransform(project?.workspace?.mapTransform || null);
           setIndependentTeachingName(project?.workspace?.independentTeachingName || '');
           setMapRouteSyncEnabled(project?.workspace?.teachingSpaceMode === 'independent'
             && snapshot?.ui?.mapRouteSyncEnabled === true);
@@ -1703,6 +1723,7 @@ export default function App() {
           if (!isCurrent()) return;
           setMapData(null);
           setWorkspaceTransfer(null);
+          setMapTransform(null);
           setIndependentTeachingName('');
           setMapRouteSyncEnabled(false);
           setSyncedMapOrigin(null);
@@ -1875,6 +1896,7 @@ export default function App() {
     queueWorkspaceSave();
   }, [
     workspaceTransfer,
+    mapTransform,
     independentTeachingName,
     mapRouteSyncEnabled,
     directoryAutosaveSuspended,
@@ -2414,7 +2436,7 @@ export default function App() {
     let nextPortableResourceId = null;
     let portableResourceCommitted = false;
     let reloadingLinkedProject = false;
-    beginProjectImport(sourceName);
+    beginProjectImport(sourceName, { showOverlay: !options.fromWorkSync });
     setLoadState({
       loading: true,
       progress: 0.04,
@@ -2488,6 +2510,7 @@ export default function App() {
       const importedDirectorySuspended = !importedFile.directory
         && project.workspace?.directoryAutosaveSuspended === true;
       setWorkspaceTransfer(project.workspace?.transfer || null);
+      setMapTransform(project.workspace?.mapTransform || null);
       setIndependentTeachingName(project.workspace?.independentTeachingName || '');
       setMapRouteSyncEnabled(false);
       setSyncedMapOrigin(null);
@@ -2707,6 +2730,7 @@ export default function App() {
           schemaVersion: 1,
           project: buildExport({
             transfer: project.workspace?.transfer || null,
+            mapTransform: project.workspace?.mapTransform || null,
             independentTeachingName: project.workspace?.independentTeachingName || '',
             directoryAutosaveSuspended: importedDirectorySuspended,
             mapData: effectiveMap,
@@ -2845,7 +2869,7 @@ export default function App() {
       if (!restoreRobotTwinProfiles(project.robotTwin)) {
         notify('工程已加载，但机器人连接配置未能保存，请检查浏览器存储后重新加载工程', 'warning');
       }
-      notify(
+      if (!options.fromWorkSync) notify(
         `${sourceLabel}已加载${importedFile.portable ? '（完整）' : ''} · ${project.waypoints.length} 导航点 / ${project.teachingTasks.length} 示教任务${importedFile.manifest ? ` / ${importedFile.manifest?.statistics?.cameraFrameCount || 0} 相机帧` : ''}${importedFile.portable ? ' · 地图与机器人资源已恢复' : ''}${importedFile.source === 'directory' ? ' · 已启用增量保存' : ''}`,
       );
 
@@ -2872,7 +2896,7 @@ export default function App() {
         releasePortableRobotPackage(nextPortableResourceId);
       }
       setLoadState({ loading: false, progress: 0, phase: '' });
-      setProjectImportError({ sourceName, mode: requestedMode, message: error?.message || '无法读取所选工程' });
+      if (!options.fromWorkSync) setProjectImportError({ sourceName, mode: requestedMode, message: error?.message || '无法读取所选工程' });
       if (sourcePage === APP_PAGE_HOME) navigateAppPage(APP_PAGE_HOME, { replace: true });
       if (options.throwOnError) throw error;
     } finally {
@@ -4377,6 +4401,7 @@ export default function App() {
     robotTwin: loadRobotTwinProfiles(),
     abxRoutes,
     transfer: workspaceTransfer,
+    mapTransform,
     independentTeachingName,
     directoryAutosaveSuspended,
     mapData,
@@ -6417,6 +6442,44 @@ export default function App() {
     return task;
   };
 
+  const loadMapTeachingMatrix = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || mapMatrixBusyRef.current || independentSwitchBlocked || workspaceSwitchingRef.current) return;
+    const current = latestWorkspaceRef.current;
+    if (current.teachingSpaceMode !== 'map' || !current.mapData?.geometry
+      || mapMatrixTargetRef.current !== current.mapData) {
+      notify('地图示教已切换，请在目标地图中重新选择转换矩阵', 'warning');
+      return;
+    }
+    mapMatrixBusyRef.current = true;
+    setLoadState({ loading: true, progress: 0.1, phase: '加载转换矩阵', detail: file.name });
+    try {
+      const matrix = await readMapTeachingMatrix(file);
+      if (sessionSaveTimerRef.current) window.clearTimeout(sessionSaveTimerRef.current);
+      await persistWorkspaceNow();
+      if (!sessionReadyRef.current) throw new Error('当前工程尚未保存成功，请重试后再加载转换矩阵');
+      if (latestWorkspaceRef.current.mapData !== current.mapData
+        || latestWorkspaceRef.current.teachingSpaceMode !== 'map') throw new Error('地图示教已变化，请重新选择转换矩阵');
+      workspaceSwitchingRef.current = true;
+      const source = await loadWorkspaceSnapshot(sessionIdRef.current, 'map');
+      setLoadState({ loading: true, progress: 0.4, phase: '应用转换矩阵', detail: '更新路网、独立对象与示教位姿' });
+      const result = await transformMapTeachingWorkspace(source, matrix, {
+        loadSource: (identity) => loadIndependentDisplaySource(sessionIdRef.current, identity),
+      });
+      // Commit geometry and configuration together, with the same concurrent
+      // edit checks used by teaching transfers, then restore through hydration.
+      await commitWorkspaceTransfer(sessionIdRef.current, source, source, result);
+      sessionReadyRef.current = false;
+      window.location.assign('/workbench');
+    } catch (error) {
+      workspaceSwitchingRef.current = false;
+      mapMatrixBusyRef.current = false;
+      setLoadState({ loading: false, progress: 0, phase: '' });
+      notify(error.message || '转换矩阵加载失败', 'error');
+    }
+  };
+
   const applyTeachingTransfer = async (options) => {
     if (teachingTransferBusyRef.current || !teachingTransferDialog?.source) return;
     teachingTransferBusyRef.current = true;
@@ -6604,6 +6667,8 @@ export default function App() {
     <RobotJointSoftRangesContext.Provider value={robotArmSoftLimitOverrides}>
     <RobotJointCouplingContext.Provider value={robotArmJointCouplingEnabled}>
     <input ref={mapInputRef} className="visually-hidden" type="file" accept=".ply" onChange={handleMapFile} />
+    <input ref={mapMatrixInputRef} className="visually-hidden" type="file" accept=".txt,text/plain"
+      aria-label="地图示教转换矩阵" onChange={loadMapTeachingMatrix} />
     <input ref={abxTeachingInputRef} className="visually-hidden" type="file"
       accept=".zip,.abxteach.ndjson,.ndjson" aria-label="机器人示教文件"
       onChange={(event) => importAbxFile(event, 'teaching')} />
@@ -6658,13 +6723,10 @@ export default function App() {
       inert={robotSettingsModalOpen ? '' : undefined}
     >
       <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark"><Route size={20} strokeWidth={1.8} /></div>
-          <div>
-            <span>{isVisionWorkbench() ? 'ATLAS / VISION PRO' : 'ATLAS / ROUTE'}</span>
-            <strong>{isVisionWorkbench() ? '空间工程工作台' : '虚拟示教平台'}</strong>
-          </div>
-        </div>
+        <IPadReturnBrand className="brand-block" markClassName="brand-mark">
+          <span>{isVisionWorkbench() ? 'ATLAS / VISION PRO' : 'ATLAS / ROUTE'}</span>
+          <strong>{isVisionWorkbench() ? '空间工程工作台' : '虚拟示教平台'}</strong>
+        </IPadReturnBrand>
 
         <button
           type="button"
@@ -6734,6 +6796,21 @@ export default function App() {
               content: <>
                 <section className="workbench-menu-section">
                   <p>当前：{teachingModeLabel(teachingSpaceMode)}</p>
+                  {!isIndependentTeachingSpace && <>
+                    <button type="button" className="action-button" aria-label="转换矩阵"
+                      disabled={independentSwitchBlocked || !mapData?.geometry}
+                      title={mapTransform
+                        ? `已加载 ${mapTransform.name}；重新选择 TXT 文件可替换矩阵，不会叠加转换`
+                        : '选择虚拟示教到真实地图的 4×4 TXT 转换矩阵'}
+                      onClick={() => {
+                        mapMatrixTargetRef.current = mapData;
+                        mapMatrixInputRef.current?.click();
+                      }}>
+                      <ArrowLeftRight size={15} /><span>转换矩阵</span>
+                      {mapTransform && <b>已加载</b>}
+                    </button>
+                    <hr className="workbench-menu-separator" />
+                  </>}
                   <button
                     type="button"
                     className={`action-button teaching-mode-action ${isIndependentTeachingSpace ? '' : 'independent-teaching-action'}`}
@@ -7457,7 +7534,7 @@ export default function App() {
         )}
       </div>
     )}
-    {[APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA].includes(appPage) && (loadState.loading || projectImportProgress) && (
+    {[APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA].includes(appPage) && projectImportProgress?.showOverlay !== false && (loadState.loading || projectImportProgress) && (
       <div className="loading-curtain" role="status" aria-live="polite">
         <div className={`loading-module ${projectImportProgress ? 'is-project-import' : ''}`}>
           <div className="loading-module__top">

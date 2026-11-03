@@ -4,12 +4,12 @@ import {
   CircleDot,
   History,
   House,
-  Route,
   ShieldCheck,
 } from 'lucide-react';
 import TeachingArchiveTree from "./TeachingArchiveTree.jsx";
 import TeachingPoseRobotPreview from "./TeachingPoseRobotPreview.jsx";
 import IPadCaptureDetails from "../../devices/ui/IPadCaptureDetails.jsx";
+import IPadReturnBrand from "../../devices/ui/IPadReturnBrand.jsx";
 import ProjectExportButton from "../../workspace/ui/ProjectExportButton.jsx";
 
 const formatBytes = (value) => {
@@ -166,10 +166,9 @@ export default function TeachingDataPage({
       data-active-teaching-task={activeTask?.id || ''}
     >
       <header className="teaching-data-page__topbar">
-        <div className="teaching-data-page__brand">
-          <span><Route size={17} /></span>
-          <div><small>ATLAS / TEACHING</small><strong>虚拟示教平台</strong></div>
-        </div>
+        <IPadReturnBrand className="teaching-data-page__brand" iconSize={17} strokeWidth={2}>
+          <small>ATLAS / TEACHING</small><strong>虚拟示教平台</strong>
+        </IPadReturnBrand>
         <nav aria-label="应用页面">
           <button type="button" onClick={onHome}><House size={11} />主页面</button>
           <i>/</i>

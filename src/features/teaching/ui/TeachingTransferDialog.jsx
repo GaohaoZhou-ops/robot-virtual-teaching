@@ -68,7 +68,7 @@ function TransferForm({ source, target, initialOperation, settingsVisible, setSe
   const targetProject = useMemo(() => projectOf(target), [target]);
   const link = sourceProject.workspace.transfer;
   const boundRelation = useMemo(() => initialOperation === 'extract' ? null
-    : boundTeachingRelation(source.map, link, target?.map, targetProject?.workspace.transfer),
+    : boundTeachingRelation(source.map, link, target?.map, targetProject?.workspace.transfer, targetProject?.workspace.mapTransform),
   [initialOperation, source, link, target, targetProject]);
   const boundTransform = boundRelation?.localToMap;
   const initialRelation = initialOperation === 'writeback' ? link : boundRelation;

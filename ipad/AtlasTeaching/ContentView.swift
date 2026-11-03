@@ -58,6 +58,8 @@ private struct PoseOriginLegend: View {
 }
 
 struct ContentView: View {
+    var onOpenOfflineWorkbench: (IPadLibraryProject?) -> Void = { _ in }
+    @StateObject private var workbenchLibrary = IPadWorkbenchLibrary.shared
     @EnvironmentObject private var session: TeachingSession
     @EnvironmentObject private var screen: ScreenCollaboration
     @State private var collaboration = !TeachingSession.supportsLocalTeaching
@@ -297,10 +299,12 @@ struct ContentView: View {
     }
     private var collaborationPairingContents: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(screen.connecting ? "正在连接画面协作…" : screen.awaitingUSBInvitation ? "等待处理协作邀请" : "连接电脑，开始协作", systemImage: "display")
+            Label(screen.connecting ? "正在连接画面协作…" : screen.awaitingUSBInvitation ? "等待处理协作邀请"
+                  : TeachingDevice.isPhone ? "连接电脑，开始协作" : "选择协作方式", systemImage: "display")
                 .font(.headline).foregroundStyle(accent)
                 .accessibilityIdentifier("screen-pairing-status")
-            Text("可在下方用数据线邀请电脑，或选择扫码 / Wi-Fi 配对。")
+            Text(TeachingDevice.isPhone ? "可在下方用数据线邀请电脑，或选择扫码 / Wi-Fi 配对。"
+                 : "作为扩展共享电脑画面与控制；离线协作在 iPad 使用完整工作台。")
                 .font(.callout).foregroundStyle(.secondary)
             if screen.connecting {
                 HStack {
@@ -309,8 +313,13 @@ struct ContentView: View {
                     Button("取消", action: screen.finish)
                 }.font(.callout)
             } else {
-                wiredCollaborationGuide
-                wiredCollaborationButton
+                if TeachingDevice.isPhone {
+                    collaborationConnectionGuide
+                    collaborationButtons
+                } else {
+                    collaborationButtons
+                    collaborationConnectionGuide
+                }
                 if !screen.usbInvitationMessage.isEmpty {
                     Text(screen.usbInvitationMessage).font(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("usb-invitation-status")
@@ -320,24 +329,36 @@ struct ContentView: View {
                 Text(screen.connectionError).font(.callout).foregroundStyle(.orange).textSelection(.enabled)
             }
             Divider().padding(.vertical, 4)
-            Label("扫码配对", systemImage: "qrcode").font(.headline)
+            Label(TeachingDevice.isPhone ? "扫码配对" : "作为扩展 · 扫码配对", systemImage: "qrcode").font(.headline)
             scanPairingButton
             Divider().padding(.vertical, 4)
-            Label("Wi-Fi 连接", systemImage: "globe").font(.headline)
+            Label(TeachingDevice.isPhone ? "Wi-Fi 连接" : "作为扩展 · Wi-Fi 配对", systemImage: "globe").font(.headline)
             LANAddressFields(address: $session.serverConnection, onSubmit: presentAddressPairing).disabled(pairingBusy)
             discoveryPanel
         }.frame(maxWidth: .infinity, alignment: .topLeading)
     }
-    private var wiredCollaborationGuide: some View {
+    private var collaborationConnectionGuide: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("数据线连接（USB）", systemImage: "cable.connector")
-                .font(.headline).foregroundStyle(accent)
-            Text("1. 用数据线连接电脑，解锁 \(TeachingDevice.storageName) 并信任此电脑。")
-            Text("2. 在下方邀请电脑，或由电脑端发起邀请；对方确认接受后进入协作。")
-            Text("无需扫码或输入配对码，请保持此 App 与电脑工作台打开。")
-                .font(.caption).foregroundStyle(accent)
-            Text("Windows 或远端电脑需先在电脑端启动并连接「数据线连接助手」。")
-                .font(.caption).foregroundStyle(.secondary)
+            if TeachingDevice.isPhone {
+                Label("数据线连接（USB）", systemImage: "cable.connector")
+                    .font(.headline).foregroundStyle(accent)
+                Text("1. 用数据线连接电脑，解锁 \(TeachingDevice.storageName) 并信任此电脑。")
+                Text("2. 在下方邀请电脑，或由电脑端发起邀请；对方确认接受后进入协作。")
+                Text("无需扫码或输入配对码，请保持此 App 与电脑工作台打开。")
+                    .font(.caption).foregroundStyle(accent)
+                Text("Windows 或远端电脑需先在电脑端启动并连接「数据线连接助手」。")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Label("作为扩展 · 数据线", systemImage: "cable.connector")
+                    .font(.headline).foregroundStyle(accent)
+                Text("用数据线连接电脑，解锁 iPad 并信任此电脑。点击“作为扩展”，由电脑接受邀请后共享画面与控制。")
+                Text("保持双方应用打开；Windows 或远端电脑需先连接「数据线连接助手」。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Divider()
+                Label("离线协作 · 局域网", systemImage: "network")
+                    .font(.headline).foregroundStyle(accent)
+                Text("iPad 与电脑连接同一局域网，电脑保持示教服务运行。点击“离线协作”，选择电脑地址后进入完整工作台。")
+            }
         }
         .font(.callout).fixedSize(horizontal: false, vertical: true)
         .padding(14).frame(maxWidth: .infinity, alignment: .leading)
@@ -345,16 +366,30 @@ struct ContentView: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(accent.opacity(0.25)))
         .accessibilityElement(children: .contain).accessibilityIdentifier("screen-pairing-wired-guide")
     }
-    @ViewBuilder private var wiredCollaborationButton: some View {
-        if screen.awaitingUSBInvitation {
-            Button(action: screen.cancelUSBInvitation) {
-                pairingActionLabel("取消邀请", systemImage: "xmark")
-            }.buttonStyle(.bordered).accessibilityIdentifier("cancel-usb-invitation")
-        } else {
-            Button(action: screen.inviteUSBComputer) {
-                pairingActionLabel("邀请电脑协作", systemImage: "cable.connector")
-            }.buttonStyle(.borderedProminent).disabled(session.busy || screen.connecting)
-                .accessibilityIdentifier("invite-usb-collaboration")
+    private var collaborationButtons: some View {
+        VStack(spacing: 10) {
+            if screen.awaitingUSBInvitation {
+                Button(action: screen.cancelUSBInvitation) {
+                    pairingActionLabel("取消邀请", systemImage: "xmark")
+                }.buttonStyle(.bordered).accessibilityIdentifier("cancel-usb-invitation")
+            } else {
+                Button(action: screen.inviteUSBComputer) {
+                    pairingActionLabel(TeachingDevice.isPhone ? "邀请电脑协作" : "作为扩展",
+                                       systemImage: TeachingDevice.isPhone ? "cable.connector" : "display.2")
+                }.buttonStyle(.borderedProminent).disabled(session.busy || screen.connecting)
+                    .accessibilityIdentifier(TeachingDevice.isPhone ? "invite-usb-collaboration" : "collaboration-mode-extension")
+            }
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                Button {
+                    guard !pairingBusy, screen.incomingUSBInvitation == nil else { return }
+                    discovery.stop()
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    onOpenOfflineWorkbench(nil)
+                } label: {
+                    pairingActionLabel("离线协作", systemImage: "rectangle.on.rectangle")
+                }.buttonStyle(.bordered).disabled(pairingBusy)
+                    .accessibilityIdentifier("collaboration-mode-offline")
+            }
         }
     }
     private var scanPairingButton: some View {
@@ -559,7 +594,9 @@ struct ContentView: View {
                 Label("保存在此 \(TeachingDevice.storageName)", systemImage: "square.stack.3d.up")
                     .font(TeachingDevice.isPhone ? .headline : .title2.weight(.medium))
                 Spacer()
-                Text("\(session.projects.count) 个物体").font(.caption).foregroundStyle(.secondary)
+                Text(TeachingDevice.isPhone ? "\(session.projects.count) 个物体"
+                     : "\(session.projects.count) 个物体 · \(workbenchLibrary.projects.count) 个离线工程")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Divider()
             if !TeachingSession.supportsLocalTeaching {
@@ -580,19 +617,20 @@ struct ContentView: View {
         .background(Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 18))
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Color.white.opacity(0.06)))
-        .disabled(!TeachingSession.supportsLocalTeaching)
-        .opacity(TeachingSession.supportsLocalTeaching ? 1 : 0.5)
+        .disabled(TeachingDevice.isPhone && !TeachingSession.supportsLocalTeaching)
+        .opacity(TeachingDevice.isPhone && !TeachingSession.supportsLocalTeaching ? 0.5 : 1)
         .accessibilityElement(children: .contain).accessibilityIdentifier("library-projects-panel")
     }
     private var localProjectContents: some View {
         VStack(alignment: .leading, spacing: 20) {
-            if session.projects.isEmpty {
+            if session.projects.isEmpty && workbenchLibrary.projects.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "cube.transparent").font(.system(size: 64, weight: .ultraLight)).foregroundStyle(accent.opacity(0.7))
                     Text(TeachingSession.supportsLocalTeaching ? "从电脑接收第一个物体" : "本机虚拟示教不可用").font(.headline)
                     Text(TeachingSession.supportsLocalTeaching
-                         ? "接收后，物体和示教草稿都会出现在这里。"
-                         : "请使用画面协作，查看电脑画面并协作操作虚拟机器人。")
+                         ? (TeachingDevice.isPhone ? "接收后，物体和示教草稿都会出现在这里。" : "接收的物体、示教草稿和离线协作工程都会出现在这里。")
+                         : TeachingDevice.isPhone ? "请使用画面协作，查看电脑画面并协作操作虚拟机器人。"
+                         : "可使用画面协作，或点击“离线协作”打开完整工作台。")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }.frame(maxWidth: .infinity, minHeight: 230)
             } else {
@@ -625,12 +663,39 @@ struct ContentView: View {
                                 }
                                 .padding(TeachingDevice.isPhone ? 12 : 20).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                                 .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                            }.buttonStyle(.plain).disabled(pairingBusy).accessibilityIdentifier("local-project-\(project.id)")
+                            }.buttonStyle(.plain).disabled(pairingBusy || !TeachingSession.supportsLocalTeaching)
+                                .opacity(TeachingSession.supportsLocalTeaching ? 1 : 0.5)
+                                .accessibilityIdentifier("local-project-\(project.id)")
+                        }
+                    }
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        ForEach(workbenchLibrary.projects) { project in
+                            Button { discovery.stop(); onOpenOfflineWorkbench(project) } label: {
+                                HStack(spacing: 18) {
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        Text(project.item.name).font(.headline).multilineTextAlignment(.leading).lineLimit(3)
+                                        Text("离线协作 · \(project.item.mode == "map" ? "地图示教" : "独立示教") · \(project.item.taskCount) 个任务 · \(project.item.poseCount) 个 Pose")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        Text("保存于 \(Date(timeIntervalSince1970: project.item.savedAt / 1000).formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Spacer(minLength: 4)
+                                    Image(systemName: "rectangle.on.rectangle").font(.system(size: 32, weight: .light)).foregroundStyle(accent)
+                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(accent)
+                                }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
+                            }.buttonStyle(.plain).disabled(pairingBusy)
+                                .accessibilityIdentifier("local-offline-project-\(project.item.id)")
+                        }
+                        if !workbenchLibrary.projects.isEmpty {
+                            Text("离线工程已保存在本机；打开工作台时需连接电脑服务。")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
-                .accessibilityIdentifier("local-project-list")
+                .accessibilityElement(children: .contain).accessibilityIdentifier("local-project-list")
             }
+            if !workbenchLibrary.error.isEmpty { Text(workbenchLibrary.error).font(.caption).foregroundStyle(.orange) }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -954,7 +1019,7 @@ private struct WiFiPairingSheet: View {
     }
 }
 
-private struct LANAddressFields: View {
+struct LANAddressFields: View {
     @Binding var address: LANAddressInput
     var onSubmit: () -> Void = {}
     @State private var hostError = ""
