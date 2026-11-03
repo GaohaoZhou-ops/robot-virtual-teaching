@@ -112,6 +112,7 @@ export const zividOpticalPoseFromObject = (frame, side) => {
   return {
     side,
     frameName: frame.name,
+    ...(frame.userData.cameraCalibration ? { calibration: frame.userData.cameraCalibration } : {}),
     position: { x: position.x, y: position.y, z: position.z },
     quaternion: {
       x: quaternion.x,

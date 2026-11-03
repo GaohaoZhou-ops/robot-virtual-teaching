@@ -8,7 +8,7 @@ import { validateIPadResult, withoutDesktopPoseReferences } from "../../../share
 import { normalizeMobileSolveReport } from "../../teaching/mobile/model/mobileTeachingSolver.js";
 import { normalizePolyline } from "../../teaching/polyline/model/polylineTeaching.js";
 import { TEACHING_DATA_FORMAT } from "../../teaching/model/teachingData.js";
-import { ZIVID_M70_PROFILE } from "../../cameras/model/zividCamera.js";
+import { ZIVID_M70_PROFILE, zividCalibrationSnapshot } from "../../cameras/model/zividCamera.js";
 import { withoutTemporaryMapNavigation } from "../../teaching/model/teachingNavigation.js";
 import { abxNodeLabel, abxNodeName } from "../../navigation/model/abxRoute.js";
 import { normalizeIndependentTeachingName } from "./independentTeachingName.js";
@@ -255,6 +255,8 @@ const normalizeTeachingCameraFrame = (value, side) => {
     side,
     capturedAt: String(value.capturedAt || ''),
     opticalPose,
+    ...(value.calibration && typeof value.calibration === 'object'
+      ? { calibration: zividCalibrationSnapshot(value.calibration) } : {}),
     rgb,
     pointCloud,
     rendering: {
@@ -748,7 +750,7 @@ export function normalizeProject(payload) {
         ? workspace.placedObjectColorMode : ['height', 'source', 'white'].includes(workspace.pointColorMode)
           ? workspace.pointColorMode : 'height',
       showPaths3D: workspace.showPaths3D !== false,
-      annotationsOnTop3D: workspace.annotationsOnTop3D !== false,
+      annotationsOnTop3D: workspace.annotationsOnTop3D === true,
       showParkingPoints3D: workspace.showParkingPoints3D !== false,
       showWaypoints3D: workspace.showWaypoints3D !== false,
       showWaypointNames3D: workspace.showWaypointNames3D !== false,
@@ -798,7 +800,7 @@ export function buildExport({
   pointColorMode = 'height',
   placedObjectColorMode = pointColorMode,
   showPaths3D = true,
-  annotationsOnTop3D = true,
+  annotationsOnTop3D = false,
   showParkingPoints3D = true,
   showWaypoints3D = true,
   showWaypointNames3D = true,
@@ -854,7 +856,7 @@ export function buildExport({
         ? pointColorMode
         : 'height',
       showPaths3D: showPaths3D !== false,
-      annotationsOnTop3D: annotationsOnTop3D !== false,
+      annotationsOnTop3D: annotationsOnTop3D === true,
       showParkingPoints3D: showParkingPoints3D !== false,
       showWaypoints3D: showWaypoints3D !== false,
       placedObjectColorMode: ['height', 'source', 'white'].includes(placedObjectColorMode)

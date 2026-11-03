@@ -2709,6 +2709,23 @@ code {
 .robot-ground-clearance-warning li > button:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
 .robot-ground-clearance-warning li > button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.robot-camera-calibration-status {
+  padding: 9px 11px;
+  border: 1px solid rgba(98, 199, 160, 0.3);
+  background: rgba(9, 17, 19, 0.93);
+  color: var(--green);
+  font-size: 10px;
+  backdrop-filter: blur(8px);
+}
+.robot-camera-calibration-status.has-fallback { border-color: rgba(244, 201, 93, 0.4); color: var(--amber); }
+.robot-camera-calibration-status header { display: flex; align-items: center; gap: 6px; }
+.robot-camera-calibration-status header > span { margin-left: auto; font-size: 9px; }
+.robot-camera-calibration-status__side { display: grid; grid-template-columns: auto 1fr; gap: 4px 8px; margin-top: 7px; }
+.robot-camera-calibration-status__side > span { color: #c6d4d0; }
+.robot-camera-calibration-status__side > strong { text-align: right; font-size: 10px; font-weight: 500; }
+.robot-camera-calibration-status__side[data-calibration-state="loaded"] > strong { color: var(--green); }
+.robot-camera-calibration-status__side > small { grid-column: 1 / -1; color: #b9c5c3; font-size: 9px; overflow-wrap: anywhere; }
+
 .robot-parking-ghost-readout {
   position: absolute;
   bottom: 38px;

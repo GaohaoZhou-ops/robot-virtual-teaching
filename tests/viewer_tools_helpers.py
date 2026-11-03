@@ -18,3 +18,7 @@ def display_settings_section(page, section):
     if heading.get_attribute('aria-expanded') != 'true':
         heading.click()
     return panel
+
+
+def parking_points_toggle(page):
+    return display_settings_section(page, '路径与标注').get_by_role('switch', name='显示停车点', exact=True)

@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import CameraTeachingControls from "./CameraTeachingControls.jsx";
-import { ZIVID_M70_PROFILE, ZividM70Camera } from "../model/zividCamera.js";
+import { ZIVID_M70_PROFILE, ZividM70Camera, zividProjection, zividCalibrationSnapshot } from "../model/zividCamera.js";
 export { ZIVID_M70_PROFILE } from "../model/zividCamera.js";
 import {
   createUniformMeshIndex,
@@ -127,6 +127,7 @@ const cameraMeshRegionKeyForPose = (pose) => {
   const quaternionSign = inverse.qw < 0 ? -1 : 1;
   const quantize = (value, step) => Math.round(value / step);
   return [
+    JSON.stringify(pose?.calibration?.intrinsics || null),
     quantize(inverse.px, CAMERA_MESH_REGION_POSITION_STEP),
     quantize(inverse.py, CAMERA_MESH_REGION_POSITION_STEP),
     quantize(inverse.pz, CAMERA_MESH_REGION_POSITION_STEP),
@@ -352,8 +353,8 @@ const createCameraSurfaceGeometry = (sourceGeometry, qualityPlan, pose) => {
   selectedDepths.fill(Number.POSITIVE_INFINITY);
   const projectedX = new Float32Array(gridCellCount);
   const projectedY = new Float32Array(gridCellCount);
-  const tangentX = Math.tan(THREE.MathUtils.degToRad(ZIVID_M70_PROFILE.horizontalFov / 2));
-  const tangentY = Math.tan(THREE.MathUtils.degToRad(ZIVID_M70_PROFILE.verticalFov / 2));
+  const projection = zividProjection(pose.calibration);
+  const tangentX = 1 / projection.scaleX, tangentY = 1 / projection.scaleY;
   const projectionLimit = 1 + CAMERA_SURFACE_FOV_MARGIN;
   const readPosition = directPositionReader(sourcePosition);
   let candidatePointCount = 0;
@@ -364,8 +365,8 @@ const createCameraSurfaceGeometry = (sourceGeometry, qualityPlan, pose) => {
     const [x, y, z] = readPosition(sourceIndex);
     const local = rotateIntoCamera(x, y, z, inversePose);
     if (local.z < ZIVID_M70_PROFILE.near || local.z > ZIVID_M70_PROFILE.far) continue;
-    const normalizedX = local.x / Math.max(local.z * tangentX, 1e-6);
-    const normalizedY = local.y / Math.max(local.z * tangentY, 1e-6);
+    const normalizedX = local.x / Math.max(local.z, 1e-6) * projection.scaleX + projection.offsetX;
+    const normalizedY = local.y / Math.max(local.z, 1e-6) * projection.scaleY + projection.offsetY;
     if (Math.abs(normalizedX) > projectionLimit || Math.abs(normalizedY) > projectionLimit) continue;
     candidatePointCount += 1;
     if (Math.abs(normalizedX) <= 1 && Math.abs(normalizedY) <= 1) strictVisiblePointCount += 1;
@@ -761,6 +762,7 @@ const normalizedCameraPoseSnapshot = (pose, side) => {
   if (!pose?.position || !pose?.quaternion) return null;
   const quaternionW = Number(pose.quaternion.w ?? 1);
   return {
+    calibration: zividCalibrationSnapshot(pose.calibration),
     frameName: String(
       pose.frameName || `zivid_${side === 'right' ? 'right' : 'left'}_optical_frame`,
     ),
@@ -792,8 +794,7 @@ const captureVisiblePointCloud = (
   const hasRgb = sourceColor?.count === sourcePosition.count;
   const neighborhood = cameraPointNeighborhood(sourceGeometry, null, inversePose);
   const readPosition = directPositionReader(sourcePosition);
-  const tangentX = Math.tan(THREE.MathUtils.degToRad(ZIVID_M70_PROFILE.horizontalFov / 2));
-  const tangentY = Math.tan(THREE.MathUtils.degToRad(ZIVID_M70_PROFILE.verticalFov / 2));
+  const projection = zividProjection(pose.calibration);
   const visible = [];
 
   for (let index = 0; index < neighborhood.length; index += 1) {
@@ -803,8 +804,8 @@ const captureVisiblePointCloud = (
     if (
       local.z < ZIVID_M70_PROFILE.near
       || local.z > ZIVID_M70_PROFILE.far
-      || Math.abs(local.x) > local.z * tangentX
-      || Math.abs(local.y) > local.z * tangentY
+      || Math.abs(local.x / local.z * projection.scaleX + projection.offsetX) > 1
+      || Math.abs(local.y / local.z * projection.scaleY + projection.offsetY) > 1
     ) {
       continue;
     }
@@ -939,7 +940,7 @@ const renderTeachingCaptureImages = (
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x02080b);
-    const camera = new ZividM70Camera();
+    const camera = new ZividM70Camera(pose.calibration);
     camera.position.set(pose.position.x, pose.position.y, pose.position.z);
     camera.quaternion
       .set(
@@ -1108,6 +1109,7 @@ const captureZividTeachingVision = async ({
         side,
         capturedAt,
         opticalPose: pose,
+        calibration: zividCalibrationSnapshot(pose.calibration),
         rgb: images.rgb,
         pointCloud: {
           ...pointCapture.pointCloud,
@@ -1169,8 +1171,7 @@ const estimateVisiblePoints = (geometry, pose) => {
   const px = Number(pose.position.x || 0);
   const py = Number(pose.position.y || 0);
   const pz = Number(pose.position.z || 0);
-  const tangentX = Math.tan(THREE.MathUtils.degToRad(ZIVID_M70_PROFILE.horizontalFov / 2));
-  const tangentY = Math.tan(THREE.MathUtils.degToRad(ZIVID_M70_PROFILE.verticalFov / 2));
+  const projection = zividProjection(pose.calibration);
   let checked = 0;
   let visible = 0;
 
@@ -1188,8 +1189,8 @@ const estimateVisiblePoints = (geometry, pose) => {
     if (
       localZ >= ZIVID_M70_PROFILE.near
       && localZ <= ZIVID_M70_PROFILE.far
-      && Math.abs(localX) <= localZ * tangentX
-      && Math.abs(localY) <= localZ * tangentY
+      && Math.abs(localX / localZ * projection.scaleX + projection.offsetX) <= 1
+      && Math.abs(localY / localZ * projection.scaleY + projection.offsetY) <= 1
     ) {
       visible += 1;
     }
@@ -1710,6 +1711,7 @@ export default function ZividCameraPanel({
   const spaceMouseInputCountRef = useRef(0);
   const spaceMouseStatusSignatureRef = useRef('');
   const activePose = cameraPoses?.[activeSide] || null;
+  const activeProjection = zividProjection(activePose?.calibration);
   const hasRgb = Boolean(mapData?.geometry?.getAttribute('color'));
   const meshInfo = mapData?.meshInfo || mapData?.geometry?.userData?.mapTopology || null;
   const hasEmbeddedMesh = Boolean(meshInfo?.hasMesh && meshInfo.faceCount > 0);
@@ -2295,6 +2297,7 @@ export default function ZividCameraPanel({
       const pose = poseRef.current;
       const currentView = viewRef.current;
       const renderSignature = [
+        JSON.stringify(pose?.calibration?.intrinsics || null),
         width,
         height,
         renderModeRef.current,
@@ -2332,6 +2335,7 @@ export default function ZividCameraPanel({
         1,
         MAX_DIGITAL_ZOOM,
       );
+      camera.calibration = pose?.calibration;
       camera.clearViewOffset();
       if (currentZoom > 1.0001) {
         const fullWidth = Math.max(width, Math.round(width * currentZoom));
@@ -2543,11 +2547,12 @@ export default function ZividCameraPanel({
       data-rgb-surface-point-count={cameraMeshStats.surfacePointCount}
       data-rgb-surface-triangle-count={cameraMeshStats.surfaceTriangleCount}
       data-rgb-surface-selection={cameraMeshStats.surfaceSelectionMode}
-      data-horizontal-fov={ZIVID_M70_PROFILE.horizontalFov}
-      data-vertical-fov={ZIVID_M70_PROFILE.verticalFov}
+      data-horizontal-fov={activeProjection.horizontalFov}
+      data-vertical-fov={activeProjection.verticalFov}
+      data-calibration-state={activePose?.calibration?.status || 'nominal'}
       data-working-near={ZIVID_M70_PROFILE.near}
       data-working-far={ZIVID_M70_PROFILE.far}
-      data-native-resolution={`${ZIVID_M70_PROFILE.nativeWidth}x${ZIVID_M70_PROFILE.nativeHeight}`}
+      data-native-resolution={`${activeProjection.width}x${activeProjection.height}`}
       data-optical-frame={activePose?.frameName || ''}
       data-visible-point-estimate={frustumStats.estimated}
       data-zoom={zoom.toFixed(2)}
@@ -2706,7 +2711,7 @@ export default function ZividCameraPanel({
         className={`zivid-camera-view-deck ${expanded ? 'is-camera-primary' : ''}`}
         aria-label={expanded ? 'Zivid相机主画面' : undefined}
         data-view-layout={expanded ? 'native-aspect-camera' : 'camera-only'}
-        data-native-aspect-ratio={`${ZIVID_M70_PROFILE.nativeWidth}:${ZIVID_M70_PROFILE.nativeHeight}`}
+        data-native-aspect-ratio={`${activeProjection.width}:${activeProjection.height}`}
       >
         <div
           className={`zivid-camera-viewport ${dragging ? 'is-dragging' : ''}`}
@@ -2877,13 +2882,13 @@ export default function ZividCameraPanel({
 
       {expanded && <>
       <div className="zivid-camera-specs">
-        <span><small>NATIVE</small>{ZIVID_M70_PROFILE.nativeWidth} × {ZIVID_M70_PROFILE.nativeHeight}</span>
-        <span><small>FOV @ 0.70 m</small>{ZIVID_M70_PROFILE.focusWidthMm} × {ZIVID_M70_PROFILE.focusHeightMm} mm</span>
+        <span><small>NATIVE</small>{activeProjection.width} × {activeProjection.height}</span>
+        <span><small>FOV @ 0.70 m</small>{Math.round(700 * (activeProjection.right - activeProjection.left))} × {Math.round(700 * (activeProjection.top - activeProjection.bottom))} mm</span>
         <span><small>WORKING DIST.</small>{ZIVID_M70_PROFILE.near.toFixed(2)}—{ZIVID_M70_PROFILE.far.toFixed(2)} m</span>
       </div>
       <footer className="zivid-camera-panel__footer">
         <span><i /> 仿真视图 · RGB 实体表面 / XYZ 点云</span>
-        <span>FOV {ZIVID_M70_PROFILE.horizontalFov.toFixed(1)}° × {ZIVID_M70_PROFILE.verticalFov.toFixed(1)}°</span>
+        <span>FOV {activeProjection.horizontalFov.toFixed(1)}° × {activeProjection.verticalFov.toFixed(1)}°</span>
         <strong>
           {renderMode === 'rgb'
             ? cameraMeshStats.renderFaceCount + cameraMeshStats.surfaceTriangleCount > 0

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from viewer_tools_helpers import viewer_tool
+from viewer_tools_helpers import parking_points_toggle
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
@@ -114,16 +114,18 @@ def run():
         )
 
         # The inspector search is a closed list sourced only from this map.
-        # Selecting a result restores hidden 3D markers and highlights the same
-        # waypoint in both views with a closer framing and a breathing animation.
+        # Display settings control markers; selecting a result highlights the
+        # same waypoint in both views with a closer framing and a breathing animation.
         waypoint_search = page.get_by_label("搜索导航点")
         assert waypoint_search.locator("option").count() == 3
         first_waypoint_id = waypoint_search.locator("option").nth(1).get_attribute("value")
         assert first_waypoint_id
-        viewer_tool(page, name="隐藏3D路径点").click()
+        parking_points_toggle(page).click()
         assert canvas.get_attribute("data-waypoints-visible") == "false"
         assert canvas.get_attribute("data-waypoint-visual-status") == "hidden-by-user"
-        assert "点已隐藏" in viewer_tool(page, name="显示3D路径点").inner_text()
+        assert parking_points_toggle(page).get_attribute('aria-checked') == 'false'
+        parking_points_toggle(page).click()
+        page.get_by_role('button', name='显示设置', exact=True).click()
         waypoint_search.select_option(first_waypoint_id)
         assert canvas.get_attribute("data-waypoints-visible") == "true"
         assert canvas.get_attribute("data-selected-waypoint-pulse-state") == "active"

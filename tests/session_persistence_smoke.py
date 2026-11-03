@@ -6,7 +6,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from viewer_tools_helpers import viewer_tool
+from viewer_tools_helpers import viewer_tool, parking_points_toggle
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
@@ -161,12 +161,13 @@ def run():
         assert abs(float(three_canvas.get_attribute("data-waypoint-radius-scale")) - 0.519249) < 1e-6
         assert abs(float(three_canvas.get_attribute("data-waypoint-hit-radius-scale")) - 1.286568) < 1e-6
         visible_waypoint_frame = three_canvas.screenshot()
-        hide_waypoints = viewer_tool(page, name="隐藏3D路径点")
-        assert hide_waypoints.get_attribute("aria-pressed") == "true"
+        hide_waypoints = parking_points_toggle(page)
+        assert hide_waypoints.get_attribute("aria-checked") == "true"
         hide_waypoints.click()
         page.wait_for_timeout(120)
         assert three_canvas.get_attribute("data-waypoints-visible") == "false"
-        assert viewer_tool(page, name="显示3D路径点").get_attribute("aria-pressed") == "false"
+        assert parking_points_toggle(page).get_attribute("aria-checked") == "false"
+        page.get_by_role('button', name='显示设置', exact=True).click()
         assert three_canvas.get_attribute("data-route-edge-count") == "1"
         hidden_waypoint_frame = three_canvas.screenshot()
         assert hidden_waypoint_frame != visible_waypoint_frame
@@ -267,8 +268,8 @@ def run():
         assert page.locator(".three-canvas").get_attribute("data-geometry-source") == "session-cache"
         assert page.locator(".three-canvas").get_attribute("data-color-mode") == "white"
         assert page.locator(".three-canvas").get_attribute("data-waypoints-visible") == "false"
-        assert viewer_tool(page, name="显示3D路径点").get_attribute("aria-pressed") == "false"
-        viewer_tool(page, name="显示3D路径点").click()
+        assert parking_points_toggle(page).get_attribute("aria-checked") == "false"
+        parking_points_toggle(page).click()
         assert page.locator(".three-canvas").get_attribute("data-waypoints-visible") == "true"
         page.get_by_role("button", name="显示设置", exact=True).click()
         assert display_settings_section(page, '地图与对象').get_by_role("button", name="切换点云颜色模式").get_attribute("data-color-mode") == "white"

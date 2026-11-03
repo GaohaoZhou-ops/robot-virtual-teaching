@@ -1,4 +1,5 @@
 import { strFromU8, strToU8, unzipSync, zip } from 'fflate';
+import { HAND_EYE_CALIBRATION_FILES, readOptionalCalibration } from '../../../shared/robotics/handEyeCalibration.js';
 import { sha256Bytes } from "../../../shared/utils/hash.js";
 import { buildAbxTeachingExport } from "../../teaching/model/abxTeachingExport.js";
 import { TEACHING_DATA_FORMAT } from "../../teaching/model/teachingData.js";
@@ -449,6 +450,22 @@ export async function collectProjectRobotResources(robot, onProgress, existingPa
   if (!robot) return null;
   const existing = normalizePortableRobotPackage(existingPackage, robot);
   if (existing) {
+    // Match model loading: retain bundled calibration, but supplement missing
+    // sides from the local robot package when upgrading an older archive.
+    if (existing.format === 'urdf') {
+      const paths = new Set(existing.files.map((file) => file.path));
+      const missing = Object.values(HAND_EYE_CALIBRATION_FILES)
+        .map((name) => resolveRelativePath(existing.packagePath, name))
+        .filter((path) => !paths.has(path));
+      const supplements = (await Promise.all(missing.map(async (path) => {
+        const result = await readOptionalCalibration(`${ROBOT_FILE_PREFIX}${encodePath(path)}`);
+        return result.status === 'read' ? { path, mimeType: 'application/json', bytes: strToU8(result.text) } : null;
+      }))).filter(Boolean);
+      if (supplements.length) {
+        existing.files.push(...supplements);
+        existing.resourceDigest = null;
+      }
+    }
     onProgress?.({ phase: '复用便携机器人资源', detail: `${existing.files.length} 个文件` });
     return existing;
   }
@@ -469,6 +486,7 @@ export async function collectProjectRobotResources(robot, onProgress, existingPa
 
   const packagePath = String(robot.packagePath || '').replace(/^\/+|\/+$/g, '');
   const optionalNames = ['package.xml', 'RESOURCE_MANIFEST.sha256'];
+  if (format === 'urdf') optionalNames.push(...Object.values(HAND_EYE_CALIBRATION_FILES));
   if (robot.manifestUrl) optionalNames.splice(1, 0, 'web-model.json');
   const optionalPaths = packagePath
     ? optionalNames.map((name) => resolveRelativePath(packagePath, name))
@@ -492,7 +510,11 @@ export async function collectProjectRobotResources(robot, onProgress, existingPa
     optionalPaths.filter((path) => path !== relativePath && !requiredPaths.has(path)),
     ROBOT_RESOURCE_CONCURRENCY,
     async (path) => {
-      const resource = await fetchRobotResource(path, null, true);
+      let resource;
+      if (Object.values(HAND_EYE_CALIBRATION_FILES).some((name) => path.endsWith(`/${name}`))) {
+        const result = await readOptionalCalibration(`${ROBOT_FILE_PREFIX}${encodePath(path)}`);
+        resource = result.status === 'read' ? { path, mimeType: 'application/json', bytes: strToU8(result.text) } : null;
+      } else resource = await fetchRobotResource(path, null, true);
       loaded += 1;
       onProgress?.({
         phase: '收集机器人附属清单',

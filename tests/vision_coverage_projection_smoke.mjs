@@ -8,7 +8,12 @@ import {
   disposeTeachingSurfaceProjectionOverlay,
   TEACHING_SURFACE_PROJECTION_MODE,
   VISION_COVERAGE_EMPTY_CELL_MODE,
+  collectTeachingVisionCoverageFrames,
+  prepareTeachingVisionCoverageFrames,
 } from "../src/features/cameras/model/visionCoverage.js";
+import { normalizeTeachingTasks } from '../src/features/workspace/model/io.js';
+import { zividCalibrationSnapshot } from '../src/features/cameras/model/zividCamera.js';
+import { handEyeReport } from './fixtures/hand_eye_calibration.mjs';
 
 const positions = new THREE.Float32BufferAttribute([
   -0.35, 0, 0.60, // In front of a measured surface: covered.
@@ -151,4 +156,29 @@ emptyVolume.traverse((child) => {
   }
 });
 
-console.log('vision coverage projection smoke test passed');
+// Calibration belongs to each captured frame, surviving save/import and taking
+// precedence over old captures' shared nominal model.
+const calibrated = zividCalibrationSnapshot({ intrinsics: handEyeReport().intrinsics });
+const capturedFrame = { opticalPose: { position: { x: 0, y: 0, z: 0 }, quaternion: { x: 0, y: 0, z: 0, w: 1 } },
+  calibration: calibrated,
+  pointCloud: { pointCount: 1, positionEncoding: 'uint16-le/base64', positionData: 'AAAAAAAA',
+    positionOffset: [0, 0, .8], positionScale: [0, 0, 0] } };
+const tasks = normalizeTeachingTasks([{ id: 'calibrated-task', parkingPoints: [{ id: 'park', poses: [{ id: 'capture',
+  cameraCapture: { calibration: { horizontalFov: 90 }, frames: { left: capturedFrame } } }] }] }]);
+const records = collectTeachingVisionCoverageFrames(tasks);
+assert.deepEqual(records[0].calibration.intrinsics, calibrated.intrinsics);
+const prepared = prepareTeachingVisionCoverageFrames(records);
+const p = prepared[0];
+assert.ok(Math.abs(p.offsetX - (2000 / 1944 - 1)) < 1e-12);
+assert.ok(Math.abs(p.offsetY - (1100 / 1200 - 1)) < 1e-12);
+assert.equal(p.grid.measuredCellCount, 1);
+assert.equal(buildTeachingSurfaceCoverageMask(new THREE.Float32BufferAttribute([0, 0, .7], 3), prepared).coveredPointCount, 1);
+const shiftedGeometry = new THREE.BufferGeometry();
+shiftedGeometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, .7, .01, 0, .7, 0, .01, .7], 3));
+const shiftedOverlay = createTeachingSurfaceProjectionOverlay(shiftedGeometry, prepared);
+assert.equal(shiftedOverlay.textures[0].image.width, 7);
+assert.ok(Math.abs(shiftedOverlay.textures[0].image.data[24] - p.offsetX) < 1e-6);
+assert.ok(Math.abs(shiftedOverlay.textures[0].image.data[25] - p.offsetY) < 1e-6);
+disposeTeachingSurfaceProjectionOverlay(shiftedOverlay);
+shiftedGeometry.dispose();
+console.log('vision coverage projection, calibrated capture persistence and CPU/GPU principal-point offsets passed');

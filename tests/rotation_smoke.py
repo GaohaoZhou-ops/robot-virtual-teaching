@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-from viewer_tools_helpers import open_viewer_tools, viewer_tool
+from viewer_tools_helpers import open_viewer_tools, viewer_tool, parking_points_toggle
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
@@ -72,9 +72,10 @@ def run():
         assert vector_map.get_attribute("data-source-point-count") == "24"
         assert vector_map.get_attribute("data-color-mode") == "height"
         assert viewer_tool(page, name="原点", exact=True).is_visible()
-        waypoint_visibility = viewer_tool(page, name="隐藏3D路径点")
+        waypoint_visibility = parking_points_toggle(page)
         assert waypoint_visibility.is_visible()
-        assert waypoint_visibility.get_attribute("aria-pressed") == "true"
+        assert waypoint_visibility.get_attribute("aria-checked") == "true"
+        page.get_by_role('button', name='显示设置', exact=True).click()
         assert canvas.get_attribute("data-waypoints-visible") == "true"
         assert canvas.get_attribute("data-waypoint-volume-ratio") == "0.14"
         assert abs(float(canvas.get_attribute("data-waypoint-radius-scale")) - 0.519249) < 1e-6

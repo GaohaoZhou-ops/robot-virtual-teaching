@@ -27,6 +27,10 @@ def run():
         page = browser.new_page(viewport={"width": 1440, "height": 900})
         page.set_default_timeout(180_000)
         page.on("pageerror", lambda error: errors.append(str(error)))
+        # This suite verifies the original nominal model regardless of private
+        # calibration files installed on the developer's machine.
+        page.route('**/__atlas/robot-files/**/calib/handeye_*_real_report.json',
+                   lambda route: route.fulfill(status=404, body='nominal camera fixture'))
 
         page.goto(f"{BASE_URL.rstrip('/')}/workbench", wait_until="networkidle")
         page.locator('[data-session-state="ready"]').wait_for()

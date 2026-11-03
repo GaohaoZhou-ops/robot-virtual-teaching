@@ -369,7 +369,7 @@ export default function App() {
   const layerRecoveryAttemptRef = useRef(null);
   const [meshRenderQuality, setMeshRenderQuality] = useState('auto');
   const [showPaths3D, setShowPaths3D] = useState(true);
-  const [annotationsOnTop3D, setAnnotationsOnTop3D] = useState(true);
+  const [annotationsOnTop3D, setAnnotationsOnTop3D] = useState(false);
   const [showParkingPoints3D, setShowParkingPoints3D] = useState(true);
   const [showWaypoints3D, setShowWaypoints3D] = useState(true);
   const [showWaypointNames3D, setShowWaypointNames3D] = useState(true);
@@ -1451,7 +1451,7 @@ export default function App() {
             snapshot?.ui?.meshRenderQuality ?? project?.rendering?.meshQuality,
           ));
           setShowPaths3D((snapshot?.ui?.showPaths3D ?? project?.workspace?.showPaths3D) !== false);
-          setAnnotationsOnTop3D((snapshot?.ui?.annotationsOnTop3D ?? project?.workspace?.annotationsOnTop3D) !== false);
+          setAnnotationsOnTop3D((snapshot?.ui?.annotationsOnTop3D ?? project?.workspace?.annotationsOnTop3D) === true);
           setShowParkingPoints3D((snapshot?.ui?.showParkingPoints3D ?? project?.workspace?.showParkingPoints3D) !== false);
           setShowWaypoints3D(snapshot?.ui?.showWaypoints3D !== false);
           setShowWaypointNames3D(
@@ -2607,7 +2607,7 @@ export default function App() {
         ? project.workspace.pointColorMode
         : 'height';
       const importedShowPaths3D = project.workspace?.showPaths3D !== false;
-      const importedAnnotationsOnTop3D = project.workspace?.annotationsOnTop3D !== false;
+      const importedAnnotationsOnTop3D = project.workspace?.annotationsOnTop3D === true;
       const importedShowParkingPoints3D = project.workspace?.showParkingPoints3D !== false;
       const importedShowWaypoints3D = project.workspace?.showWaypoints3D !== false;
       const importedShowWaypointNames3D = project.workspace?.showWaypointNames3D !== false;

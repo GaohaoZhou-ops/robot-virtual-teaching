@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { Vector3 } from 'three';
-import { ZividM70Camera, ZIVID_M70_PROFILE as profile } from "../src/features/cameras/model/zividCamera.js";
+import { ZividM70Camera, ZIVID_M70_PROFILE as profile, zividCalibrationSnapshot } from "../src/features/cameras/model/zividCamera.js";
+import { parseHandEyeCalibration } from '../src/shared/robotics/handEyeCalibration.js';
+import { handEyeReport } from './fixtures/hand_eye_calibration.mjs';
 
 const camera = new ZividM70Camera();
 const near = (actual, expected, tolerance = 1e-10) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} != ${expected}`);
@@ -32,4 +34,26 @@ const panned = new Vector3(profile.focus * tx / 2, profile.focus * ty / 2, -prof
 near(panned.x, 0); near(panned.y, 0);
 camera.clearViewOffset();
 assert.deepEqual(camera.projectionMatrix.toArray(), native, 'reset restores the whole M70 frame');
-console.log('M70 footprint, clipping, back-projection, viewport invariance and digital zoom/pan passed.');
+const calibration = parseHandEyeCalibration(JSON.stringify(handEyeReport()));
+const calibrated = new ZividM70Camera(calibration);
+const { width, height, K } = calibration.intrinsics;
+for (const depth of [profile.near, profile.focus, profile.far]) {
+  for (const u of [0, K[0][2], width]) for (const v of [0, K[1][2], height]) {
+    const world = new Vector3((u - K[0][2]) * depth / K[0][0], -(v - K[1][2]) * depth / K[1][1], -depth);
+    const ndc = world.clone().project(calibrated);
+    near(ndc.x, 2 * u / width - 1); near(ndc.y, 1 - 2 * v / height);
+    assert.ok(ndc.clone().unproject(calibrated).distanceTo(world) < 1e-10);
+  }
+}
+const calibrationMatrix = calibrated.projectionMatrix.toArray();
+calibrated.setViewOffset(width * 2, height * 2, width / 2, height / 2, width, height);
+const opticalAxis = new Vector3(0, 0, -.7).project(calibrated);
+near(opticalAxis.x, 2 * (2 * K[0][2] / width - 1));
+near(opticalAxis.y, 2 * (1 - 2 * K[1][2] / height));
+calibrated.clearViewOffset();
+assert.deepEqual(calibrated.projectionMatrix.toArray(), calibrationMatrix);
+const snapshot = zividCalibrationSnapshot(calibration);
+assert.deepEqual(new ZividM70Camera(snapshot).projectionMatrix.toArray(), calibrationMatrix);
+assert.notEqual(snapshot.intrinsics.K, calibration.intrinsics.K);
+assert.deepEqual(new ZividM70Camera({ intrinsics: { K: [] } }).projectionMatrix.toArray(), native);
+console.log('Nominal and calibrated M70 projection, off-center pixels, back-projection and digital zoom/pan passed.');

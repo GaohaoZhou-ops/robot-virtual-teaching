@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { getRobotJointLimits, normalizeArmSoftLimitOverrides, normalizeArmSoftLimitRatio } from "./robotJointLimits.js";
+import { loadRobotCameraCalibrations } from './robotCameraCalibration.js';
 
 const ROBOT_FILE_PREFIX = '/__atlas/robot-files/';
 const SUPPORTED_FORMATS = new Set(['urdf', 'glb', 'gltf', 'stl']);
@@ -319,7 +320,13 @@ export function resolveRobotResourceUrl(value, filename, options = {}) {
   try {
     return resolveAssetReference(filename, descriptor, options.packageRelative === true).url;
   } catch (error) {
-    if (options.optional === true && portablePackageFor(descriptor)) return null;
+    if (options.optional === true && portablePackageFor(descriptor)) {
+      // Older archives predate optional calibration files. Only callers that
+      // explicitly opt in may supplement them from this robot's local package.
+      if (options.catalogFallback === true) return resolveAssetReference(filename,
+        { ...descriptor, portableResourceId: null }, options.packageRelative === true).url;
+      return null;
+    }
     throw error;
   }
 }
@@ -752,6 +759,15 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
     return [robotJointDefinition(joint)];
   });
 
+  let cameraCalibration;
+  try {
+    cameraCalibration = await loadRobotCameraCalibrations(robot,
+      (path) => resolveRobotResourceUrl(descriptor, path,
+        { packageRelative: true, optional: true, catalogFallback: true }), { signal });
+  } catch (error) {
+    disposeRobotModel(robot);
+    throw error;
+  }
   robot.userData.robot = {
     format: 'urdf',
     linkCount: linkGroups.size,
@@ -774,6 +790,7 @@ async function loadUrdfRobot(descriptor, signal, onProgress) {
       return count + Number(Boolean(filename && meshOverrides[filename]));
     }, 0),
     movableJoints,
+    cameraCalibration,
   };
   return robot;
 }

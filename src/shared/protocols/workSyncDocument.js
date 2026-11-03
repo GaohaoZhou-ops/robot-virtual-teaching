@@ -7,7 +7,7 @@ export const WORK_SYNC_LEASE = 5 * 60 * 1000;
 const collections = ['waypoints', 'edges', 'abxRoutes', 'teachingTasks', 'jointPoses'];
 const fields = new Set([...collections, 'independentTeachingName', 'displaySettings']);
 const colorModes = new Set(['height', 'source', 'white']);
-const displayFlags = { showPaths3D: true, annotationsOnTop3D: true, showParkingPoints3D: true,
+const displayFlags = { showPaths3D: true, annotationsOnTop3D: false, showParkingPoints3D: true,
   showWaypoints3D: true, showWaypointNames3D: true, showPathNames3D: false, showHeightLegend3D: true };
 const displayFields = new Set(['pointColorMode', 'placedObjectColorMode', 'meshRenderQuality', ...Object.keys(displayFlags)]);
 const unsafeKeys = new Set(['__proto__', 'prototype', 'constructor']);

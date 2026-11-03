@@ -9,7 +9,7 @@ from archive_helpers import read_exported_project, start_project_download
 from export_separation_ui_smoke import load_project
 from teaching_transfer_ui_smoke import BASE_URL, CHROME, ready, snapshot
 from topbar_tools_helpers import topbar_action
-from viewer_tools_helpers import viewer_tool
+from viewer_tools_helpers import parking_points_toggle
 
 
 POINTS = {
@@ -147,12 +147,12 @@ def run():
             expect(canvas).to_have_attribute("data-last-pick-id", target["id"])
             expect(page.locator(f'.waypoint-name-label[data-waypoint-id="{target["id"]}"]')).to_have_class(
                 "waypoint-name-label is-selected")
-            viewer_tool(page, "隐藏3D路径点").click()
+            parking_points_toggle(page).click()
             page.keyboard.press("Escape")
             expect(canvas).to_have_attribute("data-waypoints-visible", "false")
-            check_projection(page, "map")
-            viewer_tool(page, "显示3D路径点").click()
+            parking_points_toggle(page).click()
             page.keyboard.press("Escape")
+            check_projection(page, "map")
 
             # Escape returns from a submenu to its parent; close the parent too
             # so camera gestures cannot land on the display-settings overlay.

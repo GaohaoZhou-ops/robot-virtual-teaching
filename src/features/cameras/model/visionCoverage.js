@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { ZIVID_M70_PROFILE } from "./zividCamera.js";
+import { zividProjection } from "./zividCamera.js";
 
 export const VISION_COVERAGE_MODE = 'surface-truncated-optical-frusta';
 export const VISION_COVERAGE_SURFACE_STOP = 'first-point-depth-grid';
@@ -121,23 +121,8 @@ export const buildVisionCoverageDepthGrid = (
     DEFAULT_GRID_COLUMNS,
   )));
   const rows = Math.max(3, Math.floor(finiteNumber(options.rows, DEFAULT_GRID_ROWS)));
-  const horizontalFov = THREE.MathUtils.clamp(
-    finiteNumber(calibration?.horizontalFov, ZIVID_M70_PROFILE.horizontalFov),
-    1,
-    175,
-  );
-  const verticalFov = THREE.MathUtils.clamp(
-    finiteNumber(calibration?.verticalFov, ZIVID_M70_PROFILE.verticalFov),
-    1,
-    175,
-  );
-  const near = Math.max(
-    MINIMUM_DEPTH,
-    finiteNumber(calibration?.workingNear, ZIVID_M70_PROFILE.near),
-  );
-  const far = Math.max(near, finiteNumber(calibration?.workingFar, ZIVID_M70_PROFILE.far));
-  const tangentX = Math.tan(THREE.MathUtils.degToRad(horizontalFov / 2));
-  const tangentY = Math.tan(THREE.MathUtils.degToRad(verticalFov / 2));
+  const { horizontalFov, verticalFov, near, far, scaleX, scaleY, offsetX, offsetY } = zividProjection(calibration);
+  const tangentX = 1 / scaleX, tangentY = 1 / scaleY;
   const buckets = Array.from({ length: columns * rows }, () => []);
   const positions = decodeTeachingPointCloudPositions(pointCloud);
 
@@ -146,8 +131,8 @@ export const buildVisionCoverageDepthGrid = (
     const y = positions[offset + 1];
     const z = positions[offset + 2];
     if (!Number.isFinite(x + y + z) || z < near || z > far) continue;
-    const normalizedX = x / Math.max(z * tangentX, MINIMUM_DEPTH);
-    const normalizedY = y / Math.max(z * tangentY, MINIMUM_DEPTH);
+    const normalizedX = x / Math.max(z * tangentX, MINIMUM_DEPTH) + offsetX;
+    const normalizedY = y / Math.max(z * tangentY, MINIMUM_DEPTH) + offsetY;
     if (Math.abs(normalizedX) > 1 || Math.abs(normalizedY) > 1) continue;
     const column = Math.min(
       columns - 1,
@@ -171,6 +156,10 @@ export const buildVisionCoverageDepthGrid = (
     rows,
     horizontalFov,
     verticalFov,
+    tangentX,
+    tangentY,
+    offsetX,
+    offsetY,
     near,
     far,
     depths,
@@ -186,15 +175,15 @@ export const buildVisionCoverageDepthGrid = (
   };
 };
 
-const localSurfacePoint = (normalizedX, normalizedY, depth, tangentX, tangentY) => [
-  normalizedX * tangentX * depth,
-  normalizedY * tangentY * depth,
+const localSurfacePoint = (normalizedX, normalizedY, depth, tangentX, tangentY, offsetX, offsetY) => [
+  (normalizedX - offsetX) * tangentX * depth,
+  (normalizedY - offsetY) * tangentY * depth,
   depth,
 ];
 
 const buildCoverageGeometry = (grid) => {
-  const tangentX = Math.tan(THREE.MathUtils.degToRad(grid.horizontalFov / 2));
-  const tangentY = Math.tan(THREE.MathUtils.degToRad(grid.verticalFov / 2));
+  const tangentX = grid.tangentX ?? Math.tan(THREE.MathUtils.degToRad(grid.horizontalFov / 2));
+  const tangentY = grid.tangentY ?? Math.tan(THREE.MathUtils.degToRad(grid.verticalFov / 2));
   const vertexColumns = grid.columns + 1;
   const vertexRows = grid.rows + 1;
   const farVertexCount = vertexColumns * vertexRows;
@@ -226,6 +215,8 @@ const buildCoverageGeometry = (grid) => {
         vertexDepth(column, row),
         tangentX,
         tangentY,
+        grid.offsetX || 0,
+        grid.offsetY || 0,
       );
       positions.set(point, vertexIndex * 3);
     }
@@ -359,7 +350,7 @@ export const collectTeachingVisionCoverageFrames = (tasks) => (
             poseId: pose.id,
             poseName: pose.name,
             side,
-            calibration: capture.calibration,
+            calibration: frame.calibration || capture.calibration,
             frame,
           }];
         })
@@ -400,8 +391,10 @@ export const prepareTeachingVisionCoverageFrames = (records, options = {}) => (
       record,
       grid,
       worldToCamera: Float64Array.from(worldToCamera.elements),
-      tangentX: Math.tan(THREE.MathUtils.degToRad(grid.horizontalFov / 2)),
-      tangentY: Math.tan(THREE.MathUtils.degToRad(grid.verticalFov / 2)),
+      tangentX: grid.tangentX,
+      tangentY: grid.tangentY,
+      offsetX: grid.offsetX,
+      offsetY: grid.offsetY,
     }];
   })
 );
@@ -472,8 +465,8 @@ export const markTeachingSurfaceCoverageRange = (
         + matrix[14];
       if (localZ < grid.near || localZ > grid.far) continue;
 
-      const normalizedX = localX / Math.max(localZ * frame.tangentX, MINIMUM_DEPTH);
-      const normalizedY = localY / Math.max(localZ * frame.tangentY, MINIMUM_DEPTH);
+      const normalizedX = localX / Math.max(localZ * frame.tangentX, MINIMUM_DEPTH) + (frame.offsetX || 0);
+      const normalizedY = localY / Math.max(localZ * frame.tangentY, MINIMUM_DEPTH) + (frame.offsetY || 0);
       if (Math.abs(normalizedX) > 1 || Math.abs(normalizedY) > 1) continue;
       const column = Math.min(
         grid.columns - 1,
@@ -553,7 +546,7 @@ export const createTeachingSurfaceProjectionOverlay = (
   ));
   if (!frames.length) return null;
 
-  const frameTextureWidth = 6;
+  const frameTextureWidth = 7;
   const frameTextureHeight = frames.length;
   const frameData = new Float32Array(frameTextureWidth * frameTextureHeight * 4);
   const depthTextureWidth = Math.max(...frames.map((frame) => frame.grid.columns));
@@ -583,6 +576,7 @@ export const createTeachingSurfaceProjectionOverlay = (
       depthRowOffset,
       0,
     ], frameOffset + 20);
+    frameData.set([frame.offsetX || 0, frame.offsetY || 0, 0, 0], frameOffset + 24);
 
     for (let row = 0; row < frame.grid.rows; row += 1) {
       for (let column = 0; column < frame.grid.columns; column += 1) {
@@ -665,6 +659,7 @@ export const createTeachingSurfaceProjectionOverlay = (
           );
           vec4 projection = atlasCoverageFrameTexel(frameIndex, 4.0);
           vec4 grid = atlasCoverageFrameTexel(frameIndex, 5.0);
+          vec2 principalOffset = atlasCoverageFrameTexel(frameIndex, 6.0).xy;
           vec3 localPosition = (
             worldToCamera * vec4(vAtlasCoverageWorldPosition, 1.0)
           ).xyz;
@@ -673,7 +668,7 @@ export const createTeachingSurfaceProjectionOverlay = (
           vec2 normalizedPosition = vec2(
             localPosition.x / max(localPosition.z * projection.x, 0.0001),
             localPosition.y / max(localPosition.z * projection.y, 0.0001)
-          );
+          ) + principalOffset;
           if (
             abs(normalizedPosition.x) > 1.0
             || abs(normalizedPosition.y) > 1.0

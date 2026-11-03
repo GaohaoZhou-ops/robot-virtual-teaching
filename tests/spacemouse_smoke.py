@@ -7,7 +7,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from viewer_tools_helpers import viewer_tool
+from viewer_tools_helpers import parking_points_toggle
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:21990")
@@ -531,7 +531,7 @@ def run():
       # Some 3DxWare configurations also expose cap motion and the two device
       # keys as a conventional system mouse. A HID button report must arm the
       # page-level firewall before that mapped click can activate another UI.
-      protected_toggle = viewer_tool(page, name="隐藏3D路径点")
+      protected_toggle = parking_points_toggle(page)
       protected_toggle_box = protected_toggle.bounding_box()
       assert protected_toggle_box is not None
       # Earlier trusted clicks can hit a headless-browser permission denial.
@@ -554,8 +554,8 @@ def run():
           protected_toggle_box["y"] + protected_toggle_box["height"] / 2,
       )
       page.evaluate("window.__spaceMouseMock.emitButtons(0)")
-      assert viewer_tool(page, name="隐藏3D路径点").get_attribute(
-          "aria-pressed"
+      assert protected_toggle.get_attribute(
+          "aria-checked"
       ) == "true"
       assert control.get_attribute("data-spacemouse-pointer-guard") == "active"
       assert control.get_attribute("data-spacemouse-pointer-guard-reason") == (
@@ -578,10 +578,10 @@ def run():
           "document.querySelector('.spacemouse-control')?.dataset.spacemousePointerGuard === 'idle'"
       )
       assert page.evaluate("document.pointerLockElement === null")
-      viewer_tool(page, name="隐藏3D路径点").click()
-      assert viewer_tool(page, name="显示3D路径点").is_visible()
-      viewer_tool(page, name="显示3D路径点").click()
-      assert viewer_tool(page, name="隐藏3D路径点").is_visible()
+      parking_points_toggle(page).click()
+      assert parking_points_toggle(page).get_attribute('aria-checked') == 'false'
+      parking_points_toggle(page).click()
+      assert parking_points_toggle(page).get_attribute('aria-checked') == 'true'
 
       # Cap motion uses a shorter guard and automatically hands ordinary mouse
       # interaction back after the final zero report.
@@ -595,12 +595,13 @@ def run():
       suppressed_before_motion = int(
           control.get_attribute("data-spacemouse-suppressed-pointer-events")
       )
+      protected_toggle = parking_points_toggle(page)
       emit_vector(page, scaled_vector(COUPLED_MOTIONS["x"], 0.72))
       page.evaluate(
-          "document.querySelector('[aria-label=\"隐藏3D路径点\"]').click()"
+          "document.querySelector('[aria-label=\"显示停车点\"]').click()"
       )
       emit_vector(page, [0, 0, 0, 0, 0, 0])
-      assert viewer_tool(page, name="隐藏3D路径点").is_visible()
+      assert protected_toggle.get_attribute('aria-checked') == 'true'
       assert control.get_attribute("data-spacemouse-pointer-guard-reason") == "cap-motion"
       assert int(control.get_attribute("data-spacemouse-suppressed-pointer-events")) > (
           suppressed_before_motion

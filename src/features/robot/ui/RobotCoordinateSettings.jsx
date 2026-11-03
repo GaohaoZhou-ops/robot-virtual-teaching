@@ -2,7 +2,8 @@ import { ChevronDown } from 'lucide-react';
 import { ROBOT_COORDINATE_GROUPS } from "../model/robotCoordinateAxes.js";
 import "./RobotCoordinateSettings.css";
 
-export default function RobotCoordinateSettings({ frames, selectedNames, onChange }) {
+export default function RobotCoordinateSettings({ frames, selectedNames, onChange,
+  showCalibrationStatus, onShowCalibrationStatusChange }) {
   const toggle = (names, checked) => {
     const next = new Set(selectedNames);
     names.forEach(name => { if (checked) next.add(name); else next.delete(name); });
@@ -24,6 +25,11 @@ export default function RobotCoordinateSettings({ frames, selectedNames, onChang
   return <section className="robot-coordinate-settings" aria-label="机器人坐标系显示">
     {groupCheckbox(frames, '全身坐标系', '显示全身坐标系')}
     {groupCheckbox(opticalFrames, 'Zivid 光学坐标系', '显示 Zivid 光学坐标系')}
+    <label className="robot-coordinate-settings__check">
+      <input type="checkbox" aria-label="显示标定结果提示" checked={showCalibrationStatus}
+        onChange={event => onShowCalibrationStatusChange(event.target.checked)} />
+      <span>标定结果提示</span>
+    </label>
     {frames.length > 0 ? <details className="robot-coordinate-settings__details">
       <summary><span>选择部位与坐标系</span><ChevronDown size={12} /></summary>
       <div className="robot-coordinate-settings__groups" role="group" aria-label="按部位显示坐标系">

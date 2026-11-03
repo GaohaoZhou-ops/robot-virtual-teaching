@@ -138,6 +138,9 @@ test-results/
 # Chassis clearance / landing reviews use test-artifacts/robot-ground-clearance/;
 # fleet grounding captures share test-artifacts/robot-twin-fleet/. Keep the
 # robot_ground_clearance_* runners and RobotGroundClearance* sources trackable.
+# Calibration fallback, display settings and portable-archive checks use
+# test-artifacts/camera-calibration/. Keep their synthetic hand_eye_calibration
+# fixture and maintained regression runners trackable.
 /test-artifacts/
 /screenshots/
 /test-downloads/
@@ -1453,6 +1456,14 @@ Desktop.ini
 /robots/
 /robots.[zZ][iI][pP]
 /robots-*.[zZ][iI][pP]
+# Per-unit hand-eye reports under robots/<package>/calib/ are private inputs.
+# Also ignore standalone review copies and calibration bundles at the root;
+# source helpers and synthetic tests/fixtures/ remain trackable.
+/calib/
+/calib.[zZ][iI][pP]
+/calib-*.[zZ][iI][pP]
+/handeye_*_real_report*.json
+/handeye_*_real_report*.[zZ][iI][pP]
 # Vendor model bundles, unpacked copies, dated revisions and duplicate downloads
 # stay local. Anchor these rules so nested reusable fixtures remain trackable.
 /botx-multi-descriptions/

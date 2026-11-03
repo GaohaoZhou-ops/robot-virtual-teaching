@@ -63,6 +63,7 @@ import { createRobotTwinFollowCamera, renderRobotTwinFollowView, normalizeRobotT
 import { RobotTwinFollowMenu } from "../../robot-twin/ui/RobotTwinFollowMenu.jsx";
 import RobotDistanceWarning from "../../robot/ui/RobotDistanceWarning.jsx";
 import RobotGroundClearanceWarning from "../../robot/ui/RobotGroundClearanceWarning.jsx";
+import RobotCameraCalibrationStatus from "../../robot/ui/RobotCameraCalibrationStatus.jsx";
 import { createRobotChassisClearance, isRobotChassisAirborne, robotChassisGroundedPose } from "../../robot/model/robotGroundClearance.js";
 import RobotCollisionJointSettings from "../../robot/ui/RobotCollisionJointSettings.jsx";
 import { RobotJointCouplingContext, RobotJointLimitContext, RobotJointSoftRangesContext } from "../../robot/ui/RobotJointLimitContext.js";
@@ -157,7 +158,7 @@ export default function PointCloudViewer({
   onMeshRenderQualityChange,
   showPaths = true,
   onShowPathsChange,
-  annotationsOnTop = true,
+  annotationsOnTop = false,
   onAnnotationsOnTopChange,
   showParkingPoints = true,
   onShowParkingPointsChange,
@@ -394,6 +395,7 @@ export default function PointCloudViewer({
     () => createRobotCollisionStatus(),
   );
   const [showDistanceWarnings, setShowDistanceWarnings] = useState(true);
+  const [showCalibrationStatus, setShowCalibrationStatus] = useState(true);
   const [collisionJointSettingsOpen, setCollisionJointSettingsOpen] = useState(false);
   const collisionJointOptions = useMemo(() => robotLoadState?.status === 'loaded'
     ? getRobotCollisionJointOptions(loadedRobotRef.current) : [], [robotDescriptor, robotLoadState?.status]);
@@ -7114,6 +7116,8 @@ export default function PointCloudViewer({
             {showDistanceWarnings && collisionProtectionEnabled && (
               <RobotDistanceWarning status={robotCollisionStatus} />
             )}
+            {showCalibrationStatus && robotLoadState?.status === 'loaded'
+              && <RobotCameraCalibrationStatus calibration={robotLoadState.cameraCalibration} />}
           </div>
           <div
             ref={spaceMouseAxisHudRef}
@@ -7286,7 +7290,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`tools-${resolutionMapKey}`}
               label="视图工具"
-              title="视角、路径点与机器人控制"
+              title="视角与机器人控制"
               icon={MousePointer2}
               isActive={isActive}
             >
@@ -7297,18 +7301,6 @@ export default function PointCloudViewer({
                   shiftPanArmed={shiftPanArmed}
                   onClick={toggleInteractionMode}
                 />
-                <button
-                  type="button"
-                  className={showWaypoints ? 'is-active' : 'is-hidden-state'}
-                  aria-label={showWaypoints ? '隐藏3D路径点' : '显示3D路径点'}
-                  aria-pressed={showWaypoints}
-                  disabled={!showParkingPoints}
-                  title={!showParkingPoints ? '请先在显示设置中开启停车点显示' : showWaypoints ? '隐藏3D导航点小球，保留路径连线' : '显示3D导航点小球'}
-                  onClick={() => onShowWaypointsChange?.(!showWaypoints)}
-                >
-                  {showWaypoints ? <Eye size={13} /> : <EyeOff size={13} />}
-                  {showWaypoints ? '路径点' : '点已隐藏'}
-                </button>
                 <button type="button" onClick={focusOrigin} title="将三维视图中心定位到坐标原点">
                   <Crosshair size={13} /> 原点
                 </button>
@@ -7433,7 +7425,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`还原视角、机器人模型、全身坐标系、Zivid 光学坐标系、距离警告、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`还原视角、机器人模型、全身坐标系、Zivid 光学坐标系、标定结果提示、距离警告、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
               panelClassName="viewer-display-menu"
@@ -7483,7 +7475,8 @@ export default function PointCloudViewer({
                           onChange={(event) => onRobotOpacityChange?.(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
                         <output>{Math.round(robotOpacity * 100)}%</output>
                       </label>
-                      <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames} />
+                      <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames}
+                        showCalibrationStatus={showCalibrationStatus} onShowCalibrationStatusChange={setShowCalibrationStatus} />
                   </> },
                   { id: 'distance', label: '距离警告', icon: ShieldAlert,
                     description: '距离状态 · 警告显示 · 忽略关节', content: <>
@@ -7581,15 +7574,16 @@ export default function PointCloudViewer({
                           <span>{annotationsOnTop ? '开启' : '关闭'}</span>
                         </button>
                       </div>
-                      <p className="viewer-display-settings__layer-notice">
-                        关闭后，路径、停车点及名称按空间远近显示，可被机器人和模型遮挡。
-                      </p>
                       <div className="viewer-display-settings__layer">
                         <span><MapPin size={13} /> 停车点</span>
                         <button type="button" role="switch" className="viewer-display-settings__toggle"
                           aria-label="显示停车点" aria-checked={showParkingPoints}
                           title={showParkingPoints ? '隐藏3D停车点标记及名称，保留路径连线' : '显示3D停车点，恢复原有标记及名称设置'}
-                          onClick={() => onShowParkingPointsChange?.(!showParkingPoints)}>
+                          onClick={() => {
+                            onShowParkingPointsChange?.(!showParkingPoints);
+                            // Restore markers hidden by the retired view-tools toggle.
+                            if (!showParkingPoints) onShowWaypointsChange?.(true);
+                          }}>
                           {showParkingPoints ? <Eye size={12} /> : <EyeOff size={12} />}
                           <span>{showParkingPoints ? '显示' : '隐藏'}</span>
                         </button>
