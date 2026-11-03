@@ -62,6 +62,8 @@ import { createIndependentGround, viewportDistanceScale } from "../model/viewpor
 import { createRobotTwinFollowCamera, renderRobotTwinFollowView, normalizeRobotTwinBevAngles, ZERO_ROBOT_TWIN_BEV_ANGLES } from "../../robot-twin/model/robotTwinFollowCamera.js";
 import { RobotTwinFollowMenu } from "../../robot-twin/ui/RobotTwinFollowMenu.jsx";
 import RobotDistanceWarning from "../../robot/ui/RobotDistanceWarning.jsx";
+import RobotGroundClearanceWarning from "../../robot/ui/RobotGroundClearanceWarning.jsx";
+import { createRobotChassisClearance, isRobotChassisAirborne, robotChassisGroundedPose } from "../../robot/model/robotGroundClearance.js";
 import RobotCollisionJointSettings from "../../robot/ui/RobotCollisionJointSettings.jsx";
 import { RobotJointCouplingContext, RobotJointLimitContext, RobotJointSoftRangesContext } from "../../robot/ui/RobotJointLimitContext.js";
 import { normalizeIgnoredCollisionJoints } from "../../robot/model/robotCollisionSettings.js";
@@ -243,6 +245,7 @@ export default function PointCloudViewer({
   visibleRobotFramesRef.current = visibleRobotFrames;
   const [polylineSuggestion, setPolylineSuggestion] = useState(null);
   const [polylineExecutionGhosts, setPolylineExecutionGhosts] = useState([]);
+  const [robotGroundWarnings, setRobotGroundWarnings] = useState([]);
   const robotOpacityRef = useRef(robotOpacity);
   robotOpacityRef.current = robotOpacity;
   const polylineOpenRef = useRef(polylineOpen);
@@ -1920,6 +1923,50 @@ export default function PointCloudViewer({
     updateRobotParkingGhostGuide(robotParkingGhostVisualRef.current, nextPose, canvas);
   }, [mapData?.geometry, robotPose, robotTelemetry]);
 
+  const groundRobotDisabledReason = !isActive || robotLoadState?.status !== 'loaded'
+    ? '请先加载机器人模型'
+    : teachingCaptureBusy ? '请等待采集完成后着地'
+    : !robotTelemetry && (robotTrajectoryActive || teachingPoseEditing)
+      ? '请结束示教回放或姿态编辑后着地'
+      : !robotTelemetry && !onRobotPoseChange ? '当前机器人位置不可编辑' : '';
+
+  const groundRobotChassis = (id) => {
+    if (groundRobotDisabledReason) return;
+    const twin = robotTelemetryRef.current ? twinSceneRef.current?.entries.get(id) : null;
+    if (robotTelemetryRef.current && !twin) return;
+    const model = twin?.model || loadedRobotRef.current;
+    const layer = robotLayerRef.current;
+    if (!model || !layer || !showRobotRef.current) return;
+    // Measure again at click time; the warning's displayed height is rounded
+    // and the robot may have moved since the last monitoring update.
+    const pose = twin ? (twin.rendered || twin.robot).pose : robotPoseRef.current;
+    const grounded = robotChassisGroundedPose(pose, createRobotChassisClearance(model)());
+    if (!grounded) return;
+    if (twin) {
+      const scene = twinSceneRef.current;
+      scene.offsetDisplayHeight(id, grounded.position.z - pose.position.z);
+      const frame = scene.update(performance.now(), scene.followId);
+      if (frame) {
+        robotPoseRef.current = frame.pose;
+        writeRobotPoseDataset(controlsRef.current?.domElement, frame.pose);
+      }
+      return;
+    }
+    chassisDragInteractionRef.current?.exit?.('ground-chassis');
+    endEffectorInteractionRef.current?.exit?.();
+    beginRobotDrag('ground-chassis');
+    clearEndEffectorLocks();
+    pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
+    robotPoseRef.current = applyRobotPose(layer, grounded);
+    const canvas = controlsRef.current?.domElement;
+    writeRobotPoseDataset(canvas, grounded);
+    updateRobotParkingGhostGuide(robotParkingGhostVisualRef.current, grounded, canvas);
+    markRobotDragMovement(); finishRobotDrag();
+    robotPoseActionsRef.current?.publish(true);
+    reportZividCameraPoses(true);
+    canvas?.focus({ preventScroll: true });
+  };
+
   useLayoutEffect(() => {
     const robot = loadedRobotRef.current;
     if (!robot || robotLoadStateRef.current?.status !== 'loaded') return;
@@ -2184,7 +2231,7 @@ export default function PointCloudViewer({
     // follow menu's explicit restore/start/switch behavior.
     const viewportPanel = mount.closest('.panel-3d') || mount;
     const onViewportInteraction = (event) => {
-      if (!event.target?.closest?.('.robot-twin-follow, .robot-twin-follow-menu')) stopTwinFollow(false);
+      if (!event.target?.closest?.('.robot-twin-follow, .robot-twin-follow-menu, .robot-ground-clearance-warning')) stopTwinFollow(false);
     };
     viewportPanel.addEventListener('pointerdown', onViewportInteraction, true);
     viewportPanel.addEventListener('click', onViewportInteraction, true);
@@ -3655,12 +3702,41 @@ export default function PointCloudViewer({
         || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
       return twinInputs;
     };
+    const chassisReaders = new WeakMap();
+    let lastGroundCheck = -Infinity, groundWarningSignature = '';
+    const updateGroundWarnings = () => {
+      const now = performance.now();
+      if (now - lastGroundCheck < 100) return;
+      lastGroundCheck = now;
+      const model = loadedRobotRef.current;
+      const candidates = twinScene.entries.size
+        ? [...twinScene.entries].map(([id, entry]) => ({ id, name: entry.robot.name,
+          model: entry.model || model, visible: entry.group.visible, selected: entry.selected }))
+        : [{ id: 'robot', name: '机器人', model, visible: robotLayer.visible, selected: true }];
+      const warnings = [];
+      let selectedHeight = null;
+      for (const candidate of candidates) {
+        if (!candidate.model || !candidate.visible) continue;
+        if (!chassisReaders.has(candidate.model)) chassisReaders.set(candidate.model, createRobotChassisClearance(candidate.model));
+        const height = chassisReaders.get(candidate.model)();
+        if (candidate.selected) selectedHeight = height;
+        if (isRobotChassisAirborne(height)) warnings.push({ id: candidate.id, name: candidate.name, height: (height * 100).toFixed(2) });
+      }
+      renderer.domElement.dataset.robotChassisClearance = selectedHeight?.toFixed(6) ?? '';
+      renderer.domElement.dataset.robotGroundWarning = String(warnings.length > 0);
+      const signature = JSON.stringify(warnings);
+      if (signature !== groundWarningSignature) {
+        groundWarningSignature = signature;
+        setRobotGroundWarnings(warnings);
+      }
+    };
     const renderScene = () => renderer.render(scene, camera);
     // Capture synchronously after rendering, before WebGL discards its buffer.
     // This also refreshes the scene when the workbench's animation loop is hidden.
     const captureCollaborationViewport = (target) => {
       if (renderer.getContext().isContextLost()) return false;
       updateTwinScene();
+      updateGroundWarnings();
       const following = twinFollowRef.current;
       if (following && robotTelemetryRef.current) {
         const view = following.tracker.update(robotPoseRef.current);
@@ -4461,11 +4537,13 @@ export default function PointCloudViewer({
         if (twinInputs.robots.length > 1) focusTwinRobotsRef.current?.();
       }
       twinScene.project(camera, renderer.domElement);
+      updateGroundWarnings();
       renderRobotTwinFollowView(twinFollowRef.current?.tracker, renderScene);
     });
 
     return () => {
       renderer.setAnimationLoop(null);
+      setRobotGroundWarnings([]);
       cancelFocusAnimation();
       twinScene.dispose();
       if (twinSceneRef.current === twinScene) twinSceneRef.current = null;
@@ -7030,9 +7108,13 @@ export default function PointCloudViewer({
               ))}
             </div>
           )}
-          {showDistanceWarnings && collisionProtectionEnabled && (
-            <RobotDistanceWarning status={robotCollisionStatus} />
-          )}
+          <div className="robot-viewport-warnings">
+            {showRobot && <RobotGroundClearanceWarning warnings={robotGroundWarnings}
+              onGround={groundRobotChassis} disabledReason={groundRobotDisabledReason} telemetry={robotTelemetry} />}
+            {showDistanceWarnings && collisionProtectionEnabled && (
+              <RobotDistanceWarning status={robotCollisionStatus} />
+            )}
+          </div>
           <div
             ref={spaceMouseAxisHudRef}
             className="spacemouse-axis-hud"

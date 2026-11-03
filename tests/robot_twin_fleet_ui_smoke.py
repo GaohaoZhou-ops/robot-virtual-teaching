@@ -7,6 +7,7 @@ from urllib.request import urlopen
 from playwright.sync_api import sync_playwright, expect
 from topbar_tools_helpers import topbar_action
 from robot_twin_follow_helpers import select_follow_mode
+from viewer_tools_helpers import viewer_tool
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = os.environ.get('BASE_URL', 'http://127.0.0.1:22061')
@@ -108,6 +109,19 @@ try:
             page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70', exact=True).click()
             canvas = page.locator('.three-canvas')
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
+            warning = page.get_by_role('status', name='机器人底盘悬空提示')
+            expect(canvas).to_have_attribute('data-robot-ground-warning', 'false')
+            # Use the actual chassis/wheel meshes, then carry the raised base
+            # height into both independent loopback twins.
+            viewer_tool(page, name='定位机器人模型').click()
+            canvas.focus()
+            page.keyboard.down('ArrowUp')
+            try:
+                page.wait_for_function("Number(document.querySelector('.three-canvas').dataset.robotChassisClearance) > .08")
+            finally:
+                page.keyboard.up('ArrowUp')
+            viewer_tool(page, name='定位机器人模型').click()
+            expect(warning).to_be_visible()
             offline = [canvas.get_attribute(f'data-robot-{key}') for key in ['x', 'y', 'z', 'yaw']]
             offline_view = camera_view(canvas)
             offline_signature = canvas.get_attribute('data-view-signature')
@@ -147,6 +161,9 @@ try:
             assert page.evaluate('window.twinSuccessAnimations') == 1
             assert requests(0)['POST /api/v1/access/login'] == login_a
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
+            expect(warning.locator('li')).to_have_count(2)
+            expect(warning).to_contain_text('1 号机器人')
+            expect(warning).to_contain_text('2 号机器人')
             monitor = page.get_by_role('complementary', name='任务监控台', exact=True)
             expect(monitor).to_have_attribute('data-robot-id', 'robot-0')
             expect(monitor).to_contain_text('一号巡检任务')
@@ -169,6 +186,7 @@ try:
                 expect(canvas).to_have_attribute('data-last-pick-id', robot_id)
                 expect(monitor).to_have_attribute('data-robot-id', robot_id)
             click_robot('robot-1')
+            expect(warning.locator('li')).to_have_count(2)
             expect(monitor).to_contain_text('二号巡检任务')
             expect(camera.get_by_role('switch', name='本体相机实时画面')).to_have_attribute('aria-checked', 'false')
             assert status(0)['activeCamera'] is None
@@ -211,6 +229,24 @@ try:
             assert any(abs(a-b) > .01 for a, b in zip(camera_view(canvas), offline_view)), 'fleet observation changes the live camera'
             assert canvas.get_attribute('data-view-signature') == offline_signature, 'twin navigation must not replace the saved offline view'
             page.screenshot(path=str(ARTIFACTS / 'monitor-switch.png'))
+            # Ground only the selected twin's display; following and telemetry
+            # continue, and the other robot retains its own height.
+            select_follow_mode(page)
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
+            warning.locator('li[data-robot-id="robot-0"]').get_by_role('button').click()
+            expect(canvas).to_have_attribute('data-robot-chassis-clearance', '0.001000')
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
+            expect(warning.locator('li')).to_have_count(1)
+            expect(warning.locator('li')).to_have_attribute('data-robot-id', 'robot-1')
+            command({'move': True})
+            page.wait_for_timeout(1000)
+            expect(canvas).to_have_attribute('data-robot-chassis-clearance', '0.001000')
+            warning.get_by_role('button', name='底盘着地', exact=True).click()
+            expect(warning).to_have_count(0)
+            robot_picker.click()
+            robot_options.get_by_role('option', name='2 号机器人', exact=True).click()
+            expect(canvas).to_have_attribute('data-robot-chassis-clearance', '0.001000')
+            expect(warning).to_have_count(0)
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect(monitor).to_have_count(0)
             expect(canvas).to_have_attribute('data-twin-robots', '[]')
@@ -286,6 +322,8 @@ try:
             expect(canvas).to_have_attribute('data-twin-follow-mode', 'head')
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect_view(page, second_view)
+            expect(warning.locator('li')).to_have_count(1)
+            expect(warning.locator('li')).to_have_attribute('data-robot-id', 'robot')
             expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
             # Normal workspace persistence must also keep the restored view.
             page.reload(wait_until='networkidle')

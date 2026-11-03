@@ -135,6 +135,9 @@ test-results/
 # test-artifacts/viewport-surface-zoom*/; temporary baseline runners and service
 # backups use build/viewport-surface-zoom/. The shared roots cover all of these;
 # keep tests/fixtures/viewport_surface_zoom_fixture.mjs and regression sources.
+# Chassis clearance / landing reviews use test-artifacts/robot-ground-clearance/;
+# fleet grounding captures share test-artifacts/robot-twin-fleet/. Keep the
+# robot_ground_clearance_* runners and RobotGroundClearance* sources trackable.
 /test-artifacts/
 /screenshots/
 /test-downloads/
@@ -177,6 +180,14 @@ test-results/
 /iphone/test-artifacts-*.[zZ][iI][pP]
 /vision/test-artifacts.[zZ][iI][pP]
 /vision/test-artifacts-*.[zZ][iI][pP]
+# Tar/tgz exports of desktop test artifacts, including dated review bundles.
+# Scope these to output names; source and fixture archives remain trackable.
+/test-artifacts*.[tT][aA][rR]
+/test-artifacts*.[tT][aA][rR].*
+/test-artifacts*.[tT][gG][zZ]
+/tests/test-artifacts*.[tT][aA][rR]
+/tests/test-artifacts*.[tT][aA][rR].*
+/tests/test-artifacts*.[tT][gG][zZ]
 # ZIP copies of the test-output directories above stay local.
 # Use explicit output paths so fixture archives and design media stay visible.
 /playwright-report.[zZ][iI][pP]

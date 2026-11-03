@@ -61,5 +61,23 @@ try {
   assert.equal(fleet.entries.get('a').group.position.x, .5);
   fleet.update(950);
   assert.equal(fleet.motion.size, 0, 'manual viewing leaves no smoothing buffers');
+  // A floor correction belongs to one twin's display, not its telemetry or
+  // the offline model. It survives selection, following and later samples.
+  assert.equal(fleet.offsetDisplayHeight('missing', -.2), false);
+  assert.equal(fleet.offsetDisplayHeight('a', NaN), false);
+  assert.equal(fleet.offsetDisplayHeight('a', -.2), true);
+  fleet.update(960);
+  assert.equal(fleet.entries.get('a').group.position.z, -.2, 'stationary twins update immediately');
+  assert.equal(fleet.entries.get('b').group.position.z, 0, 'other robot stays at its own height');
+  assert.equal(robots[0].pose.position.z, 0, 'original telemetry is untouched');
+  fleet.sync(model, layer, robots, 'a', true); fleet.update(970, 'a');
+  assert.equal(layer.position.z, -.2, 'switching selection retains the correction');
+  fleet.sync(model, layer, [robot('a', 1000), robot('b', 1000)], 'a', true);
+  fleet.update(1600, 'a');
+  assert.equal(layer.position.z, -.2, 'fresh telemetry cannot undo display grounding');
+  fleet.sync(model, layer, [robot('b', 1000)], 'b', true); fleet.update(1610);
+  assert.equal(fleet.heightOffsets.has('a'), false, 'disconnected robots release their correction');
+  fleet.sync(model, layer, robots, 'a', true); fleet.update(1620);
+  assert.equal(layer.position.z, 0, 'new connections start with unmodified height');
 } finally { fleet.dispose(); globalThis.document = originalDocument; }
 console.log('Robot rendering: measured transforms preserved; only followed robot interpolates; zero per-frame model traversals/searches or other-robot joint updates.');

@@ -20,7 +20,7 @@ function isVisibleRobotMesh(object) {
 export class RobotTwinScene {
   constructor(scene, mount, onSelect) {
     this.scene = scene; this.mount = mount; this.onSelect = onSelect;
-    this.entries = new Map(); this.motion = new Map();
+    this.entries = new Map(); this.motion = new Map(); this.heightOffsets = new Map();
     this.labels = document.createElement('div');
     this.labels.className = 'robot-twin-scene-labels'; mount.append(this.labels);
     this.projected = new THREE.Vector3(); this.cameraPoint = new THREE.Vector3();
@@ -38,7 +38,7 @@ export class RobotTwinScene {
 
   clear() {
     for (const entry of this.entries.values()) this.remove(entry);
-    this.entries.clear(); this.motion.clear(); this.followId = ''; this.base = null; this.robots = null;
+    this.entries.clear(); this.motion.clear(); this.heightOffsets.clear(); this.followId = ''; this.base = null; this.robots = null;
   }
 
   sync(base, baseLayer, robots, selectedId, visible) {
@@ -48,6 +48,7 @@ export class RobotTwinScene {
     this.base = base; this.baseLayer = baseLayer; this.robots = robots; this.selectedId = selectedId; this.visible = visible; this.opacity = opacity;
     const wanted = new Set(base ? robots.map((robot) => robot.id) : []);
     for (const id of this.motion.keys()) if (!wanted.has(id)) this.motion.delete(id);
+    for (const id of this.heightOffsets.keys()) if (!wanted.has(id)) this.heightOffsets.delete(id);
     for (const [id, entry] of this.entries) {
       if (!wanted.has(id) || entry.selected !== (id === selectedId)) { this.remove(entry); this.entries.delete(id); }
     }
@@ -89,6 +90,16 @@ export class RobotTwinScene {
     }
   }
 
+  offsetDisplayHeight(id, delta) {
+    const entry = this.entries.get(id);
+    if (!entry || !Number.isFinite(delta)) return false;
+    this.heightOffsets.set(id, (this.heightOffsets.get(id) || 0) + delta);
+    // Invalidate even a stationary robot's presentation. Keep this correction
+    // outside the telemetry buffer so new samples and follow changes retain it.
+    entry.sample = null;
+    return true;
+  }
+
   update(now, followId = '') {
     if (this.followId !== followId) {
       this.motion.clear(); this.followId = followId;
@@ -108,6 +119,9 @@ export class RobotTwinScene {
         motion.push(entry.robot); frame = motion.read(now) || frame;
       }
       entry.sample = sample; entry.following = following;
+      const heightOffset = this.heightOffsets.get(id) || 0;
+      if (heightOffset) frame = { ...frame, pose: { ...frame.pose,
+        position: { ...frame.pose.position, z: frame.pose.position.z + heightOffset } } };
       const { position, rpy } = frame.pose;
       entry.rendered = frame;
       entry.group.position.set(position.x, position.y, position.z);
