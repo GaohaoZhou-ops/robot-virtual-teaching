@@ -3972,6 +3972,7 @@ code {
 
 .viewer-display-settings__color button:disabled,
 .viewer-display-settings__toggle:disabled { opacity: .4; cursor: not-allowed; }
+.viewer-display-settings__hint { margin: 0; padding: 8px 10px; color: var(--muted); font-size: 10px; line-height: 1.6; }
 .viewer-display-settings__layer-notice { margin: 0; padding: 10px 14px; color: var(--muted); font-size: 10px; line-height: 1.6; border-bottom: 1px solid var(--line); }
 
 .viewer-display-settings__toggle > span,

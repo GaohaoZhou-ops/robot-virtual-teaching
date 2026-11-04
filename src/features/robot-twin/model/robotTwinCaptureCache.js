@@ -21,8 +21,9 @@ async function decodeImage(url, signal) {
 // cancels transfers or releases downloaded files. At most two binaries are read
 // at once, matching the proxy's limit; new captures never interrupt older ones.
 export class RobotTwinCaptureCache {
-  constructor({ request, onChange = () => {}, decode = decodeImage }) {
+  constructor({ request, onChange = () => {}, decode = decodeImage, resolvePose = () => null }) {
     this.request = request; this.onChange = onChange; this.decode = decode;
+    this.resolvePose = resolvePose; this.projections = []; this.projectionKeys = new Set(); this.projectionMissing = 0;
     this.epoch = 0; this.controller = new AbortController();
     this.assets = new Map(); this.captures = new Map(); this.results = new Map(); this.runs = new Map();
     this.queue = []; this.running = 0;
@@ -37,6 +38,7 @@ export class RobotTwinCaptureCache {
     }
     this.controller = new AbortController();
     this.assets.clear(); this.captures.clear(); this.results.clear(); this.runs.clear();
+    this.projections = []; this.projectionKeys.clear(); this.projectionMissing = 0;
     this.queue = []; this.running = 0; this.historyLoading = false; this.historyTimer = null; this.activeRun = null;
     this.onChange();
   }
@@ -130,9 +132,18 @@ export class RobotTwinCaptureCache {
       // read is incomplete or the robot has cleaned up its original file.
       const sides = Object.fromEntries(SIDES.map((side) => [side, { ...capture.sides[side],
         image: capture.sides[side].image || this.peek(capture.id, side, 'png')?.phase === 'ready' }]));
-      this.captures.set(capture.id, { ...capture, sides });
+      const projectionPose = this.captures.get(capture.id)?.projectionPose || this.resolvePose(capture);
+      this.captures.set(capture.id, { ...capture, sides, projectionPose });
+      for (const side of SIDES) {
+        const key = `${capture.id}:${side}`;
+        if (!projectionPose || !(sides[side].image || sides[side].cloud) || this.projectionKeys.has(key)) continue;
+        this.projectionKeys.add(key);
+        this.projections = [...this.projections, { key, side, captureId: capture.id, ...projectionPose }];
+      }
       for (const side of SIDES) if (capture.sides[side].image) this.enqueue(capture.id, side, 'png');
     }
+    this.projectionMissing = [...this.captures.values()].filter((capture) => !capture.projectionPose
+      && SIDES.some((side) => capture.sides[side].image || capture.sides[side].cloud)).length;
   }
 
   observe(monitor) {

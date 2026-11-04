@@ -1,5 +1,6 @@
 import { CAMERA_NAMES, ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_RESULT_LIMIT, robotTwinTask } from "../../shared/protocols/robotTwinMonitor.js";
 import { robotDetectionConfidence, robotDetectionThreshold, summarizeRobotDetections } from "../../shared/protocols/robotTwinInspection.js";
+import { robotTwinCapturePose } from '../../shared/protocols/robotTwinCapturePose.js';
 
 const validId = (value) => typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
 const text = (value) => typeof value === 'string' ? value.slice(0, 2000) : '';
@@ -36,6 +37,7 @@ function result(record, job, { demo, algorithmState, skipped }) {
 function captureDetails(record, jobs) {
   const entry = jobs.get(jobPath(record)), job = entry?.job;
   return { id: record.id, createdAt: text(job?.created_utc), taskName: text(record.task_name),
+    robotPose: robotTwinCapturePose(job?.robot_pose),
     parkingName: text(record.parking_name), pointName: text(record.point_name), error: entry?.error || '',
     sides: Object.fromEntries(['left', 'right'].map((side) => {
       const camera = job?.cameras?.[side], inspection = camera?.inspection, mapping = camera?.pixel_mapping;

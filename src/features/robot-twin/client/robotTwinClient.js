@@ -2,6 +2,7 @@ import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL } from "../../../shared/protocol
 import { ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_MONITOR_MAX_AGE } from "../../../shared/protocols/robotTwinMonitor.js";
 import { RobotTwinCameraClient } from "./robotTwinCameraClient.js";
 import { RobotTwinCaptureCache } from "../model/robotTwinCaptureCache.js";
+import { RobotTwinCapturePoses } from '../model/robotTwinCapturePoses.js';
 import { forgetRobotTwinCredential, rememberRobotTwinCredential } from "./robotTwinCredentials.js";
 
 const isRobotAuthFailure = (error) => ['ROBOT_AUTH_FAILED', 'ROBOT_AUTH_REQUIRED'].includes(error.code);
@@ -16,10 +17,13 @@ export class RobotTwinClient {
     this.request = request; this.onChange = onChange;
     this.generation = 0;
     this.controllers = new Set();
+    this.capturePoses = new RobotTwinCapturePoses();
     this.cameraClient = new RobotTwinCameraClient({ request: (path, options) => this.api(path, options),
       onChange: (camera) => this.publish({ camera }) });
     this.captureCache = new RobotTwinCaptureCache({ request: (path, options) => this.api(path, options),
-      onChange: () => this.publish({ captureRevision: (this.state.captureRevision || 0) + 1 }) });
+      resolvePose: (capture) => this.capturePoses.resolve(capture),
+      onChange: () => this.publish({ captureRevision: (this.state.captureRevision || 0) + 1,
+        captureProjections: this.captureCache.projections, captureProjectionMissing: this.captureCache.projectionMissing }) });
     this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, motionSample: null, error: '', authFailed: false, credentialError: '',
       monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state };
   }
@@ -53,6 +57,7 @@ export class RobotTwinClient {
     clearTimeout(this.timer); clearTimeout(this.expiry);
     clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
     this.cameraClient.reset();
+    this.capturePoses.reset();
     this.captureCache.reset();
     for (const controller of this.controllers) controller.abort();
     this.controllers.clear();
@@ -81,6 +86,7 @@ export class RobotTwinClient {
     const poseFresh = snapshot.localizationFresh && snapshot.pose && poseMs > 0;
     const jointsFresh = jointMs > 0;
     const live = poseFresh && jointsFresh && snapshot.jointCount === snapshot.expectedJointCount;
+    if (live) this.capturePoses.observe(snapshot);
     this.publish({ phase: live ? 'live' : 'stale',
       pose: poseFresh ? snapshot.pose : this.state.pose,
       joints: jointsFresh ? { ...this.state.joints, ...snapshot.joints } : this.state.joints,

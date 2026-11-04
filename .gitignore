@@ -273,6 +273,9 @@ playwright/.auth/
 # keep RobotTwin* UI/model sources, follow helpers and unit tests trackable.
 # Continuous-photo cache/decode checks use test-artifacts/robot-twin-capture/;
 # keep robot_twin_capture_* runners and the synthetic capture fixture in tests/.
+# Capture-projection surface comparisons and arm-switch reviews use
+# test-artifacts/robot-twin-projection/; the shared artifact root covers them.
+# Keep projection workers, protocol helpers and maintained regression tests.
 # Card-portability checks use test-artifacts/robot-twin-project/ for browser
 # captures. Fleet CPU profiles and motion samples use the same ignored root.
 # Save As/export/import checks may put their temporary project bundles inside
@@ -321,6 +324,40 @@ playwright/.auth/
 # Preserve compressed fixture inputs and documentation assets in other paths.
 /robot-twin-*.[gG][zZ]
 /tests/robot-twin-*.[gG][zZ]
+
+# Legacy standalone twin diagnostics beside the reorganized test suites.
+# Scope these to direct output paths, preserving suite fixtures and source files.
+# New checks should continue writing to test-artifacts/<test>/ instead.
+/tests/unit/robot-twin/
+/tests/unit/robot-twin-*/
+/tests/integration/robot-twin/
+/tests/integration/robot-twin-*/
+/tests/unit/robot-twin.[zZ][iI][pP]
+/tests/unit/robot-twin-*.[zZ][iI][pP]
+/tests/integration/robot-twin.[zZ][iI][pP]
+/tests/integration/robot-twin-*.[zZ][iI][pP]
+/tests/unit/robot-twin-*.[pP][nN][gG]
+/tests/integration/robot-twin-*.[pP][nN][gG]
+/tests/unit/robot-twin-*.[jJ][pP][gG]
+/tests/integration/robot-twin-*.[jJ][pP][gG]
+/tests/unit/robot-twin-*.[jJ][pP][eE][gG]
+/tests/integration/robot-twin-*.[jJ][pP][eE][gG]
+/tests/unit/robot-twin-*.[wW][eE][bB][pP]
+/tests/integration/robot-twin-*.[wW][eE][bB][pP]
+/tests/unit/robot-twin-*.[wW][eE][bB][mM]
+/tests/integration/robot-twin-*.[wW][eE][bB][mM]
+/tests/unit/robot-twin-*.[mM][pP]4
+/tests/integration/robot-twin-*.[mM][pP]4
+/tests/unit/robot-twin-*.[hH][aA][rR]
+/tests/integration/robot-twin-*.[hH][aA][rR]
+/tests/unit/robot-twin-*.[jJ][sS][oO][nN]
+/tests/integration/robot-twin-*.[jJ][sS][oO][nN]
+/tests/unit/robot-twin-*.[jJ][sS][oO][nN][lL]
+/tests/integration/robot-twin-*.[jJ][sS][oO][nN][lL]
+/tests/unit/robot-twin-*.[nN][dD][jJ][sS][oO][nN]
+/tests/integration/robot-twin-*.[nN][dD][jJ][sS][oO][nN]
+/tests/unit/robot-twin-*.[gG][zZ]
+/tests/integration/robot-twin-*.[gG][zZ]
 
 # Simulator PID/locks/logs live in .atlas-cache/fake-robot/; twin, confidence,
 # history-list and offline-to-twin UI captures use test-artifacts/{robot-twin,

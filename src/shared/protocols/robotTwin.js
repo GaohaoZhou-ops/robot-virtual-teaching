@@ -46,6 +46,7 @@ export function robotTwinSnapshot({ slam, state, model, elapsedMs = 0, errors = 
     jointCount: Object.keys(joints).length,
     expectedJointCount: 20,
     modelName: typeof model?.name === 'string' ? model.name : '',
+    jointNames: mappingValid ? [...names] : [],
     localizationFresh,
     // No fallback to state.localization: it is SDK odometry, a different frame.
     poseValidForMs: localizationFresh ? ROBOT_TWIN_MAX_AGE - slam.age_ms - elapsedMs : 0,

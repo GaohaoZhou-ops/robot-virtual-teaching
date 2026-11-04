@@ -124,7 +124,7 @@ export const buildVisionCoverageDepthGrid = (
   const { horizontalFov, verticalFov, near, far, scaleX, scaleY, offsetX, offsetY } = zividProjection(calibration);
   const tangentX = 1 / scaleX, tangentY = 1 / scaleY;
   const buckets = Array.from({ length: columns * rows }, () => []);
-  const positions = decodeTeachingPointCloudPositions(pointCloud);
+  const positions = options.positions || decodeTeachingPointCloudPositions(pointCloud);
 
   for (let offset = 0; offset < positions.length; offset += 3) {
     const x = positions[offset];

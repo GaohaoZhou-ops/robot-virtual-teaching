@@ -12,7 +12,8 @@ export const POINT_COLOR_MODES = [
 export const installMapColorShader = (material, bounds, colorMode, { surface = false, objectColorMode = colorMode } = {}) => {
   material.userData.mapColorMode = colorMode;
   material.userData.objectColorMode = objectColorMode;
-  material.defaultAttributeValues = { ...material.defaultAttributeValues, atlasPlacedObject: [0] };
+  material.defaultAttributeValues = { ...material.defaultAttributeValues, atlasPlacedObject: [0], atlasTwinCoverage: [0] };
+  material.userData.twinProjectionVisibility = [1, 1];
   material.userData.teachingTintVisibility = 1;
   material.userData.teachingTintOpacity = TEACHING_SURFACE_TINT_OPACITY;
   if (surface) {
@@ -31,12 +32,15 @@ export const installMapColorShader = (material, bounds, colorMode, { surface = f
     shader.uniforms.atlasTeachingTintOpacity = {
       value: material.userData.teachingTintOpacity,
     };
+    shader.uniforms.atlasTwinProjectionVisibility = { value: material.userData.twinProjectionVisibility };
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
 attribute float ${TEACHING_SURFACE_COVERAGE_ATTRIBUTE};
 attribute float atlasPlacedObject;
+attribute float atlasTwinCoverage;
+varying float vAtlasTwinCoverage;
 varying float vAtlasPlacedObject;
 varying float vAtlasHeight;
 varying float vAtlasTeachingCoverage;
@@ -47,6 +51,7 @@ ${surface ? 'varying vec3 vAtlasViewPosition;' : ''}`,
         `#include <begin_vertex>
 vAtlasTeachingCoverage = ${TEACHING_SURFACE_COVERAGE_ATTRIBUTE};
 vAtlasPlacedObject = atlasPlacedObject;
+vAtlasTwinCoverage = atlasTwinCoverage;
 #ifdef USE_INSTANCING
   vAtlasHeight = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).z;
 #else
@@ -67,6 +72,8 @@ vAtlasViewPosition = -mvPosition.xyz;`,
 varying float vAtlasHeight;
 varying float vAtlasTeachingCoverage;
 varying float vAtlasPlacedObject;
+varying float vAtlasTwinCoverage;
+uniform vec2 atlasTwinProjectionVisibility;
 ${surface ? 'varying vec3 vAtlasViewPosition;' : ''}
 uniform float atlasPointColorMode;
 uniform float atlasObjectColorMode;
@@ -104,12 +111,16 @@ diffuseColor.rgb = mix(
   atlasTeachingSurface
     * atlasTeachingTintOpacity
     * atlasTeachingTintVisibility
-);`}`,
+);
+float atlasTwinLeft = mod(floor(vAtlasTwinCoverage + 0.5), 2.0);
+float atlasTwinRight = floor(vAtlasTwinCoverage / 2.0);
+float atlasTwinVisible = max(atlasTwinLeft * atlasTwinProjectionVisibility.x, atlasTwinRight * atlasTwinProjectionVisibility.y);
+diffuseColor.rgb = mix(diffuseColor.rgb, atlasTeachingTint, clamp(atlasTwinVisible, 0.0, 1.0) * 0.28);`}`,
       );
     material.userData.mapColorShader = shader;
   };
   material.customProgramCacheKey = () => (
-    surface ? 'atlas-map-color-v13-object-layers-surface' : 'atlas-map-color-v13-object-layers-points'
+    surface ? 'atlas-map-color-v14-twin-surface' : 'atlas-map-color-v14-twin-points'
   );
 };
 

@@ -8,6 +8,7 @@ import { tagSelectionTarget, selectionForObject, disposeObject } from "../scene/
 import { clearRobotParkingGhostLayer, writePolylineExecutionGhostDataset, writeRobotParkingGhostHiddenDataset, measureRobotParkingGhost, createRobotParkingGhostVisual, updateRobotParkingGhostGuide } from "../scene/parkingGhost.js";
 import { createCoordinateOrigin, createChassisControlGuide } from "../scene/coordinates.js";
 import { RobotTwinScene } from "../../robot-twin/model/robotTwinScene.js";
+import { useRobotTwinProjection } from '../../robot-twin/hooks/useRobotTwinProjection.js';
 import { configureRobotJointCoupling, getRobotJointCouplingPairs, robotJointCouplingViolations } from "../../robot/model/robotJointCoupling.js";
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -6191,6 +6192,10 @@ export default function PointCloudViewer({
     }
   }, [heightRange, mapData?.geometry]);
 
+  const twinProjection = useRobotTwinProjection({ enabled: robotTelemetry, geometry: mapData?.geometry,
+    modelStatus: robotLoadState?.status, modelRef: loadedRobotRef, sceneRef, displayGeometryRef,
+    surfaceGeometryRef, cloudMaterialRef, controlsRef, robots: twinRobots, height: robotPose?.position?.z || 0, twinSceneRef });
+
   useEffect(() => {
     const group = visionCoverageGroupRef.current;
     const displayGeometry = displayGeometryRef.current;
@@ -7469,7 +7474,7 @@ export default function PointCloudViewer({
                         <span><strong>{label}</strong><small>{description}</small></span></button>)}
                     </div> },
                   { id: 'robot', label: '机器人与相机', icon: Bot,
-                    description: '模型显示 · 透明度 · 全身坐标系', content: <>
+                    description: '模型显示 · 相机投影 · 全身坐标系', content: <>
                       <div className="viewer-display-settings__robot">
                         <span><Bot size={13} /> 机器人模型</span>
                         <button
@@ -7499,6 +7504,17 @@ export default function PointCloudViewer({
                       </label>
                       <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames}
                         showCalibrationStatus={showCalibrationStatus} onShowCalibrationStatusChange={setShowCalibrationStatus} />
+                      {['left', 'right'].map((side) => <div key={side} className="viewer-display-settings__robot">
+                        <span><Camera size={13} /> {side === 'left' ? '左臂' : '右臂'}拍照投影</span>
+                        <button type="button" role="switch" className="viewer-display-settings__toggle"
+                          aria-label={`显示${side === 'left' ? '左臂' : '右臂'}拍照投影`} aria-checked={twinProjection.visible[side]}
+                          title="显示或隐藏真机孪生中该侧相机已拍摄的表面区域"
+                          onClick={() => twinProjection.toggle(side)}>
+                          {twinProjection.visible[side] ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{twinProjection.visible[side] ? '显示' : '隐藏'}</span>
+                        </button>
+                      </div>)}
+                      <p className="viewer-display-settings__hint">{twinProjection.message}</p>
                   </> },
                   { id: 'distance', label: '距离警告', icon: ShieldAlert,
                     description: '距离状态 · 警告显示 · 忽略关节', content: <>
