@@ -5,6 +5,8 @@ import { robotFetch } from "./robotTwinTransport.js";
 import { createRobotCaptureHistory, createRobotTaskMonitor, isRobotMonitorRead } from "./robotTwinMonitor.js";
 import { createRobotCamera } from "./robotTwinCameraService.js";
 import { streamRobotCapture } from "./robotTwinCaptureService.js";
+import { ROBOT_PEDESTRIANS_PATH } from '../../shared/protocols/robotTwinPedestrians.js';
+import { createRobotPedestrianReader } from './robotTwinPedestrians.js';
 
 const fail = (status, message, code) => { throw Object.assign(new Error(message), { status, code }); };
 const reply = (res, status, data) => {
@@ -46,7 +48,7 @@ async function body(req) {
 // This status reader only POSTs password authentication. Body-camera observation
 // has a separate restricted preview/frame adapter, never a generic proxy or a
 // control-ownership, motion, enable, stop or task command.
-const allowedReads = new Set(['/api/v1/control-session', '/api/v1/model', '/api/v1/slam', '/api/v1/state']);
+const allowedReads = new Set(['/api/v1/control-session', '/api/v1/model', '/api/v1/slam', '/api/v1/state', ROBOT_PEDESTRIANS_PATH]);
 async function readRobot(session, path, login, signal) {
   if (login ? path !== '/api/v1/access/login' : !allowedReads.has(path) && !isRobotMonitorRead(path)) fail(403, '真机孪生只允许读取状态');
   const headers = { Accept: 'application/json', 'X-ABX-Web-Client': 'robot-dashboard' };
@@ -67,6 +69,10 @@ async function readRobot(session, path, login, signal) {
     // Authentication failures may have an HTML or empty response body.
     if (response.status === 401 || response.status === 403) fail(401,
       '机器人鉴权失败，请重新输入管理员密码', 'ROBOT_AUTH_FAILED');
+    if (path === ROBOT_PEDESTRIANS_PATH && [404, 405].includes(response.status)) {
+      fail(502, '当前机器人不支持读取后台行人感知', 'ROBOT_PEDESTRIANS_UNAVAILABLE');
+    }
+    if (path === ROBOT_PEDESTRIANS_PATH && response.status === 503) fail(503, '机器人后台行人感知服务暂不可用');
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (!response.ok) fail(502, `机器人状态接口返回 HTTP ${response.status}`);
     if (login) session.cookie = response.headers.get('set-cookie')?.split(';')[0] || '';
@@ -151,6 +157,7 @@ export function createRobotTwinService() {
           session.monitor = createRobotTaskMonitor((path) => readRobot(session, path));
           session.captureHistory = createRobotCaptureHistory((path, signal) => readRobot(session, path, undefined, signal));
           session.camera = createRobotCamera(session);
+          session.pedestrians = createRobotPedestrianReader((path, signal) => readRobot(session, path, undefined, signal));
           const token = randomBytes(32).toString('hex');
           session.lastSeen = Date.now(); sessions.set(token, session);
           reply(res, 201, { token, address: session.address,
@@ -161,7 +168,7 @@ export function createRobotTwinService() {
       }
       const capture = new RegExp(`^${ROBOT_TWIN_PREFIX}/captures/([a-f0-9]{32})/(left|right)/(png|xyzbin)$`).exec(pathname);
       const history = new RegExp(`^${ROBOT_TWIN_PREFIX}/capture-history/([a-f0-9]{32})/([0-9]{1,8})$`).exec(pathname);
-      if (!capture && !history && !['/snapshot', '/monitor', '/session', '/cameras', '/camera', '/camera/frame'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
+      if (!capture && !history && !['/snapshot', '/monitor', '/session', '/cameras', '/camera', '/camera/frame', '/pedestrians'].some((path) => pathname === ROBOT_TWIN_PREFIX + path)) fail(404, '孪生接口不存在');
       const token = /^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization || '')?.[1];
       const session = sessions.get(token);
       if (!session || Date.now() - session.lastSeen > 60_000) {
@@ -192,6 +199,16 @@ export function createRobotTwinService() {
         reply(res, 200, await session.camera.set(data.camera, data.revision)); return;
       }
       if (pathname.endsWith('/session') || req.method !== 'GET') fail(405, '真机孪生仅支持读取状态或断开本地会话');
+      if (pathname.endsWith('/pedestrians')) {
+        const controller = new AbortController();
+        const abort = () => { if (!res.writableEnded) controller.abort(); };
+        res.once('close', abort);
+        try {
+          const result = await session.pedestrians(AbortSignal.any([controller.signal, session.controller.signal]));
+          if (!res.destroyed) reply(res, 200, { ...result, serverProcessingMs: performance.now() - requestStarted });
+        } finally { res.off('close', abort); }
+        return;
+      }
       if (pathname.endsWith('/cameras')) { reply(res, 200, await session.camera.catalog()); return; }
       if (pathname.endsWith('/camera/frame')) {
         const frame = await session.camera.frame(Number(req.headers['x-atlas-camera-revision']));

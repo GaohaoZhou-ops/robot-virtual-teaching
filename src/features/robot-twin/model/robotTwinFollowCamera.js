@@ -105,6 +105,8 @@ export function createRobotTwinFollowCamera(pose, robotHeight = 1.8, { mode = 'b
       forward.copy(offset).negate().normalize();
       up.applyAxisAngle(forward, angles.roll * Math.PI / 180);
     }
+    // Bring BEV 15% closer without changing its target or viewing angle.
+    position.sub(target).multiplyScalar(.85).add(target);
     return { position, target, up };
   };
   frame();

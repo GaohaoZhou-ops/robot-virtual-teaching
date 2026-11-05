@@ -9,14 +9,17 @@ export class RobotTwinFleet {
   constructor({ onChange = () => {}, createClient = (options) => new RobotTwinClient(options) } = {}) {
     this.onChange = onChange; this.createClient = createClient;
     this.entries = new Map(); this.selectedId = ''; this.generation = 0; this.cameraEpoch = 0;
+    this.pedestriansVisible = true;
     this.cameraBarrier = Promise.resolve(); this.publish();
   }
 
   publish() {
+    const activeEntries = [...this.entries.values()].filter(({ client }) => client.state.active);
+    if (!activeEntries.some(({ profile }) => profile.id === this.selectedId)) this.selectedId = activeEntries[0]?.profile.id || '';
+    const selected = this.entries.get(this.selectedId);
+    this.syncPedestrians(selected);
     const robots = [...this.entries.values()].map(({ profile, client }) => ({ ...client.state, ...profile }));
     const active = robots.filter((robot) => robot.active);
-    if (!active.some((robot) => robot.id === this.selectedId)) this.selectedId = active[0]?.id || '';
-    const selected = this.entries.get(this.selectedId);
     this.state = { phase: 'idle', pose: null, joints: {}, error: '', ...selected?.client.state,
       active: active.length > 0, robots, selectedId: this.selectedId, selectedRobot: selected?.profile,
       connectedCount: active.filter((robot) => robot.phase !== 'connecting').length,
@@ -27,16 +30,40 @@ export class RobotTwinFleet {
     this.onChange(this.state);
   }
 
+  syncPedestrians(selected) {
+    const client = selected?.client.token && selected.client.state.active && selected.client.state.phase !== 'connecting'
+      ? selected.client : null;
+    const token = client?.token;
+    if (this.pedestriansOwner === client && this.pedestriansToken === token) return;
+    const previous = this.pedestriansOwner;
+    // Set the owner before publishing child state, which may call publish again.
+    this.pedestriansOwner = client; this.pedestriansToken = token;
+    if (previous && previous !== client) previous.pedestriansClient?.reset();
+    client?.pedestriansClient?.setEnabled(selected.pedestriansEnabled);
+  }
+
   createEntry(profile) {
     const used = new Set([...this.entries.values()].map((entry) => entry.profile.color));
     const color = /^#[0-9a-f]{6}$/i.test(profile.color || '') && !used.has(profile.color)
       ? profile.color : robotTwinColor(profile.id, used);
     profile = { ...profile, color };
     const client = this.createClient({ onChange: () => {
-      if (this.entries.get(profile.id)?.client === client) this.publish();
+      const entry = this.entries.get(profile.id);
+      if (entry?.client !== client) return;
+      if (entry.pedestriansToken !== client.token) {
+        entry.pedestriansToken = client.token;
+        entry.pedestriansEnabled = true;
+      }
+      this.publish();
     } });
     const current = () => this.entries.get(profile.id)?.client === client && this.selectedId === profile.id && client.state.active;
+    client.pedestriansClient?.setVisible(this.pedestriansVisible);
     const access = {
+      setPedestriansEnabled: (enabled) => {
+        if (!current() || !client.token) return;
+        entry.pedestriansEnabled = Boolean(enabled);
+        client.pedestriansClient.setEnabled(enabled);
+      },
       loadCameras: () => current() && client.cameraClient.load(),
       selectCamera: (id) => current() && client.cameraClient.select(id),
       startCamera: async () => {
@@ -50,7 +77,7 @@ export class RobotTwinFleet {
       readCaptureHistory: (runId, offset, signal) => client.api(`/capture-history/${runId}/${offset}`,
         { timeoutMs: 30_000, signal }),
     };
-    const entry = { profile, client, access };
+    const entry = { profile, client, access, pedestriansEnabled: true, pedestriansToken: client.token };
     this.entries.set(profile.id, entry); return entry;
   }
 
@@ -98,6 +125,11 @@ export class RobotTwinFleet {
     ++this.cameraEpoch;
     this.cameraBarrier = Promise.allSettled([this.cameraBarrier,
       ...[...this.entries.values()].map(({ client }) => client.cameraClient.stop())]);
+  }
+
+  setPedestriansVisible(visible) {
+    this.pedestriansVisible = visible;
+    for (const { client } of this.entries.values()) client.pedestriansClient?.setVisible(visible);
   }
 
   disconnect() {

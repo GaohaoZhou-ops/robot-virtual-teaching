@@ -1,0 +1,16 @@
+Standing pedestrian model
+Creator: Innerscene Corp, adapted from MakeHuman CC0 assets
+License: Creative Commons CC0 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+Legal text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Original GLB asset copyright metadata:
+Authored by Innerscene Corp (innerscene.com). Public domain: dedicated under CC0 1.0 Universal, https://creativecommons.org/publicdomain/zero/1.0/. Free to use, modify and redistribute for any purpose, with no credit required.
+
+Source asset page:
+https://www.innerscene.com/tools/library/3d-parts/abstract-white-man-3d-person-standing-9e06c5d7
+MakeHuman source assets:
+https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html
+
+Adaptations in this repository: geometric simplification, mesh merging,
+coordinate rotation, uniform normalization, texture removal and PLY conversion.

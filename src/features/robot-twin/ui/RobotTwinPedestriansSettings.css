@@ -1,0 +1,5 @@
+.robot-twin-pedestrians-settings { border-bottom: 1px solid var(--line); }
+.robot-twin-pedestrians-settings .viewer-display-settings__robot { border-bottom: 0; padding-bottom: 8px; }
+.robot-twin-pedestrians-settings .viewer-display-settings__robot > span > svg { color: #ffffff; }
+.robot-twin-pedestrians-settings__robot { margin: 0; padding: 0 14px 4px; color: var(--muted-2); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.robot-twin-pedestrians-settings .viewer-display-settings__hint { padding: 4px 14px 12px; color: var(--muted-2); }

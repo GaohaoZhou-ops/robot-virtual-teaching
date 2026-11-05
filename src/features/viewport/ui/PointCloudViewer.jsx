@@ -188,6 +188,7 @@ export default function PointCloudViewer({
   robotPose,
   robotJointValues,
   robotTelemetry = false,
+  robotTwinDisplaySettings,
   twinRobots = [],
   selectedTwinRobotId = '',
   onSelectTwinRobot,
@@ -279,7 +280,6 @@ export default function PointCloudViewer({
   const teachingSurfaceTintOpacityRef = useRef(TEACHING_SURFACE_TINT_OPACITY);
   const robotLayerRef = useRef(null);
   const twinSceneRef = useRef(null);
-  const focusTwinRobotsRef = useRef(null);
   const twinSceneInputsRef = useRef(null);
   twinSceneInputsRef.current = { robots: twinRobots, selectedId: selectedTwinRobotId, onSelect: onSelectTwinRobot };
   const showRobotRef = useRef(showRobot);
@@ -330,6 +330,9 @@ export default function PointCloudViewer({
   const robotFollowPositionRef = useRef(null);
   const twinWorkspaceViewRef = useRef(null);
   const twinFollowRef = useRef(null);
+  const twinSessionActiveRef = useRef(false);
+  const twinAutoFollowPendingRef = useRef(false);
+  const changeTwinFollowModeRef = useRef(null);
   const [twinFollowMode, setTwinFollowMode] = useState(null);
   const [twinBevAngles, setTwinBevAngles] = useState(ZERO_ROBOT_TWIN_BEV_ANGLES);
   const pointerInteractionRef = useRef(null);
@@ -457,7 +460,8 @@ export default function PointCloudViewer({
     const canvas = controlsRef.current?.domElement;
     if (canvas) canvas.dataset.synchronizedFocusState = state;
   }, []);
-  const stopTwinFollow = useCallback((restore = true) => {
+  const stopTwinFollow = useCallback((restore = true, cancelPending = true) => {
+    if (cancelPending) twinAutoFollowPendingRef.current = false;
     const follow = twinFollowRef.current;
     if (!follow) return;
     twinFollowRef.current = null;
@@ -473,6 +477,9 @@ export default function PointCloudViewer({
     if (restore) viewActionsRef.current?.apply(follow.previousView, 'twin-follow-ended');
   }, []);
   useLayoutEffect(() => {
+    if (robotTelemetry && !twinSessionActiveRef.current) twinAutoFollowPendingRef.current = true;
+    if (!robotTelemetry) twinAutoFollowPendingRef.current = false;
+    twinSessionActiveRef.current = robotTelemetry;
     const saved = twinWorkspaceViewRef.current;
     if (saved && saved.geometry !== mapData?.geometry) {
       // A different project owns its own view; never restore the old map's camera.
@@ -494,7 +501,7 @@ export default function PointCloudViewer({
     }
   }, [robotTelemetry, mapData?.geometry, stopTwinFollow]);
   useEffect(() => {
-    if (!robotTelemetry || !isActive || !showRobot || robotLoadState?.status !== 'loaded') stopTwinFollow();
+    if (!robotTelemetry || !isActive || !showRobot || robotLoadState?.status !== 'loaded') stopTwinFollow(true, false);
   }, [robotTelemetry, isActive, showRobot, robotLoadState?.status, stopTwinFollow]);
 
   const visionCoveragePlaybackStatus = String(teachingPlayback?.status || 'idle');
@@ -3714,7 +3721,12 @@ export default function PointCloudViewer({
       }
       robotLayer.visible = showRobotRef.current && (!robotTelemetryRef.current
         || twinInputs.robots.some((robot) => robot.id === twinInputs.selectedId));
-      return twinInputs;
+      // Wait for the selected robot's real pose and model to reach the scene.
+      // The pending request is consumed once per connection, never by polling.
+      if (twinAutoFollowPendingRef.current && frame
+        && twinInputs.robots.find((robot) => robot.id === twinInputs.selectedId)?.localizationFresh) {
+        changeTwinFollowModeRef.current?.('bev');
+      }
     };
     const chassisReaders = new WeakMap();
     let lastGroundCheck = -Infinity, groundWarningSignature = '';
@@ -3790,7 +3802,7 @@ export default function PointCloudViewer({
     renderer.setAnimationLoop(() => {
       const deltaSeconds = Math.min(frameClock.getDelta(), 0.05);
       if (!renderActiveRef.current) return;
-      const twinInputs = updateTwinScene();
+      updateTwinScene();
       const pressedKeys = pressedKeysRef.current;
       const keyboardImpulses = keyboardImpulseRef.current;
       const robotControlActive =
@@ -4544,11 +4556,6 @@ export default function PointCloudViewer({
         parkingGhostVisual.pulseRing.material.opacity = 0.18
           + ((ghostPulse - 0.96) / 0.16) * 0.22;
         renderer.domElement.dataset.parkingGhostPulse = ghostPulse.toFixed(3);
-      }
-      const twinRoster = twinInputs.robots.map((robot) => robot.id).join(',');
-      if (twinScene.framedRoster !== twinRoster) {
-        twinScene.framedRoster = twinRoster;
-        if (twinInputs.robots.length > 1) focusTwinRobotsRef.current?.();
       }
       twinScene.project(camera, renderer.domElement);
       updateGroundWarnings();
@@ -6865,25 +6872,11 @@ export default function PointCloudViewer({
     controls.update();
   };
 
-  const focusTwinRobots = () => {
-    const controls = controlsRef.current, camera = cameraRef.current;
-    const bounds = twinSceneRef.current?.bounds();
-    if (!controls || !camera || !bounds || bounds.isEmpty()) return;
-    stopTwinFollow();
-    cancelFocusAnimation();
-    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-    const direction = camera.position.clone().sub(controls.target).normalize();
-    controls.target.copy(sphere.center);
-    camera.position.copy(sphere.center).addScaledVector(direction, sphere.radius * 3.1 * Math.max(1, 1 / camera.aspect));
-    camera.zoom = 1; camera.updateProjectionMatrix(); controls.update();
-    viewActionsRef.current?.refreshClipping();
-  };
-  focusTwinRobotsRef.current = focusTwinRobots;
-
   const changeTwinFollowMode = (mode, bevAngles = ZERO_ROBOT_TWIN_BEV_ANGLES) => {
     if (!mode) { stopTwinFollow(); return; }
     const angles = normalizeRobotTwinBevAngles(bevAngles);
     if (twinFollowRef.current?.mode === mode) {
+      twinAutoFollowPendingRef.current = false;
       if (mode === 'bev') {
         twinFollowRef.current.tracker.setAngles(angles);
         setTwinBevAngles(angles);
@@ -6891,13 +6884,14 @@ export default function PointCloudViewer({
       return;
     }
     const controls = controlsRef.current, camera = cameraRef.current;
-    if (!robotTelemetryRef.current || !isActive || !showRobot || !loadedRobotRef.current || !controls || !camera) return;
+    if (!robotTelemetryRef.current || !isActive || !showRobot || robotLoadState?.status !== 'loaded' || !loadedRobotRef.current || !controls || !camera) return;
     const bounds = setRobotVisualBounds(new THREE.Box3(), robotLayerRef.current);
     const tracker = createRobotTwinFollowCamera(robotPoseRef.current, bounds.max.z - bounds.min.z,
       { mode, robot: loadedRobotRef.current, bevAngles: angles });
     const previous = twinFollowRef.current;
     const previousView = previous?.previousView || viewActionsRef.current?.capture();
     if (!previousView) return;
+    twinAutoFollowPendingRef.current = false;
     twinFollowRef.current = { tracker, mode, previousView, controlsEnabled: previous?.controlsEnabled ?? controls.enabled };
     cancelFocusAnimation();
     pressedKeysRef.current.clear(); keyboardImpulseRef.current.clear();
@@ -6912,6 +6906,7 @@ export default function PointCloudViewer({
     setTwinFollowMode(mode);
     setTwinBevAngles(mode === 'bev' ? angles : ZERO_ROBOT_TWIN_BEV_ANGLES);
   };
+  changeTwinFollowModeRef.current = changeTwinFollowMode;
 
   const setRobotControlMode = (enabled) => {
     if (!showRobotRef.current || robotTrajectoryActiveRef.current || teachingPoseEditingRef.current) return;
@@ -7451,7 +7446,7 @@ export default function PointCloudViewer({
             <ViewerMenu
               key={`display-${resolutionMapKey}`}
               label="显示设置"
-              title={`还原视角、机器人模型、全身坐标系、Zivid 光学坐标系、标定结果提示、距离警告、路径、停车点、名称、点云颜色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
+              title={`还原视角、机器人模型、行人感知、全身坐标系、Zivid 光学坐标系、标定结果提示、距离警告、路径、停车点、名称、点云颜色、真机孪生表面着色、高程色卡${canShowSurfaceCoverage ? '、表面覆盖率' : ''}${showVisionCoverageControls ? '、投影渲染、表面透明度' : ''}与显示质量`}
               icon={SlidersHorizontal}
               isActive={isActive}
               panelClassName="viewer-display-menu"
@@ -7474,7 +7469,7 @@ export default function PointCloudViewer({
                         <span><strong>{label}</strong><small>{description}</small></span></button>)}
                     </div> },
                   { id: 'robot', label: '机器人与相机', icon: Bot,
-                    description: '模型显示 · 相机投影 · 全身坐标系', content: <>
+                    description: '模型显示 · 行人感知 · 相机投影', content: <>
                       <div className="viewer-display-settings__robot">
                         <span><Bot size={13} /> 机器人模型</span>
                         <button
@@ -7502,6 +7497,7 @@ export default function PointCloudViewer({
                           onChange={(event) => onRobotOpacityChange?.(Math.max(0, Math.min(100, Number(event.target.value) || 0)) / 100)} />
                         <output>{Math.round(robotOpacity * 100)}%</output>
                       </label>
+                      {robotTwinDisplaySettings}
                       <RobotCoordinateSettings frames={robotCoordinateFrames} selectedNames={visibleRobotFrames} onChange={setVisibleRobotFrames}
                         showCalibrationStatus={showCalibrationStatus} onShowCalibrationStatusChange={setShowCalibrationStatus} />
                       {['left', 'right'].map((side) => <div key={side} className="viewer-display-settings__robot">
@@ -7556,7 +7552,7 @@ export default function PointCloudViewer({
                       />
                   </> },
                   { id: 'map', label: '地图与对象', icon: Palette,
-                    description: hasObjectColorControl ? '地图颜色 · 对象颜色 · 高程色卡' : '点云颜色 · 高程色卡', content: <>
+                    description: hasObjectColorControl ? '地图颜色 · 对象颜色 · 表面着色 · 高程色卡' : '点云颜色 · 表面着色 · 高程色卡', content: <>
                       <div className="viewer-display-settings__color">
                         <span><Palette size={13} /> {hasObjectColorControl ? '地图颜色' : '点云颜色'}</span>
                         <button
@@ -7585,6 +7581,16 @@ export default function PointCloudViewer({
                       {hasObjectColorControl && !objectLayers?.complete && <p className="viewer-display-settings__layer-notice">
                         旧工程中未识别的对象沿用地图颜色；加载含原独立示教缓存的完整工程可恢复分组。
                       </p>}
+                      <div className="viewer-display-settings__layer">
+                        <span><Palette size={13} /> 真机孪生表面着色</span>
+                        <button type="button" role="switch" className="viewer-display-settings__toggle"
+                          aria-label="显示真机孪生表面着色" aria-checked={twinProjection.coloringEnabled}
+                          title="显示或隐藏真机孪生拍照覆盖的物体表面区域"
+                          onClick={twinProjection.toggleColoring}>
+                          {twinProjection.coloringEnabled ? <Eye size={12} /> : <EyeOff size={12} />}
+                          <span>{twinProjection.coloringEnabled ? '开启' : '关闭'}</span>
+                        </button>
+                      </div>
                       {isHeightColor && <div className="viewer-display-settings__height-legend">
                         <span><Palette size={13} /> 高程色卡</span>
                         <button

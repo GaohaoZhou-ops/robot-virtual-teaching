@@ -19,8 +19,10 @@
 | 范围 | 入口 |
 | --- | --- |
 | 工作台点云加载、路径编辑、工程 ZIP 往返和三维缩放 | `BASE_URL=http://127.0.0.1:22170 uv run --with playwright python tests/browser_smoke.py`（先启动独立 Vite；可用 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定浏览器） |
-| 孪生协议、慢响应时效、BEV RPY 角度与归零、胸摄 / 头部视角、双摄几何中心与自身遮挡、跟随对象独立插值、变速转向平滑、晚到数据恢复、模型更新开销与相机换帧生命周期 | `npm run test:robot-twin` |
-| 真机拍照投影：采集位姿快照、后台表面计算、多机器人隔离、左右臂独立显隐、隐藏期间累计与断开清理 | `BASE_URL=http://127.0.0.1:22368 uv run --with playwright python tests/integration/robot_twin_projection_ui_smoke.py`（先启动独立 Vite；仅连接测试自行启动的本地模拟机器人，算法回归包含在 `npm run test:robot-twin`） |
+| 孪生协议、慢响应时效、BEV 距离收近 15%、RPY 角度与归零、胸摄 / 头部视角、双摄几何中心与自身遮挡、跟随对象独立插值、变速转向平滑、晚到数据恢复、模型更新开销与相机换帧生命周期 | `npm run test:robot-twin` |
+| 行人感知：纯白人体资源、等比缩放、资源异步加载与释放、只读接口、连接后默认开启、手动关闭保持与重连恢复、2 Hz 同周期读取、30/60/120 FPS 同步相位、历史定位、1.2 秒实体保留／1 秒淡出／200 毫秒恢复／3 秒关联上限、隐藏后重接与歧义拒绝、排序关联、限频时差、过期与生命周期清理 | `npm run test:robot-twin-pedestrians`（已纳入核心回归） |
+| 显示设置中的行人开关、连接后自动开启、不显示检测人数与过期状态行、正常／过期／失败切换时下方控件定位稳定且可点击、未连接时置灰、关闭菜单后持续显示、三维人体与机器人移动同步、交替空帧不闪烁、人体整体淡化像素对比（正面／斜面／背面／侧面／多人重叠和前景遮挡、每个人体独立透明度）、恢复步长、持续缺失清理、窄屏、切换机器人和断开恢复 | `BASE_URL=http://127.0.0.1:22369 uv run --with playwright python tests/integration/robot_twin_pedestrians_ui_smoke.py`（先启动独立 Vite；仅访问测试启动的本地模拟机器人，测量输出在 `test-artifacts/robot-twin-pedestrians/motion.json` 、`presence.json`、`settings-layout.json` 和 `fade-rendering.json`） |
+| 真机拍照投影：地图与对象中的默认开启着色总开关、实际渲染变化、关闭后保留左右臂选择与后台新增覆盖、采集位姿快照、多机器人隔离、左右臂独立显隐、断开清理 | `BASE_URL=http://127.0.0.1:22368 uv run --with playwright python tests/integration/robot_twin_projection_ui_smoke.py`（先启动独立 Vite；仅连接测试自行启动的本地模拟机器人，算法回归包含在 `npm run test:robot-twin`） |
 | 机器人卡片的工程归档、工作区集合、地址合并及密码隔离 | `npm run test:robot-twin-project` |
 | 另存为 / 导出后在新浏览器恢复机器人卡片、端口及勾选状态 | `BASE_URL=http://127.0.0.1:22070 uv run --with playwright python tests/robot_twin_project_ui_smoke.py`（先启动独立 Vite 开发服务；测试不会连接机器人） |
 | 连续运动、BEV / 胸摄 / 头部与模型同步、显示延迟、相机后台解码与弱网布局稳定 | `BASE_URL=http://127.0.0.1:22067 uv run --with playwright python tests/robot_twin_smoothing_ui_smoke.py`（独立 Vite 开发服务；测试自行启动本地模拟机器人） |

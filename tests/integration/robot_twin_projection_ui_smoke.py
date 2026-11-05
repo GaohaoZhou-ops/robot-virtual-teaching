@@ -121,6 +121,10 @@ try:
             page.get_by_role('option', name='加载机器人 botx_abx_zivid_m70', exact=True).click()
             canvas = page.locator('.three-canvas')
             expect(canvas).to_have_attribute('data-robot-model-state', 'loaded', timeout=180000)
+            settings = display_settings_section(page, '地图与对象')
+            coloring = settings.get_by_role('switch', name='显示真机孪生表面着色', exact=True)
+            expect(coloring).to_be_checked()
+            settings.get_by_role('button', name='关闭显示设置', exact=True).click()
             joints = json.loads(canvas.get_attribute('data-robot-joint-values'))
             fixture['joints'] = [joints[name] * 3.141592653589793 / 180 for name in NAMES]
             fixture['x'] = float(canvas.get_attribute('data-robot-x'))
@@ -152,6 +156,27 @@ try:
             display_settings_section(page, '还原视角').get_by_role('button', name='俯视图', exact=True).click()
             page.keyboard.press('Escape')
             visible_pixels = canvas.screenshot(path=str(ARTIFACTS / 'surface-visible.png'))
+            settings = display_settings_section(page, '地图与对象')
+            expect(coloring).to_be_checked()
+            expect(canvas).to_have_attribute('data-twin-projection-coloring-enabled', 'true')
+            page.screenshot(path=str(ARTIFACTS / 'map-coloring-switch.png'))
+            coloring.click()
+            expect(coloring).not_to_be_checked()
+            expect(canvas).to_have_attribute('data-twin-projection-coloring-enabled', 'false')
+            expect(canvas).to_have_attribute('data-twin-projection-frame-count', '4')
+            expect(canvas).to_have_attribute('data-twin-projection-visible-frame-count', '0')
+            expect(canvas).to_have_attribute('data-twin-projection-covered-point-count', '0')
+            expect(canvas).to_have_attribute('data-twin-projection-mesh-count', '0')
+            assert canvas.get_attribute('data-twin-projection-poses') == signature
+            settings.get_by_role('button', name='关闭显示设置', exact=True).click()
+            master_hidden_pixels = canvas.screenshot(path=str(ARTIFACTS / 'surface-master-hidden.png'))
+            assert visible_pixels != master_hidden_pixels, 'master switch must change actual rendered surface colors'
+            settings = display_settings_section(page, '地图与对象')
+            expect(coloring).not_to_be_checked()
+            coloring.click()
+            expect(canvas).to_have_attribute('data-twin-projection-visible-frame-count', '4')
+            assert int(canvas.get_attribute('data-twin-projection-covered-point-count')) > 0
+            assert int(canvas.get_attribute('data-twin-projection-mesh-count')) > 0
             settings = display_settings_section(page, '机器人与相机')
             left = settings.get_by_role('switch', name='显示左臂拍照投影', exact=True)
             right = settings.get_by_role('switch', name='显示右臂拍照投影', exact=True)
@@ -166,12 +191,23 @@ try:
             settings.get_by_role('button', name='关闭显示设置', exact=True).click()
             hidden_pixels = canvas.screenshot(path=str(ARTIFACTS / 'surface-hidden.png'))
             assert visible_pixels != hidden_pixels, 'switches must change the actual WebGL surface'
-            settings = display_settings_section(page, '机器人与相机')
+            settings = display_settings_section(page, '地图与对象')
+            coloring.click()
+            settings.get_by_role('button', name='关闭显示设置', exact=True).click()
             capture(('left',))
             expect(canvas).to_have_attribute('data-twin-projection-frame-count', '6')
             expect(canvas).to_have_attribute('data-twin-projection-visible-frame-count', '0')
+            expect(canvas).to_have_attribute('data-twin-projection-covered-point-count', '0')
+            expect(canvas).to_have_attribute('data-twin-projection-mesh-count', '0')
+            settings = display_settings_section(page, '机器人与相机')
             left.click()
+            expect(canvas).to_have_attribute('data-twin-projection-visible-frame-count', '0')
+            settings = display_settings_section(page, '地图与对象')
+            expect(coloring).not_to_be_checked()
+            coloring.click()
             expect(canvas).to_have_attribute('data-twin-projection-visible-frame-count', '4')
+            expect(canvas).to_have_attribute('data-twin-projection-right-visible', 'false')
+            settings = display_settings_section(page, '机器人与相机')
             capture(old=True)
             expect(settings).to_contain_text('2 次采集缺少拍照时的有效定位或姿态')
             expect(canvas).to_have_attribute('data-twin-projection-frame-count', '6')
@@ -192,12 +228,13 @@ try:
             capture(('right',))
             expect(canvas).to_have_attribute('data-twin-projection-frame-count', '2')
             expect(canvas).to_have_attribute('data-twin-projection-visible-frame-count', '2')
+            expect(canvas).to_have_attribute('data-twin-projection-coloring-enabled', 'true')
             page.get_by_role('button', name='停止同步', exact=True).click()
             expect(canvas).to_have_attribute('data-twin-projection-state', 'inactive')
             assert not [path for method, path in traffic if method == 'POST' and path != '/api/v1/access/login']
             assert not [path for _, path in traffic if path.endswith('/xyzbin')], 'projection does not download extra clouds'
             assert not errors, errors
-            print('Twin projection UI passed: real capture metadata, fleet isolation, fixed surfaces, independent switches, hidden capture retention, disconnect cleanup and reconnect.')
+            print('Twin projection UI passed: default-on map coloring switch, actual surface visibility, real capture metadata, fleet isolation, arm preferences, hidden capture retention, disconnect cleanup and reconnect.')
         finally:
             if errors:
                 print('Browser errors:', errors)

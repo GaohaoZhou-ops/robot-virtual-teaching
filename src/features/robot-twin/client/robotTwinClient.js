@@ -1,6 +1,7 @@
-import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL } from "../../../shared/protocols/robotTwin.js";
+import { ROBOT_TWIN_PREFIX, ROBOT_TWIN_INTERVAL, ROBOT_TWIN_MAX_AGE } from "../../../shared/protocols/robotTwin.js";
 import { ROBOT_TWIN_MONITOR_INTERVAL, ROBOT_TWIN_MONITOR_MAX_AGE } from "../../../shared/protocols/robotTwinMonitor.js";
 import { RobotTwinCameraClient } from "./robotTwinCameraClient.js";
+import { RobotTwinPedestriansClient } from './robotTwinPedestriansClient.js';
 import { RobotTwinCaptureCache } from "../model/robotTwinCaptureCache.js";
 import { RobotTwinCapturePoses } from '../model/robotTwinCapturePoses.js';
 import { forgetRobotTwinCredential, rememberRobotTwinCredential } from "./robotTwinCredentials.js";
@@ -20,12 +21,16 @@ export class RobotTwinClient {
     this.capturePoses = new RobotTwinCapturePoses();
     this.cameraClient = new RobotTwinCameraClient({ request: (path, options) => this.api(path, options),
       onChange: (camera) => this.publish({ camera }) });
+    this.pedestriansClient = new RobotTwinPedestriansClient({ request: (path, options) => this.api(path, options), externallyClocked: true,
+      getPose: () => this.state.snapshot?.localizationFresh ? this.state.snapshot.pose : null,
+      onChange: (pedestrians) => this.publish({ pedestrians }) });
     this.captureCache = new RobotTwinCaptureCache({ request: (path, options) => this.api(path, options),
       resolvePose: (capture) => this.capturePoses.resolve(capture),
       onChange: () => this.publish({ captureRevision: (this.state.captureRevision || 0) + 1,
         captureProjections: this.captureCache.projections, captureProjectionMissing: this.captureCache.projectionMissing }) });
     this.state = { active: false, phase: 'idle', pose: null, joints: {}, snapshot: null, motionSample: null, error: '', authFailed: false, credentialError: '',
-      monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state };
+      monitor: null, monitorPhase: 'idle', monitorError: '', monitorReceivedAt: null, camera: this.cameraClient.state,
+      pedestrians: this.pedestriansClient.state };
   }
 
   publish(update) { this.state = { ...this.state, ...update }; this.onChange(this.state); }
@@ -57,6 +62,7 @@ export class RobotTwinClient {
     clearTimeout(this.timer); clearTimeout(this.expiry);
     clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
     this.cameraClient.reset();
+    this.pedestriansClient.reset();
     this.capturePoses.reset();
     this.captureCache.reset();
     for (const controller of this.controllers) controller.abort();
@@ -86,6 +92,7 @@ export class RobotTwinClient {
     const poseFresh = snapshot.localizationFresh && snapshot.pose && poseMs > 0;
     const jointsFresh = jointMs > 0;
     const live = poseFresh && jointsFresh && snapshot.jointCount === snapshot.expectedJointCount;
+    const receivedAt = performance.now();
     if (live) this.capturePoses.observe(snapshot);
     this.publish({ phase: live ? 'live' : 'stale',
       pose: poseFresh ? snapshot.pose : this.state.pose,
@@ -93,7 +100,8 @@ export class RobotTwinClient {
       snapshot: { ...snapshot, localizationFresh: Boolean(poseFresh), jointCount: jointsFresh ? snapshot.jointCount : 0 },
       error: live ? '' : snapshot.warnings?.join('；') || '正在等待有效的实时定位与姿态',
       lastReceivedAt: Date.now(),
-      motionSample: { time: performance.now(), id: snapshot.sampledAt },
+      motionSample: { time: receivedAt, id: snapshot.sampledAt,
+        sourceTime: poseFresh ? receivedAt - (ROBOT_TWIN_MAX_AGE - poseMs) : null },
     });
     const durations = [poseFresh ? poseMs : 0, jointsFresh ? jointMs : 0].filter((value) => value > 0);
     if (durations.length) this.expiry = setTimeout(() => {
@@ -131,6 +139,7 @@ export class RobotTwinClient {
 
   async poll(generation) {
     if (generation !== this.generation || !this.token) return;
+    this.pedestriansClient.tick();
     const started = performance.now();
     let delay = ROBOT_TWIN_INTERVAL;
     try {
@@ -146,6 +155,7 @@ export class RobotTwinClient {
       this.publish({ error: error.message });
       if (error.status === 401) {
         this.cameraClient.reset();
+        this.pedestriansClient.reset();
         this.token = null; clearTimeout(this.monitorTimer); clearTimeout(this.monitorExpiry);
         this.publish({ monitorPhase: 'stale', monitorError: error.message });
         return;

@@ -6,6 +6,7 @@ export class RobotTwinProjectionLayer {
   constructor({ scene, model, geometry, displayGeometry, surfaceGeometry, material, canvas, onStatus }) {
     Object.assign(this, { scene, displayGeometry, surfaceGeometry, material, canvas, onStatus });
     this.records = new Map(); this.frames = []; this.overlays = []; this.visible = { left: true, right: true }; this.counts = [0, 0, 0, 0];
+    this.coloringEnabled = true;
     this.kinematics = createRobotTwinProjectionKinematics(model);
     this.revision = 0; this.pending = false; this.dirty = false;
     this.attribute = displayGeometry.getAttribute(ROBOT_TWIN_COVERAGE_ATTRIBUTE)
@@ -58,9 +59,9 @@ export class RobotTwinProjectionLayer {
     this.worker.postMessage({ type: 'project', revision: this.revision, records: [...this.records.values()] });
   }
 
-  setVisible(visible) {
-    this.visible = visible;
-    const values = [visible.left ? 1 : 0, visible.right ? 1 : 0];
+  setVisible(visible, coloringEnabled = this.coloringEnabled) {
+    this.visible = visible; this.coloringEnabled = coloringEnabled;
+    const values = [coloringEnabled && visible.left ? 1 : 0, coloringEnabled && visible.right ? 1 : 0];
     this.material.userData.twinProjectionVisibility = values;
     const uniform = this.material.userData.mapColorShader?.uniforms.atlasTwinProjectionVisibility;
     if (uniform) uniform.value = values;
@@ -69,17 +70,21 @@ export class RobotTwinProjectionLayer {
 
   rebuild() {
     this.overlays.forEach(disposeTeachingSurfaceProjectionOverlay); this.overlays = [];
-    const frames = this.frames.filter((frame) => this.visible[frame.record.side]);
+    // The master switch changes presentation only. Keep capture records and
+    // coverage masks, including worker results received while coloring is off.
+    const visible = { left: this.coloringEnabled && this.visible.left, right: this.coloringEnabled && this.visible.right };
+    const frames = this.frames.filter((frame) => visible[frame.record.side]);
     // Bound shader loops and texture dimensions for long-running sessions.
     for (let i = 0; i < frames.length; i += 128) {
       const overlay = createTeachingSurfaceProjectionOverlay(this.surfaceGeometry, frames.slice(i, i + 128), { opacity: .28 });
       if (overlay) { overlay.mesh.name = 'robot-twin-capture-projection'; this.scene.add(overlay.mesh); this.overlays.push(overlay); }
     }
-    this.canvas.dataset.twinProjectionLeftVisible = String(this.visible.left);
-    this.canvas.dataset.twinProjectionRightVisible = String(this.visible.right);
+    this.canvas.dataset.twinProjectionColoringEnabled = String(this.coloringEnabled);
+    this.canvas.dataset.twinProjectionLeftVisible = String(visible.left);
+    this.canvas.dataset.twinProjectionRightVisible = String(visible.right);
     this.canvas.dataset.twinProjectionVisibleFrameCount = String(frames.length);
-    const count = (this.visible.left ? this.counts[1] : 0) + (this.visible.right ? this.counts[2] : 0)
-      + (this.visible.left || this.visible.right ? this.counts[3] : 0);
+    const count = (visible.left ? this.counts[1] : 0) + (visible.right ? this.counts[2] : 0)
+      + (visible.left || visible.right ? this.counts[3] : 0);
     this.canvas.dataset.twinProjectionCoveredPointCount = String(count);
     this.canvas.dataset.twinProjectionMeshCount = String(this.overlays.length);
   }
@@ -92,5 +97,6 @@ export class RobotTwinProjectionLayer {
     this.records.clear(); this.frames = []; this.overlays = [];
     for (const key of ['twinProjectionFrameCount', 'twinProjectionVisibleFrameCount', 'twinProjectionCoveredPointCount', 'twinProjectionMeshCount']) this.canvas.dataset[key] = '0';
     this.canvas.dataset.twinProjectionPoses = '[]'; this.canvas.dataset.twinProjectionState = 'inactive';
+    this.canvas.dataset.twinProjectionColoringEnabled = 'false';
   }
 }

@@ -57,6 +57,15 @@ assert.ok(bev.position.equals(original.position) && bev.target.equals(original.t
 near(bev.up, [0, 0, 1]);
 
 const originalDistance = original.position.distanceTo(original.target);
+const previousPosition = new Vector3(pose.position.x - 3.96, pose.position.y, pose.position.z + 3.2);
+assert.ok(Math.abs(originalDistance / previousPosition.distanceTo(original.target) - .85) < 1e-9,
+  'default BEV distance is 15% shorter');
+assert.ok(original.position.clone().sub(original.target).normalize()
+  .distanceTo(previousPosition.sub(original.target).normalize()) < 1e-9, 'closer BEV preserves the viewing angle');
+for (const height of [.3, 1.8, 3]) {
+  const framed = createRobotTwinFollowCamera(pose, height);
+  assert.ok(framed.position.z > pose.position.z + height, 'default BEV remains above the robot');
+}
 bev.setAngles({ roll: 45 });
 assert.ok(bev.position.distanceTo(original.position) < 1e-9, 'roll tilts the image without orbiting');
 assert.ok(bev.target.equals(original.target));

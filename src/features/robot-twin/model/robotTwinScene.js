@@ -4,6 +4,7 @@ import { createRobotMeasuredJointUpdater, setRobotVisualBounds } from "../../rob
 import { tintRobotTwinBody } from "./robotTwinAppearance.js";
 import { applyRobotModelOpacity } from "../../robot/model/robotDisplay.js";
 import { RobotTwinMotion } from "./robotTwinMotion.js";
+import { RobotTwinPedestriansLayer } from './robotTwinPedestriansLayer.js';
 
 function isVisibleRobotMesh(object) {
   if (!object.isMesh || object.userData.robotChassisDragTarget) return false;
@@ -21,6 +22,7 @@ export class RobotTwinScene {
   constructor(scene, mount, onSelect) {
     this.scene = scene; this.mount = mount; this.onSelect = onSelect;
     this.entries = new Map(); this.motion = new Map(); this.heightOffsets = new Map();
+    this.pedestrians = new RobotTwinPedestriansLayer(scene);
     this.labels = document.createElement('div');
     this.labels.className = 'robot-twin-scene-labels'; mount.append(this.labels);
     this.projected = new THREE.Vector3(); this.cameraPoint = new THREE.Vector3();
@@ -37,6 +39,7 @@ export class RobotTwinScene {
   }
 
   clear() {
+    this.pedestrians.clear();
     for (const entry of this.entries.values()) this.remove(entry);
     this.entries.clear(); this.motion.clear(); this.heightOffsets.clear(); this.followId = ''; this.base = null; this.robots = null;
   }
@@ -94,6 +97,7 @@ export class RobotTwinScene {
     const entry = this.entries.get(id);
     if (!entry || !Number.isFinite(delta)) return false;
     this.heightOffsets.set(id, (this.heightOffsets.get(id) || 0) + delta);
+    this.pedestrians.dirty = true;
     // Invalidate even a stationary robot's presentation. Keep this correction
     // outside the telemetry buffer so new samples and follow changes retain it.
     entry.sample = null;
@@ -101,6 +105,7 @@ export class RobotTwinScene {
   }
 
   update(now, followId = '') {
+    this.pedestrians.update(this.base ? this.robots || [] : [], this.visible, this.heightOffsets, now, followId);
     if (this.followId !== followId) {
       this.motion.clear(); this.followId = followId;
     }
@@ -180,7 +185,11 @@ export class RobotTwinScene {
     canvas.dataset.twinRobots = JSON.stringify(positions);
     canvas.dataset.selectedTwinRobot = this.selectedId || '';
     canvas.dataset.smoothedTwinRobot = this.followId || '';
+    if (this.reportedPedestrians !== this.pedestrians.positions) {
+      this.reportedPedestrians = this.pedestrians.positions;
+      canvas.dataset.twinPedestrians = JSON.stringify(this.reportedPedestrians);
+    }
   }
 
-  dispose() { this.clear(); this.labels.remove(); }
+  dispose() { this.clear(); this.pedestrians.dispose(); this.labels.remove(); }
 }

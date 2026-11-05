@@ -145,6 +145,7 @@ try:
             expect(dialog.get_by_role('alert')).to_contain_text('密码')
             expect(dialog).to_be_visible()
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 1')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
             login_a = requests(0)['POST /api/v1/access/login']
             dialog.get_by_label('2 号机器人 · 管理员密码', exact=True).fill('admin-1')
             dialog.get_by_role('button', name='重试并同步所选机器人', exact=True).click()
@@ -161,6 +162,9 @@ try:
             assert page.evaluate('window.twinSuccessAnimations') == 1
             assert requests(0)['POST /api/v1/access/login'] == login_a
             page.wait_for_function('JSON.parse(document.querySelector(".three-canvas").dataset.twinRobots).length === 2')
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev', timeout=10000)
+            page.wait_for_timeout(600)
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
             expect(warning.locator('li')).to_have_count(2)
             expect(warning).to_contain_text('1 号机器人')
             expect(warning).to_contain_text('2 号机器人')

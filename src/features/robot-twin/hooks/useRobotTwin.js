@@ -8,7 +8,11 @@ export function useRobotTwin(contextKey) {
     const instance = new RobotTwinFleet({ onChange: setState });
     client.current = instance;
     const leave = () => instance.disconnect();
-    const visibility = () => { if (document.hidden) instance.stopCameras(); };
+    const visibility = () => {
+      if (document.hidden) instance.stopCameras();
+      instance.setPedestriansVisible(!document.hidden);
+    };
+    visibility();
     window.addEventListener('pagehide', leave);
     document.addEventListener('visibilitychange', visibility);
     return () => {

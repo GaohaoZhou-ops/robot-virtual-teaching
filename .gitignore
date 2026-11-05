@@ -276,6 +276,10 @@ playwright/.auth/
 # Capture-projection surface comparisons and arm-switch reviews use
 # test-artifacts/robot-twin-projection/; the shared artifact root covers them.
 # Keep projection workers, protocol helpers and maintained regression tests.
+# Pedestrian source downloads, Blender previews and build logs belong in
+# build/robot-twin-person/; fade, tracking and settings-layout captures belong in
+# test-artifacts/robot-twin-pedestrians/. Both roots are already ignored.
+# Keep the preparation script, licensed display mesh and regression sources.
 # Card-portability checks use test-artifacts/robot-twin-project/ for browser
 # captures. Fleet CPU profiles and motion samples use the same ignored root.
 # Save As/export/import checks may put their temporary project bundles inside
@@ -1484,6 +1488,8 @@ pnpm-debug.log*
 *.part
 *.crdownload
 *.download
+# Blender versioned backups from model preparation; keep authored .blend files.
+*.blend[0-9]*
 
 # Ad-hoc archive/resource-size probes created with mktemp, including copies
 # from /tmp. Keep maintained project_* tests and nested fixtures trackable.
@@ -1608,9 +1614,11 @@ Desktop.ini
 /teaching-references/
 /teaching-references.[zZ][iI][pP]
 
-# Point-cloud assets stay local; only explicit synthetic test fixtures below
-# are trackable. Do not add exceptions for private maps/ resources.
+# Point-cloud assets stay local; explicit public application meshes and
+# synthetic test fixtures are trackable. Do not expose private maps/ resources.
 *.[pP][lL][yY]
+# CC0 pedestrian display asset; its origin and license are recorded beside it.
+!/src/features/robot-twin/assets/pedestrian/standing-person.ply
 # Native ABXXYZ1 standard/execution clouds may be large and contain scene data.
 *.[xX][yY][zZ][bB][iI][nN]
 # Compressed copies of imported/exported models stay local too.

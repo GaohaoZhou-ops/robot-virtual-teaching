@@ -284,6 +284,9 @@ try:
             page.screenshot(path=str(artifacts / 'connection-success.png'), animations='disabled')
             expect(dialog).not_to_be_visible(timeout=2500)
             expect(page.get_by_role('button', name='停止同步', exact=True)).to_be_focused()
+            expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'true')
+            page.screenshot(path=str(artifacts / 'automatic-bev.png'))
             page.wait_for_timeout(1100)
             live = reading(canvas)
             assert len(snapshots) >= 2, len(snapshots)
@@ -293,6 +296,13 @@ try:
             assert live['pose']['z'] == before['pose']['z']
             assert all(any(abs(live['joints'][name] - s['joints'][name]) < 1e-5 for s in snapshots[-4:] if name in s['joints']) for name in NAMES)
             follow_view = page.get_by_role('button', name='跟随视角', exact=True)
+            # Auto-follow is only an entry default. Manual exit remains in
+            # effect across subsequent polling, and restores the previous view.
+            select_follow_mode(page, '退出跟随')
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
+            page.wait_for_timeout(1100)
+            expect(canvas).to_have_attribute('data-twin-follow-enabled', 'false')
+            assert all(abs(a - b) < 1e-6 for a, b in zip(camera_view(canvas), offline_view))
             original_view = camera_view(canvas)
             saved_view_signature = canvas.get_attribute('data-view-signature')
             follow_view.click()
@@ -313,7 +323,7 @@ try:
             offset = camera_view(canvas)
             heading = live['pose']['yaw'] * math.pi / 180
             dx, dy = offset[0] - live['pose']['x'], offset[1] - live['pose']['y']
-            assert dx * math.cos(heading) + dy * math.sin(heading) < -3
+            assert dx * math.cos(heading) + dy * math.sin(heading) < -2.5
             assert offset[2] > live['pose']['z'] + 2
             if not args.live:
                 # Sliders preview without closing either menu or releasing follow.
@@ -381,9 +391,10 @@ try:
                     return Math.abs(Number(d.cameraX) - 3.75 - dx) < .02 && Math.abs(Number(d.cameraY) + 4 - dy) < .02;
                 }''', arg=[dx, dy])
                 fixture['yaw'] = math.pi / 2
-                page.wait_for_function('''() => { const d = document.querySelector('.three-canvas').dataset;
-                    return Math.abs(Number(d.cameraX) - 3.75) < .02 && Number(d.cameraY) < -7 && Number(d.targetY) > -3.5;
-                }''')
+                page.wait_for_function('''distance => { const d = document.querySelector('.three-canvas').dataset;
+                    return Math.abs(Number(d.cameraX) - 3.75) < .02
+                        && Math.abs(Number(d.cameraY) + 4 + distance) < .02 && Number(d.targetY) > -3.5;
+                }''', arg=math.hypot(dx, dy))
                 page.screenshot(path=str(artifacts / 'fixture-twin-follow.png'))
                 fixture.update(x=2.5, y=-3.25, yaw=1)
                 expect(canvas).to_have_attribute('data-robot-x', '2.500000')
@@ -647,6 +658,7 @@ try:
                 expect(second.locator('.robot-twin-success')).to_contain_text('连接成功')
                 expect(second).not_to_be_visible(timeout=2500)
                 expect(canvas).to_have_attribute('data-robot-x', '8.500000')
+                expect(canvas).to_have_attribute('data-twin-follow-mode', 'bev')
                 assert set(robot_ports[ports_before:]) == {backup_server.server_port}, 'card B must connect only to robot B'
                 page.get_by_role('button', name='停止同步', exact=True).click()
                 page.wait_for_timeout(100)
@@ -783,6 +795,6 @@ finally:
         server.shutdown()
         backup_server.shutdown()
         assert all((method == 'POST' and path in ['/api/v1/access/login', '/api/v1/body-cameras/preview', '/api/v1/body-cameras/frame']) or
-            (method == 'GET' and (path in ['/api/v1/control-session', '/api/v1/slam', '/api/v1/state', '/api/v1/model', '/api/v1/execution', '/api/v1/execution/activity', '/api/v1/body-cameras']
+                    (method == 'GET' and (path in ['/api/v1/control-session', '/api/v1/slam', '/api/v1/state', '/api/v1/model', '/api/v1/execution', '/api/v1/execution/activity', '/api/v1/body-cameras', '/api/v1/lidars/detection/status']
             or re.fullmatch(r'/api/v1/execution/captures\?run_id=[a-f0-9]{32}&offset=\d+', path)
             or path == '/api/v1/cameras/jobs/' + 'e' * 32)) for method, path in traffic), traffic

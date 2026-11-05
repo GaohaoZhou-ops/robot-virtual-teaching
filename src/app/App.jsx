@@ -47,6 +47,7 @@ import { buildIndependentMapTeachingExport } from "../features/workspace/model/i
 import { defaultIndependentTeachingName, validateIndependentTeachingName } from "../features/workspace/model/independentTeachingName.js";
 import Inspector from "./ui/Inspector.jsx";
 import TaskMonitorConsole from "../features/robot-twin/ui/TaskMonitorConsole.jsx";
+import RobotTwinPedestriansSettings from "../features/robot-twin/ui/RobotTwinPedestriansSettings.jsx";
 import Map2DView from "../features/navigation/ui/Map2DView.jsx";
 import MapDetailsDialog from "../features/navigation/ui/MapDetailsDialog.jsx";
 import PointCloudViewer from "../features/viewport/ui/PointCloudViewer.jsx";
@@ -6534,6 +6535,7 @@ export default function App() {
     ? { ...robotJointValues, ...robotTwin.joints } : robotJointValues, [robotTwin.active, robotTwin.joints, robotJointValues]);
   const twinRobotInstances = useMemo(() => robotTwin.robots.filter((robot) => robot.active && robot.pose)
     .map((robot) => ({ id: robot.id, name: robot.name, phase: robot.phase, color: robot.color, motionSample: robot.motionSample,
+      pedestrians: robot.pedestrians, localizationFresh: robot.snapshot?.localizationFresh,
       captureProjections: robot.captureProjections, captureProjectionMissing: robot.captureProjectionMissing,
       pose: robotTwinDisplayPose(robotPose, robot.pose), joints: { ...robotJointValues, ...robot.joints } })),
   [robotTwin.robots, robotPose, robotJointValues]);
@@ -7099,6 +7101,7 @@ export default function App() {
                 robotPose={displayedRobotPose}
                 robotJointValues={displayedRobotJoints}
                 robotTelemetry={robotTwin.active}
+                robotTwinDisplaySettings={<RobotTwinPedestriansSettings twin={robotTwin} />}
                 twinRobots={twinRobotInstances}
                 selectedTwinRobotId={robotTwin.selectedId}
                 onSelectTwinRobot={robotTwin.selectRobot}
