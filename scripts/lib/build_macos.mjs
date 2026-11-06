@@ -224,7 +224,7 @@ async function main() {
     for (const file of [zip, dmg]) artifacts.push({ file: path.basename(file), bytes: (await stat(file)).size, sha256: await hashFile(file) });
     await writeFile(path.join(output, 'release.json'), JSON.stringify({ ...release, arch: options.arch, electron: ELECTRON_VERSION, signing: options.signing, artifacts }, null, 2));
     await writeFile(path.join(output, 'SHA256SUMS.txt'), artifacts.map((a) => `${a.sha256}  ${a.file}\n`).join(''));
-    await writeFile(path.join(output, '使用说明.txt'), `Atlas 虚拟示教 ${release.version}\n有效期至 ${formatReleaseMinute(expiresAt)}（北京时间）。\n\n打开 DMG，将 AtlasTeaching.app 拖入 Applications，再双击打开；也可以解压 ZIP 后打开应用。\n无需安装 Node.js、npm、Python 或构建工程。\n${options.signing === 'internal' ? '\n本包为内部测试签名，未经 Apple 公证。若系统拦截，请在系统设置 → 隐私与安全性中允许打开，或向发布者索取正式签名包。\n' : ''}\n到期后可导出当前工程或已完成编辑的模型备份。替换新版应用会保留本机缓存。\nUSB 画面协作已内置；USB 文件传输仍需 Xcode 的 devicectl，可改用网络传输。\n桌面版不提供包含 Python 源码的集群计算包和 Windows USB 助手下载。\n`);
+    await writeFile(path.join(output, '使用说明.txt'), `Atlas 虚拟示教 ${release.version}\n有效期至 ${formatReleaseMinute(expiresAt)}（北京时间）。\n\n打开 DMG，将 AtlasTeaching.app 拖入 Applications，再双击打开；也可以解压 ZIP 后打开应用。\n无需安装 Node.js、npm、Python 或构建工程。\n${options.signing === 'internal' ? '\n本包为内部测试签名，未经 Apple 公证。若系统拦截，请在系统设置 → 隐私与安全性中允许打开，或向发布者索取正式签名包。\n' : ''}\n运行中每分钟检查到期时间；到期后可先导出当前工程或已完成编辑的模型备份。\n若启动时已经过期，仅显示原生到期提示并退出，需更新后才能进入工作台。替换新版应用会保留本机缓存。\nUSB 画面协作已内置；USB 文件传输仍需 Xcode 的 devicectl，可改用网络传输。\n桌面版不提供包含 Python 源码的集群计算包和 Windows USB 助手下载。\n`);
     if (Date.now() >= Date.parse(expiresAt)) throw new Error('构建完成时已超过失效时间，请设置更晚的时间重新打包。');
     console.log(`\n打包完成：${output}\n有效期：${formatReleaseMinute(expiresAt)}（北京时间）`);
     for (const a of artifacts) console.log(`${a.file}  ${(a.bytes / 1e6).toFixed(1)} MB`);

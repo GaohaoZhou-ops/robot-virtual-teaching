@@ -1,6 +1,7 @@
 // Requires an unmodified Electron runtime, never the sealed release executable.
 // Uses a disposable profile and a short-lived build; does not change system time.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { _electron as electron } from 'playwright';
@@ -32,6 +33,8 @@ const errors = [];
 async function launch() {
   application = await electron.launch({ executablePath, args: [payload],
     env: { ...process.env, ATLAS_DESKTOP_TEST_USER_DATA: userData }, timeout: 40000 });
+  application.process().stderr.on('data', data => process.stderr.write(data));
+  application.process().once('exit', (code, signal) => console.log(`Desktop test process exited: ${signal || code}`));
   page = await application.firstWindow();
   page.setDefaultTimeout(30000);
   page.on('pageerror', error => errors.push(error.message));
@@ -57,6 +60,36 @@ async function downloadBackup(filename) {
   assert.ok(entries['robot/files/transfer/robot.urdf']);
   return destination;
 }
+async function assertExpiredStartup(profile, name) {
+  const receipt = path.join(directory, `${name}.json`), bootstrap = path.join(directory, `${name}.cjs`);
+  // Replace only the native prompt so this regression can acknowledge it
+  // unattended; execute the actual compiled startup and quit paths.
+  await writeFile(bootstrap, `
+    const { app, dialog, BrowserWindow } = require('electron');
+    const fs = require('node:fs'), { Server } = require('node:http');
+    let serviceStarts = 0;
+    const listen = Server.prototype.listen;
+    Server.prototype.listen = function (...args) { serviceStarts++; return listen.apply(this, args); };
+    dialog.showMessageBox = async options => {
+      fs.writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ options, serviceStarts,
+        windows: BrowserWindow.getAllWindows().length, userData: app.getPath('userData') }));
+      return { response: 0 };
+    };
+    dialog.showErrorBox = (title, content) => { console.error(title, content); app.exit(1); };
+    require(${JSON.stringify(path.join(payload, 'main.cjs'))});
+  `);
+  const result = spawnSync(executablePath, [bootstrap], { encoding: 'utf8', timeout: 15000,
+    env: { ...process.env, ATLAS_DESKTOP_TEST_USER_DATA: profile } });
+  assert.equal(result.status, 0, result.error?.message || result.stderr);
+  const value = JSON.parse(await readFile(receipt, 'utf8'));
+  assert.equal(value.options.type, 'warning');
+  assert.match(value.options.message, /此版本已到期/);
+  assert.match(value.options.detail, /请联系发布者获取新版安装包/);
+  assert.deepEqual(value.options.buttons, ['退出']);
+  assert.equal(value.windows, 0, 'expired launches must not create a workbench');
+  assert.equal(value.serviceStarts, 0, 'expired launches must not start local services');
+  assert.equal(value.userData, profile);
+}
 try {
   await launch();
   originalOrigin = new URL(page.url()).origin;
@@ -66,6 +99,10 @@ try {
   assert.equal(await page.evaluate(() => typeof window.showSaveFilePicker), 'function');
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   assert.equal(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.isDevToolsOpened()), false);
+  await page.evaluate(() => {
+    window.__desktopReleaseUpdates = [];
+    window.AtlasDesktop.onRelease(value => window.__desktopReleaseUpdates.push({ at: performance.now(), status: value.status }));
+  });
   await page.screenshot({ path: path.join(directory, '01-start.png') });
   await page.evaluate(() => { window.showOpenFilePicker = undefined; });
   await page.getByRole('button', { name: '加载工程', exact: true }).click();
@@ -76,8 +113,19 @@ try {
   await page.waitForFunction(() => document.querySelector('.three-canvas')?.dataset.robotModelState === 'loaded');
   await page.locator('.loading-curtain').waitFor({ state: 'hidden' });
   await page.screenshot({ path: path.join(directory, '02-workbench.png') });
+  // Exercise expiry while the Mac app is in the background, without keeping
+  // the disposable test window in front of the publisher's workspace.
+  await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
   console.log('Desktop launch, isolated preload, real project import and 3D robot rendering passed. Waiting for live expiry…');
-  await page.getByRole('dialog', { name: '此版本已到期' }).waitFor({ timeout: 100000 });
+  await page.getByRole('dialog', { name: '此版本已到期' }).waitFor({ timeout: 160000 });
+  const updates = await page.evaluate(() => window.__desktopReleaseUpdates);
+  assert.ok(updates.length >= 2, 'observe periodic checks before and after expiry');
+  assert.equal(updates[0].status, 'warning');
+  assert.equal(updates.at(-1).status, 'expired');
+  for (let i = 1; i < updates.length; i++) {
+    assert.ok(updates[i].at - updates[i - 1].at >= 55000, 'periodic checks must not wake the renderer every second');
+  }
+  console.log(`Release notifications: ${updates.map(update => update.status).join(' → ')}; interval ${(updates[1].at - updates[0].at).toFixed(0)} ms.`);
   assert.equal(await page.locator('.desktop-workbench').evaluate(e => e.inert), true);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Meta+r');
@@ -88,12 +136,9 @@ try {
   console.log('Live expiry, keyboard lock, service cutoff and complete backup passed.');
   await application.close(); application = null;
 
-  await launch();
-  assert.equal(new URL(page.url()).origin, originalOrigin);
-  await page.getByRole('dialog', { name: '此版本已到期' }).waitFor();
-  await downloadBackup('expired-restart-backup.zip');
-  await application.close(); application = null;
-  console.log('Expired restart retains the workspace and can export it again.');
+  await assertExpiredStartup(userData, 'expired-restart');
+  await assertExpiredStartup(path.join(directory, 'expired-first-run'), 'expired-first-run');
+  console.log('Expired restart and first launch: native expiry prompt, no workbench or local services, clean exit.');
 
   await buildDesktopMain(payload, { ...release, version: '1.0.1', buildId: 'desktop-smoke-update',
     builtAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 3600000).toISOString() });

@@ -35,8 +35,9 @@ vite.config.*.timestamp-*
 
 # Mac desktop releases and downloaded Electron runtimes.
 # build/macos/ already covers releases, staging payloads, npm caches and UI
-# validation profiles/screenshots. Also omit distribution copies placed at the
-# repository root; keep desktop/ sources, icons, entitlements and test fixtures.
+# validation profiles, release-clock state, native-dialog receipts and captures.
+# Also omit distribution copies placed at the repository root; keep desktop/
+# sources, icons, entitlements and maintained test fixtures.
 /AtlasTeaching-*/
 /AtlasTeaching*.[dD][mM][gG]
 /AtlasTeaching*.[zZ][iI][pP]

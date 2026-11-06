@@ -54,6 +54,16 @@ async function start() {
   const settingsFile = path.join(userData, 'desktop-settings.json');
   try { settings = JSON.parse(await readFile(settingsFile, 'utf8')); } catch { /* first launch */ }
   clock = createReleaseClock(release, { lastSeen: saved.lastSeen });
+  // Reject expired launches before opening a workbench or starting any service.
+  if (clock.snapshot().status === 'expired') {
+    await persistClock();
+    await dialog.showMessageBox({ type: 'warning', title: 'Atlas 虚拟示教 · 版本已到期',
+      message: '此版本已到期，无法打开工作台。',
+      detail: `版本 ${release.version} 的有效期已于 ${formatReleaseMinute(release.expiresAt)}（北京时间）结束。\n\n请联系发布者获取新版安装包。已有工程与自动保存缓存会保留，更新后可继续使用。`,
+      buttons: ['退出'], defaultId: 0, cancelId: 0, noLink: true });
+    app.quit();
+    return;
+  }
   const key = randomBytes(32).toString('hex');
   service = await startDesktopServer({ resources: app.getAppPath(), userData, key, releaseClock: clock,
     usbTransport: createMacUSBTransport(), port: Number.isInteger(settings.port) ? settings.port : 0 });
@@ -99,8 +109,8 @@ async function start() {
   ]));
   createWindow();
   powerMonitor.on('resume', () => { broadcast(); void persistClock().catch(console.error); });
-  let ticks = 0;
-  timer = setInterval(() => { broadcast(); if (++ticks % 10 === 0) void persistClock().catch(console.error); }, 1000);
+  // Check and persist together once per minute to avoid frequent wakeups and writes.
+  timer = setInterval(() => { broadcast(); void persistClock().catch(console.error); }, 60_000);
   await persistClock();
   console.log(`Atlas desktop ready ${release.buildId} (expires ${release.expiresAt})`);
   app.on('activate', () => { if (!window || window.isDestroyed()) createWindow(); else window.show(); });
