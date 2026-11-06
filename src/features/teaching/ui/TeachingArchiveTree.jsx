@@ -32,6 +32,7 @@ import {
 } from "../model/parkingPointMerge.js";
 import ParkingPointMergeDialog from "./ParkingPointMergeDialog.jsx";
 import ParkingPointServerDialog from "./ParkingPointServerDialog.jsx";
+import { DESKTOP_BUILD } from '../../../shared/runtime/desktop.js';
 import TeachingParkingMap from "./TeachingParkingMap.jsx";
 import TeachingInsertActionDialog from "./TeachingInsertActionDialog.jsx";
 import { teachingActionPresets } from "../model/teachingPresetInsertion.js";
@@ -902,7 +903,7 @@ export default function TeachingArchiveTree({
                         >
                           <GitMerge size={12} /> 合并停车点
                         </button>
-                        <button
+                        {!DESKTOP_BUILD && <button
                           type="button"
                           className="teaching-tree-server-merge-action"
                           aria-label="打开合并停车点 Server 导入导出"
@@ -923,7 +924,7 @@ export default function TeachingArchiveTree({
                           onClick={() => setServerMergeTaskId(selectedTask.id)}
                         >
                           <Server size={12} /> 合并停车点-Server
-                        </button>
+                        </button>}
                         </>}
                         <button
                           type="button"
@@ -1162,7 +1163,7 @@ export default function TeachingArchiveTree({
         />
       )}
 
-      {serverMergeTaskId && (
+      {!DESKTOP_BUILD && serverMergeTaskId && (
         <ParkingPointServerDialog
           task={tasks.find((task) => task.id === serverMergeTaskId)}
           mapData={mapData}

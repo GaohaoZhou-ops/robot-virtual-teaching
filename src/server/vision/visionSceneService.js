@@ -99,7 +99,7 @@ export function createVisionSceneService({ directory = path.resolve('.atlas-cach
   };
 }
 
-export function visionScenePlugin() {
-  const middleware = createVisionSceneService();
+export function visionScenePlugin({ dataRoot } = {}) {
+  const middleware = createVisionSceneService(dataRoot ? { directory: path.join(dataRoot, '.atlas-cache', 'vision-scenes') } : undefined);
   return { name: 'atlas-vision-scenes', configureServer(server) { server.middlewares.use(middleware); }, configurePreviewServer(server) { server.middlewares.use(middleware); } };
 }

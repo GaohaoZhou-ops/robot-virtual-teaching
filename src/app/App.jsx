@@ -3,6 +3,7 @@ import { createIdleTeachingPlayback, teachingPlaybackStateFromRuntime, markTeach
 import { APP_PAGE_HOME, APP_PAGE_WORKBENCH, APP_PAGE_TEACHING_DATA, APP_PAGE_MODEL_EDITOR, APP_PAGE_MODEL_PAIR_EDITOR, appPageFromLocation } from "./navigation.js";
 import { teachingModeLabel, assertProjectMode } from "../features/workspace/model/workspaceMode.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDesktopRecovery, useDesktopRelease } from '../features/desktop/ui/DesktopReleaseBoundary.jsx';
 import * as THREE from 'three';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import {
@@ -268,6 +269,7 @@ const clampJointValue = (rawValue, definition) => {
 };
 
 export default function App() {
+  const desktopRelease = useDesktopRelease();
   const mapInputRef = useRef(null);
   const mapMatrixInputRef = useRef(null);
   const mapMatrixTargetRef = useRef(null);
@@ -4604,7 +4606,7 @@ export default function App() {
     }
   };
 
-  const exportProject = async (downloadName, overwrite = false) => {
+  const exportProject = async (downloadName, overwrite = false, recovery = false) => {
     if (!mapData?.geometry) {
       notify('请先加载完整地图；仅有配置元数据时无法生成便携工程包', 'error');
       return;
@@ -4616,7 +4618,7 @@ export default function App() {
         edge.limits.minSpeed > edge.limits.maxSpeed ||
         edge.limits.minAcceleration > edge.limits.maxAcceleration,
     );
-    if (invalid) {
+    if (invalid && !recovery) {
       selectEdge(invalid.id);
       notify('存在无效的路径约束，请修正后再保存', 'error');
       return;
@@ -4632,7 +4634,7 @@ export default function App() {
       if (overwrite) {
         setProjectExportState({ status: 'selecting', operation, byteLength: 0, phase: '确认文件写入权限' });
         await ensureProjectWritePermission(fileHandle);
-      } else if (typeof downloadName !== 'string' && !isVisionWorkbench()) {
+      } else if (typeof downloadName !== 'string' && !isVisionWorkbench() && !recovery) {
         if (typeof window.showSaveFilePicker !== 'function') {
           setProjectExportDialog({ filename });
           return;
@@ -4777,6 +4779,7 @@ export default function App() {
     } catch (error) {
       setProjectExportState({ status: 'error', byteLength: 0 });
       notify(`工程保存失败：${error.message}`, 'error');
+      if (recovery) throw error;
     } finally {
       projectExportBusyRef.current = false;
     }
@@ -6672,6 +6675,18 @@ export default function App() {
         error: committed ? '缓存已清理，请刷新页面。' : error.message || '清理缓存失败，请重试' } : null);
     }
   };
+  useDesktopRecovery('workspace', { enabled: Boolean(mapData?.geometry && sessionState.status === 'ready' && !loadState.loading
+    && !['packing', 'selecting'].includes(projectExportState.status)), label: '导出当前工程备份',
+    run: () => exportProject(undefined, false, true) });
+  useEffect(() => {
+    if (!desktopRelease.blocked || desktopRelease.status === 'checking') return;
+    mobileTeachingRunRef.current?.controller.abort();
+    stopTeachingTaskPlayback(false);
+    setIPadScreenOpen(false);
+    void workSync.disconnect('当前版本不可用，请更新软件。').catch(() => {});
+    void persistWorkspaceNow();
+  }, [desktopRelease.blocked, desktopRelease.status]);
+  useEffect(() => window.AtlasDesktop?.onBeforeQuit?.(() => persistWorkspaceNow()), [persistWorkspaceNow]);
   return (
     <RobotJointLimitContext.Provider value={robotArmSoftLimitRatio}>
     <RobotJointSoftRangesContext.Provider value={robotArmSoftLimitOverrides}>
@@ -6965,10 +6980,10 @@ export default function App() {
             },
           ]}
         >
-          <div className="service-pill" title="局域网服务默认端口">
+          <div className="service-pill" title="当前服务端口">
             <Server size={13} />
             <span>{isVisionWorkbench() ? 'VISION' : 'LAN'}</span>
-            <strong>{isVisionWorkbench() ? '本机工作台' : ':21990'}</strong>
+            <strong>{isVisionWorkbench() ? '本机工作台' : `:${window.location.port || '21990'}`}</strong>
           </div>
           <WorkSyncControl sync={workSync} twin={twinControl} />
         </WorkbenchToolbar>

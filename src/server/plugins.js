@@ -8,7 +8,7 @@ import { visionScenePlugin } from "./vision/visionSceneService.js";
 
 // Keep service construction in one place. Both development and preview install
 // the same routes; the frontend build configuration contains no route handlers.
-export function createAtlasServicePlugins() {
-  return [atlasPhysicsPlugin(), atlasWorkspacePlugin(), ipadTeachingPlugin(),
-    ipadScreenPlugin(), workSyncPlugin(), robotTwinPlugin(), visionScenePlugin()];
+export function createAtlasServicePlugins(options = {}) {
+  return [atlasPhysicsPlugin(), atlasWorkspacePlugin(), ipadTeachingPlugin(options),
+    ipadScreenPlugin(options), workSyncPlugin(), robotTwinPlugin(), visionScenePlugin(options)];
 }

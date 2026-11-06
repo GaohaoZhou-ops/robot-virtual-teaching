@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDesktopRecovery } from '../../desktop/ui/DesktopReleaseBoundary.jsx';
 import { ArrowDownToLine, ArrowLeft, Box, Boxes, Crop, FileText, FolderOpen, Layers3, LoaderCircle, MousePointer2, Move3D, Rotate3D, RotateCcw, Upload, X } from 'lucide-react';
 import ModelEditorViewport from "./ModelEditorViewport.jsx";
 import ModelExportDialog from "./ModelExportDialog.jsx";
@@ -240,7 +241,7 @@ export default function ModelEditorPage({ active, onHome, onOpenPair }) {
     } catch (failure) { if (revision === loadedRevisionRef.current) setError(failure.message); }
     finally { if (revision === loadedRevisionRef.current) setPhase(''); }
   };
-  const exportModel = async (downloadName) => {
+  const exportModel = async (downloadName, recovery = false) => {
     if (!ready || exportBusyRef.current) return;
     exportBusyRef.current = true;
     setError(''); setNotice('');
@@ -280,9 +281,12 @@ export default function ModelEditorPage({ active, onHome, onOpenPair }) {
     } catch (failure) {
       if (writable) { try { await writable.abort(); } catch { /* The stream may already be closed or errored. */ } }
       if (!isMissingModel(failure)) setError(`模型导出失败：${failure.message || '无法写入所选文件'}`);
+      if (recovery) throw failure;
     } finally { exportBusyRef.current = false; setPhase(''); }
   };
 
+  useDesktopRecovery('model-editor', { enabled: active && ready, label: '导出编辑后的模型',
+    run: () => exportModel(`${source.name.replace(/\.ply$/i, '')}-backup.ply`, true) });
   if (!active) return null;
   const hasMesh = source?.stats.faceCount > 0;
   const resetCrop = () => updateSettings((next) => ({ ...next, cropDraft: enclosingModelCrop(result.transformedBounds, next.cropDraft) }));

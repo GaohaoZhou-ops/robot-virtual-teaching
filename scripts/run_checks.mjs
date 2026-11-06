@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const suites = {
-  core: ['test:architecture', 'test:workspace-sync', 'test:robot-twin', 'test:robot-twin-project', 'test:robot-twin-pedestrians',
+  core: ['test:architecture', 'test:desktop', 'test:workspace-sync', 'test:robot-twin', 'test:robot-twin-project', 'test:robot-twin-pedestrians',
     'test:work-sync', 'test:fake-robot', 'test:archive', 'test:project-storage', 'test:project-save',
     'test:playback', 'test:connectivity', 'test:model-editor', 'test:viewport-reference',
     'test:viewport-zoom', 'test:robot-focus', 'test:robot-display', 'test:collision-backends'],

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDesktopRecovery } from '../../desktop/ui/DesktopReleaseBoundary.jsx';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, Box, Boxes, FileText, FolderOpen, LoaderCircle, MousePointer2, Move3D, Rotate3D, RotateCcw, Upload, X } from 'lucide-react';
 import ModelEditorViewport from "./ModelEditorViewport.jsx";
 import ModelExportDialog from "./ModelExportDialog.jsx";
@@ -186,7 +187,7 @@ export default function ModelPairEditorPage({ active, onBack }) {
     } catch (failure) { if (currentRevision === revision.current && !missingModel(failure)) setError(failure.message); }
     finally { if (currentRevision === revision.current) setPhase(''); }
   };
-  const exportModel = async (downloadName) => {
+  const exportModel = async (downloadName, recovery = false) => {
     if (!ready || exportBusy.current) return;
     exportBusy.current = true; setError(''); setNotice('');
     const currentRevision = revision.current;
@@ -219,9 +220,12 @@ export default function ModelPairEditorPage({ active, onBack }) {
     } catch (failure) {
       if (writable) { try { await writable.abort(); } catch { /* Already closed. */ } }
       if (!missingModel(failure)) setError(`模型导出失败：${failure.message}`);
+      if (recovery) throw failure;
     } finally { exportBusy.current = false; if (currentRevision === revision.current) setPhase(''); }
   };
 
+  useDesktopRecovery('model-composition', { enabled: active && ready, label: '导出双模型处理结果',
+    run: () => exportModel(`${models.a.name.replace(/\.ply$/i, '')}-composition-backup.ply`, true) });
   if (!active) return null;
   const slotCard = (slot) => <ModelSlot key={slot} slot={slot} model={models[slot]} load={loads[slot]} disabled={busy || dragging}
     onChoose={() => inputs.current[slot]?.click()} onLoad={(file) => loadFile(slot, file)} />;

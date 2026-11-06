@@ -1,0 +1,21 @@
+.desktop-workbench { width: 100%; height: 100%; }
+.desktop-release__notice { position: fixed; z-index: 2000; bottom: 38px; left: 50%; transform: translateX(-50%); display: flex; gap: 9px; align-items: center; max-width: calc(100vw - 48px); padding: 9px 15px; border: 1px solid #7c693d; border-radius: 7px; background: #211e15f5; color: #d9cfb5; font-size: 12px; pointer-events: none; box-shadow: 0 4px 24px #0005; }
+.desktop-release__notice svg { flex: none; color: var(--amber); }
+.desktop-release__notice strong { color: #ffe1a0; font-weight: 500; }
+.desktop-release__dialog { width: min(550px, calc(100vw - 40px)); padding: 35px 38px 24px; border: 1px solid #355052; border-radius: 16px; color: var(--text); background: #0a1519; box-shadow: 0 28px 100px #0008; }
+.desktop-release__dialog::backdrop { background: #03090edb; backdrop-filter: blur(8px); }
+.desktop-release__eyebrow { display: flex; align-items: center; gap: 8px; font: 10px "SFMono-Regular", Menlo, monospace; letter-spacing: .22em; color: #809a9c; }
+.desktop-release__eyebrow span { width: 6px; height: 6px; background: var(--amber); border-radius: 50%; }
+.desktop-release__mark { display: grid; place-items: center; margin-top: 30px; width: 52px; height: 52px; border: 1px solid #8b75423d; border-radius: 13px; background: #f4c95d0b; color: var(--amber); }
+.desktop-release__dialog h1 { margin: 18px 0 11px; font-size: 27px; font-weight: 600; letter-spacing: -.02em; }
+.desktop-release__lead { margin: 0; color: #9bb0b1; font-size: 14px; line-height: 1.9; }
+.desktop-release__facts { display: grid; gap: 16px; margin: 25px 0; padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.desktop-release__facts div { display: flex; justify-content: space-between; align-items: baseline; gap: 20px; }
+.desktop-release__facts dt { font-size: 12px; color: var(--muted); }
+.desktop-release__facts dd { margin: 0; text-align: right; font: 13px "SFMono-Regular", Menlo, monospace; }
+.desktop-release__facts small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
+.desktop-release__actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }
+.desktop-release__actions button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 0 15px; border: 1px solid #477478; background: #183238; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.desktop-release__actions button:hover { background: #21424a; }
+.desktop-release__actions .desktop-release__quit { margin-left: auto; background: transparent; border-color: var(--line-strong); color: #9bb0b1; }
+.desktop-release__status { min-height: 34px; margin: 17px 0 0; font-size: 11px; line-height: 1.7; color: var(--muted); }

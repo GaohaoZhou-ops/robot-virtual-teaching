@@ -345,13 +345,13 @@ export function createIPadTeachingService({ directory, serverId = randomUUID(), 
   };
 }
 
-export function ipadTeachingPlugin() {
+export function ipadTeachingPlugin({ dataRoot } = {}) {
   let root, logger;
   const cleanups = new Set();
   const install = (server) => {
     const identity = ipadServerIdentity(server.httpServer);
-    const usbBridge = createIPadUSBBridge({ directory: path.join(root, '.atlas-cache', 'ipad-usb'), ...identity });
-    server.middlewares.use(createIPadTeachingService({ directory: path.join(root, '.atlas-cache', 'ipad-teaching'), ...identity, usbBridge }));
+    const usbBridge = createIPadUSBBridge({ directory: path.join(dataRoot || root, '.atlas-cache', 'ipad-usb'), ...identity });
+    server.middlewares.use(createIPadTeachingService({ directory: path.join(dataRoot || root, '.atlas-cache', 'ipad-teaching'), ...identity, usbBridge }));
     if (server.httpServer) {
       const start = () => usbBridge.start();
       if (server.httpServer.listening) start(); else server.httpServer.once('listening', start);

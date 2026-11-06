@@ -528,10 +528,10 @@ export function createIPadScreenService({ transport, supported = process.platfor
   return middleware;
 }
 
-export function ipadScreenPlugin() {
+export function ipadScreenPlugin({ usbTransport } = {}) {
   let root; const services = new Set();
   const install = (server) => {
-    const service = createIPadScreenService({ transport: createScreenUSBTransport(root), ...ipadServerIdentity(server.httpServer) });
+    const service = createIPadScreenService({ transport: usbTransport || createScreenUSBTransport(root), ...ipadServerIdentity(server.httpServer) });
     services.add(service); server.middlewares.use(service); service.attach(server.httpServer);
     server.httpServer?.once('close', () => { service.close(); services.delete(service); });
   };

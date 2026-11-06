@@ -33,6 +33,15 @@ output/
 *.tsbuildinfo
 vite.config.*.timestamp-*
 
+# Mac desktop releases and downloaded Electron runtimes.
+# build/macos/ already covers releases, staging payloads, npm caches and UI
+# validation profiles/screenshots. Also omit distribution copies placed at the
+# repository root; keep desktop/ sources, icons, entitlements and test fixtures.
+/AtlasTeaching-*/
+/AtlasTeaching*.[dD][mM][gG]
+/AtlasTeaching*.[zZ][iI][pP]
+/electron-v*-darwin-*.[zZ][iI][pP]
+
 # Xcode regenerates the bundled Vision Pro document engine, workers and map.
 # Keep the bundler script and application sources; omit generated bundle copies.
 /vision/AtlasVisionTeaching/WebWorkbench/
@@ -118,6 +127,9 @@ xcuserdata/
 *.provisionprofile
 *.p12
 *.p8
+*.pfx
+*.keychain
+*.keychain-db
 
 # Test and coverage output
 coverage/

@@ -247,10 +247,13 @@ export function createRobotTwinService() {
 }
 
 export function robotTwinPlugin() {
+  const services = new Set();
   const install = (server) => {
     const service = createRobotTwinService();
+    services.add(service);
     server.middlewares.use(service);
-    server.httpServer?.once('close', service.close);
+    server.httpServer?.once('close', () => { void service.close(); services.delete(service); });
   };
-  return { name: 'atlas-robot-twin-readonly', configureServer: install, configurePreviewServer: install };
+  return { name: 'atlas-robot-twin-readonly', configureServer: install, configurePreviewServer: install,
+    closeBundle() { const closing = [...services].map((service) => service.close()); services.clear(); return Promise.allSettled(closing); } };
 }
